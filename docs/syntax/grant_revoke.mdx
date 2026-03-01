@@ -6,8 +6,10 @@ title: "GRANT / REVOKE"
 
 ```sql
 grant_statement ::= GRANT privilege_list ON object_type object_name TO grantee [ WITH GRANT OPTION ]
+                  | GRANT column_privilege_list ON TABLE table_name TO grantee
 
 revoke_statement ::= REVOKE [ GRANT OPTION FOR ] privilege_list ON object_type object_name FROM grantee
+                   | REVOKE column_privilege_list ON TABLE table_name FROM grantee
 
 privilege_list ::= privilege [, ...]
 
@@ -15,6 +17,13 @@ privilege ::= SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGE
             | USAGE | SELECT | UPDATE                                                 -- for sequences
             | EXECUTE                                                                 -- for functions/procedures
             | USAGE                                                                   -- for types/domains
+
+column_privilege_list ::= column_privilege [, ...]
+
+column_privilege ::= SELECT ( column_name [, ...] )
+                   | INSERT ( column_name [, ...] )
+                   | UPDATE ( column_name [, ...] )
+                   | REFERENCES ( column_name [, ...] )
 
 object_type ::= TABLE | SEQUENCE | FUNCTION | PROCEDURE | TYPE
 
@@ -27,6 +36,7 @@ grantee ::= role_name | PUBLIC
 pgschema understands the following `GRANT`/`REVOKE` features:
 
 - **Table privileges**: SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+- **Column-level privileges**: SELECT, INSERT, UPDATE, REFERENCES on specific columns
 - **Sequence privileges**: USAGE, SELECT, UPDATE
 - **Function/Procedure privileges**: EXECUTE (with function signature)
 - **Type/Domain privileges**: USAGE
@@ -47,6 +57,20 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON orders TO app_role;
 
 -- Grant with ability to re-grant
 GRANT SELECT ON products TO admin_role WITH GRANT OPTION;
+```
+
+### Grant column-level privileges
+
+```sql
+-- Grant SELECT on specific columns only
+GRANT SELECT (id, username, email) ON users TO readonly_role;
+
+-- Grant UPDATE on specific columns
+GRANT UPDATE (status, updated_at) ON orders TO app_role;
+
+-- Combine table-level and column-level grants
+GRANT SELECT ON users TO readonly_role;
+GRANT UPDATE (email) ON users TO readonly_role;
 ```
 
 ### Grant function privileges

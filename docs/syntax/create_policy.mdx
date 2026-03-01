@@ -12,6 +12,11 @@ create_policy ::= CREATE POLICY policy_name ON table_name
                  [ USING ( using_expression ) ]
                  [ WITH CHECK ( check_expression ) ]
 
+alter_rls ::= ALTER TABLE table_name ENABLE ROW LEVEL SECURITY
+            | ALTER TABLE table_name DISABLE ROW LEVEL SECURITY
+            | ALTER TABLE table_name FORCE ROW LEVEL SECURITY
+            | ALTER TABLE table_name NO FORCE ROW LEVEL SECURITY
+
 policy_name ::= identifier
 
 table_name ::= [schema.]table

@@ -14,27 +14,85 @@
  </picture>
 </a>
 
-**pgschema** is a CLI tool that brings terraform-style declarative schema migration workflow to Postgres:
+**pgschema** is a CLI tool that brings Terraform-style declarative schema migration to PostgreSQL. Instead of writing migration files by hand, you declare the desired schema state and pgschema generates the migration plan automatically.
 
-- **Dump** a Postgres schema in a developer-friendly format with support for all common objects
-- **Edit** a schema to the desired state
-- **Plan** a schema migration by comparing desired state with current database state
-- **Apply** a schema migration with concurrent change detection, transaction-adaptive execution, and lock timeout control
+```
+pgschema dump → edit schema.sql → pgschema plan → pgschema apply
+```
 
-Think of it as Terraform for your Postgres schemas - declare your desired state, generate plan, preview changes, and apply them with confidence.
+- **Dump**: Extract the current database schema as SQL files
+- **Plan**: Diff your edited schema against the live database, generate migration DDL
+- **Apply**: Execute with concurrent change detection, transaction-adaptive execution, and lock timeout control
 
-## Key differentiators from other tools
+## Why pgschema
 
-1. **Comprehensive Postgres Support**: Handles virtually all schema-level database objects across Postgres versions 14 through 18
-1. **State-Based Terraform-Like Workflow**: No separate migration table needed to track migration history - determines changes by comparing your schema files with actual database state
-1. **Schema-Level Focus**: Designed for real-world Postgres usage patterns, from single-schema applications to multi-tenant architectures
-1. **No Shadow Database Required**: Works directly with your schema files and target database - no temporary databases needed for validation
+### State-based, not migration-file-based
+
+Tools like Flyway and Liquibase require you to write and number migration files manually. pgschema works like Terraform: you declare what the schema *should look like*, and it figures out the SQL to get there. No migration history table, no manual sequencing.
+
+### Deep Postgres support
+
+pgschema is Postgres-only, which means it handles Postgres-specific objects that generic tools skip: row-level security policies, partitioned tables, partial indexes, constraint triggers, identity columns, domain types, default privileges, and column-level grants. See the full list [below](#supported-schema-objects).
+
+### No shadow database required
+
+Most state-based tools spin up a temporary "shadow" database to validate migrations. pgschema uses an embedded Postgres instance internally and cleans up after itself — no extra infrastructure needed.
+
+### When to choose pgschema
+
+- You want a fully free and open-source tool with no feature gating
+- You want to version-control your schema as plain SQL and apply changes declaratively
+- You need Postgres-specific features (RLS, partitioning, complex triggers) tracked in migrations
+- You want migration validation without provisioning a separate shadow database
+- You want a plan/preview step before applying changes, like `terraform plan`
+- You're migrating from a manual SQL workflow and want structure without an ORM
+
+### How it compares
+
+| | pgschema | Flyway / Liquibase | Atlas |
+|---|---|---|---|
+| **Pricing** | **Free and open source (Apache 2.0)** | Free tier; advanced features paid | Free tier; advanced features paid |
+| Workflow | State-based (desired state) | Migration-file-based | State-based |
+| Database support | PostgreSQL only | Multi-database | Multi-database |
+| Postgres-specific objects | Deep (RLS, partitioning, triggers, …) | Limited | Moderate |
+| Shadow database | Not required | Not required | Required by default |
+| Migration history table | Not required | Required | Not required |
+
+### Why is it free?
+
+Fair question. We have no current plans to charge for pgschema.
+
+pgschema is sponsored by [Bytebase](https://www.bytebase.com), a commercial database DevSecOps platform. Bytebase covers the needs of teams that require controls beyond schema migration — data access control, data masking, audit logging, and multi-database management across an organization.
 
 See more details in the [introduction blog post](https://www.pgschema.com/blog/pgschema-postgres-declarative-schema-migration-like-terraform).
 
 Watch in action:
 
 [![asciicast](https://asciinema.org/a/vXHygDMUkGYsF6nmz2h0ONEQC.svg)](https://asciinema.org/a/vXHygDMUkGYsF6nmz2h0ONEQC)
+
+## Supported Schema Objects
+
+pgschema covers all the schema objects developers use in real-world Postgres applications, across versions 14-18:
+
+| Object | Key Features |
+|--------|-------------|
+| **Tables** | Columns, identity/generated columns, partitioning (RANGE/LIST/HASH), LIKE clauses, inline and table-level constraints |
+| **Constraints** | Primary keys, foreign keys (with ON DELETE/ON UPDATE), unique, check, NOT VALID, DEFERRABLE |
+| **Indexes** | Regular, UNIQUE, partial, functional/expression; all methods (btree, hash, gist, spgist, gin, brin); CONCURRENTLY |
+| **Views** | CREATE OR REPLACE, dependency-ordered migrations |
+| **Materialized Views** | WITH [NO] DATA, indexes on materialized views |
+| **Functions** | IN/OUT/INOUT parameters with defaults, SETOF/TABLE return types, SECURITY DEFINER, IMMUTABLE/STABLE/VOLATILE, STRICT |
+| **Procedures** | IN/OUT/INOUT parameters with defaults, all procedural languages |
+| **Triggers** | BEFORE/AFTER/INSTEAD OF, INSERT/UPDATE/DELETE/TRUNCATE, ROW/STATEMENT level, WHEN conditions, constraint triggers, REFERENCING OLD/NEW TABLE |
+| **Sequences** | START WITH, INCREMENT BY, MINVALUE/MAXVALUE, CYCLE, CACHE, OWNED BY |
+| **Types** | ENUM (add values in-place), composite types |
+| **Domains** | Base type, DEFAULT, NOT NULL, named and anonymous CHECK constraints |
+| **Policies** | Row-level security (RLS), PERMISSIVE/RESTRICTIVE, ALL/SELECT/INSERT/UPDATE/DELETE commands, USING/WITH CHECK expressions, ENABLE/DISABLE/FORCE ROW LEVEL SECURITY |
+| **Privileges** | GRANT/REVOKE for tables (including column-level), sequences, functions, procedures, types/domains; WITH GRANT OPTION |
+| **Default Privileges** | ALTER DEFAULT PRIVILEGES for tables, sequences, functions, types |
+| **Comments** | COMMENT ON for tables, columns, views, materialized views, functions, procedures, indexes |
+
+See [Unsupported](https://www.pgschema.com/syntax/unsupported) for objects that are explicitly out of scope.
 
 ## Installation
 
@@ -139,10 +197,14 @@ Applying changes...
 Changes applied successfully!
 ```
 
-## LLM Readiness
+## LLM / AI Integration
 
-- https://www.pgschema.com/llms.txt
-- https://www.pgschema.com/llms-full.txt
+pgschema is designed to work well in AI-assisted workflows:
+
+- **[llms.txt](https://www.pgschema.com/llms.txt)** — concise machine-readable summary of pgschema capabilities
+- **[llms-full.txt](https://www.pgschema.com/llms-full.txt)** — full documentation in a single file optimized for LLM context windows
+
+These files follow the [llms.txt standard](https://llmstxt.org/) and are suitable for including in agent tool definitions, RAG pipelines, or system prompts when building AI-assisted database tooling.
 
 ![_](https://raw.githubusercontent.com/pgplex/pgschema/main/docs/images/copy-page.webp)
 
