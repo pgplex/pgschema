@@ -54,7 +54,7 @@ Most state-based tools spin up a temporary "shadow" database to validate migrati
 | **Pricing** | **Free and open source (Apache 2.0)** | Free tier; advanced features paid | Free tier; advanced features paid |
 | Workflow | State-based (desired state) | Migration-file-based | State-based |
 | Database support | PostgreSQL only | Multi-database | Multi-database |
-| Postgres-specific objects | Deep (RLS, partitioning, triggers, …) | Limited | Moderate |
+| Postgres-specific objects | Auto-detected and diffed (RLS, partitioning, triggers, …) | You write the migration SQL manually | Auto-detected and diffed |
 | Shadow database | Not required | Not required | Required by default |
 | Migration history table | Not required | Required | Not required |
 
