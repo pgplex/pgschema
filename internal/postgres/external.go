@@ -121,6 +121,11 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// These use "IN SCHEMA <schema>" syntax which isn't handled by stripSchemaQualifications
 	schemaAgnosticSQL = replaceSchemaInDefaultPrivileges(schemaAgnosticSQL, schema, ed.tempSchema)
 
+	// Replace schema names in SET search_path clauses within function/procedure definitions
+	// SQL-language functions are validated at creation time using the function's own search_path,
+	// so we need to rewrite it to point to the temporary schema (issue #335)
+	schemaAgnosticSQL = replaceSchemaInSearchPath(schemaAgnosticSQL, schema, ed.tempSchema)
+
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.

@@ -174,6 +174,56 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	return result
 }
 
+// replaceSchemaInSearchPath replaces the target schema name in SET search_path clauses
+// within function/procedure definitions.
+//
+// Purpose:
+// When functions or procedures have SET search_path = public, pg_temp (or similar),
+// PostgreSQL uses that search_path during function body validation (for SQL-language functions)
+// and execution. When applying to a temporary schema, we need to replace the target schema
+// in these clauses so that table references in function bodies can be resolved.
+//
+// Example (when target schema is "public" and temp schema is "pgschema_tmp_xxx"):
+//
+//	SET search_path = public, pg_temp  ->  SET search_path = "pgschema_tmp_xxx", pg_temp
+//	SET search_path TO public          ->  SET search_path TO "pgschema_tmp_xxx"
+//
+// This handles both = and TO syntax, quoted and unquoted schema names,
+// and preserves other schemas in the comma-separated list.
+func replaceSchemaInSearchPath(sql string, targetSchema, tempSchema string) string {
+	if targetSchema == "" || tempSchema == "" {
+		return sql
+	}
+
+	escapedTarget := regexp.QuoteMeta(targetSchema)
+	replacement := fmt.Sprintf(`"%s"`, tempSchema)
+
+	// Pattern: SET search_path = ... or SET search_path TO ...
+	// We match the entire SET search_path clause and replace the target schema within it.
+	searchPathPattern := regexp.MustCompile(`(?i)(SET\s+search_path\s*(?:=|TO)\s*)([^\n;]+)`)
+
+	// Precompile replacement patterns
+	// Handle quoted: "public" -> "pgschema_tmp_xxx"
+	quotedPattern := regexp.MustCompile(fmt.Sprintf(`"%s"`, escapedTarget))
+	// Handle unquoted: public -> "pgschema_tmp_xxx"
+	// Use word boundary to avoid partial matches (e.g., don't match "public_data")
+	unquotedPattern := regexp.MustCompile(fmt.Sprintf(`\b%s\b`, escapedTarget))
+
+	return searchPathPattern.ReplaceAllStringFunc(sql, func(match string) string {
+		loc := searchPathPattern.FindStringSubmatchIndex(match)
+		if loc == nil {
+			return match
+		}
+		prefix := match[loc[2]:loc[3]]
+		value := match[loc[4]:loc[5]]
+
+		newValue := quotedPattern.ReplaceAllString(value, replacement)
+		newValue = unquotedPattern.ReplaceAllString(newValue, replacement)
+
+		return prefix + newValue
+	})
+}
+
 // replaceSchemaInDefaultPrivileges replaces schema names in ALTER DEFAULT PRIVILEGES statements.
 // This is needed because stripSchemaQualifications only handles "schema.object" patterns,
 // not "IN SCHEMA <schema>" clauses used by ALTER DEFAULT PRIVILEGES.

@@ -1,0 +1,47 @@
+Plan: 3 to add.
+
+Summary by type:
+  functions: 1 to add
+  tables: 1 to add
+  revoked default privileges: 1 to add
+
+Functions:
+  + auth_lookup_account_by_email
+
+Tables:
+  + person_accounts
+
+Revoked default privileges:
+  + auth_lookup_account_by_email(input_email text)
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS person_accounts (
+    id uuid DEFAULT gen_random_uuid(),
+    first_name text,
+    last_name text,
+    email_address text NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    modified_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT person_accounts_pkey PRIMARY KEY (id),
+    CONSTRAINT person_accounts_email_address_key UNIQUE (email_address)
+);
+
+CREATE OR REPLACE FUNCTION auth_lookup_account_by_email(
+    input_email text
+)
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT
+        pa.id::text AS person_account_id
+    FROM person_accounts pa
+    WHERE lower(pa.email_address) = lower(trim(input_email))
+    LIMIT 1;
+$$;
+
+REVOKE EXECUTE ON FUNCTION auth_lookup_account_by_email(input_email text) FROM PUBLIC;
