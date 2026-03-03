@@ -188,8 +188,15 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 //	SET search_path = public, pg_temp  ->  SET search_path = "pgschema_tmp_xxx", pg_temp
 //	SET search_path TO public          ->  SET search_path TO "pgschema_tmp_xxx"
 //
-// This handles both = and TO syntax, quoted and unquoted schema names,
+// This handles both = and TO syntax, quoted and unquoted schema names (case-insensitive),
 // and preserves other schemas in the comma-separated list.
+//
+// Limitation: Like stripSchemaQualifications and replaceSchemaInDefaultPrivileges, this
+// function operates on the raw SQL string without dollar-quote awareness. A SET search_path
+// inside a $$-quoted function body (e.g., dynamic SQL) would also be rewritten. In practice
+// this is not an issue because: (1) SET search_path in dynamic SQL within function bodies is
+// extremely rare, and (2) the round-trip through database inspection and normalizeSchemaNames
+// would restore the original schema name in the IR.
 func replaceSchemaInSearchPath(sql string, targetSchema, tempSchema string) string {
 	if targetSchema == "" || tempSchema == "" {
 		return sql
@@ -206,8 +213,9 @@ func replaceSchemaInSearchPath(sql string, targetSchema, tempSchema string) stri
 	// Handle quoted: "public" -> "pgschema_tmp_xxx"
 	quotedPattern := regexp.MustCompile(fmt.Sprintf(`"%s"`, escapedTarget))
 	// Handle unquoted: public -> "pgschema_tmp_xxx"
-	// Use word boundary to avoid partial matches (e.g., don't match "public_data")
-	unquotedPattern := regexp.MustCompile(fmt.Sprintf(`\b%s\b`, escapedTarget))
+	// Use word boundary and case-insensitive flag to handle PostgreSQL's identifier folding
+	// (e.g., PUBLIC, Public, public all refer to the same schema)
+	unquotedPattern := regexp.MustCompile(fmt.Sprintf(`(?i)\b%s\b`, escapedTarget))
 
 	return searchPathPattern.ReplaceAllStringFunc(sql, func(match string) string {
 		loc := searchPathPattern.FindStringSubmatchIndex(match)
