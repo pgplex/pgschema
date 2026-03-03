@@ -96,6 +96,13 @@ func TestReplaceSchemaInSearchPath(t *testing.T) {
 			tempSchema:   "pgschema_tmp_xxx",
 			expected:     "SET search_path = public_data, pg_temp",
 		},
+		{
+			name:         "does not replace quoted schema with different case",
+			sql:          `SET search_path = "PUBLIC", pg_temp`,
+			targetSchema: "public",
+			tempSchema:   "pgschema_tmp_xxx",
+			expected:     `SET search_path = "PUBLIC", pg_temp`,
+		},
 	}
 
 	for _, tt := range tests {

@@ -202,20 +202,15 @@ func replaceSchemaInSearchPath(sql string, targetSchema, tempSchema string) stri
 		return sql
 	}
 
-	escapedTarget := regexp.QuoteMeta(targetSchema)
 	replacement := fmt.Sprintf(`"%s"`, tempSchema)
 
 	// Pattern: SET search_path = ... or SET search_path TO ...
 	// We match the entire SET search_path clause and replace the target schema within it.
 	searchPathPattern := regexp.MustCompile(`(?i)(SET\s+search_path\s*(?:=|TO)\s*)([^\n;]+)`)
 
-	// Precompile replacement patterns
-	// Handle quoted: "public" -> "pgschema_tmp_xxx"
-	quotedPattern := regexp.MustCompile(fmt.Sprintf(`"%s"`, escapedTarget))
-	// Handle unquoted: public -> "pgschema_tmp_xxx"
-	// Use word boundary and case-insensitive flag to handle PostgreSQL's identifier folding
-	// (e.g., PUBLIC, Public, public all refer to the same schema)
-	unquotedPattern := regexp.MustCompile(fmt.Sprintf(`(?i)\b%s\b`, escapedTarget))
+	// Pattern to detect trailing AS clause (start of function body) in the captured value.
+	// When SET search_path and AS are on the same line, the value regex captures both.
+	asPattern := regexp.MustCompile(`(?i)\s+AS\s`)
 
 	return searchPathPattern.ReplaceAllStringFunc(sql, func(match string) string {
 		loc := searchPathPattern.FindStringSubmatchIndex(match)
@@ -225,10 +220,37 @@ func replaceSchemaInSearchPath(sql string, targetSchema, tempSchema string) stri
 		prefix := match[loc[2]:loc[3]]
 		value := match[loc[4]:loc[5]]
 
-		newValue := quotedPattern.ReplaceAllString(value, replacement)
-		newValue = unquotedPattern.ReplaceAllString(newValue, replacement)
+		// Separate the search_path value from any trailing AS clause
+		suffix := ""
+		if asLoc := asPattern.FindStringIndex(value); asLoc != nil {
+			suffix = value[asLoc[0]:]
+			value = value[:asLoc[0]]
+		}
 
-		return prefix + newValue
+		// Tokenize the comma-separated search_path list and replace matching schemas.
+		// This avoids regex pitfalls with quoted identifiers (e.g., "PUBLIC" should not
+		// be matched by a case-insensitive unquoted pattern for "public").
+		tokens := strings.Split(value, ",")
+		for i, token := range tokens {
+			trimmed := strings.TrimSpace(token)
+			if strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`) {
+				// Quoted identifier: case-sensitive exact match.
+				// "public" matches targetSchema "public", but "PUBLIC" does not
+				// (in PostgreSQL, quoted identifiers preserve case).
+				inner := trimmed[1 : len(trimmed)-1]
+				if inner == targetSchema {
+					tokens[i] = strings.Replace(token, trimmed, replacement, 1)
+				}
+			} else {
+				// Unquoted identifier: case-insensitive match.
+				// PostgreSQL folds unquoted identifiers to lowercase.
+				if strings.EqualFold(trimmed, targetSchema) {
+					tokens[i] = strings.Replace(token, trimmed, replacement, 1)
+				}
+			}
+		}
+
+		return prefix + strings.Join(tokens, ",") + suffix
 	})
 }
 
