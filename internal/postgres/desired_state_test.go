@@ -103,6 +103,13 @@ func TestReplaceSchemaInSearchPath(t *testing.T) {
 			tempSchema:   "pgschema_tmp_xxx",
 			expected:     `SET search_path = "PUBLIC", pg_temp`,
 		},
+		{
+			name:         "single-line BEGIN ATOMIC function",
+			sql:          "CREATE FUNCTION f1() RETURNS int LANGUAGE sql SET search_path = public BEGIN ATOMIC SELECT 1; END;",
+			targetSchema: "public",
+			tempSchema:   "pgschema_tmp_xxx",
+			expected:     `CREATE FUNCTION f1() RETURNS int LANGUAGE sql SET search_path = "pgschema_tmp_xxx" BEGIN ATOMIC SELECT 1; END;`,
+		},
 	}
 
 	for _, tt := range tests {
