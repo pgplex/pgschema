@@ -1,0 +1,12 @@
+Plan: 1 to add.
+
+Summary by type:
+  default privileges: 1 to add
+
+Default privileges:
+  + demouser
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLES TO demouser;

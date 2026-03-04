@@ -209,11 +209,15 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 // CreateEmbeddedPostgresForPlan creates a temporary embedded PostgreSQL instance
 // for validating the desired state schema. The instance should be stopped by the caller.
 func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.PostgresVersion) (*postgres.EmbeddedPostgres, error) {
-	// Start embedded PostgreSQL with matching version
+	// Start embedded PostgreSQL with matching version.
+	// Use the target database username so that role references match between
+	// the desired state (embedded) and current state (target database).
+	// This ensures ALTER DEFAULT PRIVILEGES FOR ROLE <user> works correctly
+	// and that implicit owner roles match the target database. (issue #303)
 	embeddedConfig := &postgres.EmbeddedPostgresConfig{
 		Version:  pgVersion,
 		Database: "pgschema_temp",
-		Username: "pgschema",
+		Username: config.User,
 		Password: "pgschema",
 	}
 	embeddedPG, err := postgres.StartEmbeddedPostgres(embeddedConfig)
