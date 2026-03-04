@@ -9,4 +9,4 @@ Default privileges:
 DDL to be executed:
 --------------------------------------------------
 
-ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLES TO demouser;
+ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT SELECT ON TABLES TO demouser;

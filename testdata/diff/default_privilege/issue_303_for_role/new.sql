@@ -7,4 +7,4 @@ BEGIN
 END $$;
 
 -- Grant default privileges with explicit FOR ROLE (issue #303)
-ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT ALL ON TABLES TO demouser;
+ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT SELECT ON TABLES TO demouser;

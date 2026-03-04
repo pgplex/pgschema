@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLES TO demouser;",
+          "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT SELECT ON TABLES TO demouser;",
           "type": "default_privilege",
           "operation": "create",
           "path": "default_privileges.testuser.TABLES.demouser"
