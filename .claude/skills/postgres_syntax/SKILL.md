@@ -1,206 +1,90 @@
 ---
-name: PostgreSQL Syntax Reference
-description: Consult PostgreSQL's parser and grammar (gram.y) to understand SQL syntax, DDL statement structure, and parsing rules when implementing pgschema features
+name: postgres_syntax
+description: Consult PostgreSQL's parser and grammar (gram.y) to understand SQL syntax, DDL statement structure, and parsing rules when implementing pgschema features. Use this skill when generating DDL in internal/diff/*.go, validating SQL syntax, understanding keyword precedence, or learning how PostgreSQL handles specific constructs like triggers, indexes, generated columns, or constraint triggers.
 ---
 
 # PostgreSQL Syntax Reference
 
-Use this skill when you need to understand PostgreSQL's SQL syntax, DDL statement structure, or how PostgreSQL parses specific SQL constructs. This is essential for correctly parsing SQL files and generating valid DDL in pgschema.
+Reference PostgreSQL's grammar to understand SQL syntax and generate correct DDL.
 
-## When to Use This Skill
+## Source Files
 
-Invoke this skill when:
-- Understanding complex SQL syntax (CREATE TABLE, CREATE TRIGGER, etc.)
-- Generating DDL statements in `internal/diff/*.go`
-- Validating SQL statement structure
-- Understanding precedence and grammar rules
-- Learning about PostgreSQL-specific syntax extensions
-- Debugging how PostgreSQL interprets specific DDL constructs
+**Local copies** (preferred):
+- `internal/gram.y` - Yacc/Bison grammar defining all PostgreSQL SQL syntax
+- `internal/scan.l` - Flex lexer for tokenization
 
-## Source Code Locations
-
-**Local copies** (preferred - read these directly):
-- `internal/gram.y` - **Main grammar file** - Yacc/Bison grammar defining PostgreSQL SQL syntax
-- `internal/scan.l` - Lexical scanner (Flex/Lex) - tokenization rules
-
-**Upstream reference**: https://github.com/postgres/postgres/blob/master/src/backend/parser/
-
-**Key files to reference**:
-
-### Grammar and Lexer
-- `internal/gram.y` (local) - **Main grammar file** - Yacc/Bison grammar defining PostgreSQL SQL syntax
-- `internal/scan.l` (local) - Lexical scanner (Flex/Lex) - tokenization rules
-- `keywords.c` (upstream) - Reserved and non-reserved keywords
-
-### Parser Implementation
-- `parse_clause.c` - Parsing of clauses (WHERE, GROUP BY, ORDER BY, etc.)
-- `parse_expr.c` - Expression parsing (operators, function calls, etc.)
-- `parse_type.c` - Type name parsing and resolution
-- `parse_relation.c` - Table and relation parsing
-- `parse_target.c` - Target list parsing (SELECT list, etc.)
-- `parse_func.c` - Function call parsing
-- `parse_utilcmd.c` - **Utility commands** (DDL statements like CREATE, ALTER, DROP)
-
-### Analysis and Transformation
-- `analyze.c` - Post-parse analysis
-- `parse_node.c` - Parse node creation utilities
-
-## Step-by-Step Workflow
-
-### 1. Identify the SQL Statement Type
-
-Determine what kind of SQL you're working with:
-
-| Statement Type | gram.y Section | parse_utilcmd.c Function |
-|----------------|----------------|-------------------------|
-| CREATE TABLE | `CreateStmt` | `transformCreateStmt()` |
-| ALTER TABLE | `AlterTableStmt` | `transformAlterTableStmt()` |
-| CREATE INDEX | `IndexStmt` | `transformIndexStmt()` |
-| CREATE TRIGGER | `CreateTrigStmt` | `transformCreateTrigStmt()` |
-| CREATE FUNCTION | `CreateFunctionStmt` | `transformCreateFunctionStmt()` |
-| CREATE PROCEDURE | `CreateFunctionStmt` | (procedures are functions) |
-| CREATE VIEW | `ViewStmt` | `transformViewStmt()` |
-| CREATE MATERIALIZED VIEW | `CreateMatViewStmt` | - |
-| CREATE SEQUENCE | `CreateSeqStmt` | `transformCreateSeqStmt()` |
-| CREATE TYPE | `CreateEnumStmt`, `CreateDomainStmt`, `CompositeTypeStmt` | - |
-| CREATE POLICY | `CreatePolicyStmt` | `transformCreatePolicyStmt()` |
-| COMMENT ON | `CommentStmt` | - |
-
-### 2. Locate the Grammar Rule in gram.y
-
-Search the local gram.y for the statement's production rule:
-
-**Example - Finding CREATE TRIGGER syntax**:
+**Searching the grammar**:
 ```bash
-# Search the local copy
-grep -n "CreateTrigStmt:" internal/gram.y
+grep -n "CreateTrigStmt:" internal/gram.y     # Find statement rule
+grep -A 10 "TriggerWhen:" internal/gram.y     # Understand an option
 ```
 
-**What to look for**:
-- The production rule name (e.g., `CreateTrigStmt:`)
-- Alternative syntaxes (multiple `|` branches)
-- Optional elements (`opt_*` rules)
-- List constructs (`*_list` rules)
-- Terminal tokens (keywords, literals)
+## Statement Types → Grammar Rules
 
-### 3. Understand the Grammar Structure
+| Statement | Grammar Rule | Key Sub-rules |
+|-----------|-------------|---------------|
+| CREATE TABLE | `CreateStmt` | `columnDef`, `TableConstraint`, `TableLikeClause` |
+| ALTER TABLE | `AlterTableStmt` | `alter_table_cmd` |
+| CREATE INDEX | `IndexStmt` | `index_elem` (column, function, expression) |
+| CREATE TRIGGER | `CreateTrigStmt` | `TriggerActionTime`, `TriggerEvents`, `TriggerWhen` |
+| CREATE FUNCTION | `CreateFunctionStmt` | `func_args`, `createfunc_opt_list` |
+| CREATE VIEW | `ViewStmt` | `SelectStmt` |
+| CREATE SEQUENCE | `CreateSeqStmt` | `OptSeqOptList` |
+| CREATE TYPE | `CreateEnumStmt`, `CompositeTypeStmt`, `CreateDomainStmt` | |
+| CREATE POLICY | `CreatePolicyStmt` | `row_security_cmd` |
 
-**gram.y uses Yacc/Bison syntax**:
+## Grammar Syntax Guide
 
+gram.y uses Yacc/Bison notation:
+- **UPPERCASE**: Terminal tokens (keywords like `CREATE`, `TRIGGER`)
+- **lowercase**: Non-terminal rules (references to other grammar rules)
+- **`|`**: Alternative syntax options
+- **`opt_*`**: Optional elements (can be empty)
+- **`*_list`**: Recursive list constructs
+
+Example:
 ```yacc
 CreateTrigStmt:
     CREATE opt_or_replace TRIGGER name TriggerActionTime TriggerEvents ON
     qualified_name TriggerReferencing TriggerForSpec TriggerWhen
     EXECUTE FUNCTION_or_PROCEDURE func_name '(' TriggerFuncArgs ')'
-    {
-        CreateTrigStmt *n = makeNode(CreateTrigStmt);
-        n->trigname = $4;
-        n->relation = $8;
-        n->funcname = $13;
-        /* ... */
-        $$ = (Node *)n;
-    }
 ```
 
-**Key elements**:
-- **Terminals** (uppercase): Keywords like `CREATE`, `TRIGGER`, `ON`
-- **Non-terminals** (lowercase): Other grammar rules like `name`, `qualified_name`
-- **Actions** (`{ ... }`): C code that builds the parse tree
-- **Alternatives** (`|`): Different ways to write the same statement
-- **Optional elements**: Rules prefixed with `opt_`
+## Key Constructs for pgschema
 
-### 4. Trace Through Related Rules
+### Column Definitions
+- Regular: `column_name type [constraints]`
+- Generated: `column_name type GENERATED ALWAYS AS (expr) STORED`
+- Identity: `column_name type GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY`
 
-Follow the grammar rules to understand the complete syntax:
+### Index Elements
+Three forms — note extra parens for arbitrary expressions:
+1. Column: `CREATE INDEX idx ON t (col)`
+2. Function: `CREATE INDEX idx ON t (lower(col))`
+3. Expression: `CREATE INDEX idx ON t ((col + 1))`
 
-**Example - Understanding trigger events**:
+### Trigger WHEN Clause
 ```yacc
-TriggerEvents:
-    TriggerOneEvent
-    | TriggerEvents OR TriggerOneEvent
-
-TriggerOneEvent:
-    INSERT
-    | DELETE
-    | UPDATE
-    | UPDATE OF columnList
-    | TRUNCATE
+TriggerWhen:
+    WHEN '(' a_expr ')'
+    | /* EMPTY */
 ```
 
-This shows:
-- Triggers can have multiple events combined with OR
-- UPDATE can optionally specify columns with `OF columnList`
-
-### 5. Cross-Reference with parse_utilcmd.c
-
-After understanding the grammar, check how PostgreSQL transforms the parsed statement:
-
-**Example - How CREATE TRIGGER is processed**:
-```c
-// In parse_utilcmd.c
-static void
-transformCreateTrigStmt(CreateTrigStmt *stmt, const char *queryString)
-{
-    // Validation and transformation logic
-    // - Check trigger name conflicts
-    // - Validate trigger function exists
-    // - Process WHEN condition
-    // - Handle constraint triggers
-}
-```
-
-### 6. Apply to pgschema
-
-Use this understanding in pgschema:
-
-**For DDL generation** (`internal/diff/*.go`):
-- Follow gram.y syntax exactly
-- Use proper keyword ordering
-- Include all required elements
-- Quote identifiers correctly
-
-**Note**: pgschema uses an inspector-only approach - both desired and current states come from database inspection rather than SQL parsing. Understanding gram.y helps ensure generated DDL is syntactically correct.
-
-## Key Grammar Concepts
-
-### Optional Elements
-
-Grammar rules prefixed with `opt_` are optional:
-
+### Constraint Triggers
 ```yacc
-opt_or_replace:
-    OR REPLACE     { $$ = true; }
-    | /* EMPTY */  { $$ = false; }
+CREATE opt_or_replace CONSTRAINT TRIGGER name ...
+    -- Can be DEFERRABLE / NOT DEFERRABLE
+    -- Can be INITIALLY DEFERRED / INITIALLY IMMEDIATE
 ```
 
-This means `CREATE OR REPLACE TRIGGER ...` and `CREATE TRIGGER ...` are both valid.
-
-### Lists
-
-Lists are typically defined recursively:
-
+### Table LIKE Clause
 ```yacc
-columnList:
-    columnElem                     { $$ = list_make1($1); }
-    | columnList ',' columnElem    { $$ = lappend($1, $3); }
+LIKE qualified_name [INCLUDING|EXCLUDING] {COMMENTS|CONSTRAINTS|DEFAULTS|IDENTITY|GENERATED|INDEXES|STATISTICS|STORAGE|ALL}
 ```
 
-### Alternatives
+## Operator Precedence (from gram.y top)
 
-Use `|` to show different syntax options:
-
-```yacc
-TriggerActionTime:
-    BEFORE     { $$ = TRIGGER_TYPE_BEFORE; }
-    | AFTER    { $$ = TRIGGER_TYPE_AFTER; }
-    | INSTEAD OF { $$ = TRIGGER_TYPE_INSTEAD; }
 ```
-
-### Precedence
-
-Operator precedence is defined at the top of gram.y:
-
-```yacc
 %left OR
 %left AND
 %right NOT
@@ -208,323 +92,26 @@ Operator precedence is defined at the top of gram.y:
 %nonassoc '<' '>' '=' LESS_EQUALS GREATER_EQUALS NOT_EQUALS
 ```
 
-## Common Grammar Patterns
+## Keywords
 
-### CREATE Statement Pattern
+- **Reserved**: Cannot be identifiers without quoting (`SELECT`, `TABLE`, `CREATE`)
+- **Unreserved**: Can be used as identifiers (`ABORT`, `ACCESS`, `ACTION`)
 
-Most CREATE statements follow this pattern:
+When generating DDL, quote identifiers that match reserved keywords.
 
-```yacc
-CreateSomethingStmt:
-    CREATE opt_or_replace SOMETHING name definition_elements
-```
+## Version Differences (14-18)
 
-### ALTER Statement Pattern
+- PG 14: `COMPRESSION` clause for tables
+- PG 15: `UNIQUE NULLS NOT DISTINCT`
+- PG 16: SQL/JSON functions
+- PG 17: `MERGE` enhancements
 
-```yacc
-AlterSomethingStmt:
-    ALTER SOMETHING name alter_action
-    | ALTER SOMETHING IF_P EXISTS name alter_action
-```
+Check gram.y git history to see when features were added. Add version detection in pgschema if needed.
 
-### DROP Statement Pattern
+## Applying to pgschema
 
-```yacc
-DropSomethingStmt:
-    DROP SOMETHING name opt_drop_behavior
-    | DROP SOMETHING IF_P EXISTS name opt_drop_behavior
-```
-
-## Important SQL Constructs for pgschema
-
-### Table Columns with Constraints
-
-```yacc
-columnDef:
-    ColId Typename opt_column_storage ColQualList
-    | ColId Typename opt_column_storage GeneratedConstraintElem
-    | ColId Typename opt_column_storage GENERATED generated_when AS IDENTITY_P OptParenthesizedSeqOptList
-```
-
-This covers:
-- Regular columns: `column_name type`
-- Generated columns: `column_name type GENERATED ALWAYS AS (expr) STORED`
-- Identity columns: `column_name type GENERATED ALWAYS AS IDENTITY`
-
-### Trigger WHEN Clause
-
-```yacc
-TriggerWhen:
-    WHEN '(' a_expr ')'    { $$ = $3; }
-    | /* EMPTY */          { $$ = NULL; }
-```
-
-### Index Elements
-
-```yacc
-index_elem:
-    ColId opt_collate opt_class opt_asc_desc opt_nulls_order
-    | func_expr_windowless opt_collate opt_class opt_asc_desc opt_nulls_order
-    | '(' a_expr ')' opt_collate opt_class opt_asc_desc opt_nulls_order
-```
-
-This shows indexes can be on:
-- Simple columns
-- Function expressions (functional indexes)
-- Arbitrary expressions (expression indexes)
-
-### Foreign Key Options
-
-```yacc
-ConstraintAttributeSpec:
-    ON DELETE key_action
-    | ON UPDATE key_action
-    | DEFERRABLE
-    | NOT DEFERRABLE
-    | INITIALLY DEFERRED
-    | INITIALLY IMMEDIATE
-```
-
-## Keywords and Reserved Words
-
-Check `keywords.c` for keyword classification:
-
-**Reserved keywords**: Cannot be used as identifiers without quoting
-- `SELECT`, `FROM`, `WHERE`, `CREATE`, `TABLE`, etc.
-
-**Type function name keywords**: Can be used as function or type names
-- `CHAR`, `CHARACTER`, `VARCHAR`, etc.
-
-**Unreserved keywords**: Can be used as identifiers
-- `ABORT`, `ABSOLUTE`, `ACCESS`, `ACTION`, etc.
-
-**Impact on pgschema**: When generating DDL, quote identifiers that match reserved keywords.
-
-## Examples
-
-### Example 1: Understanding CREATE TABLE LIKE
-
-**In gram.y**:
-```yacc
-TableLikeClause:
-    LIKE qualified_name TableLikeOptionList
-```
-
-**TableLikeOptionList**:
-```yacc
-TableLikeOptionList:
-    TableLikeOptionList INCLUDING TableLikeOption
-    | TableLikeOptionList EXCLUDING TableLikeOption
-    | /* EMPTY */
-```
-
-**TableLikeOption**:
-```yacc
-TableLikeOption:
-    COMMENTS | CONSTRAINTS | DEFAULTS | IDENTITY_P | GENERATED | INDEXES | STATISTICS | STORAGE | ALL
-```
-
-**This tells us**:
-- `LIKE table_name` is the basic syntax
-- Can include/exclude specific features: `INCLUDING ALL`, `EXCLUDING INDEXES`, etc.
-- Multiple options can be combined
-
-**pgschema usage**: When generating DDL for tables with LIKE clauses, follow the gram.y syntax exactly to ensure valid output.
-
-### Example 2: Understanding Constraint Triggers
-
-**In gram.y**:
-```yacc
-ConstraintAttributeSpec:
-    DEFERRABLE           { $$ = CAS_DEFERRABLE; }
-    | NOT DEFERRABLE     { $$ = CAS_NOT_DEFERRABLE; }
-    | INITIALLY DEFERRED { $$ = CAS_INITIALLY_DEFERRED; }
-    | INITIALLY IMMEDIATE { $$ = CAS_INITIALLY_IMMEDIATE; }
-```
-
-**For constraint triggers**:
-```yacc
-CreateTrigStmt:
-    CREATE opt_or_replace CONSTRAINT TRIGGER name ...
-```
-
-**This tells us**:
-- Constraint triggers use `CREATE CONSTRAINT TRIGGER`
-- Can be `DEFERRABLE` or `NOT DEFERRABLE`
-- Can be `INITIALLY DEFERRED` or `INITIALLY IMMEDIATE`
-
-**pgschema DDL generation** (`internal/diff/trigger.go`):
-```go
-func generateCreateTrigger(trigger *ir.Trigger) string {
-    var sql strings.Builder
-    sql.WriteString("CREATE ")
-    if trigger.IsConstraint {
-        sql.WriteString("CONSTRAINT ")
-    }
-    sql.WriteString("TRIGGER ")
-    sql.WriteString(quoteIdentifier(trigger.Name))
-    // ...
-    if trigger.Deferrable {
-        sql.WriteString(" DEFERRABLE")
-    }
-    if trigger.InitiallyDeferred {
-        sql.WriteString(" INITIALLY DEFERRED")
-    }
-    return sql.String()
-}
-```
-
-### Example 3: Understanding Expression Indexes
-
-**In gram.y**:
-```yacc
-index_elem:
-    ColId opt_collate opt_class opt_asc_desc opt_nulls_order
-    {
-        $$ = makeIndexElem($1, NULL, NULL, $2, $3, $4, $5, NULL);
-    }
-    | func_expr_windowless opt_collate opt_class opt_asc_desc opt_nulls_order
-    {
-        $$ = makeIndexElem(NULL, $1, NULL, $2, $3, $4, $5, NULL);
-    }
-    | '(' a_expr ')' opt_collate opt_class opt_asc_desc opt_nulls_order
-    {
-        $$ = makeIndexElem(NULL, NULL, $2, $4, $5, $6, $7, NULL);
-    }
-```
-
-**This tells us**:
-- Index elements can be:
-  1. Column names: `CREATE INDEX idx ON table (column)`
-  2. Function calls: `CREATE INDEX idx ON table (lower(column))`
-  3. Arbitrary expressions: `CREATE INDEX idx ON table ((column + 1))`
-- Note the extra parentheses for arbitrary expressions: `(( ... ))`
-
-**pgschema parsing consideration**:
-```go
-// When parsing index definitions, handle all three forms:
-// 1. Simple column reference
-// 2. Function expression
-// 3. Arbitrary expression (needs extra parens in DDL)
-```
-
-### Example 4: Understanding GENERATED Columns
-
-**In gram.y**:
-```yacc
-GeneratedConstraintElem:
-    GENERATED generated_when AS '(' a_expr ')' STORED
-    {
-        Constraint *n = makeNode(Constraint);
-        n->contype = CONSTR_GENERATED;
-        n->generated_when = $2;
-        n->raw_expr = $5;
-        n->cooked_expr = NULL;
-        n->location = @1;
-        $$ = (Node *)n;
-    }
-
-generated_when:
-    ALWAYS    { $$ = ATTRIBUTE_IDENTITY_ALWAYS; }
-    | BY DEFAULT { $$ = ATTRIBUTE_IDENTITY_BY_DEFAULT; }
-```
-
-**This tells us**:
-- Generated columns: `GENERATED ALWAYS AS (expression) STORED`
-- Identity columns: `GENERATED ALWAYS AS IDENTITY` or `GENERATED BY DEFAULT AS IDENTITY`
-- The expression must be in parentheses
-- Must include `STORED` keyword for computed columns
-
-## Debugging Tips
-
-### 1. Test Grammar Interactively
-
-Clone postgres and build the parser:
-```bash
-git clone https://github.com/postgres/postgres.git
-cd postgres
-./configure
-make -C src/backend/parser
-```
-
-### 2. Compare with PostgreSQL Behavior
-
-Test actual PostgreSQL behavior:
-```bash
-psql -c "CREATE TRIGGER ..."
-# If PostgreSQL accepts it, the syntax is valid
-# Use \d+ to see how PostgreSQL formats it
-```
-
-### 3. Check gram.y Comments
-
-gram.y contains helpful comments explaining syntax choices and historical notes.
-
-### 4. Search for Examples in Tests
-
-PostgreSQL's test suite has extensive SQL examples:
-```bash
-# In postgres repo
-find src/test/regress/sql -name "*.sql" -exec grep -l "CREATE TRIGGER" {} \;
-```
-
-## Version Differences
-
-PostgreSQL syntax evolves across versions:
-
-- **PostgreSQL 14**: Added `COMPRESSION` clause for tables
-- **PostgreSQL 15**: Added `MERGE` statement, `UNIQUE NULLS NOT DISTINCT`
-- **PostgreSQL 16**: Added SQL/JSON functions
-- **PostgreSQL 17**: Added `MERGE` enhancements, incremental view maintenance
-
-**For pgschema (supports 14-18)**:
-- Check gram.y history to see when features were added
-- Add version detection in parser if needed
-- Test across all supported versions
-
-## Verification Checklist
-
-After consulting gram.y and implementing in pgschema:
-
-- [ ] Grammar rule fully understood from gram.y
-- [ ] All syntax alternatives identified
-- [ ] Optional elements properly handled
-- [ ] Keywords and quoting rules followed
-- [ ] DDL generation produces valid PostgreSQL syntax
-- [ ] Test case added in `testdata/diff/`
-- [ ] Tested against PostgreSQL via integration test
-- [ ] Works across PostgreSQL versions 14-18
-
-## Quick Reference
-
-**Finding syntax in gram.y** (use local copy):
-```bash
-# Search for statement type
-grep -n "CreateTrigStmt:" internal/gram.y
-
-# Find keyword definitions
-grep -n "^TRIGGER" internal/gram.y
-
-# Understand an option
-grep -A 10 "TriggerWhen:" internal/gram.y
-```
-
-**Finding lexer rules in scan.l** (use local copy):
-```bash
-# Search for token patterns
-grep -n "identifier" internal/scan.l
-
-# Find keyword handling
-grep -n "ScanKeywordLookup" internal/scan.l
-```
-
-**Understanding precedence**:
-```bash
-# Look at top of gram.y
-head -100 internal/gram.y | grep -A 50 "%left\|%right\|%nonassoc"
-```
-
-**Find utility command handling** (upstream):
-```bash
-grep -n "transformCreateTrigStmt" src/backend/parser/parse_utilcmd.c
-```
+When generating DDL in `internal/diff/*.go`:
+- Follow gram.y syntax exactly for keyword ordering
+- Include all required elements
+- Quote identifiers correctly via `ir/quote.go`
+- Test generated DDL against real PostgreSQL via integration tests
