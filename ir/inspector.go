@@ -2030,6 +2030,11 @@ func (i *Inspector) buildPrivileges(ctx context.Context, schema *IR, targetSchem
 			continue
 		}
 
+		// Skip privileges for ignored grantees
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilege(grantee) {
+			continue
+		}
+
 		// Check for default PUBLIC grants that should be excluded
 		if grantee == "PUBLIC" {
 			if (objectType == "FUNCTION" || objectType == "PROCEDURE") && privilegeType == "EXECUTE" {
@@ -2171,6 +2176,11 @@ func (i *Inspector) buildDefaultPrivileges(ctx context.Context, schema *IR, targ
 	grouped := make(map[privKey][]string)
 	for _, p := range privileges {
 		if !p.OwnerRole.Valid || !p.ObjectType.Valid || !p.Grantee.Valid || !p.PrivilegeType.Valid {
+			continue
+		}
+
+		// Skip default privileges for ignored grantees
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreDefaultPrivilege(p.Grantee.String) {
 			continue
 		}
 
@@ -2367,6 +2377,11 @@ func (i *Inspector) buildColumnPrivileges(ctx context.Context, schema *IR, targe
 				}
 				grantee = roleName
 			}
+		}
+
+		// Skip column privileges for ignored grantees
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilege(grantee) {
+			continue
 		}
 
 		key := colPrivKey{

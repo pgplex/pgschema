@@ -7,12 +7,14 @@ import (
 
 // IgnoreConfig represents the configuration for ignoring database objects
 type IgnoreConfig struct {
-	Tables     []string `toml:"tables,omitempty"`
-	Views      []string `toml:"views,omitempty"`
-	Functions  []string `toml:"functions,omitempty"`
-	Procedures []string `toml:"procedures,omitempty"`
-	Types      []string `toml:"types,omitempty"`
-	Sequences  []string `toml:"sequences,omitempty"`
+	Tables            []string `toml:"tables,omitempty"`
+	Views             []string `toml:"views,omitempty"`
+	Functions         []string `toml:"functions,omitempty"`
+	Procedures        []string `toml:"procedures,omitempty"`
+	Types             []string `toml:"types,omitempty"`
+	Sequences         []string `toml:"sequences,omitempty"`
+	Privileges        []string `toml:"privileges,omitempty"`
+	DefaultPrivileges []string `toml:"default_privileges,omitempty"`
 }
 
 // ShouldIgnoreTable checks if a table should be ignored based on the patterns
@@ -61,6 +63,22 @@ func (c *IgnoreConfig) ShouldIgnoreSequence(sequenceName string) bool {
 		return false
 	}
 	return c.shouldIgnore(sequenceName, c.Sequences)
+}
+
+// ShouldIgnorePrivilege checks if a privilege should be ignored based on the grantee role name
+func (c *IgnoreConfig) ShouldIgnorePrivilege(grantee string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(grantee, c.Privileges)
+}
+
+// ShouldIgnoreDefaultPrivilege checks if a default privilege should be ignored based on the grantee role name
+func (c *IgnoreConfig) ShouldIgnoreDefaultPrivilege(grantee string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(grantee, c.DefaultPrivileges)
 }
 
 // shouldIgnore checks if a name should be ignored based on the patterns
