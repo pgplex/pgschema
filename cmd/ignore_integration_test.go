@@ -1030,10 +1030,16 @@ ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO deploy_bot;
 	if err != nil {
 		t.Fatalf("Failed to get current working directory: %v", err)
 	}
-	defer os.Chdir(originalWd)
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
 
 	tmpDir := t.TempDir()
-	os.Chdir(tmpDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
 
 	// Create .pgschemaignore with privileges section
 	ignoreContent := `[privileges]
