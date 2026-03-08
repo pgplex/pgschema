@@ -580,13 +580,8 @@ func viewsEqual(old, new *ir.View) bool {
 	}
 
 	// Compare view options (e.g., security_invoker, security_barrier)
-	if len(old.Options) != len(new.Options) {
+	if !viewOptionsEqual(old.Options, new.Options) {
 		return false
-	}
-	for i, opt := range old.Options {
-		if opt != new.Options[i] {
-			return false
-		}
 	}
 
 	// Both definitions come from pg_get_viewdef(), so they are already normalized
