@@ -14,7 +14,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER employees_last_modified_trigger
-    BEFORE INSERT OR UPDATE ON public.employees
+    BEFORE INSERT OR UPDATE OF salary ON public.employees
     FOR EACH ROW
     WHEN (NEW.salary IS NOT NULL)
     EXECUTE FUNCTION public.update_last_modified();

@@ -21,6 +21,12 @@
           "path": "public.employees.employees_last_modified_trigger"
         },
         {
+          "sql": "CREATE OR REPLACE TRIGGER employees_salary_update_trigger\n    BEFORE UPDATE OF salary ON employees\n    FOR EACH ROW\n    EXECUTE FUNCTION update_last_modified();",
+          "type": "table.trigger",
+          "operation": "create",
+          "path": "public.employees.employees_salary_update_trigger"
+        },
+        {
           "sql": "CREATE OR REPLACE TRIGGER employees_truncate_log_trigger\n    AFTER TRUNCATE ON employees\n    FOR EACH STATEMENT\n    EXECUTE FUNCTION update_last_modified();",
           "type": "table.trigger",
           "operation": "create",

@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "CREATE OR REPLACE TRIGGER employees_last_modified_trigger\n    BEFORE INSERT OR UPDATE ON employees\n    FOR EACH ROW\n    WHEN (((NEW.salary IS NOT NULL)))\n    EXECUTE FUNCTION update_last_modified();",
+          "sql": "CREATE OR REPLACE TRIGGER employees_last_modified_trigger\n    BEFORE INSERT OR UPDATE OF salary ON employees\n    FOR EACH ROW\n    WHEN (((NEW.salary IS NOT NULL)))\n    EXECUTE FUNCTION update_last_modified();",
           "type": "table.trigger",
           "operation": "alter",
           "path": "public.employees.employees_last_modified_trigger"
