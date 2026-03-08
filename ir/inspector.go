@@ -1363,8 +1363,8 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			return fmt.Errorf("failed to get columns for view %s.%s: %w", schemaName, viewName, err)
 		}
 
-		// Sort reloptions for deterministic comparison and output
-		options := view.Reloptions
+		// Copy and sort reloptions for deterministic comparison and output
+		options := append([]string(nil), view.Reloptions...)
 		sort.Strings(options)
 
 		v := &View{
