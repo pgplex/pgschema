@@ -1368,6 +1368,7 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			Name:         viewName,
 			Definition:   definition,
 			Columns:      columns,
+			Options:      view.Reloptions,
 			Comment:      comment,
 			Materialized: view.IsMaterialized.Valid && view.IsMaterialized.Bool,
 		}

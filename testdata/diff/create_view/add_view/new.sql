@@ -141,3 +141,13 @@ FROM (
 ) AS combined_data
 WHERE id IS NOT NULL
 ORDER BY source_type, id;
+
+-- View with security_invoker option (PG 15+, issue #343)
+CREATE VIEW public.secure_employee_view WITH (security_invoker = true) AS
+SELECT
+    id,
+    name,
+    email,
+    status
+FROM employees
+WHERE status = 'active';

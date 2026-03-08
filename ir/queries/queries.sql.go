@@ -3185,7 +3185,8 @@ WITH view_definitions AS (
         c.oid AS view_oid,
         COALESCE(d.description, '') AS view_comment,
         (c.relkind = 'm') AS is_materialized,
-        n.nspname AS view_schema
+        n.nspname AS view_schema,
+        c.reloptions AS reloptions
     FROM pg_class c
     JOIN pg_namespace n ON c.relnamespace = n.oid
     LEFT JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = 0
@@ -3202,7 +3203,8 @@ SELECT
     -- This ensures cross-schema table references are qualified with schema names
     sp.view_def AS view_definition,
     vd.view_comment,
-    vd.is_materialized
+    vd.is_materialized,
+    vd.reloptions
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
@@ -3218,6 +3220,7 @@ type GetViewsForSchemaRow struct {
 	ViewDefinition sql.NullString `db:"view_definition" json:"view_definition"`
 	ViewComment    sql.NullString `db:"view_comment" json:"view_comment"`
 	IsMaterialized sql.NullBool   `db:"is_materialized" json:"is_materialized"`
+	Reloptions     []string       `db:"reloptions" json:"reloptions"`
 }
 
 // GetViewsForSchema retrieves all views and materialized views for a specific schema
@@ -3239,6 +3242,7 @@ func (q *Queries) GetViewsForSchema(ctx context.Context, dollar_1 sql.NullString
 			&i.ViewDefinition,
 			&i.ViewComment,
 			&i.IsMaterialized,
+			pq.Array(&i.Reloptions),
 		); err != nil {
 			return nil, err
 		}
