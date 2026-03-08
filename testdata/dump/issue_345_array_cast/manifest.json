@@ -1,6 +1,9 @@
 {
   "name": "issue_345_array_cast",
   "description": "pgschema dump strips type name from array literal casts (e.g., '{nested,key}'::text[] becomes '{nested,key}'[])",
-  "source_url": "https://github.com/pgplex/pgschema/issues/345",
-  "notes": "Verifies that explicit array type casts are preserved in policy expressions and default values"
+  "source": "https://github.com/pgplex/pgschema/issues/345",
+  "notes": [
+    "Verifies that explicit array type casts are preserved in policy expressions",
+    "Reproduces the bug where '{nested,key}'::text[] becomes '{nested,key}'[] in dump output"
+  ]
 }

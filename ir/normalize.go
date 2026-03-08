@@ -746,7 +746,8 @@ func normalizeExpressionParentheses(expr string) string {
 	// Pattern: 'text'::text -> 'text' (removing redundant text cast from literals)
 	// IMPORTANT: Do NOT match when followed by [] (array cast is semantically significant)
 	// e.g., '{nested,key}'::text[] must be preserved as-is
-	// Since Go regex doesn't support lookahead, we match a trailing non-[ char or end-of-string
+	// Since Go regex doesn't support lookahead, we use [^[\w] which excludes both '['
+	// and word characters (letters/digits/_), correctly preventing matches like ::text[] or ::textual
 	redundantTextCastRegex := regexp.MustCompile(`'([^']+)'::text([^[\w]|$)`)
 	expr = redundantTextCastRegex.ReplaceAllString(expr, "'$1'$2")
 
