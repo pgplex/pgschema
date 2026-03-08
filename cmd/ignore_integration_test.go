@@ -1130,6 +1130,40 @@ ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO deploy_bot;
 			t.Error("Plan should not include changes for admin_role (ignored)")
 		}
 	})
+
+	// Clean up cluster-level objects (roles, default privileges) from sharedEmbeddedPG.
+	// The plan subtest applies SQL with CREATE ROLE and ALTER DEFAULT PRIVILEGES to the
+	// shared embedded PG instance. These are cluster-level objects that persist after the
+	// temp schema is dropped, contaminating subsequent tests (e.g., TestPlanAndApply).
+	cleanupSharedEmbeddedPG(t)
+}
+
+// cleanupSharedEmbeddedPG removes cluster-level objects (roles, default privileges)
+// that were created in sharedEmbeddedPG by privilege tests.
+func cleanupSharedEmbeddedPG(t *testing.T) {
+	t.Helper()
+
+	sharedConn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedEmbeddedPG)
+	defer sharedConn.Close()
+
+	// Must clean up in order: revoke default privileges, revoke object privileges, then drop roles.
+	// Each statement runs independently since some roles may not exist.
+	cleanupStatements := []string{
+		"ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM app_reader",
+		"ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM deploy_bot",
+		"REASSIGN OWNED BY app_reader TO testuser",
+		"DROP OWNED BY app_reader",
+		"REASSIGN OWNED BY deploy_bot TO testuser",
+		"DROP OWNED BY deploy_bot",
+		"REASSIGN OWNED BY admin_role TO testuser",
+		"DROP OWNED BY admin_role",
+		"DROP ROLE IF EXISTS app_reader",
+		"DROP ROLE IF EXISTS deploy_bot",
+		"DROP ROLE IF EXISTS admin_role",
+	}
+	for _, stmt := range cleanupStatements {
+		sharedConn.Exec(stmt) // Ignore errors; some roles may not exist
+	}
 }
 
 // verifyPlanOutput checks that plan output excludes ignored objects
