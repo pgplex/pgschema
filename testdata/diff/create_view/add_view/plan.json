@@ -27,6 +27,12 @@
           "path": "public.nullif_functions_view"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW secure_employee_view WITH (security_invoker=true) AS\n SELECT id,\n    name,\n    email,\n    status\n   FROM employees\n  WHERE status::text = 'active'::text;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.secure_employee_view"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW text_search_view AS\n SELECT id,\n    COALESCE((first_name::text || ' '::text) || last_name::text, 'Anonymous'::text) AS display_name,\n    COALESCE(email, ''::character varying) AS email,\n    COALESCE(bio, 'No description available'::text) AS description,\n    to_tsvector('english'::regconfig, (((COALESCE(first_name, ''::character varying)::text || ' '::text) || COALESCE(last_name, ''::character varying)::text) || ' '::text) || COALESCE(bio, ''::text)) AS search_vector\n   FROM employees\n  WHERE status::text = 'active'::text;",
           "type": "view",
           "operation": "create",

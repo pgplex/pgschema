@@ -251,15 +251,16 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 		// Check if only the comment changed and definition is identical
 		// Both IRs come from pg_get_viewdef() at the same PostgreSQL version, so string comparison is sufficient
 		definitionsEqual := diff.Old.Definition == diff.New.Definition
-		commentOnlyChange := diff.CommentChanged && definitionsEqual && diff.Old.Materialized == diff.New.Materialized
+		optionsEqual := viewOptionsEqual(diff.Old.Options, diff.New.Options)
+		commentOnlyChange := diff.CommentChanged && definitionsEqual && optionsEqual && diff.Old.Materialized == diff.New.Materialized
 
 		// Check if only indexes changed (for materialized views)
 		hasIndexChanges := len(diff.AddedIndexes) > 0 || len(diff.DroppedIndexes) > 0 || len(diff.ModifiedIndexes) > 0
-		indexOnlyChange := diff.New.Materialized && hasIndexChanges && definitionsEqual && !diff.CommentChanged
+		indexOnlyChange := diff.New.Materialized && hasIndexChanges && definitionsEqual && optionsEqual && !diff.CommentChanged
 
 		// Check if only triggers changed (for INSTEAD OF triggers on views)
 		hasTriggerChanges := len(diff.AddedTriggers) > 0 || len(diff.DroppedTriggers) > 0 || len(diff.ModifiedTriggers) > 0
-		triggerOnlyChange := hasTriggerChanges && definitionsEqual && !diff.CommentChanged && !hasIndexChanges
+		triggerOnlyChange := hasTriggerChanges && definitionsEqual && optionsEqual && !diff.CommentChanged && !hasIndexChanges
 
 		// Handle non-structural changes (comment-only, index-only, or trigger-only)
 		if commentOnlyChange || indexOnlyChange || triggerOnlyChange {
@@ -503,8 +504,14 @@ func generateViewSQL(view *ir.View, targetSchema string) string {
 		createClause = "CREATE OR REPLACE VIEW"
 	}
 
+	// Add WITH clause for view options (e.g., security_invoker, security_barrier)
+	var withClause string
+	if len(view.Options) > 0 {
+		withClause = " WITH (" + strings.Join(view.Options, ", ") + ")"
+	}
+
 	// Use the view definition as-is - it has already been normalized
-	return fmt.Sprintf("%s %s AS\n%s;", createClause, viewName, view.Definition)
+	return fmt.Sprintf("%s %s%s AS\n%s;", createClause, viewName, withClause, view.Definition)
 }
 
 // diffViewTriggers computes added, dropped, and modified triggers between two views
@@ -569,6 +576,11 @@ func viewsEqual(old, new *ir.View) bool {
 
 	// Check if materialized status differs
 	if old.Materialized != new.Materialized {
+		return false
+	}
+
+	// Compare view options (e.g., security_invoker, security_barrier)
+	if !viewOptionsEqual(old.Options, new.Options) {
 		return false
 	}
 
@@ -819,4 +831,17 @@ func sortModifiedViewsForProcessing(views []*viewDiff) {
 		// Otherwise maintain relative order (stable sort)
 		return false
 	})
+}
+
+// viewOptionsEqual compares two view option slices for equality
+func viewOptionsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, opt := range a {
+		if opt != b[i] {
+			return false
+		}
+	}
+	return true
 }

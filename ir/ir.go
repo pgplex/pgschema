@@ -123,6 +123,7 @@ type View struct {
 	Name         string              `json:"name"`
 	Definition   string              `json:"definition"`
 	Columns      []string            `json:"columns,omitempty"`   // Ordered list of output column names
+	Options      []string            `json:"options,omitempty"`   // View options (e.g., "security_invoker=true", "security_barrier=true")
 	Comment      string              `json:"comment,omitempty"`
 	Materialized bool                `json:"materialized,omitempty"`
 	Indexes      map[string]*Index   `json:"indexes,omitempty"`   // For materialized views only

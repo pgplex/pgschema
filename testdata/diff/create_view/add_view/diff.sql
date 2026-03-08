@@ -67,6 +67,13 @@ CREATE OR REPLACE VIEW nullif_functions_view AS
    FROM employees e
      JOIN departments d USING (id)
   WHERE e.priority > 0;
+CREATE OR REPLACE VIEW secure_employee_view WITH (security_invoker=true) AS
+ SELECT id,
+    name,
+    email,
+    status
+   FROM employees
+  WHERE status::text = 'active'::text;
 CREATE OR REPLACE VIEW text_search_view AS
  SELECT id,
     COALESCE((first_name::text || ' '::text) || last_name::text, 'Anonymous'::text) AS display_name,
