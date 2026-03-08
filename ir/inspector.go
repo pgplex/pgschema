@@ -1607,9 +1607,9 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			condition = extractWhenClauseFromTriggerDef(triggerRow.TriggerDefinition.String)
 		}
 
-		// Extract UPDATE OF columns from trigger definition
+		// Extract UPDATE OF columns from trigger definition (only for triggers with UPDATE events)
 		var updateColumns []string
-		if triggerRow.TriggerDefinition.Valid {
+		if triggerRow.TriggerDefinition.Valid && triggerRow.TriggerType&triggerTypeUpdate != 0 {
 			updateColumns = extractUpdateColumnsFromTriggerDef(triggerRow.TriggerDefinition.String)
 		}
 
