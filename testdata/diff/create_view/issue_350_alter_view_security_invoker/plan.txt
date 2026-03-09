@@ -1,0 +1,12 @@
+Plan: 1 to modify.
+
+Summary by type:
+  views: 1 to modify
+
+Views:
+  ~ employee_names
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER VIEW employee_names SET (security_invoker = true);

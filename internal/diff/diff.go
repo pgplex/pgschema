@@ -354,6 +354,7 @@ type viewDiff struct {
 	CommentChanged   bool
 	OldComment       string
 	NewComment       string
+	OptionsChanged   bool // View options (reloptions) changed
 	AddedIndexes     []*ir.Index    // For materialized views
 	DroppedIndexes   []*ir.Index    // For materialized views
 	ModifiedIndexes  []*IndexDiff   // For materialized views
@@ -781,6 +782,7 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 		if oldView, exists := oldViews[key]; exists {
 			structurallyDifferent := !viewsEqual(oldView, newView)
 			commentChanged := oldView.Comment != newView.Comment
+			optionsChanged := !viewOptionsEqual(oldView.Options, newView.Options)
 
 			// Check if indexes changed for materialized views
 			indexesChanged := false
@@ -845,6 +847,7 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 						AddedTriggers:    addedTriggers,
 						DroppedTriggers:  droppedTriggers,
 						ModifiedTriggers: modifiedTriggers,
+						OptionsChanged:   optionsChanged,
 					}
 
 					// Check for comment changes

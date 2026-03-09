@@ -248,7 +248,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			continue
 		}
 
-		// Check if only the comment changed and definition is identical
+		// Check if only metadata changed and definition is identical
 		// Both IRs come from pg_get_viewdef() at the same PostgreSQL version, so string comparison is sufficient
 		definitionsEqual := diff.Old.Definition == diff.New.Definition
 		commentOnlyChange := diff.CommentChanged && definitionsEqual && diff.Old.Materialized == diff.New.Materialized
@@ -261,8 +261,16 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 		hasTriggerChanges := len(diff.AddedTriggers) > 0 || len(diff.DroppedTriggers) > 0 || len(diff.ModifiedTriggers) > 0
 		triggerOnlyChange := hasTriggerChanges && definitionsEqual && !diff.CommentChanged && !hasIndexChanges
 
-		// Handle non-structural changes (comment-only, index-only, or trigger-only)
-		if commentOnlyChange || indexOnlyChange || triggerOnlyChange {
+		// Check if only options changed (e.g., security_invoker, security_barrier)
+		optionsOnlyChange := diff.OptionsChanged && definitionsEqual && diff.Old.Materialized == diff.New.Materialized
+
+		// Handle non-structural changes (comment-only, index-only, trigger-only, or options-only)
+		if commentOnlyChange || indexOnlyChange || triggerOnlyChange || optionsOnlyChange {
+			// Generate ALTER VIEW SET/RESET for option changes
+			if diff.OptionsChanged {
+				generateViewOptionChangesSQL(diff, targetSchema, collector)
+			}
+
 			// Only generate COMMENT ON VIEW statement if comment actually changed
 			if diff.CommentChanged {
 				viewName := qualifyEntityName(diff.New.Schema, diff.New.Name, targetSchema)
@@ -503,8 +511,106 @@ func generateViewSQL(view *ir.View, targetSchema string) string {
 		createClause = "CREATE OR REPLACE VIEW"
 	}
 
+	// Build WITH clause for view options (e.g., security_invoker, security_barrier)
+	withClause := formatViewOptionsWithClause(view.Options)
+
 	// Use the view definition as-is - it has already been normalized
-	return fmt.Sprintf("%s %s AS\n%s;", createClause, viewName, view.Definition)
+	return fmt.Sprintf("%s %s%s AS\n%s;", createClause, viewName, withClause, view.Definition)
+}
+
+// formatViewOptionsWithClause formats view options as a WITH (...) clause.
+// Returns empty string if there are no options.
+func formatViewOptionsWithClause(options map[string]string) string {
+	if len(options) == 0 {
+		return ""
+	}
+
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(options))
+	for k := range options {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s = %s", k, options[k]))
+	}
+	return " WITH (" + strings.Join(parts, ", ") + ")"
+}
+
+// generateViewOptionChangesSQL generates ALTER VIEW SET/RESET statements for option changes
+func generateViewOptionChangesSQL(diff *viewDiff, targetSchema string, collector *diffCollector) {
+	viewName := qualifyEntityName(diff.New.Schema, diff.New.Name, targetSchema)
+
+	diffType := DiffTypeView
+	viewKeyword := "VIEW"
+	if diff.New.Materialized {
+		diffType = DiffTypeMaterializedView
+		viewKeyword = "MATERIALIZED VIEW"
+	}
+
+	// Find options to SET (added or changed)
+	var setOptions []string
+	newOpts := diff.New.Options
+	oldOpts := diff.Old.Options
+	if newOpts == nil {
+		newOpts = make(map[string]string)
+	}
+	if oldOpts == nil {
+		oldOpts = make(map[string]string)
+	}
+
+	// Collect new/changed options
+	optKeys := make([]string, 0, len(newOpts))
+	for k := range newOpts {
+		optKeys = append(optKeys, k)
+	}
+	sort.Strings(optKeys)
+	for _, k := range optKeys {
+		if oldOpts[k] != newOpts[k] {
+			setOptions = append(setOptions, fmt.Sprintf("%s = %s", k, newOpts[k]))
+		}
+	}
+
+	// Find options to RESET (removed)
+	var resetOptions []string
+	oldKeys := make([]string, 0, len(oldOpts))
+	for k := range oldOpts {
+		oldKeys = append(oldKeys, k)
+	}
+	sort.Strings(oldKeys)
+	for _, k := range oldKeys {
+		if _, exists := newOpts[k]; !exists {
+			resetOptions = append(resetOptions, k)
+		}
+	}
+
+	// Generate SET statement
+	if len(setOptions) > 0 {
+		sql := fmt.Sprintf("ALTER %s %s SET (%s);", viewKeyword, viewName, strings.Join(setOptions, ", "))
+		context := &diffContext{
+			Type:                diffType,
+			Operation:           DiffOperationAlter,
+			Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+			Source:              diff,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+
+	// Generate RESET statement
+	if len(resetOptions) > 0 {
+		sql := fmt.Sprintf("ALTER %s %s RESET (%s);", viewKeyword, viewName, strings.Join(resetOptions, ", "))
+		context := &diffContext{
+			Type:                diffType,
+			Operation:           DiffOperationAlter,
+			Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+			Source:              diff,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
 }
 
 // diffViewTriggers computes added, dropped, and modified triggers between two views
@@ -572,8 +678,26 @@ func viewsEqual(old, new *ir.View) bool {
 		return false
 	}
 
+	// Check if options differ
+	if !viewOptionsEqual(old.Options, new.Options) {
+		return false
+	}
+
 	// Both definitions come from pg_get_viewdef(), so they are already normalized
 	return old.Definition == new.Definition
+}
+
+// viewOptionsEqual compares two view option maps for equality
+func viewOptionsEqual(old, new map[string]string) bool {
+	if len(old) != len(new) {
+		return false
+	}
+	for k, v := range old {
+		if new[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // viewColumnsRequireRecreate checks whether the view's column set has changed

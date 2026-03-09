@@ -1363,11 +1363,24 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			return fmt.Errorf("failed to get columns for view %s.%s: %w", schemaName, viewName, err)
 		}
 
+		// Parse view options (reloptions) from pg_class.reloptions
+		// Each option is in the format "key=value"
+		var options map[string]string
+		if len(view.ViewOptions) > 0 {
+			options = make(map[string]string, len(view.ViewOptions))
+			for _, opt := range view.ViewOptions {
+				if eqIdx := strings.Index(opt, "="); eqIdx >= 0 {
+					options[opt[:eqIdx]] = opt[eqIdx+1:]
+				}
+			}
+		}
+
 		v := &View{
 			Schema:       schemaName,
 			Name:         viewName,
 			Definition:   definition,
 			Columns:      columns,
+			Options:      options,
 			Comment:      comment,
 			Materialized: view.IsMaterialized.Valid && view.IsMaterialized.Bool,
 		}

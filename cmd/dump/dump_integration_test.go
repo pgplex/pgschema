@@ -123,6 +123,13 @@ func TestDumpCommand_Issue320PlpgsqlReservedKeywordType(t *testing.T) {
 	runExactMatchTest(t, "issue_320_plpgsql_reserved_keyword_type")
 }
 
+func TestDumpCommand_Issue350ViewSecurityInvoker(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_350_view_security_invoker")
+}
+
 func TestDumpCommand_Issue318CrossSchemaComment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

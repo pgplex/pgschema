@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.7.3",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "b9dc8ee4795ddd76cd8ee54ffd44cd7a3bd7726e008be30f02ffcba85072dfd8"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER VIEW employee_names RESET (security_invoker);",
+          "type": "view",
+          "operation": "alter",
+          "path": "public.employee_names"
+        }
+      ]
+    }
+  ]
+}
