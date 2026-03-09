@@ -37,6 +37,10 @@ pgschema supports all standard PostgreSQL environment variables:
   Database password
 </ParamField>
 
+<ParamField path="PGSSLMODE" type="string" default="prefer">
+  SSL mode for database connection. Valid values: `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`
+</ParamField>
+
 <ParamField path="PGAPPNAME" type="string" default="pgschema">
   Application name visible in `pg_stat_activity`
 </ParamField>
@@ -52,6 +56,9 @@ PGPORT=5432
 PGDATABASE=myapp
 PGUSER=postgres
 PGPASSWORD=secretpassword
+
+# Optional: SSL mode (disable, allow, prefer, require, verify-ca, verify-full)
+PGSSLMODE=prefer
 
 # Optional: Custom application name
 PGAPPNAME=pgschema

@@ -190,6 +190,12 @@ CREATE TABLE orders (
   Environment variable: `PGSCHEMA_PLAN_PASSWORD`
 </ParamField>
 
+<ParamField path="--plan-sslmode" type="string" default="prefer">
+  Plan database SSL mode. Valid values: `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`
+
+  Environment variable: `PGSCHEMA_PLAN_SSLMODE`
+</ParamField>
+
 ### Using Environment Variables
 
 <CodeGroup>
@@ -207,6 +213,7 @@ PGSCHEMA_PLAN_PORT=5432
 PGSCHEMA_PLAN_DB=pgschema_plan
 PGSCHEMA_PLAN_USER=postgres
 PGSCHEMA_PLAN_PASSWORD=planpassword
+PGSCHEMA_PLAN_SSLMODE=prefer
 
 # Run plan with external database
 pgschema plan --file schema.sql
@@ -226,6 +233,7 @@ export PGSCHEMA_PLAN_HOST=localhost
 export PGSCHEMA_PLAN_DB=pgschema_plan
 export PGSCHEMA_PLAN_USER=postgres
 export PGSCHEMA_PLAN_PASSWORD=planpassword
+export PGSCHEMA_PLAN_SSLMODE=prefer
 
 # Run plan
 pgschema plan --file schema.sql

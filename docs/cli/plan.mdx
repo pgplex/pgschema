@@ -116,6 +116,14 @@ pgschema plan --host localhost --db myapp --user postgres --password mypassword 
   See [dotenv (.env)](/cli/dotenv) for detailed configuration options.
 </ParamField>
 
+<ParamField path="--sslmode" type="string" default="prefer">
+  SSL mode for database connection (env: PGSSLMODE)
+
+  Valid values: `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`
+
+  For `verify-ca` and `verify-full` modes, you can configure certificate paths using standard PostgreSQL environment variables (`PGSSLROOTCERT`, `PGSSLCERT`, `PGSSLKEY`).
+</ParamField>
+
 <ParamField path="--schema" type="string" default="public">
   Schema name to target for comparison
 </ParamField>

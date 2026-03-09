@@ -118,6 +118,14 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
   See [dotenv (.env)](/cli/dotenv) for detailed configuration options.
 </ParamField>
 
+<ParamField path="--sslmode" type="string" default="prefer">
+  SSL mode for database connection (env: PGSSLMODE)
+
+  Valid values: `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`
+
+  For `verify-ca` and `verify-full` modes, you can configure certificate paths using standard PostgreSQL environment variables (`PGSSLROOTCERT`, `PGSSLCERT`, `PGSSLKEY`).
+</ParamField>
+
 <ParamField path="--schema" type="string" default="public">
   Schema name to dump
 </ParamField>
