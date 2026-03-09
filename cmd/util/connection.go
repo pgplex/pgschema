@@ -85,7 +85,7 @@ func buildDSN(config *ConnectionConfig) string {
 }
 
 // GetIRFromDatabase gets the IR from a database with ignore configuration
-func GetIRFromDatabase(host string, port int, db, user, password, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
+func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
 	// Build database connection
 	config := &ConnectionConfig{
 		Host:            host,
@@ -93,7 +93,7 @@ func GetIRFromDatabase(host string, port int, db, user, password, schemaName, ap
 		Database:        db,
 		User:            user,
 		Password:        password,
-		SSLMode:         "prefer",
+		SSLMode:         sslmode,
 		ApplicationName: applicationName,
 	}
 

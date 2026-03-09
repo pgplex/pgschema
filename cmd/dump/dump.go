@@ -21,6 +21,7 @@ var (
 	multiFile  bool
 	file       string
 	noComments bool
+	sslmode    string
 )
 
 // DumpConfig holds configuration for dump execution
@@ -34,6 +35,7 @@ type DumpConfig struct {
 	MultiFile  bool
 	File       string
 	NoComments bool
+	SSLMode    string
 }
 
 var DumpCmd = &cobra.Command{
@@ -55,6 +57,7 @@ func init() {
 	DumpCmd.Flags().BoolVar(&multiFile, "multi-file", false, "Output schema to multiple files organized by object type")
 	DumpCmd.Flags().StringVar(&file, "file", "", "Output file path (required when --multi-file is used)")
 	DumpCmd.Flags().BoolVar(&noComments, "no-comments", false, "Do not output object comment headers")
+	DumpCmd.Flags().StringVar(&sslmode, "sslmode", "prefer", "SSL mode for database connection (disable, allow, prefer, require, verify-ca, verify-full) (env: PGSSLMODE)")
 }
 
 // ExecuteDump executes the dump operation with the given configuration
@@ -73,7 +76,7 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	}
 
 	// Get IR from database using the shared utility
-	schemaIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.Schema, "pgschema", ignoreConfig)
+	schemaIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, "pgschema", ignoreConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to get database schema: %w", err)
 	}
@@ -110,6 +113,14 @@ func runDump(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Derive final sslmode: use flag if explicitly set, otherwise check environment variable
+	finalSSLMode := sslmode
+	if !cmd.Flags().Changed("sslmode") {
+		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
+			finalSSLMode = envSSLMode
+		}
+	}
+
 	// Create config from command-line flags
 	config := &DumpConfig{
 		Host:       host,
@@ -121,6 +132,7 @@ func runDump(cmd *cobra.Command, args []string) error {
 		MultiFile:  multiFile,
 		File:       file,
 		NoComments: noComments,
+		SSLMode:    finalSSLMode,
 	}
 
 	// Execute dump

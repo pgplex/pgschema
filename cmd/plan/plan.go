@@ -37,6 +37,9 @@ var (
 	planDBDatabase string
 	planDBUser     string
 	planDBPassword string
+
+	planSSLMode   string
+	planDBSSLMode string
 )
 
 var PlanCmd = &cobra.Command{
@@ -66,6 +69,10 @@ func init() {
 	PlanCmd.Flags().StringVar(&planDBDatabase, "plan-db", "", "Plan database name (env: PGSCHEMA_PLAN_DB)")
 	PlanCmd.Flags().StringVar(&planDBUser, "plan-user", "", "Plan database user (env: PGSCHEMA_PLAN_USER)")
 	PlanCmd.Flags().StringVar(&planDBPassword, "plan-password", "", "Plan database password (env: PGSCHEMA_PLAN_PASSWORD)")
+	PlanCmd.Flags().StringVar(&planDBSSLMode, "plan-sslmode", "prefer", "Plan database SSL mode (env: PGSCHEMA_PLAN_SSLMODE)")
+
+	// SSL mode flag
+	PlanCmd.Flags().StringVar(&planSSLMode, "sslmode", "prefer", "SSL mode for database connection (disable, allow, prefer, require, verify-ca, verify-full) (env: PGSSLMODE)")
 
 	// Output flags
 	PlanCmd.Flags().StringVar(&outputHuman, "output-human", "", "Output human-readable format to stdout or file path")
@@ -78,7 +85,7 @@ func init() {
 
 func runPlan(cmd *cobra.Command, args []string) error {
 	// Apply environment variables to plan database flags
-	util.ApplyPlanDBEnvVars(cmd, &planDBHost, &planDBDatabase, &planDBUser, &planDBPassword, &planDBPort)
+	util.ApplyPlanDBEnvVars(cmd, &planDBHost, &planDBDatabase, &planDBUser, &planDBPassword, &planDBPort, &planDBSSLMode)
 
 	// Validate plan database flags if plan-host is provided
 	if err := util.ValidatePlanDBFlags(planDBHost, planDBDatabase, planDBUser); err != nil {
@@ -90,6 +97,14 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	if finalPassword == "" {
 		if envPassword := os.Getenv("PGPASSWORD"); envPassword != "" {
 			finalPassword = envPassword
+		}
+	}
+
+	// Derive final sslmode: use flag if explicitly set, otherwise check environment variable
+	finalSSLMode := planSSLMode
+	if !cmd.Flags().Changed("sslmode") {
+		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
+			finalSSLMode = envSSLMode
 		}
 	}
 
@@ -111,12 +126,14 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		Schema:          planSchema,
 		File:            planFile,
 		ApplicationName: "pgschema",
+		SSLMode:         finalSSLMode,
 		// Plan database configuration
 		PlanDBHost:     planDBHost,
 		PlanDBPort:     planDBPort,
 		PlanDBDatabase: planDBDatabase,
 		PlanDBUser:     planDBUser,
 		PlanDBPassword: finalPlanPassword,
+		PlanDBSSLMode:  planDBSSLMode,
 	}
 
 	// Create desired state provider (embedded postgres or external database)
@@ -164,6 +181,8 @@ type PlanConfig struct {
 	PlanDBDatabase string
 	PlanDBUser     string
 	PlanDBPassword string
+	SSLMode        string
+	PlanDBSSLMode  string
 }
 
 // CreateDesiredStateProvider creates either an embedded PostgreSQL instance or connects to an external database
@@ -176,6 +195,7 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 		config.DB,
 		config.User,
 		config.Password,
+		config.SSLMode,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect PostgreSQL version: %w", err)
@@ -197,6 +217,7 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 			Database:           config.PlanDBDatabase,
 			Username:           config.PlanDBUser,
 			Password:           config.PlanDBPassword,
+			SSLMode:            config.PlanDBSSLMode,
 			TargetMajorVersion: targetMajorVersion,
 		}
 		return postgres.NewExternalDatabase(externalConfig)
@@ -250,7 +271,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	}
 
 	// Get current state from target database
-	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.Schema, config.ApplicationName, ignoreConfig)
+	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current state from database: %w", err)
 	}
@@ -279,7 +300,13 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		schemaToInspect = config.Schema
 	}
 
-	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, schemaToInspect, config.ApplicationName, ignoreConfig)
+	// Use "prefer" for provider connections (embedded postgres or external plan database)
+	// since the provider's sslmode is independent of the target database's sslmode
+	providerSSLMode := "prefer"
+	if config.PlanDBSSLMode != "" {
+		providerSSLMode = config.PlanDBSSLMode
+	}
+	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get desired state: %w", err)
 	}
@@ -692,4 +719,6 @@ func ResetFlags() {
 	planDBDatabase = ""
 	planDBUser = ""
 	planDBPassword = ""
+	planSSLMode = "prefer"
+	planDBSSLMode = "prefer"
 }
