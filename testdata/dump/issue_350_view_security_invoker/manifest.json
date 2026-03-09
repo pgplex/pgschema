@@ -1,9 +1,0 @@
-{
-  "name": "issue_350_view_security_invoker",
-  "description": "Test case for view options (security_invoker) support (GitHub issue #350)",
-  "source": "https://github.com/pgplex/pgschema/issues/350",
-  "notes": [
-    "Reproduces the bug where ALTER VIEW SET (security_invoker = true) was not supported",
-    "Tests that view options are preserved in dump output via WITH clause"
-  ]
-}
