@@ -104,6 +104,9 @@ type ApplyConfig struct {
 	LockTimeout     string
 	ApplicationName string
 	SSLMode         string
+	// Plan database configuration (needed when GeneratePlan checks provider SSL mode)
+	PlanDBHost    string
+	PlanDBSSLMode string
 }
 
 // ApplyMigration applies a migration plan to update a database schema.
@@ -136,6 +139,8 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 			File:            config.File,
 			ApplicationName: config.ApplicationName,
 			SSLMode:         config.SSLMode,
+			PlanDBHost:      config.PlanDBHost,
+			PlanDBSSLMode:   config.PlanDBSSLMode,
 		}
 
 		// Generate plan using shared logic
@@ -381,6 +386,10 @@ func RunApply(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		defer provider.Stop()
+
+		// Propagate plan DB fields so ApplyMigration -> GeneratePlan knows the provider type
+		config.PlanDBHost = applyPlanDBHost
+		config.PlanDBSSLMode = applyPlanDBSSLMode
 	}
 
 	// Apply the migration
