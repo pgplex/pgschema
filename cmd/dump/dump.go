@@ -115,7 +115,7 @@ func runDump(cmd *cobra.Command, args []string) error {
 
 	// Derive final sslmode: use flag if explicitly set, otherwise check environment variable
 	finalSSLMode := sslmode
-	if !cmd.Flags().Changed("sslmode") {
+	if cmd == nil || !cmd.Flags().Changed("sslmode") {
 		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
 			finalSSLMode = envSSLMode
 		}
