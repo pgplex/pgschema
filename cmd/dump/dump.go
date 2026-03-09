@@ -121,6 +121,11 @@ func runDump(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate sslmode
+	if err := util.ValidateSSLMode(finalSSLMode); err != nil {
+		return err
+	}
+
 	// Create config from command-line flags
 	config := &DumpConfig{
 		Host:       host,

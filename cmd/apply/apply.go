@@ -282,6 +282,11 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate sslmode
+	if err := util.ValidateSSLMode(finalSSLMode); err != nil {
+		return err
+	}
+
 	// Build configuration
 	config := &ApplyConfig{
 		Host:            applyHost,
@@ -335,6 +340,13 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		// Validate plan database flags if plan-host is provided
 		if err := util.ValidatePlanDBFlags(applyPlanDBHost, applyPlanDBDatabase, applyPlanDBUser); err != nil {
 			return err
+		}
+
+		// Validate plan database sslmode if plan-host is provided
+		if applyPlanDBHost != "" {
+			if err := util.ValidateSSLMode(applyPlanDBSSLMode); err != nil {
+				return fmt.Errorf("plan database: %w", err)
+			}
 		}
 
 		// Derive final plan database password

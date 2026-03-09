@@ -116,6 +116,16 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate sslmode values
+	if err := util.ValidateSSLMode(finalSSLMode); err != nil {
+		return err
+	}
+	if planDBHost != "" {
+		if err := util.ValidateSSLMode(planDBSSLMode); err != nil {
+			return fmt.Errorf("plan database: %w", err)
+		}
+	}
+
 	// Create plan configuration
 	config := &PlanConfig{
 		Host:            planHost,
@@ -300,11 +310,14 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		schemaToInspect = config.Schema
 	}
 
-	// Use "prefer" for provider connections (embedded postgres or external plan database)
-	// since the provider's sslmode is independent of the target database's sslmode
-	providerSSLMode := "prefer"
-	if config.PlanDBSSLMode != "" {
+	// For embedded postgres, always use "disable" since it starts without SSL configured.
+	// For external plan databases, use the configured PlanDBSSLMode (defaulting to "prefer").
+	providerSSLMode := "disable"
+	if config.PlanDBHost != "" {
 		providerSSLMode = config.PlanDBSSLMode
+		if providerSSLMode == "" {
+			providerSSLMode = "prefer"
+		}
 	}
 	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig)
 	if err != nil {
