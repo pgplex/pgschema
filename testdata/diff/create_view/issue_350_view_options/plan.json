@@ -3,7 +3,7 @@
   "pgschema_version": "1.7.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "e575624236fd96e28f386d9f25c6147d6b5b98a165dab8b74f84f53f6e2de0de"
+    "hash": "3dd9c8d5398e477d3a0cf9ac459cb7241f0c3cb02931512dc1a27b431dbc31fa"
   },
   "groups": [
     {
@@ -25,6 +25,12 @@
           "type": "view",
           "operation": "alter",
           "path": "public.employee_secure"
+        },
+        {
+          "sql": "ALTER MATERIALIZED VIEW employee_summary SET (fillfactor=80);",
+          "type": "materialized_view",
+          "operation": "alter",
+          "path": "public.employee_summary"
         }
       ]
     }

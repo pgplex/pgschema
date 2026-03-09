@@ -781,6 +781,10 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 		newView := newViews[key]
 		if oldView, exists := oldViews[key]; exists {
 			structurallyDifferent := !viewsEqual(oldView, newView)
+			// Check if the view definition itself changed (excluding options).
+			// This is used to decide if materialized views need DROP+CREATE:
+			// option-only changes should use ALTER VIEW SET/RESET, not recreation.
+			definitionChanged := oldView.Definition != newView.Definition || oldView.Materialized != newView.Materialized
 			commentChanged := oldView.Comment != newView.Comment
 			optionsChanged := !viewOptionsEqual(oldView.Options, newView.Options)
 
@@ -828,10 +832,12 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 			triggersChanged := len(addedTriggers) > 0 || len(droppedTriggers) > 0 || len(modifiedTriggers) > 0
 
 			if structurallyDifferent || commentChanged || indexesChanged || triggersChanged {
-				// For materialized views with structural changes, mark for recreation
+				// For materialized views with definition changes, mark for recreation.
 				// For regular views with column changes incompatible with CREATE OR REPLACE VIEW,
-				// also mark for recreation (issue #308)
-				needsRecreate := structurallyDifferent && (newView.Materialized || viewColumnsRequireRecreate(oldView, newView))
+				// also mark for recreation (issue #308).
+				// Use definitionChanged (not structurallyDifferent) so that option-only changes
+				// on materialized views use ALTER SET/RESET instead of DROP+CREATE.
+				needsRecreate := definitionChanged && (newView.Materialized || viewColumnsRequireRecreate(oldView, newView))
 
 				if needsRecreate {
 					diff.modifiedViews = append(diff.modifiedViews, &viewDiff{

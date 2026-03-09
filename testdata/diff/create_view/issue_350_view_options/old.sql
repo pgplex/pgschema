@@ -16,3 +16,7 @@ SELECT id, email FROM public.employees;
 -- View with security_invoker (will be removed)
 CREATE VIEW public.employee_secure WITH (security_invoker = true) AS
 SELECT id, name FROM public.employees WHERE id > 0;
+
+-- Materialized view without options (will gain fillfactor)
+CREATE MATERIALIZED VIEW public.employee_summary AS
+SELECT department_id, COUNT(*) AS cnt FROM public.employees GROUP BY department_id;

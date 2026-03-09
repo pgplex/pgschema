@@ -18,3 +18,7 @@ ALTER VIEW public.employee_emails SET (security_invoker = true);
 -- Remove security_invoker
 CREATE VIEW public.employee_secure AS
 SELECT id, name FROM public.employees WHERE id > 0;
+
+-- Add fillfactor to materialized view (should use ALTER, not DROP+CREATE)
+CREATE MATERIALIZED VIEW public.employee_summary WITH (fillfactor = 80) AS
+SELECT department_id, COUNT(*) AS cnt FROM public.employees GROUP BY department_id;
