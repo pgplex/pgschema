@@ -84,8 +84,22 @@ func buildDSN(config *ConnectionConfig) string {
 	return strings.Join(parts, " ")
 }
 
+// ValidateSSLMode validates that the given sslmode is a valid PostgreSQL SSL mode.
+func ValidateSSLMode(mode string) error {
+	switch mode {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+		return nil
+	default:
+		return fmt.Errorf("invalid sslmode %q: must be one of disable, allow, prefer, require, verify-ca, verify-full", mode)
+	}
+}
+
 // GetIRFromDatabase gets the IR from a database with ignore configuration
-func GetIRFromDatabase(host string, port int, db, user, password, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
+func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
+	if sslmode == "" {
+		sslmode = "prefer"
+	}
+
 	// Build database connection
 	config := &ConnectionConfig{
 		Host:            host,
@@ -93,7 +107,7 @@ func GetIRFromDatabase(host string, port int, db, user, password, schemaName, ap
 		Database:        db,
 		User:            user,
 		Password:        password,
-		SSLMode:         "prefer",
+		SSLMode:         sslmode,
 		ApplicationName: applicationName,
 	}
 

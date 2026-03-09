@@ -30,7 +30,16 @@ type ExternalDatabaseConfig struct {
 	Database           string
 	Username           string
 	Password           string
+	SSLMode            string
 	TargetMajorVersion int // Expected major version to match
+}
+
+// sslModeOrDefault returns the configured SSL mode, defaulting to "prefer" if empty
+func (c *ExternalDatabaseConfig) sslModeOrDefault() string {
+	if c.SSLMode == "" {
+		return "prefer"
+	}
+	return c.SSLMode
 }
 
 // NewExternalDatabase creates a new external database connection for desired state validation.
@@ -43,7 +52,7 @@ func NewExternalDatabase(config *ExternalDatabaseConfig) (*ExternalDatabase, err
 		Database: config.Database,
 		User:     config.Username,
 		Password: config.Password,
-		SSLMode:  "prefer",
+		SSLMode:  config.sslModeOrDefault(),
 	}
 
 	// Connect to database

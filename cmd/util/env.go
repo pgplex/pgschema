@@ -79,7 +79,7 @@ func PreRunEWithEnvVarsAndConnectionAndApp(dbPtr, userPtr *string, hostPtr *stri
 
 // ApplyPlanDBEnvVars applies environment variables to plan database connection parameters
 // This is used in the plan command to populate plan-* flags from PGSCHEMA_PLAN_* environment variables
-func ApplyPlanDBEnvVars(cmd *cobra.Command, hostPtr, dbPtr, userPtr, passwordPtr *string, portPtr *int) {
+func ApplyPlanDBEnvVars(cmd *cobra.Command, hostPtr, dbPtr, userPtr, passwordPtr *string, portPtr *int, sslmodePtr *string) {
 	// Apply environment variables if flags were not explicitly set
 	if GetEnvWithDefault("PGSCHEMA_PLAN_HOST", "") != "" && !cmd.Flags().Changed("plan-host") {
 		*hostPtr = GetEnvWithDefault("PGSCHEMA_PLAN_HOST", "")
@@ -95,6 +95,9 @@ func ApplyPlanDBEnvVars(cmd *cobra.Command, hostPtr, dbPtr, userPtr, passwordPtr
 	}
 	if GetEnvWithDefault("PGSCHEMA_PLAN_PASSWORD", "") != "" && !cmd.Flags().Changed("plan-password") {
 		*passwordPtr = GetEnvWithDefault("PGSCHEMA_PLAN_PASSWORD", "")
+	}
+	if GetEnvWithDefault("PGSCHEMA_PLAN_SSLMODE", "") != "" && !cmd.Flags().Changed("plan-sslmode") {
+		*sslmodePtr = GetEnvWithDefault("PGSCHEMA_PLAN_SSLMODE", "")
 	}
 }
 

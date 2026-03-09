@@ -45,15 +45,19 @@ type EmbeddedPostgresConfig struct {
 
 // DetectPostgresVersionFromDB connects to a database and detects its version
 // This is a convenience function that opens a connection, detects the version, and closes it
-func DetectPostgresVersionFromDB(host string, port int, database, user, password string) (PostgresVersion, error) {
+func DetectPostgresVersionFromDB(host string, port int, database, user, password, sslmode string) (PostgresVersion, error) {
 	// Build connection config
+	finalSSLMode := sslmode
+	if finalSSLMode == "" {
+		finalSSLMode = "prefer"
+	}
 	config := &util.ConnectionConfig{
 		Host:     host,
 		Port:     port,
 		Database: database,
 		User:     user,
 		Password: password,
-		SSLMode:  "prefer",
+		SSLMode:  finalSSLMode,
 	}
 
 	// Connect to database

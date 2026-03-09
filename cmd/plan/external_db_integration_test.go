@@ -109,6 +109,7 @@ func TestExternalDatabase_VersionMismatch(t *testing.T) {
 		targetDatabase,
 		targetUser,
 		targetPassword,
+		"prefer",
 	)
 	require.NoError(t, err, "should detect PostgreSQL version")
 	assert.NotEmpty(t, pgVersion, "version should not be empty")

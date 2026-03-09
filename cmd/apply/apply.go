@@ -38,6 +38,9 @@ var (
 	applyPlanDBDatabase string
 	applyPlanDBUser     string
 	applyPlanDBPassword string
+
+	applySSLMode       string
+	applyPlanDBSSLMode string
 )
 
 var ApplyCmd = &cobra.Command{
@@ -76,6 +79,10 @@ func init() {
 	ApplyCmd.Flags().StringVar(&applyPlanDBDatabase, "plan-db", "", "Plan database name (env: PGSCHEMA_PLAN_DB)")
 	ApplyCmd.Flags().StringVar(&applyPlanDBUser, "plan-user", "", "Plan database user (env: PGSCHEMA_PLAN_USER)")
 	ApplyCmd.Flags().StringVar(&applyPlanDBPassword, "plan-password", "", "Plan database password (env: PGSCHEMA_PLAN_PASSWORD)")
+	ApplyCmd.Flags().StringVar(&applyPlanDBSSLMode, "plan-sslmode", "prefer", "Plan database SSL mode (env: PGSCHEMA_PLAN_SSLMODE)")
+
+	// SSL mode flag
+	ApplyCmd.Flags().StringVar(&applySSLMode, "sslmode", "prefer", "SSL mode for database connection (disable, allow, prefer, require, verify-ca, verify-full) (env: PGSSLMODE)")
 
 	// Mark file and plan as mutually exclusive
 	ApplyCmd.MarkFlagsMutuallyExclusive("file", "plan")
@@ -96,6 +103,10 @@ type ApplyConfig struct {
 	Quiet           bool // Suppress plan display and progress messages (useful for tests)
 	LockTimeout     string
 	ApplicationName string
+	SSLMode         string
+	// Plan database configuration (needed when GeneratePlan checks provider SSL mode)
+	PlanDBHost    string
+	PlanDBSSLMode string
 }
 
 // ApplyMigration applies a migration plan to update a database schema.
@@ -127,6 +138,9 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 			Schema:          config.Schema,
 			File:            config.File,
 			ApplicationName: config.ApplicationName,
+			SSLMode:         config.SSLMode,
+			PlanDBHost:      config.PlanDBHost,
+			PlanDBSSLMode:   config.PlanDBSSLMode,
 		}
 
 		// Generate plan using shared logic
@@ -146,7 +160,7 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 
 	// Validate schema fingerprint if plan has one
 	if migrationPlan.SourceFingerprint != nil {
-		err := validateSchemaFingerprint(migrationPlan, config.Host, config.Port, config.DB, config.User, config.Password, config.Schema, config.ApplicationName, ignoreConfig)
+		err := validateSchemaFingerprint(migrationPlan, config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
 		if err != nil {
 			return err
 		}
@@ -191,7 +205,7 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 		Database:        config.DB,
 		User:            config.User,
 		Password:        config.Password,
-		SSLMode:         "prefer",
+		SSLMode:         config.SSLMode,
 		ApplicationName: config.ApplicationName,
 	}
 
@@ -265,6 +279,19 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Derive final sslmode: use flag if explicitly set, otherwise check environment variable
+	finalSSLMode := applySSLMode
+	if cmd == nil || !cmd.Flags().Changed("sslmode") {
+		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
+			finalSSLMode = envSSLMode
+		}
+	}
+
+	// Validate sslmode
+	if err := util.ValidateSSLMode(finalSSLMode); err != nil {
+		return err
+	}
+
 	// Build configuration
 	config := &ApplyConfig{
 		Host:            applyHost,
@@ -277,6 +304,7 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		NoColor:         applyNoColor,
 		LockTimeout:     applyLockTimeout,
 		ApplicationName: applyApplicationName,
+		SSLMode:         finalSSLMode,
 	}
 
 	var provider postgres.DesiredStateProvider
@@ -312,11 +340,18 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		config.File = applyFile
 
 		// Apply environment variables to plan database flags (only needed for File Mode)
-		util.ApplyPlanDBEnvVars(cmd, &applyPlanDBHost, &applyPlanDBDatabase, &applyPlanDBUser, &applyPlanDBPassword, &applyPlanDBPort)
+		util.ApplyPlanDBEnvVars(cmd, &applyPlanDBHost, &applyPlanDBDatabase, &applyPlanDBUser, &applyPlanDBPassword, &applyPlanDBPort, &applyPlanDBSSLMode)
 
 		// Validate plan database flags if plan-host is provided
 		if err := util.ValidatePlanDBFlags(applyPlanDBHost, applyPlanDBDatabase, applyPlanDBUser); err != nil {
 			return err
+		}
+
+		// Validate plan database sslmode if plan-host is provided
+		if applyPlanDBHost != "" {
+			if err := util.ValidateSSLMode(applyPlanDBSSLMode); err != nil {
+				return fmt.Errorf("plan database: %w", err)
+			}
 		}
 
 		// Derive final plan database password
@@ -337,18 +372,24 @@ func RunApply(cmd *cobra.Command, args []string) error {
 			Schema:          applySchema,
 			File:            applyFile,
 			ApplicationName: applyApplicationName,
+			SSLMode:         finalSSLMode,
 			// Plan database configuration
 			PlanDBHost:     applyPlanDBHost,
 			PlanDBPort:     applyPlanDBPort,
 			PlanDBDatabase: applyPlanDBDatabase,
 			PlanDBUser:     applyPlanDBUser,
 			PlanDBPassword: finalPlanPassword,
+			PlanDBSSLMode:  applyPlanDBSSLMode,
 		}
 		provider, err = planCmd.CreateDesiredStateProvider(planConfig)
 		if err != nil {
 			return err
 		}
 		defer provider.Stop()
+
+		// Propagate plan DB fields so ApplyMigration -> GeneratePlan knows the provider type
+		config.PlanDBHost = applyPlanDBHost
+		config.PlanDBSSLMode = applyPlanDBSSLMode
 	}
 
 	// Apply the migration
@@ -356,10 +397,10 @@ func RunApply(cmd *cobra.Command, args []string) error {
 }
 
 // validateSchemaFingerprint validates that the current database schema matches the expected fingerprint
-func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, db, user, password, schema, applicationName string, ignoreConfig *ir.IgnoreConfig) error {
+func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, db, user, password, sslmode, schema, applicationName string, ignoreConfig *ir.IgnoreConfig) error {
 	// Get current state from target database with ignore config
 	// This ensures ignored objects are excluded from fingerprint calculation
-	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, schema, applicationName, ignoreConfig)
+	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig)
 	if err != nil {
 		return fmt.Errorf("failed to get current database state for fingerprint validation: %w", err)
 	}
