@@ -1074,7 +1074,7 @@ WITH view_definitions AS (
         COALESCE(d.description, '') AS view_comment,
         (c.relkind = 'm') AS is_materialized,
         n.nspname AS view_schema,
-        c.reloptions AS view_options
+        c.reloptions AS reloptions
     FROM pg_class c
     JOIN pg_namespace n ON c.relnamespace = n.oid
     LEFT JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = 0
@@ -1092,7 +1092,7 @@ SELECT
     sp.view_def AS view_definition,
     vd.view_comment,
     vd.is_materialized,
-    vd.view_options
+    vd.reloptions
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
@@ -1224,6 +1224,12 @@ WITH acl_expanded AS (
     FROM pg_default_acl d
     JOIN pg_namespace n ON d.defaclnamespace = n.oid
     WHERE n.nspname = $1
+        -- Only include privileges for roles the current user can manage.
+        -- pg_has_role returns true for superusers (who can manage any role)
+        -- and for roles the current user is a member of. This prevents
+        -- generating diffs for system roles (e.g., supabase_admin) that
+        -- the current user cannot actually modify via ALTER DEFAULT PRIVILEGES.
+        AND pg_has_role(current_user, d.defaclrole, 'MEMBER')
 )
 SELECT
     pg_get_userbyid(a.defaclrole) AS owner_role,

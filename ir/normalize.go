@@ -175,6 +175,7 @@ func normalizeDefaultValue(value string, tableSchema string) string {
 		// - '2024-01-01'::date (date literals need the cast in expressions)
 		//
 		// Pattern matches redundant text/varchar/char/json casts (including arrays)
+		// For column defaults, these casts are redundant because the column type provides context
 		// Note: jsonb must come before json to avoid partial match
 		// Note: (?:\[\])* handles multi-dimensional arrays like text[][]
 		re = regexp.MustCompile(`('(?:[^']|'')*')::(text|character varying|character|bpchar|varchar|jsonb|json)(?:\[\])*`)
@@ -743,8 +744,12 @@ func normalizeExpressionParentheses(expr string) string {
 
 	// Step 3: Normalize redundant type casts in function arguments
 	// Pattern: 'text'::text -> 'text' (removing redundant text cast from literals)
-	redundantTextCastRegex := regexp.MustCompile(`'([^']+)'::text`)
-	expr = redundantTextCastRegex.ReplaceAllString(expr, "'$1'")
+	// IMPORTANT: Do NOT match when followed by [] (array cast is semantically significant)
+	// e.g., '{nested,key}'::text[] must be preserved as-is
+	// Since Go regex doesn't support lookahead, we use [^[\w] which excludes both '['
+	// and word characters (letters/digits/_), correctly preventing matches like ::text[] or ::textual
+	redundantTextCastRegex := regexp.MustCompile(`'([^']+)'::text([^[\w]|$)`)
+	expr = redundantTextCastRegex.ReplaceAllString(expr, "'$1'$2")
 
 	return expr
 }

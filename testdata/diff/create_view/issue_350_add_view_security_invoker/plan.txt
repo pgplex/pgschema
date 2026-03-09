@@ -9,4 +9,4 @@ Views:
 DDL to be executed:
 --------------------------------------------------
 
-ALTER VIEW employee_names SET (security_invoker = true);
+ALTER VIEW employee_names SET (security_invoker=true);

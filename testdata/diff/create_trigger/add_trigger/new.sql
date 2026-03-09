@@ -23,6 +23,11 @@ CREATE TRIGGER employees_insert_timestamp_trigger
     FOR EACH ROW
     EXECUTE FUNCTION public.update_last_modified();
 
+CREATE TRIGGER employees_salary_update_trigger
+    BEFORE UPDATE OF salary ON public.employees
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_last_modified();
+
 CREATE TRIGGER employees_truncate_log_trigger
     AFTER TRUNCATE ON public.employees
     FOR EACH STATEMENT

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "pgschema_version": "1.7.3",
+  "pgschema_version": "1.7.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
     "hash": "d8927a4f1a355b7082959da316da682f9455931dc9dc575e3e00f31b4e691221"
@@ -25,6 +25,12 @@
           "type": "view",
           "operation": "create",
           "path": "public.nullif_functions_view"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW secure_employee_view WITH (security_invoker=true) AS\n SELECT id,\n    name,\n    email,\n    status\n   FROM employees\n  WHERE status::text = 'active'::text;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.secure_employee_view"
         },
         {
           "sql": "CREATE OR REPLACE VIEW text_search_view AS\n SELECT id,\n    COALESCE((first_name::text || ' '::text) || last_name::text, 'Anonymous'::text) AS display_name,\n    COALESCE(email, ''::character varying) AS email,\n    COALESCE(bio, 'No description available'::text) AS description,\n    to_tsvector('english'::regconfig, (((COALESCE(first_name, ''::character varying)::text || ' '::text) || COALESCE(last_name, ''::character varying)::text) || ' '::text) || COALESCE(bio, ''::text)) AS search_vector\n   FROM employees\n  WHERE status::text = 'active'::text;",

@@ -8,6 +8,11 @@ CREATE OR REPLACE TRIGGER employees_last_modified_trigger
     FOR EACH ROW
     EXECUTE FUNCTION update_last_modified();
 
+CREATE OR REPLACE TRIGGER employees_salary_update_trigger
+    BEFORE UPDATE OF salary ON employees
+    FOR EACH ROW
+    EXECUTE FUNCTION update_last_modified();
+
 CREATE OR REPLACE TRIGGER employees_truncate_log_trigger
     AFTER TRUNCATE ON employees
     FOR EACH STATEMENT

@@ -28,12 +28,14 @@ func LoadIgnoreFileFromPath(filePath string) (*ir.IgnoreConfig, error) {
 // TomlConfig represents the TOML structure of the .pgschemaignore file
 // This is used for parsing more complex configurations if needed in the future
 type TomlConfig struct {
-	Tables     TableIgnoreConfig     `toml:"tables,omitempty"`
-	Views      ViewIgnoreConfig      `toml:"views,omitempty"`
-	Functions  FunctionIgnoreConfig  `toml:"functions,omitempty"`
-	Procedures ProcedureIgnoreConfig `toml:"procedures,omitempty"`
-	Types      TypeIgnoreConfig      `toml:"types,omitempty"`
-	Sequences  SequenceIgnoreConfig  `toml:"sequences,omitempty"`
+	Tables            TableIgnoreConfig            `toml:"tables,omitempty"`
+	Views             ViewIgnoreConfig             `toml:"views,omitempty"`
+	Functions         FunctionIgnoreConfig         `toml:"functions,omitempty"`
+	Procedures        ProcedureIgnoreConfig        `toml:"procedures,omitempty"`
+	Types             TypeIgnoreConfig             `toml:"types,omitempty"`
+	Sequences         SequenceIgnoreConfig         `toml:"sequences,omitempty"`
+	Privileges        PrivilegeIgnoreConfig        `toml:"privileges,omitempty"`
+	DefaultPrivileges DefaultPrivilegeIgnoreConfig `toml:"default_privileges,omitempty"`
 }
 
 // TableIgnoreConfig represents table-specific ignore configuration
@@ -66,6 +68,18 @@ type SequenceIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
 
+// PrivilegeIgnoreConfig represents privilege-specific ignore configuration
+// Patterns match on grantee role names
+type PrivilegeIgnoreConfig struct {
+	Patterns []string `toml:"patterns,omitempty"`
+}
+
+// DefaultPrivilegeIgnoreConfig represents default privilege-specific ignore configuration
+// Patterns match on grantee role names
+type DefaultPrivilegeIgnoreConfig struct {
+	Patterns []string `toml:"patterns,omitempty"`
+}
+
 // LoadIgnoreFileWithStructure loads the .pgschemaignore file using the structured TOML format
 // and converts it to the simple IgnoreConfig structure
 func LoadIgnoreFileWithStructure() (*ir.IgnoreConfig, error) {
@@ -91,12 +105,14 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 
 	// Convert to simple IgnoreConfig structure
 	config := &ir.IgnoreConfig{
-		Tables:     tomlConfig.Tables.Patterns,
-		Views:      tomlConfig.Views.Patterns,
-		Functions:  tomlConfig.Functions.Patterns,
-		Procedures: tomlConfig.Procedures.Patterns,
-		Types:      tomlConfig.Types.Patterns,
-		Sequences:  tomlConfig.Sequences.Patterns,
+		Tables:            tomlConfig.Tables.Patterns,
+		Views:             tomlConfig.Views.Patterns,
+		Functions:         tomlConfig.Functions.Patterns,
+		Procedures:        tomlConfig.Procedures.Patterns,
+		Types:             tomlConfig.Types.Patterns,
+		Sequences:         tomlConfig.Sequences.Patterns,
+		Privileges:        tomlConfig.Privileges.Patterns,
+		DefaultPrivileges: tomlConfig.DefaultPrivileges.Patterns,
 	}
 
 	return config, nil

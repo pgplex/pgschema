@@ -129,6 +129,69 @@ patterns = ["fn_test_*"]
 	}
 }
 
+func TestLoadIgnoreFile_PrivilegeSections(t *testing.T) {
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.pgschemaignore")
+
+	tomlContent := `[privileges]
+patterns = ["deploy_bot", "admin_*", "!admin_super"]
+
+[default_privileges]
+patterns = ["deploy_bot"]
+`
+
+	err := os.WriteFile(testFile, []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	config, err := LoadIgnoreFileFromPath(testFile)
+	if err != nil {
+		t.Fatalf("LoadIgnoreFileFromPath() error = %v", err)
+	}
+	if config == nil {
+		t.Fatal("LoadIgnoreFileFromPath() returned nil config")
+	}
+
+	// Test privileges section
+	expectedPrivileges := []string{"deploy_bot", "admin_*", "!admin_super"}
+	if len(config.Privileges) != len(expectedPrivileges) {
+		t.Errorf("Expected %d privilege patterns, got %d", len(expectedPrivileges), len(config.Privileges))
+	}
+	for i, expected := range expectedPrivileges {
+		if i < len(config.Privileges) && config.Privileges[i] != expected {
+			t.Errorf("Expected privilege pattern %q at index %d, got %q", expected, i, config.Privileges[i])
+		}
+	}
+
+	// Test default_privileges section
+	if len(config.DefaultPrivileges) != 1 || config.DefaultPrivileges[0] != "deploy_bot" {
+		t.Errorf("Expected default_privileges patterns [\"deploy_bot\"], got %v", config.DefaultPrivileges)
+	}
+
+	// Test ShouldIgnorePrivilege
+	if !config.ShouldIgnorePrivilege("deploy_bot") {
+		t.Error("deploy_bot should be ignored")
+	}
+	if !config.ShouldIgnorePrivilege("admin_role") {
+		t.Error("admin_role should be ignored (matches admin_*)")
+	}
+	if config.ShouldIgnorePrivilege("admin_super") {
+		t.Error("admin_super should NOT be ignored (negation pattern)")
+	}
+	if config.ShouldIgnorePrivilege("app_reader") {
+		t.Error("app_reader should NOT be ignored")
+	}
+
+	// Test ShouldIgnoreDefaultPrivilege
+	if !config.ShouldIgnoreDefaultPrivilege("deploy_bot") {
+		t.Error("deploy_bot default privilege should be ignored")
+	}
+	if config.ShouldIgnoreDefaultPrivilege("app_reader") {
+		t.Error("app_reader default privilege should NOT be ignored")
+	}
+}
+
 func TestLoadIgnoreFile_InvalidTOML(t *testing.T) {
 	// Create a temporary invalid TOML file
 	tempDir := t.TempDir()

@@ -3,7 +3,7 @@
 --
 
 -- Dumped from database version PostgreSQL 18.0
--- Dumped by pgschema version 1.7.3
+-- Dumped by pgschema version 1.7.4
 
 
 --
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS employees (
 -- Name: employee_emails; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW employee_emails WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW employee_emails WITH (security_invoker=true) AS
  SELECT id,
     email
    FROM employees;
@@ -30,7 +30,7 @@ CREATE OR REPLACE VIEW employee_emails WITH (security_invoker = true) AS
 -- Name: employee_names; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW employee_names WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW employee_names WITH (security_invoker=true) AS
  SELECT id,
     name
    FROM employees;
@@ -39,7 +39,7 @@ CREATE OR REPLACE VIEW employee_names WITH (security_invoker = true) AS
 -- Name: employee_secure; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW employee_secure WITH (security_barrier = true) AS
+CREATE OR REPLACE VIEW employee_secure WITH (security_barrier=true) AS
  SELECT id,
     name
    FROM employees

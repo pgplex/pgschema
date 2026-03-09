@@ -1363,17 +1363,9 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			return fmt.Errorf("failed to get columns for view %s.%s: %w", schemaName, viewName, err)
 		}
 
-		// Parse view options (reloptions) from pg_class.reloptions
-		// Each option is in the format "key=value"
-		var options map[string]string
-		if len(view.ViewOptions) > 0 {
-			options = make(map[string]string, len(view.ViewOptions))
-			for _, opt := range view.ViewOptions {
-				if eqIdx := strings.Index(opt, "="); eqIdx >= 0 {
-					options[opt[:eqIdx]] = opt[eqIdx+1:]
-				}
-			}
-		}
+		// Copy and sort reloptions for deterministic comparison and output
+		options := append([]string(nil), view.Reloptions...)
+		sort.Strings(options)
 
 		v := &View{
 			Schema:       schemaName,
@@ -1463,6 +1455,65 @@ func extractWhenClauseFromTriggerDef(triggerDef string) string {
 	}
 
 	return strings.TrimSpace(triggerDef[start:end])
+}
+
+// extractUpdateColumnsFromTriggerDef extracts column names from UPDATE OF col1, col2 in a trigger definition
+// returned by pg_get_triggerdef(). The format is:
+// "CREATE TRIGGER name BEFORE INSERT OR UPDATE OF col1, col2 ON table ..."
+func extractUpdateColumnsFromTriggerDef(triggerDef string) []string {
+	upper := strings.ToUpper(triggerDef)
+	updateOfIdx := strings.Index(upper, "UPDATE OF ")
+	if updateOfIdx == -1 {
+		return nil
+	}
+
+	// Start after "UPDATE OF "
+	start := updateOfIdx + len("UPDATE OF ")
+
+	// Find " ON " which terminates the event/column list
+	onIdx := strings.Index(upper[start:], " ON ")
+	if onIdx == -1 {
+		return nil
+	}
+
+	// Extract the column list substring
+	colListStr := strings.TrimSpace(triggerDef[start : start+onIdx])
+
+	// Handle potential " OR " separating additional events after the columns
+	// e.g., "UPDATE OF col1, col2 OR DELETE ON ..."
+	// We need to check if there's an OR followed by another event keyword
+	eventKeywords := []string{"INSERT", "UPDATE", "DELETE", "TRUNCATE"}
+	parts := strings.Split(colListStr, " OR ")
+	// Only keep the first part (column list); the rest would be other events
+	if len(parts) > 1 {
+		// Check if subsequent parts are event keywords
+		for i := 1; i < len(parts); i++ {
+			trimmed := strings.TrimSpace(strings.ToUpper(parts[i]))
+			isEvent := false
+			for _, kw := range eventKeywords {
+				if trimmed == kw || strings.HasPrefix(trimmed, kw+" ") {
+					isEvent = true
+					break
+				}
+			}
+			if isEvent {
+				colListStr = strings.TrimSpace(parts[0])
+				break
+			}
+		}
+	}
+
+	// Split by comma and trim each column name
+	rawCols := strings.Split(colListStr, ",")
+	var columns []string
+	for _, col := range rawCols {
+		col = strings.TrimSpace(col)
+		if col != "" {
+			columns = append(columns, col)
+		}
+	}
+
+	return columns
 }
 
 // extractFunctionCallFromTriggerDef extracts the function call (with arguments) from a trigger definition
@@ -1561,6 +1612,12 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			condition = extractWhenClauseFromTriggerDef(triggerRow.TriggerDefinition.String)
 		}
 
+		// Extract UPDATE OF columns from trigger definition (only for triggers with UPDATE events)
+		var updateColumns []string
+		if triggerRow.TriggerDefinition.Valid && triggerRow.TriggerType&triggerTypeUpdate != 0 {
+			updateColumns = extractUpdateColumnsFromTriggerDef(triggerRow.TriggerDefinition.String)
+		}
+
 		// Extract transition table names
 		oldTable := ""
 		if triggerRow.OldTable.Valid {
@@ -1590,6 +1647,7 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			Table:             tableName,
 			Timing:            timing,
 			Events:            events,
+			UpdateColumns:     updateColumns,
 			Level:             level,
 			Function:          functionCall,
 			Condition:         condition,
@@ -2043,6 +2101,11 @@ func (i *Inspector) buildPrivileges(ctx context.Context, schema *IR, targetSchem
 			continue
 		}
 
+		// Skip privileges for ignored grantees
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilege(grantee) {
+			continue
+		}
+
 		// Check for default PUBLIC grants that should be excluded
 		if grantee == "PUBLIC" {
 			if (objectType == "FUNCTION" || objectType == "PROCEDURE") && privilegeType == "EXECUTE" {
@@ -2184,6 +2247,11 @@ func (i *Inspector) buildDefaultPrivileges(ctx context.Context, schema *IR, targ
 	grouped := make(map[privKey][]string)
 	for _, p := range privileges {
 		if !p.OwnerRole.Valid || !p.ObjectType.Valid || !p.Grantee.Valid || !p.PrivilegeType.Valid {
+			continue
+		}
+
+		// Skip default privileges for ignored grantees
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreDefaultPrivilege(p.Grantee.String) {
 			continue
 		}
 
@@ -2380,6 +2448,11 @@ func (i *Inspector) buildColumnPrivileges(ctx context.Context, schema *IR, targe
 				}
 				grantee = roleName
 			}
+		}
+
+		// Skip column privileges for ignored grantees
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilege(grantee) {
+			continue
 		}
 
 		key := colPrivKey{

@@ -951,6 +951,221 @@ func verifyDumpOutput(t *testing.T, output string) {
 	}
 }
 
+func TestIgnorePrivileges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	// Create schema with roles and privileges
+	setupSQL := `
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    total_amount DECIMAL(10,2) NOT NULL
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_reader') THEN
+        CREATE ROLE app_reader;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'deploy_bot') THEN
+        CREATE ROLE deploy_bot;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admin_role') THEN
+        CREATE ROLE admin_role;
+    END IF;
+END $$;
+
+-- Privileges to keep
+GRANT SELECT ON users TO app_reader;
+GRANT SELECT ON orders TO app_reader;
+
+-- Privileges to ignore (deploy_bot)
+GRANT ALL ON users TO deploy_bot;
+GRANT ALL ON orders TO deploy_bot;
+
+-- Privileges to ignore (admin_role)
+GRANT SELECT, INSERT, UPDATE, DELETE ON users TO admin_role;
+
+-- Default privileges to keep
+ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO app_reader;
+
+-- Default privileges to ignore (deploy_bot)
+ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO deploy_bot;
+`
+	_, err := conn.Exec(setupSQL)
+	if err != nil {
+		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Create .pgschemaignore with privileges section
+	ignoreContent := `[privileges]
+patterns = ["deploy_bot", "admin_*"]
+
+[default_privileges]
+patterns = ["deploy_bot"]
+`
+	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	}
+
+	t.Run("dump", func(t *testing.T) {
+		output := executeIgnoreDumpCommand(t, containerInfo)
+
+		// Privileges for app_reader should be present
+		if !strings.Contains(output, "app_reader") {
+			t.Error("Dump should include privileges for app_reader")
+		}
+
+		// Privileges for deploy_bot should be ignored
+		if strings.Contains(output, "deploy_bot") {
+			t.Error("Dump should not include privileges for deploy_bot (ignored)")
+		}
+
+		// Privileges for admin_role should be ignored (matches admin_*)
+		if strings.Contains(output, "admin_role") {
+			t.Error("Dump should not include privileges for admin_role (ignored by admin_* pattern)")
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		// Create schema file that adds new privileges
+		schemaSQL := `
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    total_amount DECIMAL(10,2) NOT NULL
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_reader') THEN
+        CREATE ROLE app_reader;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'deploy_bot') THEN
+        CREATE ROLE deploy_bot;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admin_role') THEN
+        CREATE ROLE admin_role;
+    END IF;
+END $$;
+
+-- Keep these privileges
+GRANT SELECT ON users TO app_reader;
+GRANT SELECT ON orders TO app_reader;
+
+-- These should be ignored in plan
+GRANT ALL ON users TO deploy_bot;
+GRANT ALL ON orders TO deploy_bot;
+GRANT SELECT, INSERT, UPDATE, DELETE ON users TO admin_role;
+
+-- Default privileges
+ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO app_reader;
+ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO deploy_bot;
+`
+		schemaFile := "schema_privs.sql"
+		err := os.WriteFile(schemaFile, []byte(schemaSQL), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create schema file: %v", err)
+		}
+		defer os.Remove(schemaFile)
+
+		output := executeIgnorePlanCommand(t, containerInfo, schemaFile)
+
+		// Plan should not contain any changes for ignored roles
+		if strings.Contains(output, "deploy_bot") {
+			t.Error("Plan should not include changes for deploy_bot (ignored)")
+		}
+		if strings.Contains(output, "admin_role") {
+			t.Error("Plan should not include changes for admin_role (ignored)")
+		}
+	})
+
+	// Clean up cluster-level objects (roles, default privileges) from sharedEmbeddedPG.
+	// The plan subtest applies SQL with CREATE ROLE and ALTER DEFAULT PRIVILEGES to the
+	// shared embedded PG instance. These are cluster-level objects that persist after the
+	// temp schema is dropped, contaminating subsequent tests (e.g., TestPlanAndApply).
+	cleanupSharedEmbeddedPG(t)
+}
+
+// cleanupSharedEmbeddedPG removes cluster-level objects (roles, default privileges)
+// that were created in sharedEmbeddedPG by privilege tests.
+func cleanupSharedEmbeddedPG(t *testing.T) {
+	t.Helper()
+
+	sharedConn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedEmbeddedPG)
+	defer sharedConn.Close()
+
+	// Must clean up in order: revoke default privileges, revoke object privileges, then drop roles.
+	// Each statement runs independently since some roles may not exist.
+	cleanupStatements := []string{
+		"ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM app_reader",
+		"ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM deploy_bot",
+		"REASSIGN OWNED BY app_reader TO testuser",
+		"DROP OWNED BY app_reader",
+		"REASSIGN OWNED BY deploy_bot TO testuser",
+		"DROP OWNED BY deploy_bot",
+		"REASSIGN OWNED BY admin_role TO testuser",
+		"DROP OWNED BY admin_role",
+		"DROP ROLE IF EXISTS app_reader",
+		"DROP ROLE IF EXISTS deploy_bot",
+		"DROP ROLE IF EXISTS admin_role",
+	}
+	for _, stmt := range cleanupStatements {
+		sharedConn.Exec(stmt) // Ignore errors; some roles may not exist
+	}
+}
+
 // verifyPlanOutput checks that plan output excludes ignored objects
 func verifyPlanOutput(t *testing.T, output string) {
 	// Changes that should appear in plan (regular objects)

@@ -123,7 +123,7 @@ type View struct {
 	Name         string              `json:"name"`
 	Definition   string              `json:"definition"`
 	Columns      []string            `json:"columns,omitempty"`   // Ordered list of output column names
-	Options      map[string]string   `json:"options,omitempty"`   // View options (reloptions) e.g. security_invoker, security_barrier, check_option
+	Options      []string            `json:"options,omitempty"`   // View options (e.g., "security_invoker=true", "security_barrier=true")
 	Comment      string              `json:"comment,omitempty"`
 	Materialized bool                `json:"materialized,omitempty"`
 	Indexes      map[string]*Index   `json:"indexes,omitempty"`   // For materialized views only
@@ -279,8 +279,9 @@ type Trigger struct {
 	Table             string         `json:"table"`
 	Name              string         `json:"name"`
 	Timing            TriggerTiming  `json:"timing"` // BEFORE, AFTER, INSTEAD OF
-	Events            []TriggerEvent `json:"events"` // INSERT, UPDATE, DELETE
-	Level             TriggerLevel   `json:"level"`  // ROW, STATEMENT
+	Events            []TriggerEvent `json:"events"`                        // INSERT, UPDATE, DELETE
+	UpdateColumns     []string       `json:"update_columns,omitempty"`      // Column names for UPDATE OF
+	Level             TriggerLevel   `json:"level"`                         // ROW, STATEMENT
 	Function          string         `json:"function"`
 	Condition         string         `json:"condition,omitempty"` // WHEN condition
 	Comment           string         `json:"comment,omitempty"`

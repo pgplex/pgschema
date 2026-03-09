@@ -123,6 +123,13 @@ func TestDumpCommand_Issue320PlpgsqlReservedKeywordType(t *testing.T) {
 	runExactMatchTest(t, "issue_320_plpgsql_reserved_keyword_type")
 }
 
+func TestDumpCommand_Issue345ArrayCast(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_345_array_cast")
+}
+
 func TestDumpCommand_Issue350ViewSecurityInvoker(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
@@ -274,6 +281,63 @@ func TestDumpCommand_Issue307MultiFileViewDependencyOrder(t *testing.T) {
 	}
 	if viewIncludes[1] != `\i views/dashboard.sql` {
 		t.Errorf("Expected second view include to be dashboard (depends on item_summary), got: %s", viewIncludes[1])
+	}
+}
+
+func TestDumpCommand_Issue323SupabaseDefaultPrivilegeFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Verifies that dump filters out default privileges for roles the current
+	// user is not a member of. Simulates Supabase where 'postgres' is not a
+	// superuser and has no membership in 'supabase_admin'.
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+
+	conn, host, port, dbname, _, _ := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	ctx := context.Background()
+
+	majorVersion, err := testutil.GetMajorVersion(conn)
+	if err != nil {
+		t.Fatalf("Failed to detect PostgreSQL version: %v", err)
+	}
+	testutil.ShouldSkipTest(t, t.Name(), majorVersion)
+
+	// Create system_admin (simulating supabase_admin) and limited_user
+	// (simulating the connecting postgres user). limited_user is NOT a member
+	// of system_admin.
+	_, err = conn.ExecContext(ctx, fmt.Sprintf(`
+		CREATE ROLE system_admin;
+		CREATE ROLE app_user;
+		CREATE ROLE limited_user LOGIN PASSWORD 'limitedpass';
+		GRANT CONNECT ON DATABASE %s TO limited_user;
+		SET ROLE system_admin;
+		ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_user;
+		RESET ROLE;
+	`, dbname))
+	if err != nil {
+		t.Fatalf("Failed to set up roles and privileges: %v", err)
+	}
+
+	// Dump as limited_user (non-superuser, not a member of system_admin).
+	output, err := ExecuteDump(&DumpConfig{
+		Host:     host,
+		Port:     port,
+		DB:       dbname,
+		User:     "limited_user",
+		Password: "limitedpass",
+		Schema:   "public",
+	})
+	if err != nil {
+		t.Fatalf("Dump command failed: %v", err)
+	}
+
+	if strings.Contains(output, "system_admin") {
+		t.Errorf("Dump as limited_user should not include system_admin's default privileges\nActual output:\n%s", output)
 	}
 }
 

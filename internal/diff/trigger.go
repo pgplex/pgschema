@@ -46,6 +46,16 @@ func triggersEqual(old, new *ir.Trigger) bool {
 		}
 	}
 
+	// Compare update columns
+	if len(old.UpdateColumns) != len(new.UpdateColumns) {
+		return false
+	}
+	for i, col := range old.UpdateColumns {
+		if col != new.UpdateColumns[i] {
+			return false
+		}
+	}
+
 	// Compare constraint trigger properties
 	if old.IsConstraint != new.IsConstraint {
 		return false
@@ -215,7 +225,11 @@ func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string) string
 	for _, orderEvent := range eventOrder {
 		for _, triggerEvent := range trigger.Events {
 			if triggerEvent == orderEvent {
-				events = append(events, string(triggerEvent))
+				if triggerEvent == ir.TriggerEventUpdate && len(trigger.UpdateColumns) > 0 {
+					events = append(events, "UPDATE OF "+strings.Join(trigger.UpdateColumns, ", "))
+				} else {
+					events = append(events, string(triggerEvent))
+				}
 				break
 			}
 		}

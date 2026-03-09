@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.7.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS person_accounts (\n    id uuid DEFAULT gen_random_uuid(),\n    first_name text,\n    last_name text,\n    email_address text NOT NULL,\n    created_at timestamptz DEFAULT now() NOT NULL,\n    modified_at timestamptz DEFAULT now() NOT NULL,\n    CONSTRAINT person_accounts_pkey PRIMARY KEY (id),\n    CONSTRAINT person_accounts_email_address_key UNIQUE (email_address)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.person_accounts"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION auth_lookup_account_by_email(\n    input_email text\n)\nRETURNS text\nLANGUAGE sql\nSTABLE\nSECURITY DEFINER\nSET search_path = public, pg_temp\nAS $$\n    SELECT\n        pa.id::text AS person_account_id\n    FROM person_accounts pa\n    WHERE lower(pa.email_address) = lower(trim(input_email))\n    LIMIT 1;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.auth_lookup_account_by_email"
+        },
+        {
+          "sql": "REVOKE EXECUTE ON FUNCTION auth_lookup_account_by_email(input_email text) FROM PUBLIC;",
+          "type": "revoked_default_privilege",
+          "operation": "create",
+          "path": "revoked_default.FUNCTION.auth_lookup_account_by_email(input_email text)"
+        }
+      ]
+    }
+  ]
+}

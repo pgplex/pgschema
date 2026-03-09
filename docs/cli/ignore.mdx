@@ -12,6 +12,7 @@ The `.pgschemaignore` file allows you to exclude database objects from pgschema 
 2. **Temporary Objects** - Exclude temp tables, debug views, and development-only objects
 3. **Legacy Objects** - Ignore deprecated objects while maintaining new schema management
 4. **Environment-Specific Objects** - Skip objects that exist only in certain environments
+5. **Role-Specific Privileges** - Ignore grants to roles that don't exist in the plan database
 
 ## File Format
 
@@ -39,6 +40,12 @@ patterns = ["type_test_*"]
 
 [sequences]
 patterns = ["seq_temp_*", "seq_debug_*"]
+
+[privileges]
+patterns = ["deploy_bot", "admin_*"]
+
+[default_privileges]
+patterns = ["deploy_bot"]
 ```
 
 ## Pattern Syntax
@@ -78,6 +85,24 @@ patterns = [
 ```
 
 This will ignore `test_data`, `test_results` but keep `test_core_config`, `test_core_settings`.
+
+## Privileges
+
+The `[privileges]` and `[default_privileges]` sections filter GRANT statements by **grantee role name**. This is useful when running `pgschema plan` with roles that don't exist in the plan database, or managing migrations across environments with different role configurations.
+
+```toml
+[privileges]
+patterns = [
+  "deploy_bot",    # Ignore all grants to deploy_bot
+  "admin_*",       # Ignore grants to any admin_* role
+  "!admin_super"   # But keep grants to admin_super
+]
+
+[default_privileges]
+patterns = ["deploy_bot"]  # Ignore ALTER DEFAULT PRIVILEGES for deploy_bot
+```
+
+The `[privileges]` section filters explicit grants (`GRANT ... TO role`), including column-level privileges. The `[default_privileges]` section filters `ALTER DEFAULT PRIVILEGES` statements.
 
 ## Triggers on Ignored Tables
 

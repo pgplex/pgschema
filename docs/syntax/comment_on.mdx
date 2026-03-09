@@ -8,7 +8,7 @@ title: "COMMENT ON"
 comment_on ::= COMMENT ON object_type object_name IS 'comment_text'
              | COMMENT ON object_type object_name IS NULL
 
-object_type ::= COLUMN | FUNCTION | INDEX | PROCEDURE | TABLE | VIEW
+object_type ::= COLUMN | FUNCTION | INDEX | MATERIALIZED VIEW | PROCEDURE | TABLE | VIEW
 
 object_name ::= [schema.]name
               | [schema.]table_name.column_name                -- for columns
@@ -21,6 +21,7 @@ object_name ::= [schema.]name
 - Column
 - Function
 - Index
+- Materialized View
 - Procedure
 - Table
 - View

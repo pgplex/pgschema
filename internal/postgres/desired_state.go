@@ -174,6 +174,91 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	return result
 }
 
+// replaceSchemaInSearchPath replaces the target schema name in SET search_path clauses
+// within function/procedure definitions.
+//
+// Purpose:
+// When functions or procedures have SET search_path = public, pg_temp (or similar),
+// PostgreSQL uses that search_path during function body validation (for SQL-language functions)
+// and execution. When applying to a temporary schema, we need to replace the target schema
+// in these clauses so that table references in function bodies can be resolved.
+//
+// Example (when target schema is "public" and temp schema is "pgschema_tmp_xxx"):
+//
+//	SET search_path = public, pg_temp  ->  SET search_path = "pgschema_tmp_xxx", pg_temp
+//	SET search_path TO public          ->  SET search_path TO "pgschema_tmp_xxx"
+//
+// This handles both = and TO syntax, quoted and unquoted schema names (case-insensitive),
+// and preserves other schemas in the comma-separated list.
+//
+// Limitations:
+//   - Like stripSchemaQualifications and replaceSchemaInDefaultPrivileges, this function
+//     operates on the raw SQL string without dollar-quote awareness. A SET search_path
+//     inside a $$-quoted function body (e.g., dynamic SQL) would also be rewritten. In
+//     practice this is not an issue because such usage is extremely rare, and the round-trip
+//     through database inspection and normalizeSchemaNames restores the original schema name.
+//   - When targetSchema is "public", replacing it removes "public" from the function's
+//     search_path. If the function body references extension objects installed in "public"
+//     (e.g., citext), they may not be found. Most extension objects (uuid, jsonb, etc.) live
+//     in pg_catalog which is always searched, so this is rarely an issue in practice.
+func replaceSchemaInSearchPath(sql string, targetSchema, tempSchema string) string {
+	if targetSchema == "" || tempSchema == "" {
+		return sql
+	}
+
+	replacement := fmt.Sprintf(`"%s"`, tempSchema)
+
+	// Pattern: SET search_path = ... or SET search_path TO ...
+	// We match the entire SET search_path clause and replace the target schema within it.
+	searchPathPattern := regexp.MustCompile(`(?i)(SET\s+search_path\s*(?:=|TO)\s*)([^\n;]+)`)
+
+	// Pattern to detect trailing function body start in the captured value.
+	// When SET search_path and the body are on the same line, the value regex captures both.
+	// Handles both AS $$ (dollar-quoted) and BEGIN ATOMIC (SQL-standard, PG14+) syntax.
+	bodyStartPattern := regexp.MustCompile(`(?i)\s+(?:AS\s|BEGIN\s+ATOMIC\b)`)
+
+	return searchPathPattern.ReplaceAllStringFunc(sql, func(match string) string {
+		loc := searchPathPattern.FindStringSubmatchIndex(match)
+		if loc == nil {
+			return match
+		}
+		prefix := match[loc[2]:loc[3]]
+		value := match[loc[4]:loc[5]]
+
+		// Separate the search_path value from any trailing function body start
+		suffix := ""
+		if asLoc := bodyStartPattern.FindStringIndex(value); asLoc != nil {
+			suffix = value[asLoc[0]:]
+			value = value[:asLoc[0]]
+		}
+
+		// Tokenize the comma-separated search_path list and replace matching schemas.
+		// This avoids regex pitfalls with quoted identifiers (e.g., "PUBLIC" should not
+		// be matched by a case-insensitive unquoted pattern for "public").
+		tokens := strings.Split(value, ",")
+		for i, token := range tokens {
+			trimmed := strings.TrimSpace(token)
+			if strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`) {
+				// Quoted identifier: case-sensitive exact match.
+				// "public" matches targetSchema "public", but "PUBLIC" does not
+				// (in PostgreSQL, quoted identifiers preserve case).
+				inner := trimmed[1 : len(trimmed)-1]
+				if inner == targetSchema {
+					tokens[i] = strings.Replace(token, trimmed, replacement, 1)
+				}
+			} else {
+				// Unquoted identifier: case-insensitive match.
+				// PostgreSQL folds unquoted identifiers to lowercase.
+				if strings.EqualFold(trimmed, targetSchema) {
+					tokens[i] = strings.Replace(token, trimmed, replacement, 1)
+				}
+			}
+		}
+
+		return prefix + strings.Join(tokens, ",") + suffix
+	})
+}
+
 // replaceSchemaInDefaultPrivileges replaces schema names in ALTER DEFAULT PRIVILEGES statements.
 // This is needed because stripSchemaQualifications only handles "schema.object" patterns,
 // not "IN SCHEMA <schema>" clauses used by ALTER DEFAULT PRIVILEGES.
