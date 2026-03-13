@@ -93,9 +93,9 @@ func TestStripSchemaPrefixFromBody(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := stripSchemaPrefixFromBody(tt.body, tt.schema)
+			result := StripSchemaPrefixFromBody(tt.body, tt.schema)
 			if result != tt.expected {
-				t.Errorf("stripSchemaPrefixFromBody(%q, %q) = %q, want %q", tt.body, tt.schema, result, tt.expected)
+				t.Errorf("StripSchemaPrefixFromBody(%q, %q) = %q, want %q", tt.body, tt.schema, result, tt.expected)
 			}
 		})
 	}

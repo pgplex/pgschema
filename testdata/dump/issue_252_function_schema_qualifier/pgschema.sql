@@ -43,7 +43,7 @@ LANGUAGE plpgsql
 VOLATILE
 AS $$
 BEGIN
-    RETURN QUERY SELECT u.id, u.name, u.email FROM users u WHERE u.name = p_name;
+    RETURN QUERY SELECT u.id, u.name, u.email FROM public.users u WHERE u.name = p_name;
 END;
 $$;
 
@@ -57,7 +57,7 @@ LANGUAGE plpgsql
 VOLATILE
 AS $$
 BEGIN
-    RETURN (SELECT count(*)::integer FROM users);
+    RETURN (SELECT count(*)::integer FROM public.users);
 END;
 $$;
 
@@ -72,7 +72,7 @@ CREATE OR REPLACE PROCEDURE insert_user(
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO users (name, email) VALUES (p_name, p_email);
+    INSERT INTO public.users (name, email) VALUES (p_name, p_email);
 END;
 $$;
 
