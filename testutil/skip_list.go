@@ -71,7 +71,7 @@ var skipListPG14 = []string{
 
 // skipListForVersion maps PostgreSQL major versions to their skip lists.
 var skipListForVersion = map[int][]string{
-	14: append(skipListPG14_15, skipListPG14...),
+	14: append(append([]string(nil), skipListPG14_15...), skipListPG14...),
 	15: skipListPG14_15,
 }
 
