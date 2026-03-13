@@ -758,7 +758,7 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		}
 
 		// Check for NULLS NOT DISTINCT (PostgreSQL 15+)
-		if indexRow.Indexdef.Valid && strings.Contains(strings.ToUpper(indexRow.Indexdef.String), "NULLS NOT DISTINCT") {
+		if indexRow.Indexdef.Valid && strings.Contains(indexRow.Indexdef.String, "NULLS NOT DISTINCT") {
 			index.NullsNotDistinct = true
 		}
 

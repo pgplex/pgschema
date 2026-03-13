@@ -109,7 +109,7 @@ func ShouldSkipTest(t *testing.T, testName string, majorVersion int) {
 		patternNormalized := strings.ReplaceAll(pattern, "/", "_")
 
 		if testName == patternNormalized || testName == pattern {
-			t.Skipf("Skipping test %q on PostgreSQL %d due to pg_get_viewdef() formatting differences (non-consequential)", testName, majorVersion)
+			t.Skipf("Skipping test %q on PostgreSQL %d (unsupported feature or formatting differences)", testName, majorVersion)
 		}
 	}
 }
