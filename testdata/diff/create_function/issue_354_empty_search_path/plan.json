@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "CREATE OR REPLACE FUNCTION create_hello(\n    p_title text\n)\nRETURNS void\nLANGUAGE plpgsql\nVOLATILE\nSET search_path = ''\nAS $$\nBEGIN\n  INSERT INTO test (title) VALUES (p_title);\nEND;\n$$;",
+          "sql": "CREATE OR REPLACE FUNCTION create_hello(\n    p_title text\n)\nRETURNS void\nLANGUAGE plpgsql\nVOLATILE\nSET search_path = ''\nAS $$\nBEGIN\n  INSERT INTO public.test (title) VALUES (p_title);\nEND;\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.create_hello"

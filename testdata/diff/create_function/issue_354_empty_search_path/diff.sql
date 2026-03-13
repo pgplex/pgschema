@@ -7,6 +7,6 @@ VOLATILE
 SET search_path = ''
 AS $$
 BEGIN
-  INSERT INTO test (title) VALUES (p_title);
+  INSERT INTO public.test (title) VALUES (p_title);
 END;
 $$;

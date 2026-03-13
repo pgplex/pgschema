@@ -260,7 +260,7 @@ func proceduresEqual(old, new *ir.Procedure) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	if old.Definition != new.Definition {
+	if !definitionsEqualIgnoringSchema(old.Definition, new.Definition, old.Schema) {
 		return false
 	}
 	if old.Language != new.Language {
@@ -296,7 +296,7 @@ func proceduresEqualExceptComment(old, new *ir.Procedure) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	if old.Definition != new.Definition {
+	if !definitionsEqualIgnoringSchema(old.Definition, new.Definition, old.Schema) {
 		return false
 	}
 	if old.Language != new.Language {

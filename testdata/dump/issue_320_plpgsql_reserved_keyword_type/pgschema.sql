@@ -29,7 +29,7 @@ AS $$
 DECLARE
     total_count integer;
 BEGIN
-    SELECT count(*)::integer INTO total_count FROM "user";
+    SELECT count(*)::integer INTO total_count FROM public."user";
     RETURN total_count;
 END;
 $$;
@@ -44,9 +44,9 @@ LANGUAGE plpgsql
 VOLATILE
 AS $$
 DECLARE
-    account "user";
+    account public.user;
 BEGIN
-    SELECT * INTO account FROM "user" LIMIT 1;
+    SELECT * INTO account FROM public.user LIMIT 1;
     RETURN account.name;
 END;
 $$;

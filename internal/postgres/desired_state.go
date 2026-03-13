@@ -96,6 +96,77 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 		return sql
 	}
 
+	// Split SQL into dollar-quoted and non-dollar-quoted segments.
+	// Schema qualifiers inside function/procedure bodies (dollar-quoted blocks)
+	// must be preserved — the user may need them when search_path doesn't include
+	// the function's schema (e.g., SET search_path = ''). (Issue #354)
+	segments := splitDollarQuotedSegments(sql)
+	var result strings.Builder
+	result.Grow(len(sql))
+	for _, seg := range segments {
+		if seg.quoted {
+			// Preserve dollar-quoted content as-is
+			result.WriteString(seg.text)
+		} else {
+			result.WriteString(stripSchemaQualificationsFromText(seg.text, schemaName))
+		}
+	}
+	return result.String()
+}
+
+// dollarQuotedSegment represents a segment of SQL text, either inside or outside a dollar-quoted block.
+type dollarQuotedSegment struct {
+	text   string
+	quoted bool // true if this segment is inside dollar quotes (including the delimiters)
+}
+
+// splitDollarQuotedSegments splits SQL text into segments that are either inside or outside
+// dollar-quoted blocks ($$...$$, $tag$...$tag$, etc.). This allows callers to process
+// only the non-quoted parts while preserving function/procedure bodies verbatim.
+// dollarQuoteRe matches PostgreSQL dollar-quote tags: $$ or $identifier$ where the
+// identifier must start with a letter or underscore (not a digit). This avoids
+// false positives on $1, $2 etc. parameter references.
+var dollarQuoteRe = regexp.MustCompile(`\$(?:[a-zA-Z_][a-zA-Z0-9_]*)?\$`)
+
+func splitDollarQuotedSegments(sql string) []dollarQuotedSegment {
+	var segments []dollarQuotedSegment
+
+	pos := 0
+	for pos < len(sql) {
+		// Find the next dollar-quote opening tag
+		loc := dollarQuoteRe.FindStringIndex(sql[pos:])
+		if loc == nil {
+			// No more dollar quotes — rest is unquoted
+			segments = append(segments, dollarQuotedSegment{text: sql[pos:], quoted: false})
+			break
+		}
+
+		openStart := pos + loc[0]
+		openEnd := pos + loc[1]
+		tag := sql[openStart:openEnd]
+
+		// Add the unquoted segment before this tag
+		if openStart > pos {
+			segments = append(segments, dollarQuotedSegment{text: sql[pos:openStart], quoted: false})
+		}
+
+		// Find the matching closing tag
+		closeIdx := strings.Index(sql[openEnd:], tag)
+		if closeIdx == -1 {
+			// No closing tag — treat rest as quoted (unterminated)
+			segments = append(segments, dollarQuotedSegment{text: sql[openStart:], quoted: true})
+			pos = len(sql)
+		} else {
+			closeEnd := openEnd + closeIdx + len(tag)
+			segments = append(segments, dollarQuotedSegment{text: sql[openStart:closeEnd], quoted: true})
+			pos = closeEnd
+		}
+	}
+	return segments
+}
+
+// stripSchemaQualificationsFromText performs the actual schema qualification stripping on a text segment.
+func stripSchemaQualificationsFromText(text string, schemaName string) string {
 	// Escape the schema name for use in regex
 	escapedSchema := regexp.QuoteMeta(schemaName)
 
@@ -133,7 +204,7 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	pattern4 := fmt.Sprintf(`(?:^|[^"])%s\.([a-zA-Z_][a-zA-Z0-9_$]*)`, escapedSchema)
 	re4 := regexp.MustCompile(pattern4)
 
-	result := sql
+	result := text
 	// Apply in order: quoted schema first to avoid double-matching
 	result = re1.ReplaceAllString(result, "$1")
 	result = re2.ReplaceAllString(result, "$1")

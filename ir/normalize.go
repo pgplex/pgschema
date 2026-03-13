@@ -280,7 +280,7 @@ func normalizeView(view *View) {
 
 	// Strip same-schema qualifiers from view definition for consistent comparison.
 	// This uses the same logic as function/procedure body normalization.
-	view.Definition = stripSchemaPrefixFromBody(view.Definition, view.Schema)
+	view.Definition = StripSchemaPrefixFromBody(view.Definition, view.Schema)
 
 	// Normalize triggers on the view (e.g., INSTEAD OF triggers)
 	for _, trigger := range view.Triggers {
@@ -321,8 +321,10 @@ func normalizeFunction(function *Function) {
 	}
 	// Normalize function body to handle whitespace differences
 	function.Definition = normalizeFunctionDefinition(function.Definition)
-	// Strip current schema qualifier from function body for consistent unqualified output
-	function.Definition = stripSchemaPrefixFromBody(function.Definition, function.Schema)
+	// Note: We intentionally do NOT strip schema qualifiers from function bodies here.
+	// Functions may have SET search_path that excludes their own schema, making
+	// qualified references (e.g., public.test) necessary. Stripping is done at
+	// comparison time in the diff package instead. (Issue #354)
 }
 
 // normalizeFunctionDefinition normalizes function body whitespace
@@ -344,10 +346,10 @@ func normalizeFunctionDefinition(def string) string {
 	return strings.Join(normalized, "\n")
 }
 
-// stripSchemaPrefixFromBody removes the current schema qualifier from identifiers
+// StripSchemaPrefixFromBody removes the current schema qualifier from identifiers
 // in a function or procedure body. For example, "public.users" becomes "users".
 // It skips single-quoted string literals to avoid modifying string constants.
-func stripSchemaPrefixFromBody(body, schema string) string {
+func StripSchemaPrefixFromBody(body, schema string) string {
 	if body == "" || schema == "" {
 		return body
 	}
@@ -445,8 +447,8 @@ func normalizeProcedure(procedure *Procedure) {
 		}
 	}
 
-	// Strip current schema qualifier from procedure body for consistent unqualified output
-	procedure.Definition = stripSchemaPrefixFromBody(procedure.Definition, procedure.Schema)
+	// Note: We intentionally do NOT strip schema qualifiers from procedure bodies here.
+	// Same rationale as functions — see normalizeFunction. (Issue #354)
 }
 
 // normalizeFunctionReturnType normalizes function return types, especially TABLE types

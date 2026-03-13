@@ -15,7 +15,7 @@
           "path": "public.documents"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION get_document_count()\nRETURNS integer\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN (SELECT COUNT(*) FROM documents);\nEND;\n$$;",
+          "sql": "CREATE OR REPLACE FUNCTION get_document_count()\nRETURNS integer\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN (SELECT COUNT(*) FROM public.documents);\nEND;\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.get_document_count"

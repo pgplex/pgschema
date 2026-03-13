@@ -371,7 +371,7 @@ func functionsEqualExceptAttributes(old, new *ir.Function) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	if old.Definition != new.Definition {
+	if !definitionsEqualIgnoringSchema(old.Definition, new.Definition, old.Schema) {
 		return false
 	}
 	if old.ReturnType != new.ReturnType {
@@ -409,7 +409,7 @@ func functionsEqual(old, new *ir.Function) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	if old.Definition != new.Definition {
+	if !definitionsEqualIgnoringSchema(old.Definition, new.Definition, old.Schema) {
 		return false
 	}
 	if old.ReturnType != new.ReturnType {
@@ -458,7 +458,7 @@ func functionsEqualExceptComment(old, new *ir.Function) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	if old.Definition != new.Definition {
+	if !definitionsEqualIgnoringSchema(old.Definition, new.Definition, old.Schema) {
 		return false
 	}
 	if old.ReturnType != new.ReturnType {
@@ -520,6 +520,15 @@ func functionRequiresRecreate(old, new *ir.Function) bool {
 		}
 	}
 	return false
+}
+
+// definitionsEqualIgnoringSchema compares two function/procedure definitions,
+// stripping the given schema qualifier from both before comparing. This allows
+// definitions that differ only in schema qualification (e.g., "public.test" vs "test")
+// to be treated as equal, while preserving the original qualifiers in the IR for
+// correct DDL generation. (Issue #354)
+func definitionsEqualIgnoringSchema(a, b, schema string) bool {
+	return ir.StripSchemaPrefixFromBody(a, schema) == ir.StripSchemaPrefixFromBody(b, schema)
 }
 
 // filterNonTableParameters filters out TABLE mode parameters
