@@ -757,6 +757,11 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 			Columns:      []*IndexColumn{},
 		}
 
+		// Check for NULLS NOT DISTINCT (PostgreSQL 15+)
+		if indexRow.Indexdef.Valid && strings.Contains(strings.ToUpper(indexRow.Indexdef.String), "NULLS NOT DISTINCT") {
+			index.NullsNotDistinct = true
+		}
+
 		// Set WHERE clause for partial indexes
 		if isPartial && indexRow.PartialPredicate.Valid {
 			// Use the predicate as-is from pg_get_expr, which already has proper formatting

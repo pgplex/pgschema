@@ -121,6 +121,11 @@ func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema st
 	}
 	builder.WriteString(")")
 
+	// NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
+	if index.NullsNotDistinct {
+		builder.WriteString(" NULLS NOT DISTINCT")
+	}
+
 	// WHERE clause for partial indexes
 	if index.IsPartial && index.Where != "" {
 		builder.WriteString(" WHERE ")

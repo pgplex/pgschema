@@ -1414,6 +1414,7 @@ func indexesStructurallyEqual(oldIndex, newIndex *ir.Index) bool {
 		oldIndex.Method != newIndex.Method ||
 		oldIndex.IsPartial != newIndex.IsPartial ||
 		oldIndex.IsExpression != newIndex.IsExpression ||
+		oldIndex.NullsNotDistinct != newIndex.NullsNotDistinct ||
 		oldIndex.Where != newIndex.Where {
 		return false
 	}
