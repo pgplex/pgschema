@@ -1,0 +1,23 @@
+Plan: 1 to add.
+
+Summary by type:
+  functions: 1 to add
+
+Functions:
+  + create_hello
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE OR REPLACE FUNCTION create_hello(
+    p_title text
+)
+RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+SET search_path = ''
+AS $$
+BEGIN
+  INSERT INTO test (title) VALUES (p_title);
+END;
+$$;

@@ -246,7 +246,13 @@ func generateFunctionSQL(function *ir.Function, targetSchema string) string {
 	// Note: Output without outer quotes to handle multi-schema paths correctly
 	// e.g., "SET search_path = pg_catalog, public" not "SET search_path = 'pg_catalog, public'"
 	if function.SearchPath != "" {
-		stmt.WriteString(fmt.Sprintf("\nSET search_path = %s", function.SearchPath))
+		// PostgreSQL stores SET search_path = '' as search_path="" in proconfig.
+		// The extracted value is "" (two double-quote chars). Render as '' (single-quoted empty string).
+		if function.SearchPath == `""` {
+			stmt.WriteString("\nSET search_path = ''")
+		} else {
+			stmt.WriteString(fmt.Sprintf("\nSET search_path = %s", function.SearchPath))
+		}
 	}
 
 	// Add the function body
