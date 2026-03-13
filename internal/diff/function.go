@@ -243,11 +243,12 @@ func generateFunctionSQL(function *ir.Function, targetSchema string) string {
 	// Note: Don't output PARALLEL UNSAFE (it's the default)
 
 	// Add SET search_path if specified
-	// Note: Output without outer quotes to handle multi-schema paths correctly
-	// e.g., "SET search_path = pg_catalog, public" not "SET search_path = 'pg_catalog, public'"
+	// Note: Multi-schema paths are output unquoted (e.g., "SET search_path = pg_catalog, public"),
+	// except for the empty search_path case which requires single quotes: SET search_path = ''
 	if function.SearchPath != "" {
 		// PostgreSQL stores SET search_path = '' as search_path="" in proconfig.
 		// The extracted value is "" (two double-quote chars). Render as '' (single-quoted empty string).
+		// Only the whole-value empty case is handled; mixed paths (e.g. pg_catalog, "") are not expected.
 		if function.SearchPath == `""` {
 			stmt.WriteString("\nSET search_path = ''")
 		} else {
