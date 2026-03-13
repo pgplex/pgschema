@@ -122,7 +122,7 @@ func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema st
 	builder.WriteString(")")
 
 	// NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
-	if index.NullsNotDistinct {
+	if index.NullsNotDistinct && index.Type == ir.IndexTypeUnique {
 		builder.WriteString(" NULLS NOT DISTINCT")
 	}
 

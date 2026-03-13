@@ -61,9 +61,17 @@ var skipListRequiresExtension = []string{
 	"create_table/issue_295_pgvector_typmod",
 }
 
+// skipListPG14 defines test cases that should be skipped for PostgreSQL 14 only.
+//
+// Reason for skipping:
+// These tests use features not available in PostgreSQL 14 (e.g., NULLS NOT DISTINCT is PG15+).
+var skipListPG14 = []string{
+	"create_index/add_index",
+}
+
 // skipListForVersion maps PostgreSQL major versions to their skip lists.
 var skipListForVersion = map[int][]string{
-	14: skipListPG14_15,
+	14: append(skipListPG14_15, skipListPG14...),
 	15: skipListPG14_15,
 }
 

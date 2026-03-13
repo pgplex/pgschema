@@ -411,7 +411,7 @@ func generateIndexSQL(index *ir.Index, isConcurrent bool) string {
 	sql.WriteString(joinStrings(columnParts, ", "))
 	sql.WriteString(")")
 
-	if index.NullsNotDistinct {
+	if index.NullsNotDistinct && index.Type == ir.IndexTypeUnique {
 		sql.WriteString(" NULLS NOT DISTINCT")
 	}
 
