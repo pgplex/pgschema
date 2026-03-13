@@ -123,10 +123,13 @@ type dollarQuotedSegment struct {
 // splitDollarQuotedSegments splits SQL text into segments that are either inside or outside
 // dollar-quoted blocks ($$...$$, $tag$...$tag$, etc.). This allows callers to process
 // only the non-quoted parts while preserving function/procedure bodies verbatim.
+// dollarQuoteRe matches PostgreSQL dollar-quote tags: $$ or $identifier$ where the
+// identifier must start with a letter or underscore (not a digit). This avoids
+// false positives on $1, $2 etc. parameter references.
+var dollarQuoteRe = regexp.MustCompile(`\$(?:[a-zA-Z_][a-zA-Z0-9_]*)?\$`)
+
 func splitDollarQuotedSegments(sql string) []dollarQuotedSegment {
 	var segments []dollarQuotedSegment
-	// Match dollar-quote tags: $$ or $identifier$
-	dollarQuoteRe := regexp.MustCompile(`\$[a-zA-Z_]?[a-zA-Z0-9_]*\$`)
 
 	pos := 0
 	for pos < len(sql) {

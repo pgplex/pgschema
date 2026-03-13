@@ -1,8 +1,81 @@
 package postgres
 
 import (
+	"reflect"
 	"testing"
 )
+
+func TestSplitDollarQuotedSegments(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		expected []dollarQuotedSegment
+	}{
+		{
+			name:     "no dollar quotes",
+			sql:      "SELECT 1 FROM public.users;",
+			expected: []dollarQuotedSegment{{text: "SELECT 1 FROM public.users;", quoted: false}},
+		},
+		{
+			name: "simple dollar-quoted body",
+			sql:  "CREATE FUNCTION f() AS $$body$$ LANGUAGE sql;",
+			expected: []dollarQuotedSegment{
+				{text: "CREATE FUNCTION f() AS ", quoted: false},
+				{text: "$$body$$", quoted: true},
+				{text: " LANGUAGE sql;", quoted: false},
+			},
+		},
+		{
+			name: "named dollar-quote tag",
+			sql:  "AS $func$body$func$ LANGUAGE sql;",
+			expected: []dollarQuotedSegment{
+				{text: "AS ", quoted: false},
+				{text: "$func$body$func$", quoted: true},
+				{text: " LANGUAGE sql;", quoted: false},
+			},
+		},
+		{
+			name: "parameter references not treated as dollar quotes",
+			sql:  "SELECT $1 + $2 FROM t;",
+			expected: []dollarQuotedSegment{
+				{text: "SELECT $1 + $2 FROM t;", quoted: false},
+			},
+		},
+		{
+			name: "multiple dollar-quoted blocks",
+			sql:  "AS $$body1$$; AS $f$body2$f$;",
+			expected: []dollarQuotedSegment{
+				{text: "AS ", quoted: false},
+				{text: "$$body1$$", quoted: true},
+				{text: "; AS ", quoted: false},
+				{text: "$f$body2$f$", quoted: true},
+				{text: ";", quoted: false},
+			},
+		},
+		{
+			name: "unterminated dollar quote",
+			sql:  "AS $$body without end",
+			expected: []dollarQuotedSegment{
+				{text: "AS ", quoted: false},
+				{text: "$$body without end", quoted: true},
+			},
+		},
+		{
+			name:     "empty input",
+			sql:      "",
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := splitDollarQuotedSegments(tt.sql)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("splitDollarQuotedSegments(%q)\n  got:  %+v\n  want: %+v", tt.sql, result, tt.expected)
+			}
+		})
+	}
+}
 
 func TestReplaceSchemaInSearchPath(t *testing.T) {
 	tests := []struct {
