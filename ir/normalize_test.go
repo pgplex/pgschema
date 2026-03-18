@@ -161,6 +161,122 @@ func TestNormalizeViewStripsSchemaPrefixFromDefinition(t *testing.T) {
 	}
 }
 
+func TestSplitTableColumns(t *testing.T) {
+	tests := []struct {
+		name     string
+		inner    string
+		expected []string
+	}{
+		{
+			name:     "simple columns",
+			inner:    "id integer, name varchar",
+			expected: []string{"id integer", " name varchar"},
+		},
+		{
+			name:     "numeric with precision and scale",
+			inner:    "id integer, amount numeric(10, 2), name varchar",
+			expected: []string{"id integer", " amount numeric(10, 2)", " name varchar"},
+		},
+		{
+			name:     "nested parentheses",
+			inner:    "id integer, val numeric(10, 2), label character varying(100)",
+			expected: []string{"id integer", " val numeric(10, 2)", " label character varying(100)"},
+		},
+		{
+			name:     "single column",
+			inner:    "id integer",
+			expected: []string{"id integer"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := splitTableColumns(tt.inner)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("splitTableColumns(%q) returned %d parts, want %d: %v", tt.inner, len(result), len(tt.expected), result)
+			}
+			for i, part := range result {
+				if part != tt.expected[i] {
+					t.Errorf("splitTableColumns(%q)[%d] = %q, want %q", tt.inner, i, part, tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestStripSchemaFromReturnType(t *testing.T) {
+	tests := []struct {
+		name       string
+		returnType string
+		schema     string
+		expected   string
+	}{
+		{
+			name:       "empty",
+			returnType: "",
+			schema:     "public",
+			expected:   "",
+		},
+		{
+			name:       "simple type no prefix",
+			returnType: "integer",
+			schema:     "public",
+			expected:   "integer",
+		},
+		{
+			name:       "simple type with prefix",
+			returnType: "public.mytype",
+			schema:     "public",
+			expected:   "mytype",
+		},
+		{
+			name:       "SETOF with prefix",
+			returnType: "SETOF public.actor",
+			schema:     "public",
+			expected:   "SETOF actor",
+		},
+		{
+			name:       "TABLE with custom type prefix",
+			returnType: "TABLE(id uuid, name varchar, created_at public.datetimeoffset)",
+			schema:     "public",
+			expected:   "TABLE(id uuid, name varchar, created_at datetimeoffset)",
+		},
+		{
+			name:       "TABLE with multiple custom type prefixes",
+			returnType: "TABLE(id uuid, created_at public.datetimeoffset, updated_at public.datetimeoffset)",
+			schema:     "public",
+			expected:   "TABLE(id uuid, created_at datetimeoffset, updated_at datetimeoffset)",
+		},
+		{
+			name:       "TABLE with no prefix to strip",
+			returnType: "TABLE(id uuid, name varchar)",
+			schema:     "public",
+			expected:   "TABLE(id uuid, name varchar)",
+		},
+		{
+			name:       "TABLE with numeric precision (commas in parens)",
+			returnType: "TABLE(id integer, amount numeric(10, 2), name public.mytype)",
+			schema:     "public",
+			expected:   "TABLE(id integer, amount numeric(10, 2), name mytype)",
+		},
+		{
+			name:       "array type with prefix",
+			returnType: "public.mytype[]",
+			schema:     "public",
+			expected:   "mytype[]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripSchemaFromReturnType(tt.returnType, tt.schema)
+			if result != tt.expected {
+				t.Errorf("stripSchemaFromReturnType(%q, %q) = %q, want %q", tt.returnType, tt.schema, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNormalizeCheckClause(t *testing.T) {
 	tests := []struct {
 		name     string

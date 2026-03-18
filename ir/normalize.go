@@ -451,6 +451,29 @@ func normalizeProcedure(procedure *Procedure) {
 	// Same rationale as functions — see normalizeFunction. (Issue #354)
 }
 
+// splitTableColumns splits a TABLE column list by top-level commas,
+// respecting nested parentheses (e.g., numeric(10, 2)).
+func splitTableColumns(inner string) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i, ch := range inner {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, inner[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, inner[start:])
+	return parts
+}
+
 // normalizeFunctionReturnType normalizes function return types, especially TABLE types
 func normalizeFunctionReturnType(returnType string) string {
 	if returnType == "" {
@@ -462,8 +485,8 @@ func normalizeFunctionReturnType(returnType string) string {
 		// Extract the contents inside TABLE(...)
 		inner := returnType[6 : len(returnType)-1] // Remove "TABLE(" and ")"
 
-		// Split by comma to process each column definition
-		parts := strings.Split(inner, ",")
+		// Split by top-level commas (respecting nested parentheses like numeric(10,2))
+		parts := splitTableColumns(inner)
 		var normalizedParts []string
 
 		for _, part := range parts {
@@ -515,7 +538,8 @@ func stripSchemaFromReturnType(returnType, schema string) string {
 	// Handle TABLE(...) return types - strip schema from individual column types
 	if strings.HasPrefix(returnType, "TABLE(") && strings.HasSuffix(returnType, ")") {
 		inner := returnType[6 : len(returnType)-1] // Remove "TABLE(" and ")"
-		parts := strings.Split(inner, ",")
+		// Split by top-level commas (respecting nested parentheses like numeric(10,2))
+		parts := splitTableColumns(inner)
 		var newParts []string
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
