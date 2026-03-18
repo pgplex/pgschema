@@ -451,6 +451,86 @@ func normalizeProcedure(procedure *Procedure) {
 	// Same rationale as functions — see normalizeFunction. (Issue #354)
 }
 
+// splitTableColumns splits a TABLE column list by top-level commas,
+// respecting nested parentheses (e.g., numeric(10, 2)).
+func splitTableColumns(inner string) []string {
+	var parts []string
+	depth := 0
+	inQuotes := false
+	start := 0
+	for i := 0; i < len(inner); i++ {
+		ch := inner[i]
+		if inQuotes {
+			if ch == '"' {
+				if i+1 < len(inner) && inner[i+1] == '"' {
+					i++ // skip escaped ""
+				} else {
+					inQuotes = false
+				}
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inQuotes = true
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, inner[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, inner[start:])
+	return parts
+}
+
+// splitColumnNameAndType splits a TABLE column definition like `"full name" public.mytype`
+// into the column name and the type, respecting double-quoted identifiers.
+func splitColumnNameAndType(colDef string) (name, typePart string) {
+	colDef = strings.TrimSpace(colDef)
+	if colDef == "" {
+		return "", ""
+	}
+
+	var nameEnd int
+	if colDef[0] == '"' {
+		// Quoted identifier: find the closing double-quote
+		// PostgreSQL escapes embedded quotes as ""
+		i := 1
+		for i < len(colDef) {
+			if colDef[i] == '"' {
+				if i+1 < len(colDef) && colDef[i+1] == '"' {
+					i += 2 // skip escaped ""
+					continue
+				}
+				nameEnd = i + 1
+				break
+			}
+			i++
+		}
+		if nameEnd == 0 {
+			// Unterminated quote — treat whole thing as name
+			return colDef, ""
+		}
+	} else {
+		// Unquoted identifier: ends at first whitespace
+		nameEnd = strings.IndexFunc(colDef, func(r rune) bool {
+			return r == ' ' || r == '\t'
+		})
+		if nameEnd == -1 {
+			return colDef, ""
+		}
+	}
+
+	name = colDef[:nameEnd]
+	rest := strings.TrimSpace(colDef[nameEnd:])
+	return name, rest
+}
+
 // normalizeFunctionReturnType normalizes function return types, especially TABLE types
 func normalizeFunctionReturnType(returnType string) string {
 	if returnType == "" {
@@ -462,8 +542,8 @@ func normalizeFunctionReturnType(returnType string) string {
 		// Extract the contents inside TABLE(...)
 		inner := returnType[6 : len(returnType)-1] // Remove "TABLE(" and ")"
 
-		// Split by comma to process each column definition
-		parts := strings.Split(inner, ",")
+		// Split by top-level commas (respecting nested parentheses like numeric(10,2))
+		parts := splitTableColumns(inner)
 		var normalizedParts []string
 
 		for _, part := range parts {
@@ -472,13 +552,11 @@ func normalizeFunctionReturnType(returnType string) string {
 				continue
 			}
 
-			// Normalize individual column definitions (name type)
-			fields := strings.Fields(part)
-			if len(fields) >= 2 {
-				// Normalize the type part
-				typePart := strings.Join(fields[1:], " ")
+			// Split column definition into name and type, respecting quoted identifiers
+			name, typePart := splitColumnNameAndType(part)
+			if typePart != "" {
 				normalizedType := normalizePostgreSQLType(typePart)
-				normalizedParts = append(normalizedParts, fields[0]+" "+normalizedType)
+				normalizedParts = append(normalizedParts, name+" "+normalizedType)
 			} else {
 				// Just a type, normalize it
 				normalizedParts = append(normalizedParts, normalizePostgreSQLType(part))
@@ -513,8 +591,26 @@ func stripSchemaFromReturnType(returnType, schema string) string {
 	}
 
 	// Handle TABLE(...) return types - strip schema from individual column types
-	if strings.HasPrefix(returnType, "TABLE(") {
-		return returnType // TABLE types are already handled by normalizeFunctionReturnType
+	if strings.HasPrefix(returnType, "TABLE(") && strings.HasSuffix(returnType, ")") {
+		inner := returnType[6 : len(returnType)-1] // Remove "TABLE(" and ")"
+		// Split by top-level commas (respecting nested parentheses like numeric(10,2))
+		parts := splitTableColumns(inner)
+		var newParts []string
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			// Split column definition into name and type, respecting quoted identifiers
+			name, typePart := splitColumnNameAndType(part)
+			if typePart != "" {
+				strippedType := stripSchemaPrefix(typePart, prefix)
+				newParts = append(newParts, name+" "+strippedType)
+			} else {
+				newParts = append(newParts, part)
+			}
+		}
+		return "TABLE(" + strings.Join(newParts, ", ") + ")"
 	}
 
 	// Direct type name
