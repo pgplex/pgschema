@@ -513,8 +513,26 @@ func stripSchemaFromReturnType(returnType, schema string) string {
 	}
 
 	// Handle TABLE(...) return types - strip schema from individual column types
-	if strings.HasPrefix(returnType, "TABLE(") {
-		return returnType // TABLE types are already handled by normalizeFunctionReturnType
+	if strings.HasPrefix(returnType, "TABLE(") && strings.HasSuffix(returnType, ")") {
+		inner := returnType[6 : len(returnType)-1] // Remove "TABLE(" and ")"
+		parts := strings.Split(inner, ",")
+		var newParts []string
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			// Each part is "name type" — strip schema prefix from the type portion
+			fields := strings.Fields(part)
+			if len(fields) >= 2 {
+				typePart := strings.Join(fields[1:], " ")
+				strippedType := stripSchemaPrefix(typePart, prefix)
+				newParts = append(newParts, fields[0]+" "+strippedType)
+			} else {
+				newParts = append(newParts, part)
+			}
+		}
+		return "TABLE(" + strings.Join(newParts, ", ") + ")"
 	}
 
 	// Direct type name
