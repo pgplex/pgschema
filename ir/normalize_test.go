@@ -211,6 +211,16 @@ func TestSplitTableColumns(t *testing.T) {
 			expected: []string{"id integer", " val numeric(10, 2)", " label character varying(100)"},
 		},
 		{
+			name:     "quoted identifier with comma",
+			inner:    `"a,b" integer, name varchar`,
+			expected: []string{`"a,b" integer`, " name varchar"},
+		},
+		{
+			name:     "quoted identifier with parenthesis",
+			inner:    `"a(b)" integer, val numeric(10, 2)`,
+			expected: []string{`"a(b)" integer`, " val numeric(10, 2)"},
+		},
+		{
 			name:     "single column",
 			inner:    "id integer",
 			expected: []string{"id integer"},

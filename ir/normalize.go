@@ -456,9 +456,23 @@ func normalizeProcedure(procedure *Procedure) {
 func splitTableColumns(inner string) []string {
 	var parts []string
 	depth := 0
+	inQuotes := false
 	start := 0
-	for i, ch := range inner {
+	for i := 0; i < len(inner); i++ {
+		ch := inner[i]
+		if inQuotes {
+			if ch == '"' {
+				if i+1 < len(inner) && inner[i+1] == '"' {
+					i++ // skip escaped ""
+				} else {
+					inQuotes = false
+				}
+			}
+			continue
+		}
 		switch ch {
+		case '"':
+			inQuotes = true
 		case '(':
 			depth++
 		case ')':
