@@ -161,6 +161,34 @@ func TestNormalizeViewStripsSchemaPrefixFromDefinition(t *testing.T) {
 	}
 }
 
+func TestSplitColumnNameAndType(t *testing.T) {
+	tests := []struct {
+		name         string
+		colDef       string
+		expectedName string
+		expectedType string
+	}{
+		{"simple", "id integer", "id", "integer"},
+		{"schema qualified type", "col public.mytype", "col", "public.mytype"},
+		{"quoted identifier", `"full name" text`, `"full name"`, "text"},
+		{"quoted with schema type", `"my col" public.mytype`, `"my col"`, "public.mytype"},
+		{"quoted with escaped quotes", `"it""s" integer`, `"it""s"`, "integer"},
+		{"name only", "id", "id", ""},
+		{"empty", "", "", ""},
+		{"multi-word type", "col character varying", "col", "character varying"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name, typePart := splitColumnNameAndType(tt.colDef)
+			if name != tt.expectedName || typePart != tt.expectedType {
+				t.Errorf("splitColumnNameAndType(%q) = (%q, %q), want (%q, %q)",
+					tt.colDef, name, typePart, tt.expectedName, tt.expectedType)
+			}
+		})
+	}
+}
+
 func TestSplitTableColumns(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -264,6 +292,12 @@ func TestStripSchemaFromReturnType(t *testing.T) {
 			returnType: "public.mytype[]",
 			schema:     "public",
 			expected:   "mytype[]",
+		},
+		{
+			name:       "TABLE with quoted column name",
+			returnType: `TABLE("full name" public.mytype, id uuid)`,
+			schema:     "public",
+			expected:   `TABLE("full name" mytype, id uuid)`,
 		},
 	}
 

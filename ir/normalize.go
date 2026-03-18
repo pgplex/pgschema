@@ -474,6 +474,49 @@ func splitTableColumns(inner string) []string {
 	return parts
 }
 
+// splitColumnNameAndType splits a TABLE column definition like `"full name" public.mytype`
+// into the column name and the type, respecting double-quoted identifiers.
+func splitColumnNameAndType(colDef string) (name, typePart string) {
+	colDef = strings.TrimSpace(colDef)
+	if colDef == "" {
+		return "", ""
+	}
+
+	var nameEnd int
+	if colDef[0] == '"' {
+		// Quoted identifier: find the closing double-quote
+		// PostgreSQL escapes embedded quotes as ""
+		i := 1
+		for i < len(colDef) {
+			if colDef[i] == '"' {
+				if i+1 < len(colDef) && colDef[i+1] == '"' {
+					i += 2 // skip escaped ""
+					continue
+				}
+				nameEnd = i + 1
+				break
+			}
+			i++
+		}
+		if nameEnd == 0 {
+			// Unterminated quote — treat whole thing as name
+			return colDef, ""
+		}
+	} else {
+		// Unquoted identifier: ends at first whitespace
+		nameEnd = strings.IndexFunc(colDef, func(r rune) bool {
+			return r == ' ' || r == '\t'
+		})
+		if nameEnd == -1 {
+			return colDef, ""
+		}
+	}
+
+	name = colDef[:nameEnd]
+	rest := strings.TrimSpace(colDef[nameEnd:])
+	return name, rest
+}
+
 // normalizeFunctionReturnType normalizes function return types, especially TABLE types
 func normalizeFunctionReturnType(returnType string) string {
 	if returnType == "" {
@@ -495,13 +538,11 @@ func normalizeFunctionReturnType(returnType string) string {
 				continue
 			}
 
-			// Normalize individual column definitions (name type)
-			fields := strings.Fields(part)
-			if len(fields) >= 2 {
-				// Normalize the type part
-				typePart := strings.Join(fields[1:], " ")
+			// Split column definition into name and type, respecting quoted identifiers
+			name, typePart := splitColumnNameAndType(part)
+			if typePart != "" {
 				normalizedType := normalizePostgreSQLType(typePart)
-				normalizedParts = append(normalizedParts, fields[0]+" "+normalizedType)
+				normalizedParts = append(normalizedParts, name+" "+normalizedType)
 			} else {
 				// Just a type, normalize it
 				normalizedParts = append(normalizedParts, normalizePostgreSQLType(part))
@@ -546,12 +587,11 @@ func stripSchemaFromReturnType(returnType, schema string) string {
 			if part == "" {
 				continue
 			}
-			// Each part is "name type" — strip schema prefix from the type portion
-			fields := strings.Fields(part)
-			if len(fields) >= 2 {
-				typePart := strings.Join(fields[1:], " ")
+			// Split column definition into name and type, respecting quoted identifiers
+			name, typePart := splitColumnNameAndType(part)
+			if typePart != "" {
 				strippedType := stripSchemaPrefix(typePart, prefix)
-				newParts = append(newParts, fields[0]+" "+strippedType)
+				newParts = append(newParts, name+" "+strippedType)
 			} else {
 				newParts = append(newParts, part)
 			}
