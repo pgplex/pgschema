@@ -16,6 +16,9 @@ ADD CONSTRAINT orders_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES manage
 ALTER TABLE orders
 ADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE;
 
+ALTER TABLE price_adjustments
+ADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period);
+
 ALTER TABLE products
 ADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE;
 

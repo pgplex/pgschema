@@ -105,3 +105,19 @@ CREATE TABLE public.orders (
     manager_id integer,
     CONSTRAINT orders_pkey PRIMARY KEY (id)
 );
+
+-- Temporal FK case (PG18+)
+CREATE TABLE public.price_history (
+    product_id integer NOT NULL,
+    valid_period tsrange NOT NULL,
+    price numeric(10,2) NOT NULL,
+    CONSTRAINT price_history_pkey PRIMARY KEY (product_id, valid_period WITHOUT OVERLAPS)
+);
+
+CREATE TABLE public.price_adjustments (
+    id integer NOT NULL,
+    product_id integer NOT NULL,
+    adjustment_period tsrange NOT NULL,
+    adjustment_pct numeric(5,2) NOT NULL,
+    CONSTRAINT price_adjustments_pkey PRIMARY KEY (id)
+);

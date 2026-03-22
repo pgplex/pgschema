@@ -510,6 +510,9 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 		for _, col := range columns {
 			columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
 		}
+		if constraint.IsTemporal && len(columnNames) > 0 {
+			columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
+		}
 
 		tableName := getTableNameWithSchema(item.table.Schema, item.table.Name, targetSchema)
 		sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
@@ -816,6 +819,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			for _, col := range columns {
 				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
 			}
+			if constraint.IsTemporal && len(columnNames) > 0 {
+				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
+			}
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE (%s);",
 				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
@@ -852,6 +858,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			for _, col := range columns {
 				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
 			}
+			if constraint.IsTemporal && len(columnNames) > 0 {
+				columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
+			}
 
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 			canonicalSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
@@ -874,6 +883,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			var columnNames []string
 			for _, col := range columns {
 				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
+			}
+			if constraint.IsTemporal && len(columnNames) > 0 {
+				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s);",
@@ -930,6 +942,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			for _, col := range columns {
 				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
 			}
+			if constraint.IsTemporal && len(columnNames) > 0 {
+				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
+			}
 			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE (%s);",
 				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
 
@@ -945,6 +960,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			for _, col := range columns {
 				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
 			}
+			if constraint.IsTemporal && len(columnNames) > 0 {
+				columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
+			}
 
 			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
 				tableName, ir.QuoteIdentifier(constraint.Name),
@@ -957,6 +975,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			var columnNames []string
 			for _, col := range columns {
 				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
+			}
+			if constraint.IsTemporal && len(columnNames) > 0 {
+				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
 			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s);",
 				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
@@ -1461,6 +1482,9 @@ func generateForeignKeyClause(constraint *ir.Constraint, targetSchema string, in
 			var refColumnNames []string
 			for _, col := range refColumns {
 				refColumnNames = append(refColumnNames, col.Name)
+			}
+			if constraint.IsTemporal && len(refColumnNames) > 0 {
+				refColumnNames[len(refColumnNames)-1] = "PERIOD " + refColumnNames[len(refColumnNames)-1]
 			}
 			clause += fmt.Sprintf(" (%s)", strings.Join(refColumnNames, ", "))
 		}

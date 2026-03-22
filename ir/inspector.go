@@ -482,11 +482,12 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 			}
 
 			c = &Constraint{
-				Schema:  schemaName,
-				Table:   tableName,
-				Name:    constraintName,
-				Type:    cType,
-				Columns: []*ConstraintColumn{},
+				Schema:     schemaName,
+				Table:      tableName,
+				Name:       constraintName,
+				Type:       cType,
+				Columns:    []*ConstraintColumn{},
+				IsTemporal: constraint.IsPeriod, // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
 			}
 
 			// Handle foreign key references

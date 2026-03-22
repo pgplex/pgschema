@@ -796,7 +796,8 @@ SELECT
     END AS update_rule,
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
-    c.convalidated AS is_valid
+    c.convalidated AS is_valid,
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -828,6 +829,7 @@ type GetConstraintsRow struct {
 	Deferrable             bool           `db:"deferrable" json:"deferrable"`
 	InitiallyDeferred      bool           `db:"initially_deferred" json:"initially_deferred"`
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
+	IsPeriod               bool           `db:"is_period" json:"is_period"`
 }
 
 // GetConstraints retrieves all table constraints
@@ -858,6 +860,7 @@ func (q *Queries) GetConstraints(ctx context.Context) ([]GetConstraintsRow, erro
 			&i.Deferrable,
 			&i.InitiallyDeferred,
 			&i.IsValid,
+			&i.IsPeriod,
 		); err != nil {
 			return nil, err
 		}
@@ -911,7 +914,8 @@ SELECT
     END AS update_rule,
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
-    c.convalidated AS is_valid
+    c.convalidated AS is_valid,
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -941,6 +945,7 @@ type GetConstraintsForSchemaRow struct {
 	Deferrable             bool           `db:"deferrable" json:"deferrable"`
 	InitiallyDeferred      bool           `db:"initially_deferred" json:"initially_deferred"`
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
+	IsPeriod               bool           `db:"is_period" json:"is_period"`
 }
 
 // GetConstraintsForSchema retrieves all table constraints for a specific schema
@@ -971,6 +976,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.Deferrable,
 			&i.InitiallyDeferred,
 			&i.IsValid,
+			&i.IsPeriod,
 		); err != nil {
 			return nil, err
 		}

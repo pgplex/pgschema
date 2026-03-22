@@ -3,7 +3,7 @@
   "pgschema_version": "1.7.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "a7fd4cf11997deb34dc75aeec37ffbc008d32d80dba2188a1dc1611fe5b5d710"
+    "hash": "a87e375f3503287f664096a6591ae4eb902b5fc5bcef6f8578df2e3d7f206a48"
   },
   "groups": [
     {
@@ -79,6 +79,18 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.orders.orders_product_id_fkey"
+        },
+        {
+          "sql": "ALTER TABLE price_adjustments\nADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.price_adjustments.price_adjustments_product_fkey"
+        },
+        {
+          "sql": "ALTER TABLE price_adjustments VALIDATE CONSTRAINT price_adjustments_product_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.price_adjustments.price_adjustments_product_fkey"
         },
         {
           "sql": "ALTER TABLE products\nADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE NOT VALID;",

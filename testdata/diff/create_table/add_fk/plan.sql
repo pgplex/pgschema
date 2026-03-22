@@ -28,6 +28,11 @@ ADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES produc
 
 ALTER TABLE orders VALIDATE CONSTRAINT orders_product_id_fkey;
 
+ALTER TABLE price_adjustments
+ADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period) NOT VALID;
+
+ALTER TABLE price_adjustments VALIDATE CONSTRAINT price_adjustments_product_fkey;
+
 ALTER TABLE products
 ADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE NOT VALID;
 

@@ -69,10 +69,22 @@ var skipListPG14 = []string{
 	"create_index/add_index",
 }
 
+// skipListPG14_17 defines test cases that should be skipped for PostgreSQL 14-17.
+//
+// Reason for skipping:
+// These tests use features not available before PostgreSQL 18
+// (e.g., temporal constraints with WITHOUT OVERLAPS / PERIOD require pg_constraint.conperiod).
+var skipListPG14_17 = []string{
+	"create_table/add_pk",
+	"create_table/add_fk",
+}
+
 // skipListForVersion maps PostgreSQL major versions to their skip lists.
 var skipListForVersion = map[int][]string{
-	14: append(append([]string(nil), skipListPG14_15...), skipListPG14...),
-	15: skipListPG14_15,
+	14: append(append(append([]string(nil), skipListPG14_17...), skipListPG14_15...), skipListPG14...),
+	15: append(append([]string(nil), skipListPG14_17...), skipListPG14_15...),
+	16: skipListPG14_17,
+	17: skipListPG14_17,
 }
 
 // ShouldSkipTest checks if a test should be skipped for the given PostgreSQL major version.
