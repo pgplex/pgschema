@@ -57,6 +57,18 @@ func normalizeSchema(schema *Schema) {
 	for _, typeObj := range schema.Types {
 		normalizeType(typeObj)
 	}
+
+	// Strip same-schema qualifiers from function/procedure privilege signatures
+	for _, priv := range schema.Privileges {
+		if priv.ObjectType == PrivilegeObjectTypeFunction || priv.ObjectType == PrivilegeObjectTypeProcedure {
+			priv.ObjectName = stripSchemaFromFunctionSignature(priv.ObjectName, schema.Name)
+		}
+	}
+	for _, priv := range schema.RevokedDefaultPrivileges {
+		if priv.ObjectType == PrivilegeObjectTypeFunction || priv.ObjectType == PrivilegeObjectTypeProcedure {
+			priv.ObjectName = stripSchemaFromFunctionSignature(priv.ObjectName, schema.Name)
+		}
+	}
 }
 
 // normalizeTable normalizes table-related objects
@@ -632,6 +644,18 @@ func stripSchemaPrefix(typeName, prefix string) string {
 		return base[len(prefix):] + arraySuffix
 	}
 	return typeName
+}
+
+// stripSchemaFromFunctionSignature strips same-schema qualifiers from type references
+// within a function signature like "func_name(p_name text, p_kind myschema.mytype)".
+func stripSchemaFromFunctionSignature(signature, schema string) string {
+	if schema == "" {
+		return signature
+	}
+	// Replace both quoted and unquoted schema prefixes within the signature
+	signature = strings.ReplaceAll(signature, `"`+schema+`".`, "")
+	signature = strings.ReplaceAll(signature, schema+".", "")
+	return signature
 }
 
 // normalizeTrigger normalizes trigger representation
