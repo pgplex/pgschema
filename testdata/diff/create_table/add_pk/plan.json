@@ -3,7 +3,7 @@
   "pgschema_version": "1.7.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "c455204dbf5b6719964c1e26ff7ad6874ae2dda16e7f14be51b2fa082c6e7342"
+    "hash": "aa2ee5caf6ab616cedd6523e73c94e4acadf4435da3f5f31f9a89c08ac17b289"
   },
   "groups": [
     {
@@ -25,6 +25,12 @@
           "type": "table.column",
           "operation": "create",
           "path": "public.products.id"
+        },
+        {
+          "sql": "ALTER TABLE reservations\nADD CONSTRAINT reservations_pkey PRIMARY KEY (id, valid_period WITHOUT OVERLAPS);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.reservations.reservations_pkey"
         },
         {
           "sql": "ALTER TABLE sessions\nADD COLUMN id uuid CONSTRAINT sessions_pkey PRIMARY KEY;",

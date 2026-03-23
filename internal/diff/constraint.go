@@ -21,18 +21,36 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 	switch constraint.Type {
 	case ir.ConstraintTypePrimaryKey:
 		// Always include CONSTRAINT name to be explicit and consistent
-		return fmt.Sprintf("CONSTRAINT %s PRIMARY KEY (%s)", ir.QuoteIdentifier(constraint.Name), strings.Join(getColumnNames(constraint.Columns), ", "))
+		cols := getColumnNames(constraint.Columns)
+		if constraint.IsTemporal && len(cols) > 0 {
+			cols[len(cols)-1] = cols[len(cols)-1] + " WITHOUT OVERLAPS"
+		}
+		return fmt.Sprintf("CONSTRAINT %s PRIMARY KEY (%s)", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "))
 	case ir.ConstraintTypeUnique:
 		// Always include CONSTRAINT name to be explicit and consistent
-		return fmt.Sprintf("CONSTRAINT %s UNIQUE (%s)", ir.QuoteIdentifier(constraint.Name), strings.Join(getColumnNames(constraint.Columns), ", "))
+		cols := getColumnNames(constraint.Columns)
+		if constraint.IsTemporal && len(cols) > 0 {
+			cols[len(cols)-1] = cols[len(cols)-1] + " WITHOUT OVERLAPS"
+		}
+		return fmt.Sprintf("CONSTRAINT %s UNIQUE (%s)", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "))
 	case ir.ConstraintTypeForeignKey:
 		// Always include CONSTRAINT name to preserve explicit FK names
 		// Use QualifyEntityNameWithQuotes to add schema qualifier when referencing tables in other schemas
+		cols := getColumnNames(constraint.Columns)
+		refCols := getColumnNames(constraint.ReferencedColumns)
+		if constraint.IsTemporal {
+			if len(cols) > 0 {
+				cols[len(cols)-1] = "PERIOD " + cols[len(cols)-1]
+			}
+			if len(refCols) > 0 {
+				refCols[len(refCols)-1] = "PERIOD " + refCols[len(refCols)-1]
+			}
+		}
 		qualifiedRefTable := ir.QualifyEntityNameWithQuotes(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema)
 		stmt := fmt.Sprintf("CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
 			ir.QuoteIdentifier(constraint.Name),
-			strings.Join(getColumnNames(constraint.Columns), ", "),
-			qualifiedRefTable, strings.Join(getColumnNames(constraint.ReferencedColumns), ", "))
+			strings.Join(cols, ", "),
+			qualifiedRefTable, strings.Join(refCols, ", "))
 		// Only add ON UPDATE/DELETE if they are not the default "NO ACTION"
 		if constraint.UpdateRule != "" && constraint.UpdateRule != "NO ACTION" {
 			stmt += fmt.Sprintf(" ON UPDATE %s", constraint.UpdateRule)
@@ -147,6 +165,9 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 		return false
 	}
 	if old.InitiallyDeferred != new.InitiallyDeferred {
+		return false
+	}
+	if old.IsTemporal != new.IsTemporal {
 		return false
 	}
 

@@ -236,10 +236,16 @@ func generateForeignKeyRewrite(constraint *ir.Constraint) []RewriteStep {
 	for _, col := range constraint.Columns {
 		columnNames = append(columnNames, col.Name)
 	}
+	if constraint.IsTemporal && len(columnNames) > 0 {
+		columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
+	}
 
 	var refColumnNames []string
 	for _, col := range constraint.ReferencedColumns {
 		refColumnNames = append(refColumnNames, col.Name)
+	}
+	if constraint.IsTemporal && len(refColumnNames) > 0 {
+		refColumnNames[len(refColumnNames)-1] = "PERIOD " + refColumnNames[len(refColumnNames)-1]
 	}
 
 	refTableName := getTableNameWithSchema(constraint.ReferencedSchema, constraint.ReferencedTable)

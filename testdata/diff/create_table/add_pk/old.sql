@@ -35,3 +35,10 @@ CREATE TABLE public.categories (
     name text NOT NULL,
     description text
 );
+
+-- Temporal PK case (PG18+)
+CREATE TABLE public.reservations (
+    id integer NOT NULL,
+    valid_period tsrange NOT NULL,
+    description text
+);

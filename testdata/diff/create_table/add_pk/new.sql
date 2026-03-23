@@ -46,3 +46,11 @@ CREATE TABLE public.categories (
     description text,
     CONSTRAINT categories_pkey PRIMARY KEY (code)
 );
+
+-- Temporal PK case (PG18+)
+CREATE TABLE public.reservations (
+    id integer NOT NULL,
+    valid_period tsrange NOT NULL,
+    description text,
+    CONSTRAINT reservations_pkey PRIMARY KEY (id, valid_period WITHOUT OVERLAPS)
+);

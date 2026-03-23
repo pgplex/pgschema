@@ -115,3 +115,20 @@ CREATE TABLE public.orders (
     CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE,
     CONSTRAINT orders_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES public.managers(id) ON DELETE SET NULL
 );
+
+-- Temporal FK case (PG18+)
+CREATE TABLE public.price_history (
+    product_id integer NOT NULL,
+    valid_period tsrange NOT NULL,
+    price numeric(10,2) NOT NULL,
+    CONSTRAINT price_history_pkey PRIMARY KEY (product_id, valid_period WITHOUT OVERLAPS)
+);
+
+CREATE TABLE public.price_adjustments (
+    id integer NOT NULL,
+    product_id integer NOT NULL,
+    adjustment_period tsrange NOT NULL,
+    adjustment_pct numeric(5,2) NOT NULL,
+    CONSTRAINT price_adjustments_pkey PRIMARY KEY (id),
+    CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES public.price_history (product_id, PERIOD valid_period)
+);

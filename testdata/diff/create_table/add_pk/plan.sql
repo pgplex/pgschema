@@ -7,6 +7,9 @@ ADD COLUMN id serial CONSTRAINT orders_pkey PRIMARY KEY;
 ALTER TABLE products
 ADD COLUMN id integer GENERATED ALWAYS AS IDENTITY CONSTRAINT products_pkey PRIMARY KEY;
 
+ALTER TABLE reservations
+ADD CONSTRAINT reservations_pkey PRIMARY KEY (id, valid_period WITHOUT OVERLAPS);
+
 ALTER TABLE sessions
 ADD COLUMN id uuid CONSTRAINT sessions_pkey PRIMARY KEY;
 

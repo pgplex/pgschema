@@ -1,7 +1,7 @@
-Plan: 8 to modify.
+Plan: 9 to modify.
 
 Summary by type:
-  tables: 8 to modify
+  tables: 9 to modify
 
 Tables:
   ~ books
@@ -14,6 +14,8 @@ Tables:
     + orders_customer_id_fkey (constraint)
     + orders_manager_id_fkey (constraint)
     + orders_product_id_fkey (constraint)
+  ~ price_adjustments
+    + price_adjustments_product_fkey (constraint)
   ~ products
     + products_category_code_fkey (constraint)
   ~ projects
@@ -55,6 +57,11 @@ ALTER TABLE orders
 ADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE NOT VALID;
 
 ALTER TABLE orders VALIDATE CONSTRAINT orders_product_id_fkey;
+
+ALTER TABLE price_adjustments
+ADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period) NOT VALID;
+
+ALTER TABLE price_adjustments VALIDATE CONSTRAINT price_adjustments_product_fkey;
 
 ALTER TABLE products
 ADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE NOT VALID;

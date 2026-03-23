@@ -222,6 +222,7 @@ type Constraint struct {
 	Deferrable          bool                `json:"deferrable,omitempty"`
 	InitiallyDeferred   bool                `json:"initially_deferred,omitempty"`
 	IsValid             bool                `json:"is_valid,omitempty"`
+	IsTemporal          bool                `json:"is_temporal,omitempty"` // PG18: temporal constraint (WITHOUT OVERLAPS on PK/UNIQUE, PERIOD on FK)
 	Comment             string              `json:"comment,omitempty"`
 }
 
