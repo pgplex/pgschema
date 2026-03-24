@@ -1,11 +1,12 @@
 {
   "name": "issue_191_function_procedure_overload",
-  "description": "Test case for overloaded functions and procedures not being fully dumped (GitHub issue #191)",
+  "description": "Test case for overloaded functions and procedures (GitHub issues #191, #368)",
   "source": "https://github.com/pgplex/pgschema/issues/191",
   "notes": [
-    "Tests that all overloaded functions are preserved when dumping (not just the last one)",
-    "Tests that all overloaded procedures are preserved when dumping",
-    "Covers overloads with different parameter counts: test_func(integer) vs test_func(integer, integer)",
-    "Covers overloads with different parameter types: test_func(integer) vs test_func(text)"
+    "#191: Tests that all overloaded functions are preserved when dumping (not just the last one)",
+    "#191: Tests that all overloaded procedures are preserved when dumping",
+    "#191: Covers overloads with different parameter counts: test_func(integer) vs test_func(integer, integer)",
+    "#191: Covers overloads with different parameter types: test_func(integer) vs test_func(text)",
+    "#368: Tests that overloaded functions with different languages (sql vs plpgsql) each get the correct LANGUAGE"
   ]
 }

@@ -96,5 +96,31 @@ $$;
 
 
 --
+-- Name: provide_tx(text[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.provide_tx(VARIADIC p_txs text[])
+    RETURNS void
+    LANGUAGE sql
+    AS $$
+SELECT 1;
+$$;
+
+
+--
+-- Name: provide_tx(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.provide_tx(p_id uuid)
+    RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE NOTICE '%', p_id;
+END;
+$$;
+
+
+--
 -- PostgreSQL database dump complete
 --
