@@ -92,7 +92,7 @@ func GenerateTempSchemaName() string {
 // Only qualifications matching the specified schemaName are stripped.
 // All other schema qualifications are preserved as intentional cross-schema references.
 func stripSchemaQualifications(sql string, schemaName string) string {
-	if schemaName == "" {
+	if schemaName == "" || !strings.Contains(sql, schemaName) {
 		return sql
 	}
 
@@ -108,7 +108,56 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 			// Preserve dollar-quoted content as-is
 			result.WriteString(seg.text)
 		} else {
-			result.WriteString(stripSchemaQualificationsFromText(seg.text, schemaName))
+			// Further split on single-quoted string literals to avoid stripping
+			// schema prefixes from inside string constants (Issue #371).
+			// e.g., has_scope('s.manage') must NOT become has_scope('manage')
+			result.WriteString(stripSchemaQualificationsPreservingStrings(seg.text, schemaName))
+		}
+	}
+	return result.String()
+}
+
+// stripSchemaQualificationsPreservingStrings splits text on single-quoted string
+// literals, applies schema stripping only to non-string parts, and reassembles.
+func stripSchemaQualificationsPreservingStrings(text string, schemaName string) string {
+	var result strings.Builder
+	result.Grow(len(text))
+	inString := false
+
+	i := 0
+	segStart := 0
+	for i < len(text) {
+		ch := text[i]
+		if ch == '\'' {
+			if !inString {
+				// End of non-string segment — strip schema qualifications from it
+				result.WriteString(stripSchemaQualificationsFromText(text[segStart:i], schemaName))
+				segStart = i
+				inString = true
+				i++
+			} else {
+				// Check for escaped quote ('')
+				if i+1 < len(text) && text[i+1] == '\'' {
+					i += 2 // skip ''
+				} else {
+					// End of string literal — write it as-is
+					inString = false
+					i++
+					result.WriteString(text[segStart:i])
+					segStart = i
+				}
+			}
+		} else {
+			i++
+		}
+	}
+	// Handle remaining text
+	if segStart < len(text) {
+		if inString {
+			// Unterminated string literal — write as-is
+			result.WriteString(text[segStart:])
+		} else {
+			result.WriteString(stripSchemaQualificationsFromText(text[segStart:], schemaName))
 		}
 	}
 	return result.String()

@@ -194,3 +194,58 @@ func TestReplaceSchemaInSearchPath(t *testing.T) {
 		})
 	}
 }
+
+func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		schema   string
+		expected string
+	}{
+		{
+			name:     "strips schema from table reference",
+			sql:      "CREATE TABLE public.items (id int);",
+			schema:   "public",
+			expected: "CREATE TABLE items (id int);",
+		},
+		{
+			name:     "preserves schema prefix inside single-quoted string",
+			sql:      "CREATE POLICY p ON items USING (has_scope('public.manage'));",
+			schema:   "public",
+			expected: "CREATE POLICY p ON items USING (has_scope('public.manage'));",
+		},
+		{
+			name:     "preserves schema prefix inside string with short schema name",
+			sql:      "CREATE POLICY p ON items USING (has_scope('s.manage')) WITH CHECK (has_scope('s.manage'));",
+			schema:   "s",
+			expected: "CREATE POLICY p ON items USING (has_scope('s.manage')) WITH CHECK (has_scope('s.manage'));",
+		},
+		{
+			name:     "strips schema from identifier but preserves string literal",
+			sql:      "CREATE POLICY p ON s.items USING (auth.has_scope('s.manage'));",
+			schema:   "s",
+			expected: "CREATE POLICY p ON items USING (auth.has_scope('s.manage'));",
+		},
+		{
+			name:     "preserves escaped quotes in string literals",
+			sql:      "SELECT 'it''s public.test' FROM public.t;",
+			schema:   "public",
+			expected: "SELECT 'it''s public.test' FROM t;",
+		},
+		{
+			name:     "handles multiple string literals",
+			sql:      "SELECT 'public.a', public.t, 'public.b';",
+			schema:   "public",
+			expected: "SELECT 'public.a', t, 'public.b';",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripSchemaQualifications(tt.sql, tt.schema)
+			if result != tt.expected {
+				t.Errorf("stripSchemaQualifications(%q, %q)\n  got:  %q\n  want: %q", tt.sql, tt.schema, result, tt.expected)
+			}
+		})
+	}
+}
