@@ -1400,11 +1400,12 @@ SELECT
     p.proisstrict AS is_strict,
     p.prosecdef AS is_security_definer
 FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name 
+LEFT JOIN pg_proc p ON p.proname = r.routine_name
     AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
+    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
 LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
 LEFT JOIN pg_description desc_func ON desc_func.objoid = p.oid AND desc_func.classoid = 'pg_proc'::regclass
-WHERE 
+WHERE
     r.routine_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     AND r.routine_schema NOT LIKE 'pg_temp_%'
     AND r.routine_schema NOT LIKE 'pg_toast_temp_%'
@@ -1495,6 +1496,7 @@ SELECT
 FROM information_schema.routines r
 LEFT JOIN pg_proc p ON p.proname = r.routine_name
     AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
+    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
 LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
 LEFT JOIN pg_description desc_func ON desc_func.objoid = p.oid AND desc_func.classoid = 'pg_proc'::regclass
 WHERE r.routine_schema = $1
@@ -2068,11 +2070,12 @@ SELECT
     oidvectortypes(p.proargtypes) AS procedure_arguments,
     pg_get_function_arguments(p.oid) AS procedure_signature
 FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name 
+LEFT JOIN pg_proc p ON p.proname = r.routine_name
     AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
+    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
 LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
 LEFT JOIN pg_description desc_proc ON desc_proc.objoid = p.oid AND desc_proc.classoid = 'pg_proc'::regclass
-WHERE 
+WHERE
     r.routine_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     AND r.routine_schema NOT LIKE 'pg_temp_%'
     AND r.routine_schema NOT LIKE 'pg_toast_temp_%'
@@ -2143,6 +2146,7 @@ SELECT
 FROM information_schema.routines r
 LEFT JOIN pg_proc p ON p.proname = r.routine_name
     AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
+    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
 LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
 LEFT JOIN pg_description desc_proc ON desc_proc.objoid = p.oid AND desc_proc.classoid = 'pg_proc'::regclass
 WHERE r.routine_schema = $1

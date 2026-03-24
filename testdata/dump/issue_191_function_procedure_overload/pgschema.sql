@@ -2,9 +2,39 @@
 -- pgschema database dump
 --
 
--- Dumped from database version PostgreSQL 17.5
--- Dumped by pgschema version 1.5.0
+-- Dumped from database version PostgreSQL 18.0
+-- Dumped by pgschema version 1.7.4
 
+
+--
+-- Name: provide_tx(text[]); Type: FUNCTION; Schema: -; Owner: -
+--
+
+CREATE OR REPLACE FUNCTION provide_tx(
+    VARIADIC p_txs text[]
+)
+RETURNS void
+LANGUAGE sql
+VOLATILE
+AS $$
+SELECT 1;
+$$;
+
+--
+-- Name: provide_tx(uuid); Type: FUNCTION; Schema: -; Owner: -
+--
+
+CREATE OR REPLACE FUNCTION provide_tx(
+    p_id uuid
+)
+RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+BEGIN
+    RAISE NOTICE '%', p_id;
+END;
+$$;
 
 --
 -- Name: test_func(integer); Type: FUNCTION; Schema: -; Owner: -
@@ -97,3 +127,4 @@ BEGIN
     RAISE NOTICE 'Text: %', a;
 END;
 $$;
+

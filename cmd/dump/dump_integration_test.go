@@ -130,6 +130,13 @@ func TestDumpCommand_Issue345ArrayCast(t *testing.T) {
 	runExactMatchTest(t, "issue_345_array_cast")
 }
 
+func TestDumpCommand_Issue191FunctionProcedureOverload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_191_function_procedure_overload")
+}
+
 func TestDumpCommand_Issue318CrossSchemaComment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
