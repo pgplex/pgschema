@@ -383,9 +383,9 @@ type deferredConstraint struct {
 	constraint *ir.Constraint
 }
 
-// generateCreateTablesSQL generates CREATE TABLE statements with co-located indexes and RLS settings.
-// All policies are deferred for creation after all tables exist, since policies may reference
-// other tables in USING/WITH CHECK expressions (#373).
+// generateCreateTablesSQL generates CREATE TABLE statements with co-located indexes, policies, and RLS.
+// Policies that reference other new tables in the same batch (via USING/WITH CHECK expressions)
+// are deferred for creation after all tables exist (#373). All other policies are emitted inline.
 // It returns deferred policies and foreign key constraints that should be applied after dependent objects exist.
 // Tables are assumed to be pre-sorted in topological order for dependency-aware creation.
 func generateCreateTablesSQL(
@@ -393,6 +393,7 @@ func generateCreateTablesSQL(
 	targetSchema string,
 	collector *diffCollector,
 	existingTables map[string]bool,
+	shouldDeferPolicy func(*ir.RLSPolicy) bool,
 ) ([]*ir.RLSPolicy, []*deferredConstraint) {
 	var deferredPolicies []*ir.RLSPolicy
 	var deferredConstraints []*deferredConstraint
@@ -473,13 +474,22 @@ func generateCreateTablesSQL(
 			generateRLSChangesSQL(rlsChanges, targetSchema, collector)
 		}
 
-		// Defer all policies to after all tables are created.
-		// Policies may reference other tables in USING/WITH CHECK expressions (e.g., subqueries),
-		// and those tables may not exist yet at this point. (#373)
+		// Collect policies: defer those that reference other new tables or new functions (#373),
+		// emit the rest inline with their parent table.
 		if len(table.Policies) > 0 {
+			var inlinePolicies []*ir.RLSPolicy
 			policyNames := sortedKeys(table.Policies)
 			for _, name := range policyNames {
-				deferredPolicies = append(deferredPolicies, table.Policies[name])
+				policy := table.Policies[name]
+				if shouldDeferPolicy != nil && shouldDeferPolicy(policy) {
+					deferredPolicies = append(deferredPolicies, policy)
+				} else {
+					inlinePolicies = append(inlinePolicies, policy)
+				}
+			}
+
+			if len(inlinePolicies) > 0 {
+				generateCreatePoliciesSQL(inlinePolicies, targetSchema, collector)
 			}
 		}
 
