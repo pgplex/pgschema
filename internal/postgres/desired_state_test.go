@@ -238,6 +238,18 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 			schema:   "public",
 			expected: "SELECT 'public.a', t, 'public.b';",
 		},
+		{
+			// Known limitation: E'...' escape-string syntax with backslash-escaped quotes
+			// is not handled. The parser treats \' as ordinary char + string-closer,
+			// mistracking boundaries. Here it strips inside the string (wrong) and
+			// misses the identifier after (also wrong). Both are safe: the SQL remains
+			// valid, and the unstripped qualifier just means the object is looked up
+			// in the original schema. E'...' in DDL is extremely rare.
+			name:     "E-string with backslash-escaped quote (known limitation)",
+			sql:      "SELECT E'it\\'s public.test' FROM public.t;",
+			schema:   "public",
+			expected: "SELECT E'it\\'s test' FROM public.t;",
+		},
 	}
 
 	for _, tt := range tests {

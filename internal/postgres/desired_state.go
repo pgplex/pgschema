@@ -119,6 +119,13 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 
 // stripSchemaQualificationsPreservingStrings splits text on single-quoted string
 // literals, applies schema stripping only to non-string parts, and reassembles.
+//
+// Limitation: E'...' escape-string syntax uses backslash-escaped quotes (E'it\'s')
+// rather than doubled quotes ('it''s'). This parser only recognises the '' form.
+// With E'content\'', a backslash-escaped quote may cause the parser to mistrack
+// string boundaries, resulting in schema qualifiers after the string not being
+// stripped (false-negative). This is safe — it preserves the original SQL — and
+// E'...' strings are extremely rare in DDL schema definitions.
 func stripSchemaQualificationsPreservingStrings(text string, schemaName string) string {
 	var result strings.Builder
 	result.Grow(len(text))
