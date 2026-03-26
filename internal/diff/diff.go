@@ -1528,12 +1528,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		key := fmt.Sprintf("%s.%s", tableDiff.Table.Schema, tableDiff.Table.Name)
 		existingTables[key] = true
 	}
-	// Build lookup of all new table names for policy deferral (#373).
+	// Build lookup of all new table names (qualified) for policy deferral (#373).
 	// Policies that reference other new tables must be deferred until all tables exist.
 	newTableLookup := make(map[string]struct{}, len(d.addedTables))
 	for _, table := range d.addedTables {
-		newTableLookup[table.Name] = struct{}{}
-		newTableLookup[fmt.Sprintf("%s.%s", table.Schema, table.Name)] = struct{}{}
+		newTableLookup[fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))] = struct{}{}
 	}
 	var shouldDeferPolicy func(*ir.RLSPolicy) bool
 	if len(newFunctionLookup) > 0 || len(newTableLookup) > 0 {
@@ -2040,24 +2039,29 @@ func policyReferencesNewFunction(policy *ir.RLSPolicy, newFunctions map[string]s
 
 // policyReferencesOtherNewTable determines if a policy's USING or WITH CHECK expressions
 // reference any newly added table other than the policy's own table (#373).
+// newTables keys are fully qualified (schema.table) to avoid cross-schema collisions.
 func policyReferencesOtherNewTable(policy *ir.RLSPolicy, newTables map[string]struct{}) bool {
 	if len(newTables) == 0 || policy == nil {
 		return false
 	}
+
+	ownQualified := fmt.Sprintf("%s.%s", strings.ToLower(policy.Schema), strings.ToLower(policy.Table))
 
 	for _, expr := range []string{policy.Using, policy.WithCheck} {
 		if expr == "" {
 			continue
 		}
 		exprLower := strings.ToLower(expr)
-		for tableName := range newTables {
+		for qualifiedName := range newTables {
 			// Skip the policy's own table
-			if strings.EqualFold(tableName, policy.Table) ||
-				strings.EqualFold(tableName, fmt.Sprintf("%s.%s", policy.Schema, policy.Table)) {
+			if qualifiedName == ownQualified {
 				continue
 			}
-			// Check if the expression contains a reference to this table name
-			if strings.Contains(exprLower, strings.ToLower(tableName)) {
+			// Extract the unqualified table name for substring matching.
+			// Policy expressions may use unqualified or qualified references.
+			parts := strings.SplitN(qualifiedName, ".", 2)
+			tableName := parts[len(parts)-1]
+			if strings.Contains(exprLower, tableName) {
 				return true
 			}
 		}
