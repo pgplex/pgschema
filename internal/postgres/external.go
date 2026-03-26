@@ -108,16 +108,26 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// Note: We use the temporary schema name (ed.tempSchema) instead of the user-provided schema name
 	// This ensures we don't interfere with existing schemas in the external database
 
+	// Acquire a single dedicated connection to ensure SET search_path affects
+	// all subsequent statements. Using *sql.DB (connection pool) does not
+	// guarantee the same connection across ExecContext calls, so session-scoped
+	// settings like search_path may be lost.
+	conn, err := ed.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire connection: %w", err)
+	}
+	defer conn.Close()
+
 	// Create the temporary schema
 	createSchemaSQL := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS \"%s\"", ed.tempSchema)
-	if _, err := util.ExecContextWithLogging(ctx, ed.db, createSchemaSQL, "create temporary schema"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, createSchemaSQL, "create temporary schema"); err != nil {
 		return fmt.Errorf("failed to create temporary schema %s: %w", ed.tempSchema, err)
 	}
 
 	// Set search_path to the temporary schema, with public as fallback
 	// for resolving extension types installed in public schema (issue #197)
 	setSearchPathSQL := fmt.Sprintf("SET search_path TO \"%s\", public", ed.tempSchema)
-	if _, err := util.ExecContextWithLogging(ctx, ed.db, setSearchPathSQL, "set search_path for desired state"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, setSearchPathSQL, "set search_path for desired state"); err != nil {
 		return fmt.Errorf("failed to set search_path: %w", err)
 	}
 
@@ -138,7 +148,7 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.
-	if _, err := util.ExecContextWithLogging(ctx, ed.db, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
 		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ed.tempSchema, err)
 	}
 

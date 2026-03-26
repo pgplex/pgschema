@@ -191,22 +191,32 @@ func (ep *EmbeddedPostgres) GetSchemaName() string {
 // This ensures a clean state before applying the desired schema definition.
 // Note: The schema parameter is ignored - we always use the temporary schema name.
 func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql string) error {
+	// Acquire a single dedicated connection to ensure SET search_path affects
+	// all subsequent statements. Using *sql.DB (connection pool) does not
+	// guarantee the same connection across ExecContext calls, so session-scoped
+	// settings like search_path may be lost.
+	conn, err := ep.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire connection: %w", err)
+	}
+	defer conn.Close()
+
 	// Drop the temporary schema if it exists (CASCADE to drop all objects)
 	dropSchemaSQL := fmt.Sprintf("DROP SCHEMA IF EXISTS \"%s\" CASCADE", ep.tempSchema)
-	if _, err := util.ExecContextWithLogging(ctx, ep.db, dropSchemaSQL, "drop temporary schema"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, dropSchemaSQL, "drop temporary schema"); err != nil {
 		return fmt.Errorf("failed to drop temporary schema %s: %w", ep.tempSchema, err)
 	}
 
 	// Create the temporary schema
 	createSchemaSQL := fmt.Sprintf("CREATE SCHEMA \"%s\"", ep.tempSchema)
-	if _, err := util.ExecContextWithLogging(ctx, ep.db, createSchemaSQL, "create temporary schema"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, createSchemaSQL, "create temporary schema"); err != nil {
 		return fmt.Errorf("failed to create temporary schema %s: %w", ep.tempSchema, err)
 	}
 
 	// Set search_path to the temporary schema, with public as fallback
 	// for resolving extension types installed in public schema (issue #197)
 	setSearchPathSQL := fmt.Sprintf("SET search_path TO \"%s\", public", ep.tempSchema)
-	if _, err := util.ExecContextWithLogging(ctx, ep.db, setSearchPathSQL, "set search_path for desired state"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, setSearchPathSQL, "set search_path for desired state"); err != nil {
 		return fmt.Errorf("failed to set search_path: %w", err)
 	}
 
@@ -227,7 +237,7 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.
-	if _, err := util.ExecContextWithLogging(ctx, ep.db, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
+	if _, err := util.ExecContextWithLogging(ctx, conn, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
 		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ep.tempSchema, err)
 	}
 
