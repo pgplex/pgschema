@@ -125,9 +125,13 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 // Limitation: E'...' escape-string syntax uses backslash-escaped quotes (E'it\'s')
 // rather than doubled quotes ('it''s'). This parser only recognises the '' form.
 // With E'content\'', a backslash-escaped quote may cause the parser to mistrack
-// string boundaries, resulting in schema qualifiers after the string not being
-// stripped (false-negative). This is safe — it preserves the original SQL — and
-// E'...' strings are extremely rare in DDL schema definitions.
+// string boundaries, which can result in either:
+//   - false-negative: schema qualifiers after the string are not stripped, or
+//   - false-positive: schema prefixes inside the E-string are incorrectly stripped.
+//
+// Both cases change semantics only for E'...' strings, which are extremely rare
+// in DDL schema definitions. The false-negative case preserves valid SQL; the
+// false-positive case could alter string content but is unlikely in practice.
 func stripSchemaQualificationsPreservingStrings(text string, schemaName string) string {
 	var result strings.Builder
 	result.Grow(len(text))
@@ -278,11 +282,18 @@ func getSchemaRegexes(schemaName string) *schemaRegexes {
 		return cached
 	}
 	escapedSchema := regexp.QuoteMeta(schemaName)
+	// Patterns 1-2: quoted schema ("schema".object / "schema"."object")
+	// The leading " already prevents suffix matching.
+	// Patterns 3-4: unquoted schema (schema.object / schema."object")
+	// Use a capture group for the optional non-identifier prefix so we can
+	// preserve it in replacement without the match[0] ambiguity at ^.
+	// The character class [^a-zA-Z0-9_$"] ensures the schema name isn't a
+	// suffix of a longer identifier (e.g., schema "s" won't match "sales").
 	sr := &schemaRegexes{
 		re1: regexp.MustCompile(fmt.Sprintf(`"%s"\.(\"[^"]+\")`, escapedSchema)),
 		re2: regexp.MustCompile(fmt.Sprintf(`"%s"\.([a-zA-Z_][a-zA-Z0-9_$]*)`, escapedSchema)),
-		re3: regexp.MustCompile(fmt.Sprintf(`(?:^|[^"])%s\.(\"[^"]+\")`, escapedSchema)),
-		re4: regexp.MustCompile(fmt.Sprintf(`(?:^|[^"])%s\.([a-zA-Z_][a-zA-Z0-9_$]*)`, escapedSchema)),
+		re3: regexp.MustCompile(fmt.Sprintf(`(^|[^a-zA-Z0-9_$"])%s\.(\"[^"]+\")`, escapedSchema)),
+		re4: regexp.MustCompile(fmt.Sprintf(`(^|[^a-zA-Z0-9_$"])%s\.([a-zA-Z_][a-zA-Z0-9_$]*)`, escapedSchema)),
 	}
 	schemaRegexCache[schemaName] = sr
 	return sr
@@ -301,35 +312,10 @@ func stripSchemaQualificationsFromText(text string, schemaName string) string {
 	// Apply in order: quoted schema first to avoid double-matching
 	result = sr.re1.ReplaceAllString(result, "$1")
 	result = sr.re2.ReplaceAllString(result, "$1")
-	// For patterns 3 and 4, we need to preserve the character before the schema
-	result = sr.re3.ReplaceAllStringFunc(result, func(match string) string {
-		// If match starts with a non-quote character, preserve it
-		if len(match) > 0 && match[0] != '"' {
-			parts := strings.SplitN(match, ".", 2)
-			if len(parts) == 2 {
-				return string(match[0]) + parts[1]
-			}
-		}
-		parts := strings.SplitN(match, ".", 2)
-		if len(parts) == 2 {
-			return parts[1]
-		}
-		return match
-	})
-	result = sr.re4.ReplaceAllStringFunc(result, func(match string) string {
-		// If match starts with a non-quote character, preserve it
-		if len(match) > 0 && match[0] != '"' {
-			parts := strings.SplitN(match, ".", 2)
-			if len(parts) == 2 {
-				return string(match[0]) + parts[1]
-			}
-		}
-		parts := strings.SplitN(match, ".", 2)
-		if len(parts) == 2 {
-			return parts[1]
-		}
-		return match
-	})
+	// For patterns 3 and 4, $1 is the prefix (boundary char or empty at ^),
+	// $2 is the object name — preserve the prefix and keep only the object.
+	result = sr.re3.ReplaceAllString(result, "${1}${2}")
+	result = sr.re4.ReplaceAllString(result, "${1}${2}")
 
 	return result
 }

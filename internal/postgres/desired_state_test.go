@@ -239,6 +239,18 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 			expected: "SELECT 'public.a', t, 'public.b';",
 		},
 		{
+			name:     "does not match schema as suffix of longer identifier",
+			sql:      "SELECT sales.total, s.items FROM s.orders;",
+			schema:   "s",
+			expected: "SELECT sales.total, items FROM orders;",
+		},
+		{
+			name:     "strips schema at start of string",
+			sql:      "public.t",
+			schema:   "public",
+			expected: "t",
+		},
+		{
 			name:     "handles apostrophe in line comment followed by schema-qualified identifier",
 			sql:      "SELECT 1; -- don't drop public.t\nDROP TABLE public.t;",
 			schema:   "public",
