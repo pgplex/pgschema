@@ -384,7 +384,7 @@ type deferredConstraint struct {
 }
 
 // generateCreateTablesSQL generates CREATE TABLE statements with co-located indexes, policies, and RLS.
-// Policies that reference other new tables in the same batch (via USING/WITH CHECK expressions)
+// Policies that reference other new tables in the same migration (via USING/WITH CHECK expressions)
 // are deferred for creation after all tables exist (#373). All other policies are emitted inline.
 // It returns deferred policies and foreign key constraints that should be applied after dependent objects exist.
 // Tables are assumed to be pre-sorted in topological order for dependency-aware creation.
