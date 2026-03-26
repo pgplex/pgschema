@@ -239,6 +239,24 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 			expected: "SELECT 'public.a', t, 'public.b';",
 		},
 		{
+			name:     "handles apostrophe in line comment followed by schema-qualified identifier",
+			sql:      "SELECT 1; -- don't drop public.t\nDROP TABLE public.t;",
+			schema:   "public",
+			expected: "SELECT 1; -- don't drop public.t\nDROP TABLE t;",
+		},
+		{
+			name:     "handles block comment with apostrophe",
+			sql:      "/* it's public.t */ DROP TABLE public.t;",
+			schema:   "public",
+			expected: "/* it's public.t */ DROP TABLE t;",
+		},
+		{
+			name:     "handles block comment without apostrophe",
+			sql:      "/* drop public.t */ DROP TABLE public.t;",
+			schema:   "public",
+			expected: "/* drop public.t */ DROP TABLE t;",
+		},
+		{
 			// Known limitation: E'...' escape-string syntax with backslash-escaped quotes
 			// is not handled. The parser treats \' as ordinary char + string-closer,
 			// mistracking boundaries. Here it strips inside the string (wrong) and
