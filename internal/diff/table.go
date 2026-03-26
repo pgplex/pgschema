@@ -383,9 +383,9 @@ type deferredConstraint struct {
 	constraint *ir.Constraint
 }
 
-// generateCreateTablesSQL generates CREATE TABLE statements with co-located indexes, policies, and RLS.
-// Policies that reference newly added helper functions are collected for deferred creation after
-// dependent functions/procedures have been created, while all other policies are emitted inline.
+// generateCreateTablesSQL generates CREATE TABLE statements with co-located indexes and RLS settings.
+// All policies are deferred for creation after all tables exist, since policies may reference
+// other tables in USING/WITH CHECK expressions (#373).
 // It returns deferred policies and foreign key constraints that should be applied after dependent objects exist.
 // Tables are assumed to be pre-sorted in topological order for dependency-aware creation.
 func generateCreateTablesSQL(

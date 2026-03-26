@@ -10,10 +10,18 @@ import (
 
 // generateCreatePoliciesSQL generates CREATE POLICY statements
 func generateCreatePoliciesSQL(policies []*ir.RLSPolicy, targetSchema string, collector *diffCollector) {
-	// Sort policies by name for consistent ordering
+	// Sort policies by (schema, table, name) for deterministic ordering across tables.
+	// Policy names are only unique per table, so sorting by name alone is insufficient
+	// when policies from multiple tables are collected together (#373).
 	sortedPolicies := make([]*ir.RLSPolicy, len(policies))
 	copy(sortedPolicies, policies)
 	sort.Slice(sortedPolicies, func(i, j int) bool {
+		if sortedPolicies[i].Schema != sortedPolicies[j].Schema {
+			return sortedPolicies[i].Schema < sortedPolicies[j].Schema
+		}
+		if sortedPolicies[i].Table != sortedPolicies[j].Table {
+			return sortedPolicies[i].Table < sortedPolicies[j].Table
+		}
 		return sortedPolicies[i].Name < sortedPolicies[j].Name
 	})
 
