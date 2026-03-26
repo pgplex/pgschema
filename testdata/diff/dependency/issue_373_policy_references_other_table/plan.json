@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.7.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS manager (\n    id SERIAL,\n    user_id uuid NOT NULL\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.manager"
+        },
+        {
+          "sql": "ALTER TABLE manager ENABLE ROW LEVEL SECURITY;",
+          "type": "table.rls",
+          "operation": "alter",
+          "path": "public.manager"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS project_manager (\n    id SERIAL,\n    project_id integer NOT NULL,\n    manager_id integer NOT NULL,\n    is_deleted boolean DEFAULT false NOT NULL\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.project_manager"
+        },
+        {
+          "sql": "CREATE POLICY employee_manager_select ON manager FOR SELECT TO PUBLIC USING (id IN ( SELECT pam.manager_id FROM project_manager pam WHERE ((pam.project_id IN ( SELECT unnest(ARRAY[1, 2, 3]) AS unnest)) AND (pam.is_deleted = false))));",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.manager.employee_manager_select"
+        }
+      ]
+    }
+  ]
+}

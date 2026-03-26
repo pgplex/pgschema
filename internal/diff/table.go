@@ -393,7 +393,6 @@ func generateCreateTablesSQL(
 	targetSchema string,
 	collector *diffCollector,
 	existingTables map[string]bool,
-	shouldDeferPolicy func(*ir.RLSPolicy) bool,
 ) ([]*ir.RLSPolicy, []*deferredConstraint) {
 	var deferredPolicies []*ir.RLSPolicy
 	var deferredConstraints []*deferredConstraint
@@ -474,21 +473,13 @@ func generateCreateTablesSQL(
 			generateRLSChangesSQL(rlsChanges, targetSchema, collector)
 		}
 
-		// Collect policies that can run immediately; defer only those that depend on new helper functions
+		// Defer all policies to after all tables are created.
+		// Policies may reference other tables in USING/WITH CHECK expressions (e.g., subqueries),
+		// and those tables may not exist yet at this point. (#373)
 		if len(table.Policies) > 0 {
-			var inlinePolicies []*ir.RLSPolicy
 			policyNames := sortedKeys(table.Policies)
 			for _, name := range policyNames {
-				policy := table.Policies[name]
-				if shouldDeferPolicy != nil && shouldDeferPolicy(policy) {
-					deferredPolicies = append(deferredPolicies, policy)
-				} else {
-					inlinePolicies = append(inlinePolicies, policy)
-				}
-			}
-
-			if len(inlinePolicies) > 0 {
-				generateCreatePoliciesSQL(inlinePolicies, targetSchema, collector)
+				deferredPolicies = append(deferredPolicies, table.Policies[name])
 			}
 		}
 

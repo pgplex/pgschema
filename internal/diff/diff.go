@@ -1528,13 +1528,6 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		key := fmt.Sprintf("%s.%s", tableDiff.Table.Schema, tableDiff.Table.Name)
 		existingTables[key] = true
 	}
-	var shouldDeferPolicy func(*ir.RLSPolicy) bool
-	if len(newFunctionLookup) > 0 {
-		shouldDeferPolicy = func(policy *ir.RLSPolicy) bool {
-			return policyReferencesNewFunction(policy, newFunctionLookup)
-		}
-	}
-
 	// Create default privileges BEFORE tables so auto-grants apply to new tables
 	generateCreateDefaultPrivilegesSQL(d.addedDefaultPrivileges, targetSchema, collector)
 
@@ -1552,7 +1545,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
-	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy)
+	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -1583,7 +1576,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
-	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy)
+	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables)
 
 	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
 	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
