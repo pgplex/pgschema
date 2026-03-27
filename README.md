@@ -101,6 +101,15 @@ Visit https://www.pgschema.com/installation
 > [!NOTE]
 > Windows is not supported. Please use WSL (Windows Subsystem for Linux) or a Linux VM.
 
+### Nix (flake)
+
+```bash
+nix build
+nix run
+```
+
+If the build fails with a `vendorHash` mismatch, update `nix/pgschema.nix` with the hash printed by Nix.
+
 ## Getting help
 
 - [Docs](https://www.pgschema.com)
