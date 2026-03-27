@@ -670,13 +670,17 @@ func normalizePrivilegeObjectName(objectName, schemaName string) string {
 
 	prefix := schemaName + "."
 
-	// Split args by comma, strip schema prefix from each type reference, rejoin
-	parts := strings.Split(args, ", ")
+	// Use splitTableColumns to correctly handle nested parentheses in type modifiers
+	// (e.g., numeric(10, 2)) — consistent with other normalization helpers in this file
+	parts := splitTableColumns(args)
 	changed := false
 	for i, part := range parts {
-		if strings.Contains(part, prefix) {
-			parts[i] = strings.ReplaceAll(part, prefix, "")
+		trimmed := strings.TrimSpace(part)
+		if strings.Contains(trimmed, prefix) {
+			parts[i] = strings.ReplaceAll(trimmed, prefix, "")
 			changed = true
+		} else {
+			parts[i] = trimmed
 		}
 	}
 

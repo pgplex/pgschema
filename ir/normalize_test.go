@@ -390,6 +390,85 @@ func TestNormalizePolicyExpression(t *testing.T) {
 	}
 }
 
+func TestNormalizePrivilegeObjectName(t *testing.T) {
+	tests := []struct {
+		name       string
+		objectName string
+		schemaName string
+		expected   string
+	}{
+		{
+			name:       "empty object name",
+			objectName: "",
+			schemaName: "public",
+			expected:   "",
+		},
+		{
+			name:       "empty schema name",
+			objectName: "f_test(p_items my_input[])",
+			schemaName: "",
+			expected:   "f_test(p_items my_input[])",
+		},
+		{
+			name:       "no args",
+			objectName: "f_test()",
+			schemaName: "public",
+			expected:   "f_test()",
+		},
+		{
+			name:       "no schema prefix in args",
+			objectName: "f_test(p_items my_input[])",
+			schemaName: "public",
+			expected:   "f_test(p_items my_input[])",
+		},
+		{
+			name:       "temp schema prefix in array type",
+			objectName: "f_test(p_items pgschema_tmp_20260326_161823_31f3dbda.my_input[])",
+			schemaName: "pgschema_tmp_20260326_161823_31f3dbda",
+			expected:   "f_test(p_items my_input[])",
+		},
+		{
+			name:       "public schema prefix",
+			objectName: "f_test(p_items public.my_input[])",
+			schemaName: "public",
+			expected:   "f_test(p_items my_input[])",
+		},
+		{
+			name:       "multiple args with schema prefix",
+			objectName: "f_test(a public.my_type, b integer, c public.other_type[])",
+			schemaName: "public",
+			expected:   "f_test(a my_type, b integer, c other_type[])",
+		},
+		{
+			name:       "no parentheses",
+			objectName: "my_table",
+			schemaName: "public",
+			expected:   "my_table",
+		},
+		{
+			name:       "builtin types unchanged",
+			objectName: "calculate_total(quantity integer, unit_price numeric)",
+			schemaName: "public",
+			expected:   "calculate_total(quantity integer, unit_price numeric)",
+		},
+		{
+			name:       "type with precision in parens",
+			objectName: "f_test(a public.my_type, b numeric(10, 2))",
+			schemaName: "public",
+			expected:   "f_test(a my_type, b numeric(10, 2))",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizePrivilegeObjectName(tt.objectName, tt.schemaName)
+			if result != tt.expected {
+				t.Errorf("normalizePrivilegeObjectName(%q, %q) = %q, want %q", tt.objectName, tt.schemaName, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNormalizeCheckClause(t *testing.T) {
 	tests := []struct {
 		name     string
