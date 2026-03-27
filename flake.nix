@@ -2,7 +2,7 @@
   description = "pgschema";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
   };
 
   outputs = { self, nixpkgs }:
@@ -19,7 +19,10 @@
       packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
-          pgschema = pkgs.callPackage ./nix/pgschema.nix {};
+          pgschema = pkgs.callPackage ./nix/pgschema.nix {
+            rev = self.shortRev or "dirty";
+            buildDate = self.lastModifiedDate or "unknown";
+          };
         in
         {
           inherit pgschema;

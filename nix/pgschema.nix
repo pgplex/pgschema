@@ -1,4 +1,4 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> {}, rev ? "unknown", buildDate ? "unknown" }:
 
 let
   lib = pkgs.lib;
@@ -9,12 +9,12 @@ pkgs.buildGoModule {
   inherit version;
 
   src = lib.cleanSource ../.;
-  # go_1_24 is not available in some nixpkgs revisions; use the closest newer toolchain.
-  go = pkgs.go_1_25;
+  # Prefer Go 1.24 when available; fall back to the closest newer toolchain.
+  go = if pkgs ? go_1_24 then pkgs.go_1_24 else pkgs.go_1_25;
   subPackages = [ "." ];
   proxyVendor = true;
 
-  # Replace with the real hash from `nix build` output.
+  # Update if `nix build` reports a vendorHash mismatch.
   vendorHash = "sha256-3nV7AEsWyEvIbxHetoEsA8PPXJ6ENvU/sz7Wn5aysss=";
 
   env = {
@@ -23,6 +23,10 @@ pkgs.buildGoModule {
   ldflags = [
     "-s"
     "-w"
+    "-X"
+    "github.com/pgplex/pgschema/cmd.GitCommit=${rev}"
+    "-X"
+    "github.com/pgplex/pgschema/cmd.BuildDate=${buildDate}"
   ];
 
   meta = with lib; {

@@ -108,6 +108,12 @@ nix build
 nix run
 ```
 
+To pass arguments, use `--`:
+
+```bash
+nix run . -- plan
+```
+
 If the build fails with a `vendorHash` mismatch, update `nix/pgschema.nix` with the hash printed by Nix.
 
 ## Getting help
