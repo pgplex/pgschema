@@ -819,28 +819,7 @@ func normalizeExpressionParentheses(expr string) string {
 		expr = fmt.Sprintf("(%s)", expr)
 	}
 
-	// Step 2: Remove unnecessary parentheses around function calls within the expression
-	// Specifically targets patterns like (function_name(...)) -> function_name(...)
-	// This pattern looks for:
-	// \( - opening parenthesis
-	// ([a-zA-Z_][a-zA-Z0-9_]*) - function name (captured)
-	// \( - opening parenthesis for function call
-	// ([^)]*) - function arguments (captured, non-greedy to avoid matching nested parens)
-	// \) - closing parenthesis for function call
-	// \) - closing parenthesis around the whole function
-	functionParensRegex := regexp.MustCompile(`\(([a-zA-Z_][a-zA-Z0-9_]*\([^)]*\))\)`)
-
-	// Replace (function(...)) with function(...)
-	// Keep applying until no more matches to handle nested cases
-	for {
-		original := expr
-		expr = functionParensRegex.ReplaceAllString(expr, "$1")
-		if expr == original {
-			break
-		}
-	}
-
-	// Step 3: Normalize redundant type casts in function arguments
+	// Step 2: Normalize redundant type casts in function arguments
 	// Pattern: 'text'::text -> 'text' (removing redundant text cast from literals)
 	// IMPORTANT: Do NOT match when followed by [] (array cast is semantically significant)
 	// e.g., '{nested,key}'::text[] must be preserved as-is

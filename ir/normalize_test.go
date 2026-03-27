@@ -321,6 +321,75 @@ func TestStripSchemaFromReturnType(t *testing.T) {
 	}
 }
 
+func TestNormalizeExpressionParentheses(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple expression gets wrapped",
+			input:    "tenant_id = 1",
+			expected: "(tenant_id = 1)",
+		},
+		{
+			name:     "already parenthesized",
+			input:    "(tenant_id = 1)",
+			expected: "(tenant_id = 1)",
+		},
+		{
+			name:     "nested function call preserved",
+			input:    "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+			expected: "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+		},
+		{
+			name:     "simple function call preserved",
+			input:    "(has_scope('admin'))",
+			expected: "(has_scope('admin'))",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeExpressionParentheses(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeExpressionParentheses(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizePolicyExpression(t *testing.T) {
+	tests := []struct {
+		name        string
+		expr        string
+		tableSchema string
+		expected    string
+	}{
+		{
+			name:        "nested function call in policy expression",
+			expr:        "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+			tableSchema: "public",
+			expected:    "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+		},
+		{
+			name:        "schema-qualified nested function call",
+			expr:        "(id IN ( SELECT unnest(public.get_user_assigned_projects()) AS unnest))",
+			tableSchema: "public",
+			expected:    "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizePolicyExpression(tt.expr, tt.tableSchema)
+			if result != tt.expected {
+				t.Errorf("normalizePolicyExpression(%q, %q) = %q, want %q", tt.expr, tt.tableSchema, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNormalizeCheckClause(t *testing.T) {
 	tests := []struct {
 		name     string
