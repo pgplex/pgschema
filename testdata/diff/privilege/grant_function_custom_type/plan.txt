@@ -1,0 +1,18 @@
+Plan: 2 to add.
+
+Summary by type:
+  privileges: 1 to add
+  revoked default privileges: 1 to add
+
+Privileges:
+  + app_user
+
+Revoked default privileges:
+  + create_entity(p_name text, p_kind entity_kind)
+
+DDL to be executed:
+--------------------------------------------------
+
+REVOKE EXECUTE ON FUNCTION create_entity(p_name text, p_kind entity_kind) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION create_entity(p_name text, p_kind entity_kind) TO app_user;
