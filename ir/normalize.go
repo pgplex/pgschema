@@ -57,6 +57,18 @@ func normalizeSchema(schema *Schema) {
 	for _, typeObj := range schema.Types {
 		normalizeType(typeObj)
 	}
+
+	// Normalize privileges - strip schema qualifiers from function/procedure signatures
+	for _, priv := range schema.Privileges {
+		if priv.ObjectType == PrivilegeObjectTypeFunction || priv.ObjectType == PrivilegeObjectTypeProcedure {
+			priv.ObjectName = normalizePrivilegeObjectName(priv.ObjectName, schema.Name)
+		}
+	}
+	for _, revoked := range schema.RevokedDefaultPrivileges {
+		if revoked.ObjectType == PrivilegeObjectTypeFunction || revoked.ObjectType == PrivilegeObjectTypeProcedure {
+			revoked.ObjectName = normalizePrivilegeObjectName(revoked.ObjectName, schema.Name)
+		}
+	}
 }
 
 // normalizeTable normalizes table-related objects
@@ -632,6 +644,47 @@ func stripSchemaPrefix(typeName, prefix string) string {
 		return base[len(prefix):] + arraySuffix
 	}
 	return typeName
+}
+
+// normalizePrivilegeObjectName strips schema qualifiers from argument types
+// in function/procedure signatures used in GRANT/REVOKE statements.
+// e.g., "f_test(p_items pgschema_tmp_20260326_161823_31f3dbda.my_input[])" → "f_test(p_items my_input[])"
+func normalizePrivilegeObjectName(objectName, schemaName string) string {
+	if objectName == "" || schemaName == "" {
+		return objectName
+	}
+
+	// Find the argument list in the signature: name(args)
+	parenOpen := strings.Index(objectName, "(")
+	parenClose := strings.LastIndex(objectName, ")")
+	if parenOpen < 0 || parenClose < 0 || parenClose <= parenOpen {
+		return objectName
+	}
+
+	funcName := objectName[:parenOpen]
+	args := objectName[parenOpen+1 : parenClose]
+
+	if args == "" {
+		return objectName
+	}
+
+	prefix := schemaName + "."
+
+	// Split args by comma, strip schema prefix from each type reference, rejoin
+	parts := strings.Split(args, ", ")
+	changed := false
+	for i, part := range parts {
+		if strings.Contains(part, prefix) {
+			parts[i] = strings.ReplaceAll(part, prefix, "")
+			changed = true
+		}
+	}
+
+	if !changed {
+		return objectName
+	}
+
+	return funcName + "(" + strings.Join(parts, ", ") + ")"
 }
 
 // normalizeTrigger normalizes trigger representation

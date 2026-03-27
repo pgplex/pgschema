@@ -1,0 +1,18 @@
+Plan: 2 to add.
+
+Summary by type:
+  privileges: 1 to add
+  revoked default privileges: 1 to add
+
+Privileges:
+  + appname_apiuser
+
+Revoked default privileges:
+  + f_test(p_items my_input[])
+
+DDL to be executed:
+--------------------------------------------------
+
+REVOKE EXECUTE ON FUNCTION f_test(p_items my_input[]) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION f_test(p_items my_input[]) TO appname_apiuser;
