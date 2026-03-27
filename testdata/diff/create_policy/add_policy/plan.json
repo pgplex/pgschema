@@ -21,7 +21,7 @@
           "path": "public.orders.orders_user_access"
         },
         {
-          "sql": "CREATE POLICY \"UserPolicy\" ON users TO PUBLIC USING (tenant_id = current_setting('app.current_tenant')::integer);",
+          "sql": "CREATE POLICY \"UserPolicy\" ON users TO PUBLIC USING (tenant_id = (current_setting('app.current_tenant'))::integer);",
           "type": "table.policy",
           "operation": "create",
           "path": "public.users.UserPolicy"
@@ -45,7 +45,7 @@
           "path": "public.users.select"
         },
         {
-          "sql": "CREATE POLICY user_tenant_isolation ON users FOR UPDATE TO PUBLIC USING (tenant_id = current_setting('app.current_tenant')::integer);",
+          "sql": "CREATE POLICY user_tenant_isolation ON users FOR UPDATE TO PUBLIC USING (tenant_id = (current_setting('app.current_tenant'))::integer);",
           "type": "table.policy",
           "operation": "create",
           "path": "public.users.user_tenant_isolation"

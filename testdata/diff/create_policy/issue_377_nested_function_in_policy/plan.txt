@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ projects
+    + description (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE projects ADD COLUMN description text;
