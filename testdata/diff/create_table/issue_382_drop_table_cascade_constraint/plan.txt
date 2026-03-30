@@ -1,0 +1,16 @@
+Plan: 1 to modify, 1 to drop.
+
+Summary by type:
+  tables: 1 to modify, 1 to drop
+
+Tables:
+  ~ a
+    - b_id (column)
+  - b
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP TABLE IF EXISTS b CASCADE;
+
+ALTER TABLE a DROP COLUMN b_id;

@@ -536,11 +536,17 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 }
 
 // generateModifyTablesSQL generates ALTER TABLE statements
-func generateModifyTablesSQL(diffs []*tableDiff, targetSchema string, collector *diffCollector) {
+func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, targetSchema string, collector *diffCollector) {
+	// Build a set of tables being dropped (CASCADE will remove their dependent FK constraints)
+	droppedTableSet := make(map[string]bool, len(droppedTables))
+	for _, t := range droppedTables {
+		droppedTableSet[t.Schema+"."+t.Name] = true
+	}
+
 	// Diffs are already sorted by the Diff operation
 	for _, diff := range diffs {
 		// Pass collector to generateAlterTableStatements to collect with proper context
-		diff.generateAlterTableStatements(targetSchema, collector)
+		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet)
 	}
 }
 
@@ -654,9 +660,20 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 // generateAlterTableStatements generates SQL statements for table modifications
 // Note: DroppedTriggers are skipped here because they are already processed in the DROP phase
 // (see generateDropTriggersFromModifiedTables in trigger.go)
-func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector) {
+// droppedTableSet contains "schema.table" keys for tables being dropped with CASCADE;
+// FK constraints referencing these tables are skipped since CASCADE already removes them.
+func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool) {
 	// Drop constraints first (before dropping columns) - already sorted by the Diff operation
 	for _, constraint := range td.DroppedConstraints {
+		// Skip FK constraints whose referenced table is being dropped with CASCADE,
+		// since the CASCADE will already remove the constraint. (#382)
+		if constraint.Type == ir.ConstraintTypeForeignKey && constraint.ReferencedTable != "" {
+			refKey := constraint.ReferencedSchema + "." + constraint.ReferencedTable
+			if droppedTableSet[refKey] {
+				continue
+			}
+		}
+
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 		sql := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", tableName, ir.QuoteIdentifier(constraint.Name))
 

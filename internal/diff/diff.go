@@ -1644,7 +1644,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	generateModifySequencesSQL(d.modifiedSequences, targetSchema, collector)
 
 	// Modify tables
-	generateModifyTablesSQL(d.modifiedTables, targetSchema, collector)
+	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, targetSchema, collector)
 
 	// Find views that depend on views being recreated (issue #268, #308)
 	// Handles both materialized views and regular views with RequiresRecreate

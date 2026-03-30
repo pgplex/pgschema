@@ -1,0 +1,1 @@
+CREATE TABLE a (id bigint PRIMARY KEY);
