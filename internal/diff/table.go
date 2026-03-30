@@ -668,7 +668,11 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		// Skip FK constraints whose referenced table is being dropped with CASCADE,
 		// since the CASCADE will already remove the constraint. (#382)
 		if constraint.Type == ir.ConstraintTypeForeignKey && constraint.ReferencedTable != "" {
-			refKey := constraint.ReferencedSchema + "." + constraint.ReferencedTable
+			refSchema := constraint.ReferencedSchema
+			if refSchema == "" {
+				refSchema = td.Table.Schema
+			}
+			refKey := refSchema + "." + constraint.ReferencedTable
 			if droppedTableSet[refKey] {
 				continue
 			}
