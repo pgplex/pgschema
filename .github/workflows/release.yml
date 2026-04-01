@@ -83,7 +83,7 @@ jobs:
 
       - name: Build binary
         run: |
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build \
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build \
             -ldflags "-X github.com/pgplex/pgschema/cmd.GitCommit=${{ steps.build_info.outputs.GIT_COMMIT }} -X 'github.com/pgplex/pgschema/cmd.BuildDate=${{ steps.build_info.outputs.BUILD_DATE }}'" \
             -o pgschema-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }} .
 
