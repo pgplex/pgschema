@@ -545,8 +545,14 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, targ
 
 	// Diffs are already sorted by the Diff operation
 	for _, diff := range diffs {
+		// Build a set of columns being dropped (DROP COLUMN will remove dependent constraints)
+		droppedColumnSet := make(map[string]bool, len(diff.DroppedColumns))
+		for _, column := range diff.DroppedColumns {
+			droppedColumnSet[column.Name] = true
+		}
+
 		// Pass collector to generateAlterTableStatements to collect with proper context
-		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet)
+		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet)
 	}
 }
 
@@ -657,14 +663,38 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 	return true
 }
 
+// constraintDroppedWithColumns reports whether dropping any column in droppedColumnSet
+// will implicitly remove the constraint. PostgreSQL drops dependent constraints as part
+// of ALTER TABLE ... DROP COLUMN, so emitting an explicit DROP CONSTRAINT would be redundant.
+func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet map[string]bool) bool {
+	if constraint == nil || len(droppedColumnSet) == 0 {
+		return false
+	}
+
+	for _, column := range constraint.Columns {
+		if droppedColumnSet[column.Name] {
+			return true
+		}
+	}
+
+	return false
+}
+
 // generateAlterTableStatements generates SQL statements for table modifications
 // Note: DroppedTriggers are skipped here because they are already processed in the DROP phase
 // (see generateDropTriggersFromModifiedTables in trigger.go)
 // droppedTableSet contains "schema.table" keys for tables being dropped with CASCADE;
 // FK constraints referencing these tables are skipped since CASCADE already removes them.
-func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool) {
+// droppedColumnSet contains column names being dropped from this table; constraints that
+// depend on those columns are skipped because DROP COLUMN already removes them. (#384)
+func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool) {
 	// Drop constraints first (before dropping columns) - already sorted by the Diff operation
 	for _, constraint := range td.DroppedConstraints {
+		// Skip constraints already removed by a dropped column. (#384)
+		if constraintDroppedWithColumns(constraint, droppedColumnSet) {
+			continue
+		}
+
 		// Skip FK constraints whose referenced table is being dropped with CASCADE,
 		// since the CASCADE will already remove the constraint. (#382)
 		if constraint.Type == ir.ConstraintTypeForeignKey && constraint.ReferencedTable != "" {
@@ -944,16 +974,18 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 		constraint := ConstraintDiff.New
 
-		// Step 1: Drop the old constraint
-		dropSQL := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", tableName, ir.QuoteIdentifier(ConstraintDiff.Old.Name))
-		dropContext := &diffContext{
-			Type:                DiffTypeTableConstraint,
-			Operation:           DiffOperationDrop,
-			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, ConstraintDiff.Old.Name),
-			Source:              ConstraintDiff.Old,
-			CanRunInTransaction: true,
+		// Step 1: Drop the old constraint unless a dropped column already removes it. (#384)
+		if !constraintDroppedWithColumns(ConstraintDiff.Old, droppedColumnSet) {
+			dropSQL := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", tableName, ir.QuoteIdentifier(ConstraintDiff.Old.Name))
+			dropContext := &diffContext{
+				Type:                DiffTypeTableConstraint,
+				Operation:           DiffOperationDrop,
+				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, ConstraintDiff.Old.Name),
+				Source:              ConstraintDiff.Old,
+				CanRunInTransaction: true,
+			}
+			collector.collect(dropContext, dropSQL)
 		}
-		collector.collect(dropContext, dropSQL)
 
 		// Step 2: Add new constraint
 		var addSQL string
