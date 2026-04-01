@@ -88,7 +88,7 @@ jobs:
             -o pgschema-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }} .
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pgschema-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}
           path: pgschema-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}
@@ -165,13 +165,13 @@ jobs:
         run: nfpm package --packager rpm --target ./dist/
 
       - name: Upload DEB package
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pgschema-deb-${{ matrix.arch }}
           path: ./dist/*.deb
 
       - name: Upload RPM package
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pgschema-rpm-${{ matrix.arch }}
           path: ./dist/*.rpm
