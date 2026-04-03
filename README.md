@@ -6,11 +6,11 @@
 ![light-banner](https://raw.githubusercontent.com/pgplex/pgschema/main/docs/logo/light.png#gh-light-mode-only)
 ![dark-banner](https://raw.githubusercontent.com/pgplex/pgschema/main/docs/logo/dark.png#gh-dark-mode-only)
 
-<a href="https://www.star-history.com/#pgplex/pgschema&Date">
+<a href="https://www.star-history.com/?repos=pgplex%2Fpgschema&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=pgplex/pgschema&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=pgplex/pgschema&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pgplex/pgschema&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=pgplex/pgschema&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=pgplex/pgschema&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=pgplex/pgschema&type=date&legend=top-left" />
  </picture>
 </a>
 
