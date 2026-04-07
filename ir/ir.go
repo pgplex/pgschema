@@ -251,11 +251,12 @@ type Index struct {
 	Type         IndexType      `json:"type"`
 	Method       string         `json:"method"` // btree, hash, gin, gist, etc.
 	Columns      []*IndexColumn `json:"columns"`
-	IsPartial        bool   `json:"is_partial"`                   // has a WHERE clause
-	IsExpression     bool   `json:"is_expression"`                // functional/expression index
-	Where            string `json:"where,omitempty"`              // partial index condition
-	NullsNotDistinct bool   `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
-	Comment          string `json:"comment,omitempty"`
+	IncludeColumns   []string `json:"include_columns,omitempty"`     // INCLUDE columns (non-key)
+	IsPartial        bool     `json:"is_partial"`                   // has a WHERE clause
+	IsExpression     bool     `json:"is_expression"`                // functional/expression index
+	Where            string   `json:"where,omitempty"`              // partial index condition
+	NullsNotDistinct bool     `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
+	Comment          string   `json:"comment,omitempty"`
 }
 
 // IndexColumn represents a column within an index

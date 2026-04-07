@@ -121,6 +121,18 @@ func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema st
 	}
 	builder.WriteString(")")
 
+	// INCLUDE columns (non-key columns stored in the index)
+	if len(index.IncludeColumns) > 0 {
+		builder.WriteString(" INCLUDE (")
+		for i, col := range index.IncludeColumns {
+			if i > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(col)
+		}
+		builder.WriteString(")")
+	}
+
 	// NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
 	if index.NullsNotDistinct && index.Type == ir.IndexTypeUnique {
 		builder.WriteString(" NULLS NOT DISTINCT")

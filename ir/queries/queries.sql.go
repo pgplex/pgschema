@@ -1692,10 +1692,11 @@ WITH index_base AS (
             ELSE false
         END as has_expressions,
         COALESCE(d.description, '') AS index_comment,
+        idx.indnkeyatts as num_key_columns,
         idx.indnatts as num_columns,
         ARRAY(
             SELECT pg_get_indexdef(idx.indexrelid, k::int, true)
-            FROM generate_series(1, idx.indnatts) k
+            FROM generate_series(1, idx.indnkeyatts) k
         ) as column_definitions,
         ARRAY(
             SELECT
@@ -1703,16 +1704,20 @@ WITH index_base AS (
                     WHEN (idx.indoption[k-1] & 1) = 1 THEN 'DESC'
                     ELSE 'ASC'
                 END
-            FROM generate_series(1, idx.indnatts) k
+            FROM generate_series(1, idx.indnkeyatts) k
         ) as column_directions,
         ARRAY(
             SELECT CASE
                 WHEN opc.opcdefault THEN ''  -- Omit default operator classes
                 ELSE COALESCE(opc.opcname, '')
             END
-            FROM generate_series(1, idx.indnatts) k
+            FROM generate_series(1, idx.indnkeyatts) k
             LEFT JOIN pg_opclass opc ON opc.oid = idx.indclass[k-1]
-        ) as column_opclasses
+        ) as column_opclasses,
+        ARRAY(
+            SELECT pg_get_indexdef(idx.indexrelid, k::int, true)
+            FROM generate_series(idx.indnkeyatts + 1, idx.indnatts) k
+        ) as include_columns
     FROM pg_index idx
     JOIN pg_class i ON i.oid = idx.indexrelid
     JOIN pg_class t ON t.oid = idx.indrelid
@@ -1744,10 +1749,12 @@ SELECT
     sp.partial_predicate,
     ib.has_expressions,
     ib.index_comment,
+    ib.num_key_columns,
     ib.num_columns,
     ib.column_definitions,
     ib.column_directions,
-    ib.column_opclasses
+    ib.column_opclasses,
+    ib.include_columns
 FROM index_base ib
 CROSS JOIN LATERAL (
     SELECT
@@ -1772,10 +1779,12 @@ type GetIndexesForSchemaRow struct {
 	PartialPredicate  sql.NullString `db:"partial_predicate" json:"partial_predicate"`
 	HasExpressions    sql.NullBool   `db:"has_expressions" json:"has_expressions"`
 	IndexComment      sql.NullString `db:"index_comment" json:"index_comment"`
+	NumKeyColumns     int16          `db:"num_key_columns" json:"num_key_columns"`
 	NumColumns        int16          `db:"num_columns" json:"num_columns"`
 	ColumnDefinitions []string       `db:"column_definitions" json:"column_definitions"`
 	ColumnDirections  []string       `db:"column_directions" json:"column_directions"`
 	ColumnOpclasses   []string       `db:"column_opclasses" json:"column_opclasses"`
+	IncludeColumns    []string       `db:"include_columns" json:"include_columns"`
 }
 
 // GetIndexesForSchema retrieves all indexes for a specific schema
@@ -1803,10 +1812,12 @@ func (q *Queries) GetIndexesForSchema(ctx context.Context, dollar_1 sql.NullStri
 			&i.PartialPredicate,
 			&i.HasExpressions,
 			&i.IndexComment,
+			&i.NumKeyColumns,
 			&i.NumColumns,
 			pq.Array(&i.ColumnDefinitions),
 			pq.Array(&i.ColumnDirections),
 			pq.Array(&i.ColumnOpclasses),
+			pq.Array(&i.IncludeColumns),
 		); err != nil {
 			return nil, err
 		}

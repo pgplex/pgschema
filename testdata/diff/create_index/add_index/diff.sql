@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email varchar_pattern_ops);
 
+CREATE INDEX IF NOT EXISTS idx_users_email_include ON users (email) INCLUDE (name);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email) NULLS NOT DISTINCT;
 
 CREATE INDEX IF NOT EXISTS idx_users_id ON users (id);

@@ -21,6 +21,12 @@
           "path": "public.users.idx_users_email"
         },
         {
+          "sql": "CREATE INDEX IF NOT EXISTS idx_users_email_include ON users (email) INCLUDE (name);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.users.idx_users_email_include"
+        },
+        {
           "sql": "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email) NULLS NOT DISTINCT;",
           "type": "table.index",
           "operation": "create",

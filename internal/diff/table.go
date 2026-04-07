@@ -1511,6 +1511,16 @@ func indexesStructurallyEqual(oldIndex, newIndex *ir.Index) bool {
 		}
 	}
 
+	// Compare INCLUDE columns
+	if len(oldIndex.IncludeColumns) != len(newIndex.IncludeColumns) {
+		return false
+	}
+	for i, oldCol := range oldIndex.IncludeColumns {
+		if oldCol != newIndex.IncludeColumns[i] {
+			return false
+		}
+	}
+
 	return true
 }
 

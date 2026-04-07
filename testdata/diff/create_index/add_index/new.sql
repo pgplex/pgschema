@@ -12,3 +12,5 @@ CREATE INDEX idx_users_id ON public.users (id);
 CREATE INDEX "public.idx_users" ON public.users (email, name);
 -- Test NULLS NOT DISTINCT (issue #355)
 CREATE UNIQUE INDEX idx_users_email_unique ON public.users (email) NULLS NOT DISTINCT;
+-- Test INCLUDE columns (issue #385)
+CREATE INDEX idx_users_email_include ON public.users (email) INCLUDE (name);

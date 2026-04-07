@@ -436,10 +436,11 @@ WITH index_base AS (
             ELSE false
         END as has_expressions,
         COALESCE(d.description, '') AS index_comment,
+        idx.indnkeyatts as num_key_columns,
         idx.indnatts as num_columns,
         ARRAY(
             SELECT pg_get_indexdef(idx.indexrelid, k::int, true)
-            FROM generate_series(1, idx.indnatts) k
+            FROM generate_series(1, idx.indnkeyatts) k
         ) as column_definitions,
         ARRAY(
             SELECT
@@ -447,16 +448,20 @@ WITH index_base AS (
                     WHEN (idx.indoption[k-1] & 1) = 1 THEN 'DESC'
                     ELSE 'ASC'
                 END
-            FROM generate_series(1, idx.indnatts) k
+            FROM generate_series(1, idx.indnkeyatts) k
         ) as column_directions,
         ARRAY(
             SELECT CASE
                 WHEN opc.opcdefault THEN ''  -- Omit default operator classes
                 ELSE COALESCE(opc.opcname, '')
             END
-            FROM generate_series(1, idx.indnatts) k
+            FROM generate_series(1, idx.indnkeyatts) k
             LEFT JOIN pg_opclass opc ON opc.oid = idx.indclass[k-1]
-        ) as column_opclasses
+        ) as column_opclasses,
+        ARRAY(
+            SELECT pg_get_indexdef(idx.indexrelid, k::int, true)
+            FROM generate_series(idx.indnkeyatts + 1, idx.indnatts) k
+        ) as include_columns
     FROM pg_index idx
     JOIN pg_class i ON i.oid = idx.indexrelid
     JOIN pg_class t ON t.oid = idx.indrelid
@@ -488,10 +493,12 @@ SELECT
     sp.partial_predicate,
     ib.has_expressions,
     ib.index_comment,
+    ib.num_key_columns,
     ib.num_columns,
     ib.column_definitions,
     ib.column_directions,
-    ib.column_opclasses
+    ib.column_opclasses,
+    ib.include_columns
 FROM index_base ib
 CROSS JOIN LATERAL (
     SELECT

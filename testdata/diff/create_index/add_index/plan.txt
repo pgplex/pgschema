@@ -6,6 +6,7 @@ Summary by type:
 Tables:
   + users
     + idx_users_email (index)
+    + idx_users_email_include (index)
     + idx_users_email_unique (index)
     + idx_users_id (index)
     + idx_users_name (index)
@@ -22,6 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email varchar_pattern_ops);
+
+CREATE INDEX IF NOT EXISTS idx_users_email_include ON users (email) INCLUDE (name);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email) NULLS NOT DISTINCT;
 
