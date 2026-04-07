@@ -338,7 +338,8 @@ SELECT
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
-    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
+    c.connoinherit AS no_inherit
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -917,7 +918,8 @@ SELECT
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
-    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
+    c.connoinherit AS no_inherit
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid

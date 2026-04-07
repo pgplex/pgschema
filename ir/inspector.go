@@ -453,7 +453,11 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 		}
 
 		if columnName == "" || columnName == "<nil>" {
-			continue // Skip constraints without columns
+			// CHECK and EXCLUDE constraints may have no columns (e.g., CHECK (FALSE))
+			// Only skip non-CHECK/EXCLUDE constraints without columns
+			if constraintType != "CHECK" && constraintType != "EXCLUDE" {
+				continue
+			}
 		}
 
 		key := constraintKey{
@@ -487,6 +491,7 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				Name:       constraintName,
 				Type:       cType,
 				Columns:    []*ConstraintColumn{},
+				NoInherit:  constraint.NoInherit,
 				IsTemporal: constraint.IsPeriod, // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
 			}
 
@@ -537,52 +542,55 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 			constraintGroups[key] = c
 		}
 
-		// Get column position in constraint
-		position := i.getConstraintColumnPosition(ctx, schemaName, constraintName, columnName)
+		// Add column to constraint (skip for column-less constraints like CHECK (FALSE))
+		if columnName != "" && columnName != "<nil>" {
+			// Get column position in constraint
+			position := i.getConstraintColumnPosition(ctx, schemaName, constraintName, columnName)
 
-		// Check if column already exists in constraint to avoid duplicates
-		columnExists := false
-		for _, existingCol := range c.Columns {
-			if existingCol.Name == columnName {
-				columnExists = true
-				break
-			}
-		}
-
-		// Add column to constraint only if it doesn't exist
-		if !columnExists {
-			constraintCol := &ConstraintColumn{
-				Name:     columnName,
-				Position: position,
-			}
-			c.Columns = append(c.Columns, constraintCol)
-		}
-
-		// Handle foreign key referenced columns
-		if c.Type == ConstraintTypeForeignKey {
-			if refColumnName := i.safeInterfaceToString(constraint.ForeignColumnName); refColumnName != "" && refColumnName != "<nil>" {
-				// Check if referenced column already exists to avoid duplicates
-				refColumnExists := false
-				for _, existingRefCol := range c.ReferencedColumns {
-					if existingRefCol.Name == refColumnName {
-						refColumnExists = true
-						break
-					}
+			// Check if column already exists in constraint to avoid duplicates
+			columnExists := false
+			for _, existingCol := range c.Columns {
+				if existingCol.Name == columnName {
+					columnExists = true
+					break
 				}
+			}
 
-				// Add referenced column only if it doesn't exist
-				if !refColumnExists {
-					// Use the local column's constraint position for the referenced column.
-					// The local and referenced columns are paired together in the FK definition,
-					// so they must have the same position to maintain correct ordering.
-					// Note: ForeignOrdinalPosition from the query is fa.attnum (column position
-					// in the foreign table's definition), which is wrong - we need the constraint
-					// array position, which is the same as the local column's position.
-					refConstraintCol := &ConstraintColumn{
-						Name:     refColumnName,
-						Position: position, // Use local column's constraint position
+			// Add column to constraint only if it doesn't exist
+			if !columnExists {
+				constraintCol := &ConstraintColumn{
+					Name:     columnName,
+					Position: position,
+				}
+				c.Columns = append(c.Columns, constraintCol)
+			}
+
+			// Handle foreign key referenced columns
+			if c.Type == ConstraintTypeForeignKey {
+				if refColumnName := i.safeInterfaceToString(constraint.ForeignColumnName); refColumnName != "" && refColumnName != "<nil>" {
+					// Check if referenced column already exists to avoid duplicates
+					refColumnExists := false
+					for _, existingRefCol := range c.ReferencedColumns {
+						if existingRefCol.Name == refColumnName {
+							refColumnExists = true
+							break
+						}
 					}
-					c.ReferencedColumns = append(c.ReferencedColumns, refConstraintCol)
+
+					// Add referenced column only if it doesn't exist
+					if !refColumnExists {
+						// Use the local column's constraint position for the referenced column.
+						// The local and referenced columns are paired together in the FK definition,
+						// so they must have the same position to maintain correct ordering.
+						// Note: ForeignOrdinalPosition from the query is fa.attnum (column position
+						// in the foreign table's definition), which is wrong - we need the constraint
+						// array position, which is the same as the local column's position.
+						refConstraintCol := &ConstraintColumn{
+							Name:     refColumnName,
+							Position: position, // Use local column's constraint position
+						}
+						c.ReferencedColumns = append(c.ReferencedColumns, refConstraintCol)
+					}
 				}
 			}
 		}

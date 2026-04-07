@@ -1158,6 +1158,8 @@ func normalizeConstraint(constraint *Constraint) {
 	// Only normalize CHECK and EXCLUDE constraints - other constraint types are already consistent
 	if constraint.Type == ConstraintTypeCheck && constraint.CheckClause != "" {
 		constraint.CheckClause = normalizeCheckClause(constraint.CheckClause)
+		// pg_get_constraintdef may include NO INHERIT suffix — strip it and use the NoInherit field instead
+		// (NoInherit is already set from connoinherit in the query)
 	}
 	if constraint.Type == ConstraintTypeExclusion && constraint.ExclusionDefinition != "" {
 		constraint.ExclusionDefinition = normalizeExclusionDefinition(constraint.ExclusionDefinition)
@@ -1179,10 +1181,14 @@ func normalizeExclusionDefinition(definition string) string {
 // now come from the same PostgreSQL version via pg_get_constraintdef(), they produce identical
 // output. We only need basic cleanup for PostgreSQL internal representations.
 func normalizeCheckClause(checkClause string) string {
-	// Strip " NOT VALID" suffix if present (mimicking pg_dump behavior)
-	// PostgreSQL's pg_get_constraintdef may include NOT VALID at the end,
-	// but we want to control its placement via the IsValid field
+	// Strip " NOT VALID" and " NO INHERIT" suffixes if present
+	// PostgreSQL's pg_get_constraintdef may include these at the end,
+	// but we control their placement via the IsValid and NoInherit fields
 	clause := strings.TrimSpace(checkClause)
+	if strings.HasSuffix(clause, " NO INHERIT") {
+		clause = strings.TrimSuffix(clause, " NO INHERIT")
+		clause = strings.TrimSpace(clause)
+	}
 	if strings.HasSuffix(clause, " NOT VALID") {
 		clause = strings.TrimSuffix(clause, " NOT VALID")
 		clause = strings.TrimSpace(clause)

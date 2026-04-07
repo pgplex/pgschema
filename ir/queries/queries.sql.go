@@ -797,7 +797,8 @@ SELECT
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
-    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
+    c.connoinherit AS no_inherit
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -830,6 +831,7 @@ type GetConstraintsRow struct {
 	InitiallyDeferred      bool           `db:"initially_deferred" json:"initially_deferred"`
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
 	IsPeriod               bool           `db:"is_period" json:"is_period"`
+	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 }
 
 // GetConstraints retrieves all table constraints
@@ -861,6 +863,7 @@ func (q *Queries) GetConstraints(ctx context.Context) ([]GetConstraintsRow, erro
 			&i.InitiallyDeferred,
 			&i.IsValid,
 			&i.IsPeriod,
+			&i.NoInherit,
 		); err != nil {
 			return nil, err
 		}
@@ -915,7 +918,8 @@ SELECT
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
-    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
+    c.connoinherit AS no_inherit
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -946,6 +950,7 @@ type GetConstraintsForSchemaRow struct {
 	InitiallyDeferred      bool           `db:"initially_deferred" json:"initially_deferred"`
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
 	IsPeriod               bool           `db:"is_period" json:"is_period"`
+	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 }
 
 // GetConstraintsForSchema retrieves all table constraints for a specific schema
@@ -977,6 +982,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.InitiallyDeferred,
 			&i.IsValid,
 			&i.IsPeriod,
+			&i.NoInherit,
 		); err != nil {
 			return nil, err
 		}

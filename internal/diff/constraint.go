@@ -72,10 +72,13 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 		}
 		return stmt
 	case ir.ConstraintTypeCheck:
-		// Generate CHECK constraint with proper NOT VALID placement
-		// The CheckClause is normalized to exclude NOT VALID (stripped in normalize.go)
-		// We append NOT VALID based on IsValid field, mimicking pg_dump behavior
+		// Generate CHECK constraint with proper NOT VALID / NO INHERIT placement
+		// The CheckClause is normalized to exclude NOT VALID and NO INHERIT (stripped in normalize.go)
+		// We append them based on IsValid/NoInherit fields, mimicking pg_dump behavior
 		result := fmt.Sprintf("CONSTRAINT %s %s", ir.QuoteIdentifier(constraint.Name), constraint.CheckClause)
+		if constraint.NoInherit {
+			result += " NO INHERIT"
+		}
 		if !constraint.IsValid {
 			result += " NOT VALID"
 		}
@@ -148,6 +151,9 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 		return false
 	}
 	if old.CheckClause != new.CheckClause {
+		return false
+	}
+	if old.NoInherit != new.NoInherit {
 		return false
 	}
 	if old.ExclusionDefinition != new.ExclusionDefinition {

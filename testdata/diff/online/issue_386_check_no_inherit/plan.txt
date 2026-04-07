@@ -1,0 +1,16 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ parent_base
+    + no_direct_insert (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE parent_base
+ADD CONSTRAINT no_direct_insert CHECK (false) NO INHERIT NOT VALID;
+
+ALTER TABLE parent_base VALIDATE CONSTRAINT no_direct_insert;

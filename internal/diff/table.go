@@ -892,8 +892,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			// Ensure CHECK clause has outer parentheses around the full expression
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 			clause := ensureCheckClauseParens(constraint.CheckClause)
-			canonicalSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s;",
-				tableName, ir.QuoteIdentifier(constraint.Name), clause)
+			suffix := ""
+			if constraint.NoInherit {
+				suffix += " NO INHERIT"
+			}
+			canonicalSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), clause, suffix)
 
 			context := &diffContext{
 				Type:                DiffTypeTableConstraint,
@@ -1005,8 +1009,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 		case ir.ConstraintTypeCheck:
 			// Add CHECK constraint with ensured outer parentheses
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s;",
-				tableName, ir.QuoteIdentifier(constraint.Name), ensureCheckClauseParens(constraint.CheckClause))
+			suffix := ""
+			if constraint.NoInherit {
+				suffix += " NO INHERIT"
+			}
+			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), ensureCheckClauseParens(constraint.CheckClause), suffix)
 
 		case ir.ConstraintTypeForeignKey:
 			// Sort columns by position

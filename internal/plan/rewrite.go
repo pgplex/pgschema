@@ -210,8 +210,12 @@ func generateIndexChangeRewrite(indexDiff *diff.IndexDiff) []RewriteStep {
 func generateConstraintRewrite(constraint *ir.Constraint) []RewriteStep {
 	tableName := getTableNameWithSchema(constraint.Schema, constraint.Table)
 
-	notValidSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s NOT VALID;",
-		tableName, ir.QuoteIdentifier(constraint.Name), constraint.CheckClause)
+	noInheritSuffix := ""
+	if constraint.NoInherit {
+		noInheritSuffix = " NO INHERIT"
+	}
+	notValidSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s%s NOT VALID;",
+		tableName, ir.QuoteIdentifier(constraint.Name), constraint.CheckClause, noInheritSuffix)
 	validateSQL := fmt.Sprintf("ALTER TABLE %s VALIDATE CONSTRAINT %s;",
 		tableName, ir.QuoteIdentifier(constraint.Name))
 
