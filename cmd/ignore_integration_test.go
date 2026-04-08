@@ -1321,7 +1321,7 @@ GRANT SELECT ON users TO app_user;
 		}
 	})
 
-	// Clean up roles from embedded PG
+	// Clean up roles from sharedEmbeddedPG (plan subtest may create roles there)
 	cleanupStatements := []string{
 		"REASSIGN OWNED BY app_user TO testuser",
 		"DROP OWNED BY app_user",

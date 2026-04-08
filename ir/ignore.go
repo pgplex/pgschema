@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// stripFunctionArgs removes the argument list from a function/procedure signature.
+// e.g. "dblink_connect_u(text, text)" -> "dblink_connect_u"
+func stripFunctionArgs(name string) string {
+	if idx := strings.Index(name, "("); idx != -1 {
+		return name[:idx]
+	}
+	return name
+}
+
 // IgnoreConfig represents the configuration for ignoring database objects
 type IgnoreConfig struct {
 	Tables            []string `toml:"tables,omitempty"`
@@ -73,13 +82,14 @@ func (c *IgnoreConfig) ShouldIgnorePrivilegeByObjectType(objectName string, obje
 		return false
 	}
 	switch objectType {
-	case "TABLE", "VIEW":
-		// Views use table-level privileges in PostgreSQL
-		return c.shouldIgnore(objectName, c.Tables) || c.shouldIgnore(objectName, c.Views)
+	case "TABLE":
+		return c.shouldIgnore(objectName, c.Tables)
+	case "VIEW":
+		return c.shouldIgnore(objectName, c.Views)
 	case "FUNCTION":
-		return c.shouldIgnore(objectName, c.Functions)
+		return c.shouldIgnore(stripFunctionArgs(objectName), c.Functions)
 	case "PROCEDURE":
-		return c.shouldIgnore(objectName, c.Procedures)
+		return c.shouldIgnore(stripFunctionArgs(objectName), c.Procedures)
 	case "SEQUENCE":
 		return c.shouldIgnore(objectName, c.Sequences)
 	case "TYPE":

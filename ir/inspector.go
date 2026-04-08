@@ -2480,8 +2480,8 @@ func (i *Inspector) buildColumnPrivileges(ctx context.Context, schema *IR, targe
 			continue
 		}
 
-		// Skip column privileges for ignored tables
-		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreTable(tableName) {
+		// Skip column privileges for ignored tables/views
+		if i.ignoreConfig != nil && (i.ignoreConfig.ShouldIgnoreTable(tableName) || i.ignoreConfig.ShouldIgnoreView(tableName)) {
 			continue
 		}
 
