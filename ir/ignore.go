@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// stripFunctionArgs removes the argument list from a function/procedure signature.
+// e.g. "dblink_connect_u(text, text)" -> "dblink_connect_u"
+func stripFunctionArgs(name string) string {
+	if idx := strings.Index(name, "("); idx != -1 {
+		return name[:idx]
+	}
+	return name
+}
+
 // IgnoreConfig represents the configuration for ignoring database objects
 type IgnoreConfig struct {
 	Tables            []string `toml:"tables,omitempty"`
@@ -63,6 +72,30 @@ func (c *IgnoreConfig) ShouldIgnoreSequence(sequenceName string) bool {
 		return false
 	}
 	return c.shouldIgnore(sequenceName, c.Sequences)
+}
+
+// ShouldIgnorePrivilegeByObjectType checks if a privilege should be ignored based on the object name
+// and its type. When an object (function, table, etc.) is ignored via its section pattern,
+// privileges on that object should also be ignored.
+func (c *IgnoreConfig) ShouldIgnorePrivilegeByObjectType(objectName string, objectType string) bool {
+	if c == nil {
+		return false
+	}
+	switch objectType {
+	case "TABLE":
+		return c.shouldIgnore(objectName, c.Tables)
+	case "VIEW":
+		return c.shouldIgnore(objectName, c.Views)
+	case "FUNCTION":
+		return c.shouldIgnore(stripFunctionArgs(objectName), c.Functions)
+	case "PROCEDURE":
+		return c.shouldIgnore(stripFunctionArgs(objectName), c.Procedures)
+	case "SEQUENCE":
+		return c.shouldIgnore(objectName, c.Sequences)
+	case "TYPE":
+		return c.shouldIgnore(objectName, c.Types)
+	}
+	return false
 }
 
 // ShouldIgnorePrivilege checks if a privilege should be ignored based on the grantee role name

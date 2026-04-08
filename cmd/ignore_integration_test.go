@@ -1166,6 +1166,174 @@ func cleanupSharedEmbeddedPG(t *testing.T) {
 	}
 }
 
+// TestIgnorePrivilegesForIgnoredObjects tests that privileges on ignored objects
+// (functions, tables, etc.) are also excluded from dump/plan output.
+// Reproduces https://github.com/pgplex/pgschema/issues/392
+func TestIgnorePrivilegesForIgnoredObjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	// Create schema with functions and revoked PUBLIC privileges (simulates extension-installed functions)
+	setupSQL := `
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+-- Simulate extension-installed functions with revoked PUBLIC EXECUTE
+CREATE OR REPLACE FUNCTION dblink_connect_u(text) RETURNS text AS $$
+BEGIN RETURN 'stub'; END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION dblink_connect_u(text, text) RETURNS text AS $$
+BEGIN RETURN 'stub'; END;
+$$ LANGUAGE plpgsql;
+
+-- Revoke default PUBLIC EXECUTE (simulates extension behavior)
+REVOKE EXECUTE ON FUNCTION dblink_connect_u(text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION dblink_connect_u(text, text) FROM PUBLIC;
+
+-- Also test table privileges on ignored tables
+CREATE TABLE temp_data (
+    id SERIAL PRIMARY KEY,
+    value TEXT
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+        CREATE ROLE app_user;
+    END IF;
+END $$;
+
+GRANT SELECT ON temp_data TO app_user;
+GRANT SELECT ON users TO app_user;
+`
+	_, err := conn.Exec(setupSQL)
+	if err != nil {
+		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Create .pgschemaignore that ignores dblink_* functions and temp_* tables
+	ignoreContent := `[functions]
+patterns = ["dblink_*"]
+
+[tables]
+patterns = ["temp_*"]
+`
+	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	}
+
+	t.Run("dump", func(t *testing.T) {
+		output := executeIgnoreDumpCommand(t, containerInfo)
+
+		// Users table and its privileges should be present
+		if !strings.Contains(output, "CREATE TABLE IF NOT EXISTS users") {
+			t.Error("Dump should include users table")
+		}
+		if !strings.Contains(output, "app_user") {
+			t.Error("Dump should include privileges for app_user on non-ignored tables")
+		}
+
+		// Ignored functions should not appear
+		if strings.Contains(output, "dblink_connect_u") {
+			t.Error("Dump should not include dblink_connect_u (function is ignored, so REVOKE statements should also be ignored)")
+		}
+
+		// Ignored table privileges should not appear
+		if strings.Contains(output, "temp_data") {
+			t.Error("Dump should not include temp_data or its privileges (table is ignored)")
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		schemaSQL := `
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+        CREATE ROLE app_user;
+    END IF;
+END $$;
+
+GRANT SELECT ON users TO app_user;
+`
+		schemaFile := "schema.sql"
+		err := os.WriteFile(schemaFile, []byte(schemaSQL), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create schema file: %v", err)
+		}
+		defer os.Remove(schemaFile)
+
+		output := executeIgnorePlanCommand(t, containerInfo, schemaFile)
+
+		// Plan should not reference dblink functions or their privileges
+		if strings.Contains(output, "dblink_connect_u") {
+			t.Error("Plan should not include dblink_connect_u (function is ignored)")
+		}
+
+		// Plan should not reference ignored tables
+		if strings.Contains(output, "temp_data") {
+			t.Error("Plan should not include temp_data (table is ignored)")
+		}
+	})
+
+	// Clean up roles from sharedEmbeddedPG (plan subtest may create roles there)
+	cleanupStatements := []string{
+		"REASSIGN OWNED BY app_user TO testuser",
+		"DROP OWNED BY app_user",
+		"DROP ROLE IF EXISTS app_user",
+	}
+	sharedConn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedEmbeddedPG)
+	defer sharedConn.Close()
+	for _, stmt := range cleanupStatements {
+		sharedConn.Exec(stmt)
+	}
+}
+
 // verifyPlanOutput checks that plan output excludes ignored objects
 func verifyPlanOutput(t *testing.T, output string) {
 	// Changes that should appear in plan (regular objects)

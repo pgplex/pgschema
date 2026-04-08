@@ -2121,6 +2121,11 @@ func (i *Inspector) buildPrivileges(ctx context.Context, schema *IR, targetSchem
 			continue
 		}
 
+		// Skip privileges for ignored objects (e.g., ignored functions should have their privileges ignored too)
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilegeByObjectType(objectName, objectType) {
+			continue
+		}
+
 		// Check for default PUBLIC grants that should be excluded
 		if grantee == "PUBLIC" {
 			if (objectType == "FUNCTION" || objectType == "PROCEDURE") && privilegeType == "EXECUTE" {
@@ -2215,6 +2220,11 @@ func (i *Inspector) buildRevokedDefaultPrivileges(ctx context.Context, targetSch
 	for _, row := range rows {
 		objectName := row.ObjectName.String
 		objectType := row.ObjectType.String
+
+		// Skip revoked default privileges for ignored objects
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilegeByObjectType(objectName, objectType) {
+			continue
+		}
 
 		var objType PrivilegeObjectType
 		var privs []string
@@ -2467,6 +2477,11 @@ func (i *Inspector) buildColumnPrivileges(ctx context.Context, schema *IR, targe
 
 		// Skip column privileges for ignored grantees
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnorePrivilege(grantee) {
+			continue
+		}
+
+		// Skip column privileges for ignored tables/views
+		if i.ignoreConfig != nil && (i.ignoreConfig.ShouldIgnoreTable(tableName) || i.ignoreConfig.ShouldIgnoreView(tableName)) {
 			continue
 		}
 
