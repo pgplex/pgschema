@@ -6,11 +6,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // DesiredStateProvider is an interface that abstracts the desired state database provider.
@@ -439,4 +442,47 @@ func replaceSchemaInDefaultPrivileges(sql string, targetSchema, tempSchema strin
 	result = re2.ReplaceAllString(result, fmt.Sprintf(`${1}"%s"`, tempSchema))
 
 	return result
+}
+
+// enhanceApplyError extracts the surrounding SQL context from a PostgreSQL error's
+// position field to help the user locate the problematic statement in their schema files.
+func enhanceApplyError(err error, sql string) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Position == 0 {
+		return err
+	}
+
+	// PostgreSQL Position is 1-based character (not byte) offset
+	runes := []rune(sql)
+	pos := int(pgErr.Position) - 1
+	if pos < 0 || pos >= len(runes) {
+		return err
+	}
+
+	line := 1
+	lineStart := 0
+	for i := 0; i < pos; i++ {
+		if runes[i] == '\n' {
+			line++
+			lineStart = i + 1
+		}
+	}
+	col := pos - lineStart + 1
+
+	const contextLines = 3
+	lines := strings.Split(sql, "\n")
+
+	startLine := max(line-contextLines, 1)
+	endLine := min(line+contextLines, len(lines))
+
+	var snippet strings.Builder
+	for i := startLine; i <= endLine; i++ {
+		prefix := "  "
+		if i == line {
+			prefix = "> "
+		}
+		snippet.WriteString(fmt.Sprintf("%s%5d | %s\n", prefix, i, lines[i-1]))
+	}
+
+	return fmt.Errorf("%w\n\nError location (line %d, column %d):\n%s", err, line, col, snippet.String())
 }
