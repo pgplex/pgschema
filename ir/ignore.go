@@ -65,6 +65,29 @@ func (c *IgnoreConfig) ShouldIgnoreSequence(sequenceName string) bool {
 	return c.shouldIgnore(sequenceName, c.Sequences)
 }
 
+// ShouldIgnorePrivilegeByObjectType checks if a privilege should be ignored based on the object name
+// and its type. When an object (function, table, etc.) is ignored via its section pattern,
+// privileges on that object should also be ignored.
+func (c *IgnoreConfig) ShouldIgnorePrivilegeByObjectType(objectName string, objectType string) bool {
+	if c == nil {
+		return false
+	}
+	switch objectType {
+	case "TABLE", "VIEW":
+		// Views use table-level privileges in PostgreSQL
+		return c.shouldIgnore(objectName, c.Tables) || c.shouldIgnore(objectName, c.Views)
+	case "FUNCTION":
+		return c.shouldIgnore(objectName, c.Functions)
+	case "PROCEDURE":
+		return c.shouldIgnore(objectName, c.Procedures)
+	case "SEQUENCE":
+		return c.shouldIgnore(objectName, c.Sequences)
+	case "TYPE":
+		return c.shouldIgnore(objectName, c.Types)
+	}
+	return false
+}
+
 // ShouldIgnorePrivilege checks if a privilege should be ignored based on the grantee role name
 func (c *IgnoreConfig) ShouldIgnorePrivilege(grantee string) bool {
 	if c == nil {
