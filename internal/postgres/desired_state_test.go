@@ -1,8 +1,12 @@
 package postgres
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestSplitDollarQuotedSegments(t *testing.T) {
@@ -290,4 +294,71 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnhanceApplyError(t *testing.T) {
+	sql := "CREATE TABLE foo (id int);\nCREATE TABLE bar (\n  name text\n);\nSELECT 1;\nCREATE TABLE baz (id int);"
+
+	t.Run("pgError with position", func(t *testing.T) {
+		// Position points to "SELECT" on line 5
+		pos := int32(strings.Index(sql, "SELECT 1") + 1) // 1-based
+		pgErr := &pgconn.PgError{
+			Message:  "syntax error at or near \"SELECT\"",
+			Code:     "42601",
+			Position: pos,
+		}
+		enhanced := enhanceApplyError(pgErr, sql)
+		errMsg := enhanced.Error()
+
+		if !strings.Contains(errMsg, "line 5") {
+			t.Errorf("expected error to mention line 5, got: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, "SELECT 1") {
+			t.Errorf("expected error to contain the offending line, got: %s", errMsg)
+		}
+		// Should still contain original error
+		if !strings.Contains(errMsg, "syntax error") {
+			t.Errorf("expected error to contain original message, got: %s", errMsg)
+		}
+	})
+
+	t.Run("multi-byte UTF-8 position", func(t *testing.T) {
+		// PostgreSQL Position counts characters, not bytes.
+		// "café" is 4 characters but 5 bytes (é is 2 bytes in UTF-8).
+		mbSQL := "-- café\nSELECT 1;"
+		// "SELECT" starts at character position 9 (1-based): "-- café\n" = 8 chars
+		pgErr := &pgconn.PgError{
+			Message:  "syntax error",
+			Code:     "42601",
+			Position: 9,
+		}
+		enhanced := enhanceApplyError(pgErr, mbSQL)
+		errMsg := enhanced.Error()
+
+		if !strings.Contains(errMsg, "line 2, column 1") {
+			t.Errorf("expected line 2, column 1 for multi-byte SQL, got: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, "SELECT 1") {
+			t.Errorf("expected snippet to contain the error line, got: %s", errMsg)
+		}
+	})
+
+	t.Run("non-pg error passes through", func(t *testing.T) {
+		origErr := fmt.Errorf("some other error")
+		result := enhanceApplyError(origErr, sql)
+		if result != origErr {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
+
+	t.Run("pgError without position passes through", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: "some error",
+			Code:    "42601",
+		}
+		result := enhanceApplyError(pgErr, sql)
+		if result != pgErr {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
 }

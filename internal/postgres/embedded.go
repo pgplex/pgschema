@@ -238,7 +238,7 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.
 	if _, err := util.ExecContextWithLogging(ctx, conn, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
-		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ep.tempSchema, err)
+		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ep.tempSchema, enhanceApplyError(err, schemaAgnosticSQL))
 	}
 
 	return nil
