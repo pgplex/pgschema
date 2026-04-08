@@ -322,11 +322,32 @@ func TestEnhanceApplyError(t *testing.T) {
 		}
 	})
 
+	t.Run("multi-byte UTF-8 position", func(t *testing.T) {
+		// PostgreSQL Position counts characters, not bytes.
+		// "café" is 4 characters but 5 bytes (é is 2 bytes in UTF-8).
+		mbSQL := "-- café\nSELECT 1;"
+		// "SELECT" starts at character position 9 (1-based): "-- café\n" = 8 chars
+		pgErr := &pgconn.PgError{
+			Message:  "syntax error",
+			Code:     "42601",
+			Position: 9,
+		}
+		enhanced := enhanceApplyError(pgErr, mbSQL)
+		errMsg := enhanced.Error()
+
+		if !strings.Contains(errMsg, "line 2, column 1") {
+			t.Errorf("expected line 2, column 1 for multi-byte SQL, got: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, "SELECT 1") {
+			t.Errorf("expected snippet to contain the error line, got: %s", errMsg)
+		}
+	})
+
 	t.Run("non-pg error passes through", func(t *testing.T) {
 		origErr := fmt.Errorf("some other error")
 		result := enhanceApplyError(origErr, sql)
-		if result.Error() != origErr.Error() {
-			t.Errorf("expected passthrough, got: %s", result.Error())
+		if result != origErr {
+			t.Errorf("expected same error instance, got: %s", result.Error())
 		}
 	})
 
@@ -336,8 +357,8 @@ func TestEnhanceApplyError(t *testing.T) {
 			Code:    "42601",
 		}
 		result := enhanceApplyError(pgErr, sql)
-		if result.Error() != pgErr.Error() {
-			t.Errorf("expected passthrough, got: %s", result.Error())
+		if result != pgErr {
+			t.Errorf("expected same error instance, got: %s", result.Error())
 		}
 	})
 }
