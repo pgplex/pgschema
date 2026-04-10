@@ -517,9 +517,18 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 			// Handle check constraints
 			if cType == ConstraintTypeCheck {
 				if checkClause := i.safeInterfaceToString(constraint.CheckClause); checkClause != "" && checkClause != "<nil>" {
-					// Skip system-generated NOT NULL constraints as they're redundant with column definitions
-					if strings.Contains(checkClause, "IS NOT NULL") {
-						continue
+					// Skip simple NOT NULL check constraints (e.g., "CHECK ((value IS NOT NULL))")
+					// as they're redundant with column definitions. Only skip if the entire
+					// expression is just "identifier IS NOT NULL".
+					inner := strings.TrimPrefix(strings.TrimSpace(checkClause), "CHECK ")
+					inner = strings.TrimSpace(inner)
+					for len(inner) > 2 && inner[0] == '(' && inner[len(inner)-1] == ')' && isBalancedParentheses(inner[1:len(inner)-1]) {
+						inner = strings.TrimSpace(inner[1 : len(inner)-1])
+					}
+					if prefix, ok := strings.CutSuffix(inner, " IS NOT NULL"); ok {
+						if !strings.Contains(strings.TrimSpace(prefix), " ") {
+							continue
+						}
 					}
 
 					// Use CheckClause as-is from PostgreSQL's pg_get_constraintdef(c.oid, true)

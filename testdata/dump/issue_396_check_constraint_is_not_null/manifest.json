@@ -1,0 +1,9 @@
+{
+  "name": "issue_396_check_constraint_is_not_null",
+  "description": "Table-level CHECK constraints containing IS NOT NULL in complex expressions are silently omitted from schema dump",
+  "source": "https://github.com/pgplex/pgschema/issues/396",
+  "notes": [
+    "The inspector incorrectly skips CHECK constraints that contain 'IS NOT NULL' anywhere in the expression",
+    "Only simple NOT NULL check constraints should be skipped, not complex expressions using IS NOT NULL"
+  ]
+}
