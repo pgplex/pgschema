@@ -131,6 +131,15 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 		return fmt.Errorf("failed to set search_path: %w", err)
 	}
 
+	// Disable function body validation to avoid type-identity mismatches (issue #399).
+	// Schema qualifications inside dollar-quoted function bodies are preserved (issue #354),
+	// but parameter types are stripped. For SQL-language functions, PostgreSQL validates the
+	// body at creation time, which can fail when body references use the original schema's
+	// types while parameters reference the temporary schema's types.
+	if _, err := util.ExecContextWithLogging(ctx, conn, "SET check_function_bodies = off", "disable function body validation for desired state"); err != nil {
+		return fmt.Errorf("failed to disable check_function_bodies: %w", err)
+	}
+
 	// Strip schema qualifications from SQL before applying to temporary schema
 	// This ensures that objects are created in the temporary schema via search_path
 	// rather than being explicitly qualified with the original schema name

@@ -104,6 +104,11 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	// Schema qualifiers inside function/procedure bodies (dollar-quoted blocks)
 	// must be preserved — the user may need them when search_path doesn't include
 	// the function's schema (e.g., SET search_path = ''). (Issue #354)
+	//
+	// To avoid type-identity mismatches between stripped parameter types and
+	// unstripped body references (Issue #399), callers should disable function
+	// body validation with SET check_function_bodies = off before executing
+	// the resulting SQL.
 	segments := splitDollarQuotedSegments(sql)
 	var result strings.Builder
 	result.Grow(len(sql))

@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.9.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "eb148b37b7b6325bdd5f0c1c120dfe0bd71a062ce69951aa946c452aff2dc662"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION role_has_cap(\n    p_role role_type,\n    p_cap text\n)\nRETURNS boolean\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT EXISTS (\n        SELECT 1\n        FROM public.role_caps rc\n        WHERE rc.role = p_role\n          AND rc.capability = p_cap\n    );\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.role_has_cap"
+        }
+      ]
+    }
+  ]
+}
