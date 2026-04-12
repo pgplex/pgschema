@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.7.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "4dae5400719835d4bc41b032c23f8510b2050a8cad16ca8461f488c927c68d20"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE transactions ALTER COLUMN amount TYPE numeric(16,6);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.transactions.amount"
+        }
+      ]
+    }
+  ]
+}
