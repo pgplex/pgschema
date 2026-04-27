@@ -774,7 +774,11 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				case ir.ConstraintTypePrimaryKey:
 					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s PRIMARY KEY", ir.QuoteIdentifier(constraint.Name))
 				case ir.ConstraintTypeUnique:
-					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s UNIQUE", ir.QuoteIdentifier(constraint.Name))
+					modifier := ""
+					if constraint.NullsNotDistinct {
+						modifier = " NULLS NOT DISTINCT"
+					}
+					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s UNIQUE%s", ir.QuoteIdentifier(constraint.Name), modifier)
 				case ir.ConstraintTypeForeignKey:
 					// For FK, use the generateForeignKeyClause with inline=true
 					fkClause := generateForeignKeyClause(constraint, targetSchema, true)
@@ -876,8 +880,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
-			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE (%s);",
-				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
+			modifier := ""
+			if constraint.NullsNotDistinct {
+				modifier = " NULLS NOT DISTINCT"
+			}
+			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s);",
+				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "))
 
 			context := &diffContext{
 				Type:                DiffTypeTableConstraint,
@@ -1004,8 +1012,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.IsTemporal && len(columnNames) > 0 {
 				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE (%s);",
-				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
+			modifier := ""
+			if constraint.NullsNotDistinct {
+				modifier = " NULLS NOT DISTINCT"
+			}
+			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s);",
+				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "))
 
 		case ir.ConstraintTypeCheck:
 			// Add CHECK constraint with ensured outer parentheses

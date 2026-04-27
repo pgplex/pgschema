@@ -222,8 +222,9 @@ type Constraint struct {
 	Deferrable          bool                `json:"deferrable,omitempty"`
 	InitiallyDeferred   bool                `json:"initially_deferred,omitempty"`
 	IsValid             bool                `json:"is_valid,omitempty"`
-	NoInherit           bool                `json:"no_inherit,omitempty"` // CHECK constraint NO INHERIT modifier
-	IsTemporal          bool                `json:"is_temporal,omitempty"` // PG18: temporal constraint (WITHOUT OVERLAPS on PK/UNIQUE, PERIOD on FK)
+	NoInherit           bool                `json:"no_inherit,omitempty"`         // CHECK constraint NO INHERIT modifier
+	IsTemporal          bool                `json:"is_temporal,omitempty"`        // PG18: temporal constraint (WITHOUT OVERLAPS on PK/UNIQUE, PERIOD on FK)
+	NullsNotDistinct    bool                `json:"nulls_not_distinct,omitempty"` // PG15+: UNIQUE constraint treats NULLs as not distinct
 	Comment             string              `json:"comment,omitempty"`
 }
 
