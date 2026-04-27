@@ -830,7 +830,7 @@ type GetConstraintsRow struct {
 	Deferrable             bool           `db:"deferrable" json:"deferrable"`
 	InitiallyDeferred      bool           `db:"initially_deferred" json:"initially_deferred"`
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
-	IsPeriod               bool           `db:"is_period" json:"is_period"`
+	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 }
 
@@ -949,7 +949,7 @@ type GetConstraintsForSchemaRow struct {
 	Deferrable             bool           `db:"deferrable" json:"deferrable"`
 	InitiallyDeferred      bool           `db:"initially_deferred" json:"initially_deferred"`
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
-	IsPeriod               bool           `db:"is_period" json:"is_period"`
+	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 }
 
@@ -1372,6 +1372,65 @@ func (q *Queries) GetEnumValuesForSchema(ctx context.Context, dollar_1 sql.NullS
 			&i.TypeName,
 			&i.EnumValue,
 			&i.EnumOrder,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getFunctionDependencies = `-- name: GetFunctionDependencies :many
+SELECT
+    dependent_ns.nspname AS dependent_schema,
+    dependent_proc.proname AS dependent_name,
+    pg_get_function_identity_arguments(dependent_proc.oid) AS dependent_args,
+    referenced_ns.nspname AS referenced_schema,
+    referenced_proc.proname AS referenced_name,
+    pg_get_function_identity_arguments(referenced_proc.oid) AS referenced_args
+FROM pg_depend d
+JOIN pg_proc dependent_proc ON d.objid = dependent_proc.oid
+JOIN pg_namespace dependent_ns ON dependent_proc.pronamespace = dependent_ns.oid
+JOIN pg_proc referenced_proc ON d.refobjid = referenced_proc.oid
+JOIN pg_namespace referenced_ns ON referenced_proc.pronamespace = referenced_ns.oid
+WHERE d.classid = 'pg_proc'::regclass
+  AND d.refclassid = 'pg_proc'::regclass
+  AND d.deptype = 'n'
+  AND dependent_ns.nspname = $1
+`
+
+type GetFunctionDependenciesRow struct {
+	DependentSchema  string         `db:"dependent_schema" json:"dependent_schema"`
+	DependentName    string         `db:"dependent_name" json:"dependent_name"`
+	DependentArgs    sql.NullString `db:"dependent_args" json:"dependent_args"`
+	ReferencedSchema string         `db:"referenced_schema" json:"referenced_schema"`
+	ReferencedName   string         `db:"referenced_name" json:"referenced_name"`
+	ReferencedArgs   sql.NullString `db:"referenced_args" json:"referenced_args"`
+}
+
+// GetFunctionDependencies retrieves function-to-function dependencies for topological sorting
+func (q *Queries) GetFunctionDependencies(ctx context.Context, dollar_1 sql.NullString) ([]GetFunctionDependenciesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getFunctionDependencies, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetFunctionDependenciesRow
+	for rows.Next() {
+		var i GetFunctionDependenciesRow
+		if err := rows.Scan(
+			&i.DependentSchema,
+			&i.DependentName,
+			&i.DependentArgs,
+			&i.ReferencedSchema,
+			&i.ReferencedName,
+			&i.ReferencedArgs,
 		); err != nil {
 			return nil, err
 		}
@@ -2783,7 +2842,7 @@ func (q *Queries) GetTables(ctx context.Context) ([]GetTablesRow, error) {
 }
 
 const getTablesForSchema = `-- name: GetTablesForSchema :many
-SELECT 
+SELECT
     t.table_schema,
     t.table_name,
     t.table_type,
@@ -3270,65 +3329,6 @@ func (q *Queries) GetViewsForSchema(ctx context.Context, dollar_1 sql.NullString
 			&i.ViewComment,
 			&i.IsMaterialized,
 			pq.Array(&i.Reloptions),
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getFunctionDependencies = `-- name: GetFunctionDependencies :many
-SELECT
-    dependent_ns.nspname AS dependent_schema,
-    dependent_proc.proname AS dependent_name,
-    pg_get_function_identity_arguments(dependent_proc.oid) AS dependent_args,
-    referenced_ns.nspname AS referenced_schema,
-    referenced_proc.proname AS referenced_name,
-    pg_get_function_identity_arguments(referenced_proc.oid) AS referenced_args
-FROM pg_depend d
-JOIN pg_proc dependent_proc ON d.objid = dependent_proc.oid
-JOIN pg_namespace dependent_ns ON dependent_proc.pronamespace = dependent_ns.oid
-JOIN pg_proc referenced_proc ON d.refobjid = referenced_proc.oid
-JOIN pg_namespace referenced_ns ON referenced_proc.pronamespace = referenced_ns.oid
-WHERE d.classid = 'pg_proc'::regclass
-  AND d.refclassid = 'pg_proc'::regclass
-  AND d.deptype = 'n'
-  AND dependent_ns.nspname = $1
-`
-
-type GetFunctionDependenciesRow struct {
-	DependentSchema  string         `db:"dependent_schema" json:"dependent_schema"`
-	DependentName    string         `db:"dependent_name" json:"dependent_name"`
-	DependentArgs    sql.NullString `db:"dependent_args" json:"dependent_args"`
-	ReferencedSchema string         `db:"referenced_schema" json:"referenced_schema"`
-	ReferencedName   string         `db:"referenced_name" json:"referenced_name"`
-	ReferencedArgs   sql.NullString `db:"referenced_args" json:"referenced_args"`
-}
-
-// GetFunctionDependencies retrieves function-to-function dependencies for topological sorting
-func (q *Queries) GetFunctionDependencies(ctx context.Context, dollar_1 sql.NullString) ([]GetFunctionDependenciesRow, error) {
-	rows, err := q.db.QueryContext(ctx, getFunctionDependencies, dollar_1)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetFunctionDependenciesRow
-	for rows.Next() {
-		var i GetFunctionDependenciesRow
-		if err := rows.Scan(
-			&i.DependentSchema,
-			&i.DependentName,
-			&i.DependentArgs,
-			&i.ReferencedSchema,
-			&i.ReferencedName,
-			&i.ReferencedArgs,
 		); err != nil {
 			return nil, err
 		}
