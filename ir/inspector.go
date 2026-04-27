@@ -492,7 +492,7 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				Type:       cType,
 				Columns:    []*ConstraintColumn{},
 				NoInherit:  constraint.NoInherit,
-				IsTemporal: constraint.IsPeriod, // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
+				IsTemporal: constraint.IsPeriod.Bool, // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
 			}
 
 			// Handle foreign key references

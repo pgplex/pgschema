@@ -144,6 +144,45 @@ func TestDumpCommand_Issue191FunctionProcedureOverload(t *testing.T) {
 	runExactMatchTest(t, "issue_191_function_procedure_overload")
 }
 
+// Reproduces a bug where a column declared as `name` is dumped as `char[]`.
+// The inspector classifies any base type with pg_type.typelem <> 0 as an array,
+// but the `name` type has typelem = 18 (the OID of "char") despite not being an array.
+func TestDumpCommand_NameTypeNotDumpedAsCharArray(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	_, err := conn.ExecContext(context.Background(), `CREATE TABLE pgschema_name_repro (n name);`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	output, err := ExecuteDump(&DumpConfig{
+		Host:     host,
+		Port:     port,
+		DB:       dbname,
+		User:     user,
+		Password: password,
+		Schema:   "public",
+	})
+	if err != nil {
+		t.Fatalf("Dump command failed: %v", err)
+	}
+
+	if strings.Contains(output, "char[]") {
+		t.Errorf("Dump output should not contain char[] for a name column.\nOutput:\n%s", output)
+	}
+	if !strings.Contains(output, "n name") {
+		t.Errorf("Dump output should contain `n name` column declaration.\nOutput:\n%s", output)
+	}
+}
+
 func TestDumpCommand_Issue318CrossSchemaComment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
