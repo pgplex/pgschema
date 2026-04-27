@@ -1,0 +1,9 @@
+{
+  "name": "issue_412_unique_nulls_not_distinct",
+  "description": "pgschema dump silently drops the NULLS NOT DISTINCT modifier from UNIQUE table constraints",
+  "source": "https://github.com/pgplex/pgschema/issues/412",
+  "notes": [
+    "NULLS NOT DISTINCT was introduced in PostgreSQL 15; the underlying pg_index.indnullsnotdistinct column does not exist on PG14.",
+    "The inspector exposes the modifier on UNIQUE constraints by joining pg_index via conindid and reading indnullsnotdistinct defensively (to_jsonb), which collapses to false on PG14."
+  ]
+}

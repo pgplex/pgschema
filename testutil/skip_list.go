@@ -69,6 +69,7 @@ var skipListRequiresExtension = []string{
 var skipListPG14 = []string{
 	"create_index/add_index",
 	"create_table/add_unique_constraint_nulls_not_distinct",
+	"TestDumpCommand_Issue412UniqueNullsNotDistinct",
 }
 
 // skipListPG14_17 defines test cases that should be skipped for PostgreSQL 14-17.
