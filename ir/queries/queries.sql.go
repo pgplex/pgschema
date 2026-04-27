@@ -278,8 +278,10 @@ WITH column_base AS (
                 CASE WHEN dn.nspname = c.table_schema THEN dt.typname
                      ELSE dn.nspname || '.' || dt.typname
                 END
-            WHEN dt.typtype = 'b' AND dt.typelem <> 0 THEN
+            WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
                 -- Array types: apply same schema qualification logic to element type
+                -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
+                -- for non-array fixed-length types like name (typelem points to char).
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname || '[]'
                     WHEN en.nspname = c.table_schema THEN et.typname || '[]'
@@ -466,8 +468,10 @@ WITH column_base AS (
                 CASE WHEN dn.nspname = c.table_schema THEN dt.typname
                      ELSE dn.nspname || '.' || dt.typname
                 END
-            WHEN dt.typtype = 'b' AND dt.typelem <> 0 THEN
+            WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
                 -- Array types: apply same schema qualification logic to element type
+                -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
+                -- for non-array fixed-length types like name (typelem points to char).
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname || '[]'
                     WHEN en.nspname = c.table_schema THEN et.typname || '[]'
