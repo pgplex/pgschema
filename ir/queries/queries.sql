@@ -22,11 +22,12 @@ WHERE
 
 -- GetTables retrieves all tables in the database with metadata
 -- name: GetTables :many
-SELECT 
+SELECT
     t.table_schema,
     t.table_name,
     t.table_type,
-    COALESCE(d.description, '') AS table_comment
+    COALESCE(d.description, '') AS table_comment,
+    c.relpersistence::text AS relpersistence
 FROM information_schema.tables t
 LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
 LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
@@ -44,7 +45,8 @@ SELECT
     t.table_schema,
     t.table_name,
     t.table_type,
-    COALESCE(d.description, '') AS table_comment
+    COALESCE(d.description, '') AS table_comment,
+    c.relpersistence::text AS relpersistence
 FROM information_schema.tables t
 LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
 LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid

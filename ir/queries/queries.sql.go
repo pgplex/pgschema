@@ -2798,11 +2798,12 @@ func (q *Queries) GetSequencesForSchema(ctx context.Context, dollar_1 sql.NullSt
 }
 
 const getTables = `-- name: GetTables :many
-SELECT 
+SELECT
     t.table_schema,
     t.table_name,
     t.table_type,
-    COALESCE(d.description, '') AS table_comment
+    COALESCE(d.description, '') AS table_comment,
+    c.relpersistence::text AS relpersistence
 FROM information_schema.tables t
 LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
 LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
@@ -2816,10 +2817,11 @@ ORDER BY t.table_schema, t.table_name
 `
 
 type GetTablesRow struct {
-	TableSchema  interface{}    `db:"table_schema" json:"table_schema"`
-	TableName    interface{}    `db:"table_name" json:"table_name"`
-	TableType    interface{}    `db:"table_type" json:"table_type"`
-	TableComment sql.NullString `db:"table_comment" json:"table_comment"`
+	TableSchema    interface{}    `db:"table_schema" json:"table_schema"`
+	TableName      interface{}    `db:"table_name" json:"table_name"`
+	TableType      interface{}    `db:"table_type" json:"table_type"`
+	TableComment   sql.NullString `db:"table_comment" json:"table_comment"`
+	Relpersistence sql.NullString `db:"relpersistence" json:"relpersistence"`
 }
 
 // GetTables retrieves all tables in the database with metadata
@@ -2837,6 +2839,7 @@ func (q *Queries) GetTables(ctx context.Context) ([]GetTablesRow, error) {
 			&i.TableName,
 			&i.TableType,
 			&i.TableComment,
+			&i.Relpersistence,
 		); err != nil {
 			return nil, err
 		}
@@ -2856,7 +2859,8 @@ SELECT
     t.table_schema,
     t.table_name,
     t.table_type,
-    COALESCE(d.description, '') AS table_comment
+    COALESCE(d.description, '') AS table_comment,
+    c.relpersistence::text AS relpersistence
 FROM information_schema.tables t
 LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
 LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
@@ -2868,10 +2872,11 @@ ORDER BY t.table_name
 `
 
 type GetTablesForSchemaRow struct {
-	TableSchema  interface{}    `db:"table_schema" json:"table_schema"`
-	TableName    interface{}    `db:"table_name" json:"table_name"`
-	TableType    interface{}    `db:"table_type" json:"table_type"`
-	TableComment sql.NullString `db:"table_comment" json:"table_comment"`
+	TableSchema    interface{}    `db:"table_schema" json:"table_schema"`
+	TableName      interface{}    `db:"table_name" json:"table_name"`
+	TableType      interface{}    `db:"table_type" json:"table_type"`
+	TableComment   sql.NullString `db:"table_comment" json:"table_comment"`
+	Relpersistence sql.NullString `db:"relpersistence" json:"relpersistence"`
 }
 
 // GetTablesForSchema retrieves all tables in a specific schema with metadata
@@ -2889,6 +2894,7 @@ func (q *Queries) GetTablesForSchema(ctx context.Context, dollar_1 sql.NullStrin
 			&i.TableName,
 			&i.TableType,
 			&i.TableComment,
+			&i.Relpersistence,
 		); err != nil {
 			return nil, err
 		}
