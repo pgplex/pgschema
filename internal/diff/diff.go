@@ -24,6 +24,7 @@ const (
 	DiffTypeTableComment
 	DiffTypeTableColumnComment
 	DiffTypeTableIndexComment
+	DiffTypeTablePersistence
 	DiffTypeView
 	DiffTypeViewTrigger
 	DiffTypeViewComment
@@ -66,6 +67,8 @@ func (d DiffType) String() string {
 		return "table.column.comment"
 	case DiffTypeTableIndexComment:
 		return "table.index.comment"
+	case DiffTypeTablePersistence:
+		return "table.persistence"
 	case DiffTypeView:
 		return "view"
 	case DiffTypeViewTrigger:
@@ -138,6 +141,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeTableColumnComment
 	case "table.index.comment":
 		*d = DiffTypeTableIndexComment
+	case "table.persistence":
+		*d = DiffTypeTablePersistence
 	case "view":
 		*d = DiffTypeView
 	case "view.trigger":
@@ -386,6 +391,7 @@ type tableDiff struct {
 	CommentChanged      bool
 	OldComment          string
 	NewComment          string
+	PersistenceChanged  bool
 }
 
 // ColumnDiff represents changes to a column

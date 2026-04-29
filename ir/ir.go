@@ -63,6 +63,7 @@ type Table struct {
 	PartitionStrategy string                 `json:"partition_strategy,omitempty"` // RANGE, LIST, HASH
 	PartitionKey      string                 `json:"partition_key,omitempty"`      // Column(s) used for partitioning
 	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`       // LIKE clauses in CREATE TABLE
+	Unlogged          bool                   `json:"unlogged,omitempty"`           // True for UNLOGGED tables
 }
 
 // Column represents a table column

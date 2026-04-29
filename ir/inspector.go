@@ -261,6 +261,7 @@ func (i *Inspector) buildTables(ctx context.Context, schema *IR, targetSchema st
 			Name:        tableName,
 			Type:        tType,
 			Comment:     comment,
+			Unlogged:    table.Relpersistence.Valid && table.Relpersistence.String == "u",
 			Columns:     []*Column{},
 			Constraints: make(map[string]*Constraint),
 			Indexes:     make(map[string]*Index),

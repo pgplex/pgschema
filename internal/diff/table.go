@@ -328,6 +328,11 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		diff.NewComment = newTable.Comment
 	}
 
+	// Check for persistence (UNLOGGED/LOGGED) changes
+	if oldTable.Unlogged != newTable.Unlogged {
+		diff.PersistenceChanged = true
+	}
+
 	// Return nil if no changes
 	if len(diff.AddedColumns) == 0 && len(diff.DroppedColumns) == 0 &&
 		len(diff.ModifiedColumns) == 0 && len(diff.AddedConstraints) == 0 &&
@@ -337,7 +342,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		len(diff.DroppedTriggers) == 0 && len(diff.ModifiedTriggers) == 0 &&
 		len(diff.AddedPolicies) == 0 && len(diff.DroppedPolicies) == 0 &&
 		len(diff.ModifiedPolicies) == 0 && len(diff.RLSChanges) == 0 &&
-		!diff.CommentChanged {
+		!diff.CommentChanged && !diff.PersistenceChanged {
 		return nil
 	}
 
@@ -583,7 +588,11 @@ func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[st
 	tableName := ir.QualifyEntityNameWithQuotes(table.Schema, table.Name, targetSchema)
 
 	var parts []string
-	parts = append(parts, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (", tableName))
+	createPrefix := "CREATE TABLE IF NOT EXISTS"
+	if table.Unlogged {
+		createPrefix = "CREATE UNLOGGED TABLE IF NOT EXISTS"
+	}
+	parts = append(parts, fmt.Sprintf("%s %s (", createPrefix, tableName))
 
 	// Add columns
 	var columnParts []string
@@ -688,6 +697,27 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 // droppedColumnSet contains column names being dropped from this table; constraints that
 // depend on those columns are skipped because DROP COLUMN already removes them. (#384)
 func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool) {
+	// Persistence change (UNLOGGED to LOGGED or vice versa) should emit first
+	// because PostgreSQL rewrites the heap so doing it before column/constraint
+	// changes reduces data movement on subsequent steps
+	if td.PersistenceChanged {
+		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+		clause := "SET LOGGED"
+		if td.Table.Unlogged {
+			clause = "SET UNLOGGED"
+		}
+		sql := fmt.Sprintf("ALTER TABLE %s %s;", tableName, clause)
+
+		context := &diffContext{
+			Type:                DiffTypeTablePersistence,
+			Operation:           DiffOperationAlter,
+			Path:                fmt.Sprintf("%s.%s", td.Table.Schema, td.Table.Name),
+			Source:              td.Table,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+
 	// Drop constraints first (before dropping columns) - already sorted by the Diff operation
 	for _, constraint := range td.DroppedConstraints {
 		// Skip constraints already removed by a dropped column. (#384)
