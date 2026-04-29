@@ -13,6 +13,10 @@ pkgs.buildGoModule {
   go = if pkgs ? go_1_24 then pkgs.go_1_24 else pkgs.go_1_25;
   subPackages = [ "." ];
   proxyVendor = true;
+  # buildGoModule runs `go test ./...` by default; disable checks because
+  # this repository's integration test setup starts embedded Postgres, which
+  # is not reliable in Nix's sandboxed build environment.
+  doCheck = false;
 
   # Update if `nix build` reports a vendorHash mismatch.
   vendorHash = "sha256-3nV7AEsWyEvIbxHetoEsA8PPXJ6ENvU/sz7Wn5aysss=";
