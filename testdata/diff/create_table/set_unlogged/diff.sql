@@ -1,0 +1,1 @@
+ALTER TABLE events SET UNLOGGED;

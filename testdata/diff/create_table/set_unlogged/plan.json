@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.9.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "cb84b30ef73ee96caeeef3901be4354d9f8aecf303f0fcb9ae70618c1d106761"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE events SET UNLOGGED;",
+          "type": "table.persistence",
+          "operation": "alter",
+          "path": "public.events"
+        }
+      ]
+    }
+  ]
+}

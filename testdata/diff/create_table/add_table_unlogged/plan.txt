@@ -1,0 +1,16 @@
+Plan: 1 to add.
+
+Summary by type:
+  tables: 1 to add
+
+Tables:
+  + events
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE UNLOGGED TABLE IF NOT EXISTS events (
+    id integer,
+    payload text NOT NULL,
+    CONSTRAINT events_pkey PRIMARY KEY (id)
+);
