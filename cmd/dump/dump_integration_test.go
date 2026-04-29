@@ -137,6 +137,13 @@ func TestDumpCommand_Issue396CheckConstraintIsNotNull(t *testing.T) {
 	runExactMatchTest(t, "issue_396_check_constraint_is_not_null")
 }
 
+func TestDumpCommand_Issue412UniqueNullsNotDistinct(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_412_unique_nulls_not_distinct")
+}
+
 func TestDumpCommand_Issue191FunctionProcedureOverload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

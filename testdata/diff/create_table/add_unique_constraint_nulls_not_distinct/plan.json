@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.9.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "70a4465367d5d40d0149eadc73c423f9eb954838b6602f00ca3496b264baf2e9"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE pgschema_repro_nulls\nADD CONSTRAINT pgschema_repro_nulls_uniq UNIQUE NULLS NOT DISTINCT (a, b);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.pgschema_repro_nulls.pgschema_repro_nulls_uniq"
+        }
+      ]
+    }
+  ]
+}

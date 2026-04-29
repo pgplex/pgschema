@@ -486,13 +486,14 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 			}
 
 			c = &Constraint{
-				Schema:     schemaName,
-				Table:      tableName,
-				Name:       constraintName,
-				Type:       cType,
-				Columns:    []*ConstraintColumn{},
-				NoInherit:  constraint.NoInherit,
-				IsTemporal: constraint.IsPeriod.Bool, // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
+				Schema:           schemaName,
+				Table:            tableName,
+				Name:             constraintName,
+				Type:             cType,
+				Columns:          []*ConstraintColumn{},
+				NoInherit:        constraint.NoInherit,
+				IsTemporal:       constraint.IsPeriod.Bool,         // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
+				NullsNotDistinct: constraint.NullsNotDistinct.Bool, // PG15+ UNIQUE NULLS NOT DISTINCT
 			}
 
 			// Handle foreign key references

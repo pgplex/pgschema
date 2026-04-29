@@ -1,0 +1,14 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ pgschema_repro_nulls
+    + pgschema_repro_nulls_uniq (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE pgschema_repro_nulls
+ADD CONSTRAINT pgschema_repro_nulls_uniq UNIQUE NULLS NOT DISTINCT (a, b);

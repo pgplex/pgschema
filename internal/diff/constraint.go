@@ -32,7 +32,11 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 		if constraint.IsTemporal && len(cols) > 0 {
 			cols[len(cols)-1] = cols[len(cols)-1] + " WITHOUT OVERLAPS"
 		}
-		return fmt.Sprintf("CONSTRAINT %s UNIQUE (%s)", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "))
+		modifier := ""
+		if constraint.NullsNotDistinct {
+			modifier = " NULLS NOT DISTINCT"
+		}
+		return fmt.Sprintf("CONSTRAINT %s UNIQUE%s (%s)", ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(cols, ", "))
 	case ir.ConstraintTypeForeignKey:
 		// Always include CONSTRAINT name to preserve explicit FK names
 		// Use QualifyEntityNameWithQuotes to add schema qualifier when referencing tables in other schemas
@@ -174,6 +178,9 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 		return false
 	}
 	if old.IsTemporal != new.IsTemporal {
+		return false
+	}
+	if old.NullsNotDistinct != new.NullsNotDistinct {
 		return false
 	}
 

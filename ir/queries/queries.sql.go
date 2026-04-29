@@ -923,7 +923,10 @@ SELECT
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
     COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
-    c.connoinherit AS no_inherit
+    c.connoinherit AS no_inherit,
+    -- pg_index.indnullsnotdistinct is PG15+. Use to_jsonb so the column reference
+    -- doesn't fail to plan on PG14 (where the attribute does not exist on pg_index).
+    COALESCE((to_jsonb(i) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -931,6 +934,7 @@ LEFT JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
 LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
+LEFT JOIN pg_index i ON i.indexrelid = c.conindid
 WHERE n.nspname = $1
 ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum
 `
@@ -955,6 +959,7 @@ type GetConstraintsForSchemaRow struct {
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
 	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
+	NullsNotDistinct       sql.NullBool   `db:"nulls_not_distinct" json:"nulls_not_distinct"`
 }
 
 // GetConstraintsForSchema retrieves all table constraints for a specific schema
@@ -987,6 +992,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.IsValid,
 			&i.IsPeriod,
 			&i.NoInherit,
+			&i.NullsNotDistinct,
 		); err != nil {
 			return nil, err
 		}
