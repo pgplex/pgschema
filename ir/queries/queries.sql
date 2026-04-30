@@ -22,12 +22,11 @@ WHERE
 
 -- GetTables retrieves all tables in the database with metadata
 -- name: GetTables :many
-SELECT
+SELECT 
     t.table_schema,
     t.table_name,
     t.table_type,
-    COALESCE(d.description, '') AS table_comment,
-    c.relpersistence::text AS relpersistence
+    COALESCE(d.description, '') AS table_comment
 FROM information_schema.tables t
 LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
 LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
@@ -45,8 +44,7 @@ SELECT
     t.table_schema,
     t.table_name,
     t.table_type,
-    COALESCE(d.description, '') AS table_comment,
-    c.relpersistence::text AS relpersistence
+    COALESCE(d.description, '') AS table_comment
 FROM information_schema.tables t
 LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
 LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
@@ -74,21 +72,19 @@ WITH column_base AS (
         COALESCE(d.description, '') AS column_comment,
         CASE
             WHEN dt.typtype = 'd' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN format_type(dt.oid, NULL)
+                     ELSE dn.nspname || '.' || format_type(dt.oid, NULL)
                 END
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN format_type(dt.oid, NULL)
+                     ELSE dn.nspname || '.' || format_type(dt.oid, NULL)
                 END
-            WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
+            WHEN dt.typtype = 'b' AND dt.typelem <> 0 THEN
                 -- Array types: apply same schema qualification logic to element type
-                -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
-                -- for non-array fixed-length types like name (typelem points to char).
                 CASE
-                    WHEN en.nspname = 'pg_catalog' THEN et.typname || '[]'
-                    WHEN en.nspname = c.table_schema THEN et.typname || '[]'
-                    ELSE en.nspname || '.' || et.typname || '[]'
+                    WHEN en.nspname = 'pg_catalog' THEN format_type(et.oid, NULL) || '[]'
+                    WHEN en.nspname = c.table_schema THEN format_type(et.oid, NULL) || '[]'
+                    ELSE en.nspname || '.' || format_type(et.oid, NULL) || '[]'
                 END
             WHEN dt.typtype = 'b' THEN
                 -- Non-array base types: qualify if not in pg_catalog or table's schema
@@ -192,21 +188,19 @@ WITH column_base AS (
         COALESCE(d.description, '') AS column_comment,
         CASE
             WHEN dt.typtype = 'd' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN format_type(dt.oid, NULL)
+                     ELSE dn.nspname || '.' || format_type(dt.oid, NULL)
                 END
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN format_type(dt.oid, NULL)
+                     ELSE dn.nspname || '.' || format_type(dt.oid, NULL)
                 END
-            WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
+            WHEN dt.typtype = 'b' AND dt.typelem <> 0 THEN
                 -- Array types: apply same schema qualification logic to element type
-                -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
-                -- for non-array fixed-length types like name (typelem points to char).
                 CASE
-                    WHEN en.nspname = 'pg_catalog' THEN et.typname || '[]'
-                    WHEN en.nspname = c.table_schema THEN et.typname || '[]'
-                    ELSE en.nspname || '.' || et.typname || '[]'
+                    WHEN en.nspname = 'pg_catalog' THEN format_type(et.oid, NULL) || '[]'
+                    WHEN en.nspname = c.table_schema THEN format_type(et.oid, NULL) || '[]'
+                    ELSE en.nspname || '.' || format_type(et.oid, NULL) || '[]'
                 END
             WHEN dt.typtype = 'b' THEN
                 -- Non-array base types: qualify if not in pg_catalog or table's schema
@@ -344,8 +338,7 @@ SELECT
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
-    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
-    c.connoinherit AS no_inherit
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -443,11 +436,10 @@ WITH index_base AS (
             ELSE false
         END as has_expressions,
         COALESCE(d.description, '') AS index_comment,
-        idx.indnkeyatts as num_key_columns,
         idx.indnatts as num_columns,
         ARRAY(
             SELECT pg_get_indexdef(idx.indexrelid, k::int, true)
-            FROM generate_series(1, idx.indnkeyatts) k
+            FROM generate_series(1, idx.indnatts) k
         ) as column_definitions,
         ARRAY(
             SELECT
@@ -455,20 +447,16 @@ WITH index_base AS (
                     WHEN (idx.indoption[k-1] & 1) = 1 THEN 'DESC'
                     ELSE 'ASC'
                 END
-            FROM generate_series(1, idx.indnkeyatts) k
+            FROM generate_series(1, idx.indnatts) k
         ) as column_directions,
         ARRAY(
             SELECT CASE
                 WHEN opc.opcdefault THEN ''  -- Omit default operator classes
                 ELSE COALESCE(opc.opcname, '')
             END
-            FROM generate_series(1, idx.indnkeyatts) k
+            FROM generate_series(1, idx.indnatts) k
             LEFT JOIN pg_opclass opc ON opc.oid = idx.indclass[k-1]
-        ) as column_opclasses,
-        ARRAY(
-            SELECT pg_get_indexdef(idx.indexrelid, k::int, true)
-            FROM generate_series(idx.indnkeyatts + 1, idx.indnatts) k
-        ) as include_columns
+        ) as column_opclasses
     FROM pg_index idx
     JOIN pg_class i ON i.oid = idx.indexrelid
     JOIN pg_class t ON t.oid = idx.indrelid
@@ -500,12 +488,10 @@ SELECT
     sp.partial_predicate,
     ib.has_expressions,
     ib.index_comment,
-    ib.num_key_columns,
     ib.num_columns,
     ib.column_definitions,
     ib.column_directions,
-    ib.column_opclasses,
-    ib.include_columns
+    ib.column_opclasses
 FROM index_base ib
 CROSS JOIN LATERAL (
     SELECT
@@ -931,11 +917,7 @@ SELECT
     c.condeferrable AS deferrable,
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
-    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
-    c.connoinherit AS no_inherit,
-    -- pg_index.indnullsnotdistinct is PG15+. Use to_jsonb so the column reference
-    -- doesn't fail to plan on PG14 (where the attribute does not exist on pg_index).
-    COALESCE((to_jsonb(i) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct
+    COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -943,7 +925,6 @@ LEFT JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
 LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
-LEFT JOIN pg_index i ON i.indexrelid = c.conindid
 WHERE n.nspname = $1
 ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum;
 
