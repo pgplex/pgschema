@@ -12,9 +12,9 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	var statements []string
 	qualifiedTableName := getTableNameWithSchema(tableSchema, tableName, targetSchema)
 
-	// Handle data type changes - normalize types by stripping target schema prefix
-	oldType := stripSchemaPrefix(cd.Old.DataType, targetSchema)
-	newType := stripSchemaPrefix(cd.New.DataType, targetSchema)
+	// Handle data type changes - use full type with precision/scale/length modifiers
+	oldType := stripSchemaPrefix(columnTypeWithModifiers(cd.Old), targetSchema)
+	newType := stripSchemaPrefix(columnTypeWithModifiers(cd.New), targetSchema)
 
 	// Check if there's a type change AND the column has a default value
 	// When a USING clause is needed, we must: DROP DEFAULT -> ALTER TYPE -> SET DEFAULT
@@ -170,6 +170,22 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 		return false
 	}
 
+	// Compare precision
+	if (old.Precision == nil) != (new.Precision == nil) {
+		return false
+	}
+	if old.Precision != nil && new.Precision != nil && *old.Precision != *new.Precision {
+		return false
+	}
+
+	// Compare scale
+	if (old.Scale == nil) != (new.Scale == nil) {
+		return false
+	}
+	if old.Scale != nil && new.Scale != nil && *old.Scale != *new.Scale {
+		return false
+	}
+
 	// Compare identity columns
 	if (old.Identity == nil) != (new.Identity == nil) {
 		return false
@@ -186,4 +202,20 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 	}
 
 	return true
+}
+
+// columnTypeWithModifiers returns the column's DataType with precision/scale/length
+// modifiers appended, without serial type transformation.
+func columnTypeWithModifiers(col *ir.Column) string {
+	dt := col.DataType
+	if col.MaxLength != nil && (dt == "varchar" || dt == "character varying") {
+		return fmt.Sprintf("varchar(%d)", *col.MaxLength)
+	} else if col.MaxLength != nil && dt == "character" {
+		return fmt.Sprintf("character(%d)", *col.MaxLength)
+	} else if col.Precision != nil && col.Scale != nil && (dt == "numeric" || dt == "decimal") {
+		return fmt.Sprintf("%s(%d,%d)", dt, *col.Precision, *col.Scale)
+	} else if col.Precision != nil && (dt == "numeric" || dt == "decimal") {
+		return fmt.Sprintf("%s(%d)", dt, *col.Precision)
+	}
+	return dt
 }
