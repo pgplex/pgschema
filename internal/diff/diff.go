@@ -1616,7 +1616,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create views, deferring any whose body references a newly-added column on a
 	// modified table. Those columns are emitted by generateModifyTablesSQL during
-	// the modify phase, so deferred views are created there (issue #414).
+	// the modify phase, so deferred views are created there (issue #414)
 	addedColLookup := buildModifiedTableAddedColumnLookup(d.modifiedTables)
 	viewsToCreateNow := d.addedViews
 	if len(addedColLookup) > 0 {
