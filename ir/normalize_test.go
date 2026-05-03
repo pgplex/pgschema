@@ -378,6 +378,24 @@ func TestNormalizePolicyExpression(t *testing.T) {
 			tableSchema: "public",
 			expected:    "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
 		},
+		{
+			name:        "cross-schema function call preserved (Issue #427)",
+			expr:        "(owner_id = ( SELECT auth.uid() AS uid))",
+			tableSchema: "public",
+			expected:    "(owner_id = ( SELECT auth.uid() AS uid))",
+		},
+		{
+			name:        "cross-schema auth.role() preserved (Issue #427)",
+			expr:        "(auth.role() = 'authenticated'::text)",
+			tableSchema: "public",
+			expected:    "(auth.role() = 'authenticated')",
+		},
+		{
+			name:        "multiple cross-schema functions preserved (Issue #427)",
+			expr:        "(owner_id = auth.uid() AND auth.role() = 'admin'::text)",
+			tableSchema: "pgschema_poc",
+			expected:    "(owner_id = auth.uid() AND auth.role() = 'admin')",
+		},
 	}
 
 	for _, tt := range tests {

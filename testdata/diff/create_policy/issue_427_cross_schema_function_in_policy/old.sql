@@ -1,0 +1,7 @@
+CREATE TABLE items (
+    id BIGSERIAL PRIMARY KEY,
+    owner_id uuid NOT NULL,
+    name text NOT NULL
+);
+
+ALTER TABLE items ENABLE ROW LEVEL SECURITY;
