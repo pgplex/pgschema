@@ -24,6 +24,7 @@ type IgnoreConfig struct {
 	Sequences         []string `toml:"sequences,omitempty"`
 	Privileges        []string `toml:"privileges,omitempty"`
 	DefaultPrivileges []string `toml:"default_privileges,omitempty"`
+	Constraints       []string `toml:"constraints,omitempty"`
 }
 
 // ShouldIgnoreTable checks if a table should be ignored based on the patterns
@@ -112,6 +113,14 @@ func (c *IgnoreConfig) ShouldIgnoreDefaultPrivilege(grantee string) bool {
 		return false
 	}
 	return c.shouldIgnore(grantee, c.DefaultPrivileges)
+}
+
+// ShouldIgnoreConstraints checks if constraints should be ignored based on the patterns
+func (c *IgnoreConfig) ShouldIgnoreConstraints(constraintName string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(constraintName, c.Constraints)
 }
 
 // shouldIgnore checks if a name should be ignored based on the patterns

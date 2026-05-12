@@ -447,6 +447,11 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 			constraintType = constraint.ConstraintType.String
 		}
 
+		// Check if constraint should be ignored
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraints(constraintName) {
+			continue
+		}
+
 		// Extract column name from sql.NullString
 		columnName := ""
 		if constraint.ColumnName.Valid {
