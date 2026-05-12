@@ -448,7 +448,7 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 		}
 
 		// Check if constraint should be ignored
-		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraints(constraintName) {
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraint(constraintName) {
 			continue
 		}
 
