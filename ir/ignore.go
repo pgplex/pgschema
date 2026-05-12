@@ -115,8 +115,8 @@ func (c *IgnoreConfig) ShouldIgnoreDefaultPrivilege(grantee string) bool {
 	return c.shouldIgnore(grantee, c.DefaultPrivileges)
 }
 
-// ShouldIgnoreConstraints checks if constraints should be ignored based on the patterns
-func (c *IgnoreConfig) ShouldIgnoreConstraints(constraintName string) bool {
+// ShouldIgnoreConstraint checks if a constraint should be ignored based on the patterns
+func (c *IgnoreConfig) ShouldIgnoreConstraint(constraintName string) bool {
 	if c == nil {
 		return false
 	}
