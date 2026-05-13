@@ -81,8 +81,8 @@ type DefaultPrivilegeIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
 
-// ConstraintsIgnoreConfig represents default privilege-specific ignore configuration
-// Patterns match on grantee role names
+// ConstraintsIgnoreConfig represents constraint-specific ignore configuration
+// Patterns match constraint names, including optionally qualified names
 type ConstraintsIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
