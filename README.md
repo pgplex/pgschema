@@ -179,6 +179,16 @@ DDL to be executed:
 ALTER TABLE users ADD COLUMN age integer NOT NULL;
 ```
 
+#### Multi-schema `plan`
+
+To compare **more than one** PostgreSQL namespace in one run, pass a comma-separated list as the first flag value is the *primary* schema (where unqualified DDL in `--file` is rooted); remaining names are also loaded from the target and from the plan database after applying your SQL. Example:
+
+```bash
+pgschema plan --schema public,app --file schema.sql ...
+```
+
+See [cmd/plan/README.md](cmd/plan/README.md) for full behaviour and caveats (including how this relates to `dump` / `apply`).
+
 ### Step 4: Apply plan with confirmation
 
 ```bash

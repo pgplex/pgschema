@@ -2,17 +2,18 @@
 title: "Plan"
 ---
 
-The `plan` command generates a migration plan to apply a desired schema state to a target database schema. It compares the desired state (from a file) with the current state of a specific schema and shows what changes would be applied.
+The `plan` command generates a migration plan to apply a desired schema state to a target database. It compares the desired state (from a file) with the current state of one or more PostgreSQL schemas and shows what changes would be applied.
 
 ## Overview
 
 The plan command follows infrastructure-as-code principles similar to Terraform:
+
 1. Read the desired state from a SQL file (with include directive support)
-1. Apply the desired state SQL to a temporary PostgreSQL instance (embedded by default, or external via `--plan-*` flags)
-1. Connect to the target database and analyze current state of the specified schema
-1. Compare the two states
-1. Generate a detailed migration plan with proper dependency ordering
-1. Display the plan without making any changes
+2. Apply the desired state SQL to a temporary PostgreSQL instance (embedded by default, or external via `--plan-*` flags)
+3. Connect to the target database and analyze current state of the specified schema(s)
+4. Compare the two states
+5. Generate a detailed migration plan with proper dependency ordering
+6. Display the plan without making any changes
 
 By default, pgschema uses an embedded PostgreSQL instance to validate your desired state SQL. For schemas using PostgreSQL extensions or cross-schema references, you can use an external database instead. See [External Plan Database](/cli/plan-db) for details.
 
@@ -125,7 +126,15 @@ pgschema plan --host localhost --db myapp --user postgres --password mypassword 
 </ParamField>
 
 <ParamField path="--schema" type="string" default="public">
-  Schema name to target for comparison
+  One PostgreSQL schema name, or a **comma-separated** list to plan across multiple namespaces (e.g. `public,app`).
+
+  **Single schema** — Only that schema is read from the target database and from the plan database after applying `--file`.
+
+  **Multi-schema** — Every name in the list is read from the target. On the plan side, the **first** name is the *primary* schema: your SQL is applied with that schema as the strip/normalize target (same as today’s single-schema flow). The temporary schema plus each additional listed schema is then introspected so qualified objects (e.g. `app.table`) appear in the desired state as long as you include `app` in the list.
+
+  Put the schema that contains most **unqualified** DDL in `--file` **first**. Duplicate names are ignored; spaces around commas are trimmed.
+
+  The [apply](/cli/apply) command still documents a single `--schema` for fingerprinting and session defaults; review your workflow if the generated plan touches several namespaces.
 </ParamField>
 
 ## Plan Database Options
@@ -358,6 +367,22 @@ pgschema plan \
   --schema tenant1 \
   --file tenant_schema.sql
 ```
+
+### Plan for multiple schemas
+
+When a migration spans more than one namespace (for example `public` and `app`), pass them as a comma-separated list:
+
+```bash
+pgschema plan \
+  --host localhost \
+  --db myapp \
+  --user postgres \
+  --schema public,app \
+  --file schema.sql
+```
+
+- **Target**: all listed schemas are loaded and merged for the “current” side of the diff.
+- **Desired**: the first entry is primary (where unqualified objects in `--file` are rooted after temp-schema normalization); remaining entries are also introspected on the plan database so explicitly qualified DDL is visible to the diff.
 
 ## Use Cases
 

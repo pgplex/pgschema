@@ -630,6 +630,116 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 	return sortedTableDiffs
 }
 
+// sortDeferredForeignKeys orders pending ALTER TABLE ADD FOREIGN KEY steps using the same
+// dependency rule as topologicallySortTables: referenced table precedes the table that
+// receives the foreign key. Cycles are broken deterministically via insertion order.
+func sortDeferredForeignKeys(items []*deferredConstraint) []*deferredConstraint {
+	nonNil := make([]*deferredConstraint, 0, len(items))
+	for _, it := range items {
+		if it != nil && it.table != nil && it.constraint != nil && it.constraint.Type == ir.ConstraintTypeForeignKey {
+			nonNil = append(nonNil, it)
+		}
+	}
+	if len(nonNil) <= 1 {
+		return nonNil
+	}
+
+	tableMap := make(map[string]bool)
+	for _, it := range nonNil {
+		key := it.table.Schema + "." + it.table.Name
+		tableMap[key] = true
+		refSchema := it.constraint.ReferencedSchema
+		if refSchema == "" {
+			refSchema = it.table.Schema
+		}
+		if it.constraint.ReferencedTable != "" {
+			refKey := refSchema + "." + it.constraint.ReferencedTable
+			tableMap[refKey] = true
+		}
+	}
+	insertionOrder := make([]string, 0, len(tableMap))
+	for k := range tableMap {
+		insertionOrder = append(insertionOrder, k)
+	}
+	sort.Strings(insertionOrder)
+
+	inDegree := make(map[string]int)
+	adjList := make(map[string][]string)
+	for key := range tableMap {
+		inDegree[key] = 0
+		adjList[key] = []string{}
+	}
+
+	for _, it := range nonNil {
+		refSchema := it.constraint.ReferencedSchema
+		if refSchema == "" {
+			refSchema = it.table.Schema
+		}
+		if it.constraint.ReferencedTable == "" {
+			continue
+		}
+		keyA := it.table.Schema + "." + it.table.Name
+		keyB := refSchema + "." + it.constraint.ReferencedTable
+		if _, exists := tableMap[keyB]; exists && keyA != keyB {
+			adjList[keyB] = append(adjList[keyB], keyA)
+			inDegree[keyA]++
+		}
+	}
+
+	var queue []string
+	var result []string
+	processed := make(map[string]bool, len(tableMap))
+	for key, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, key)
+		}
+	}
+	sort.Strings(queue)
+
+	for len(result) < len(tableMap) {
+		if len(queue) == 0 {
+			next := nextInOrder(insertionOrder, processed)
+			if next == "" {
+				break
+			}
+			queue = append(queue, next)
+			inDegree[next] = 0
+		}
+		current := queue[0]
+		queue = queue[1:]
+		if processed[current] {
+			continue
+		}
+		processed[current] = true
+		result = append(result, current)
+		neighbors := append([]string(nil), adjList[current]...)
+		sort.Strings(neighbors)
+		for _, neighbor := range neighbors {
+			inDegree[neighbor]--
+			if inDegree[neighbor] <= 0 && !processed[neighbor] {
+				queue = append(queue, neighbor)
+				sort.Strings(queue)
+			}
+		}
+	}
+
+	rank := make(map[string]int, len(result))
+	for i, k := range result {
+		rank[k] = i
+	}
+	sorted := append([]*deferredConstraint(nil), nonNil...)
+	sort.Slice(sorted, func(i, j int) bool {
+		ki := sorted[i].table.Schema + "." + sorted[i].table.Name
+		kj := sorted[j].table.Schema + "." + sorted[j].table.Name
+		ri, rj := rank[ki], rank[kj]
+		if ri != rj {
+			return ri < rj
+		}
+		return sorted[i].constraint.Name < sorted[j].constraint.Name
+	})
+	return sorted
+}
+
 // constraintMatchesFKReference checks if a UNIQUE/PK constraint matches the columns
 // referenced by a foreign key constraint.
 // In PostgreSQL, composite foreign keys must reference columns in the same order as they

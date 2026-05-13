@@ -50,26 +50,61 @@ func NewInspector(db *sql.DB, ignoreConfig *IgnoreConfig) *Inspector {
 
 // BuildIR builds the schema IR from the database for a specific schema
 func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, error) {
-	schema := NewIR()
+	return i.BuildIRFromSchemas(ctx, []string{targetSchema})
+}
 
-	// Sequential prerequisites
+// BuildIRFromSchemas merges IR from multiple PostgreSQL namespaces into one IR value.
+// Order can matter when later stages depend on objects created in an earlier schema pass.
+func (i *Inspector) BuildIRFromSchemas(ctx context.Context, targetSchemas []string) (*IR, error) {
+	if len(targetSchemas) == 0 {
+		targetSchemas = []string{"public"}
+	}
+	if len(targetSchemas) == 1 {
+		return i.buildIRSingle(ctx, targetSchemas[0])
+	}
+
+	schema := NewIR()
 	if err := i.buildMetadata(ctx, schema); err != nil {
 		return nil, fmt.Errorf("failed to build metadata: %w", err)
 	}
 
+	for _, ts := range targetSchemas {
+		if err := i.validateSchemaExists(ctx, ts); err != nil {
+			return nil, fmt.Errorf("schema %q: %w", ts, err)
+		}
+		if err := i.buildSchemaContent(ctx, schema, ts); err != nil {
+			return nil, fmt.Errorf("schema %q: %w", ts, err)
+		}
+	}
+
+	normalizeIR(schema)
+	return schema, nil
+}
+
+func (i *Inspector) buildIRSingle(ctx context.Context, targetSchema string) (*IR, error) {
+	schema := NewIR()
+	if err := i.buildMetadata(ctx, schema); err != nil {
+		return nil, fmt.Errorf("failed to build metadata: %w", err)
+	}
 	if err := i.validateSchemaExists(ctx, targetSchema); err != nil {
 		return nil, err
 	}
+	if err := i.buildSchemaContent(ctx, schema, targetSchema); err != nil {
+		return nil, err
+	}
+	normalizeIR(schema)
+	return schema, nil
+}
 
+// buildSchemaContent loads all objects for one namespace into schema (merge).
+func (i *Inspector) buildSchemaContent(ctx context.Context, schema *IR, targetSchema string) error {
 	if err := i.buildSchemas(ctx, schema, targetSchema); err != nil {
-		return nil, fmt.Errorf("failed to build schemas: %w", err)
+		return fmt.Errorf("failed to build schemas: %w", err)
 	}
-
 	if err := i.buildTables(ctx, schema, targetSchema); err != nil {
-		return nil, fmt.Errorf("failed to build tables: %w", err)
+		return fmt.Errorf("failed to build tables: %w", err)
 	}
 
-	// Concurrent Group 1: Table Details
 	group1 := queryGroup{
 		name: "table details",
 		funcs: []func(context.Context, *IR, string) error{
@@ -78,8 +113,6 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 			i.buildPartitions,
 		},
 	}
-
-	// Concurrent Group 2: Independent Objects
 	group2 := queryGroup{
 		name: "independent objects",
 		funcs: []func(context.Context, *IR, string) error{
@@ -93,16 +126,12 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 			i.buildColumnPrivileges,
 		},
 	}
-
-	// Concurrent Group 3: View and table-dependent objects (views must load first)
 	group3 := queryGroup{
 		name: "views",
 		funcs: []func(context.Context, *IR, string) error{
 			i.buildViews,
 		},
 	}
-
-	// Group 4: Objects that depend on both tables AND views (must run after views are loaded)
 	group4 := queryGroup{
 		name: "table-and-view-dependent objects",
 		funcs: []func(context.Context, *IR, string) error{
@@ -111,46 +140,30 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		},
 	}
 
-	// Execute groups concurrently where possible
 	var eg errgroup.Group
-
-	// Group 1 & 2 can run in parallel
 	eg.Go(func() error {
 		return i.executeConcurrentGroup(ctx, schema, targetSchema, group1)
 	})
-
 	eg.Go(func() error {
 		return i.executeConcurrentGroup(ctx, schema, targetSchema, group2)
 	})
-
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		return err
 	}
 
-	// Build function dependencies after functions are loaded
 	if err := i.buildFunctionDependencies(ctx, schema, targetSchema); err != nil {
-		return nil, err
+		return fmt.Errorf("failed to build function dependencies: %w", err)
 	}
-
-	// Group 3 runs after table details are loaded (views must be loaded before triggers)
 	if err := i.executeConcurrentGroup(ctx, schema, targetSchema, group3); err != nil {
-		return nil, err
+		return err
 	}
-
-	// Group 4 runs after views are loaded (triggers can reference views for INSTEAD OF triggers)
 	if err := i.executeConcurrentGroup(ctx, schema, targetSchema, group4); err != nil {
-		return nil, err
+		return err
 	}
-
-	// Build indexes after views are loaded (indexes can reference materialized views)
 	if err := i.buildIndexes(ctx, schema, targetSchema); err != nil {
-		return nil, fmt.Errorf("failed to build indexes: %w", err)
+		return fmt.Errorf("failed to build indexes: %w", err)
 	}
-
-	// Normalize the IR
-	normalizeIR(schema)
-
-	return schema, nil
+	return nil
 }
 
 // queryGroup represents a group of queries that can be executed concurrently

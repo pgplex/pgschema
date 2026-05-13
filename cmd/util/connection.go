@@ -94,7 +94,31 @@ func ValidateSSLMode(mode string) error {
 	}
 }
 
-// GetIRFromDatabase gets the IR from a database with ignore configuration
+// ParseSchemaList splits a comma-separated schema specification into non-empty names.
+// Empty input yields ["public"]. Duplicates are removed while preserving order.
+func ParseSchemaList(spec string) []string {
+	parts := strings.Split(spec, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{})
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return []string{"public"}
+	}
+	return out
+}
+
+// GetIRFromDatabase gets the IR from a database with ignore configuration.
+// schemaName may be a comma-separated list (e.g. "public,app") to merge multiple namespaces.
 func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
 	if sslmode == "" {
 		sslmode = "prefer"
@@ -122,13 +146,9 @@ func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schem
 	// Build IR using the IR system with ignore config
 	inspector := ir.NewInspector(conn, ignoreConfig)
 
-	// Default to public schema if none specified
-	targetSchema := schemaName
-	if targetSchema == "" {
-		targetSchema = "public"
-	}
+	schemas := ParseSchemaList(schemaName)
 
-	schemaIR, err := inspector.BuildIR(ctx, targetSchema)
+	schemaIR, err := inspector.BuildIRFromSchemas(ctx, schemas)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build IR: %w", err)
 	}

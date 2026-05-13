@@ -15,6 +15,36 @@ type SchemaFingerprint struct {
 
 // ComputeFingerprint generates a fingerprint for the given IR and schema
 func ComputeFingerprint(schemaIR *ir.IR, schemaName string) (*SchemaFingerprint, error) {
+	return ComputeFingerprintForSchemas(schemaIR, []string{schemaName})
+}
+
+// ComputeFingerprintForSchemas hashes the union of the listed PostgreSQL namespaces.
+func ComputeFingerprintForSchemas(schemaIR *ir.IR, schemaNames []string) (*SchemaFingerprint, error) {
+	if len(schemaNames) == 0 {
+		schemaNames = []string{"public"}
+	}
+	if len(schemaNames) == 1 {
+		return computeFingerprintSingle(schemaIR, schemaNames[0])
+	}
+
+	subset := make(map[string]*ir.Schema)
+	for _, name := range schemaNames {
+		if s := schemaIR.Schemas[name]; s != nil {
+			subset[name] = s
+		}
+	}
+	partial := &ir.IR{
+		Metadata: schemaIR.Metadata,
+		Schemas:  subset,
+	}
+	hash, err := hashObject(partial)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute schema hash: %w", err)
+	}
+	return &SchemaFingerprint{Hash: hash}, nil
+}
+
+func computeFingerprintSingle(schemaIR *ir.IR, schemaName string) (*SchemaFingerprint, error) {
 	// Get the target schema, default to "public" if not found
 	targetSchema := schemaIR.Schemas[schemaName]
 	if targetSchema == nil && schemaName == "public" {

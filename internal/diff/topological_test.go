@@ -439,3 +439,35 @@ func TestBuildFunctionBodyDependenciesWithTopologicalSort(t *testing.T) {
 		t.Errorf("expected a_helper before z_wrapper, got order: %v", order)
 	}
 }
+
+func TestSortDeferredForeignKeys_ordersRefBeforeChild(t *testing.T) {
+	child := &ir.Table{Schema: "app", Name: "child"}
+	fk := &ir.Constraint{
+		Name:              "child_parent_fk",
+		Type:              ir.ConstraintTypeForeignKey,
+		Columns:           []*ir.ConstraintColumn{{Name: "pid", Position: 1}},
+		ReferencedSchema:  "public",
+		ReferencedTable:   "parent",
+		ReferencedColumns: []*ir.ConstraintColumn{{Name: "id", Position: 1}},
+	}
+	fk2 := &ir.Constraint{
+		Name:              "other_child_fk",
+		Type:              ir.ConstraintTypeForeignKey,
+		Columns:           []*ir.ConstraintColumn{{Name: "cid", Position: 1}},
+		ReferencedSchema:  "app",
+		ReferencedTable:   "child",
+		ReferencedColumns: []*ir.ConstraintColumn{{Name: "id", Position: 1}},
+	}
+	other := &ir.Table{Schema: "public", Name: "other"}
+	items2 := []*deferredConstraint{
+		{table: other, constraint: fk2},
+		{table: child, constraint: fk},
+	}
+	sorted2 := sortDeferredForeignKeys(items2)
+	if len(sorted2) != 2 {
+		t.Fatalf("got %d", len(sorted2))
+	}
+	if sorted2[0].table.Name != "child" || sorted2[1].table.Name != "other" {
+		t.Fatalf("expected child FK before other FK, got %v then %v", sorted2[0].table.Name, sorted2[1].table.Name)
+	}
+}

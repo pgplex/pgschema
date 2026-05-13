@@ -507,37 +507,40 @@ func generateCreateTablesSQL(
 
 func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema string, collector *diffCollector) {
 	for _, item := range deferred {
-		constraint := item.constraint
-		if constraint == nil || item.table == nil || constraint.Name == "" {
-			continue
-		}
-
-		columns := sortConstraintColumnsByPosition(constraint.Columns)
-		var columnNames []string
-		for _, col := range columns {
-			columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
-		}
-		if constraint.IsTemporal && len(columnNames) > 0 {
-			columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
-		}
-
-		tableName := getTableNameWithSchema(item.table.Schema, item.table.Name, targetSchema)
-		sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
-			tableName,
-			ir.QuoteIdentifier(constraint.Name),
-			strings.Join(columnNames, ", "),
-			generateForeignKeyClause(constraint, targetSchema, false),
-		)
-
-		context := &diffContext{
-			Type:                DiffTypeTableConstraint,
-			Operation:           DiffOperationCreate,
-			Path:                fmt.Sprintf("%s.%s.%s", item.table.Schema, item.table.Name, constraint.Name),
-			Source:              constraint,
-			CanRunInTransaction: true,
-		}
-		collector.collect(context, sql)
+		emitDeferredForeignKeyConstraint(item, targetSchema, collector)
 	}
+}
+
+func emitDeferredForeignKeyConstraint(item *deferredConstraint, targetSchema string, collector *diffCollector) {
+	if item == nil || item.constraint == nil || item.table == nil || item.constraint.Name == "" {
+		return
+	}
+	constraint := item.constraint
+	columns := sortConstraintColumnsByPosition(constraint.Columns)
+	var columnNames []string
+	for _, col := range columns {
+		columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
+	}
+	if constraint.IsTemporal && len(columnNames) > 0 {
+		columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
+	}
+
+	tableName := getTableNameWithSchema(item.table.Schema, item.table.Name, targetSchema)
+	sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
+		tableName,
+		ir.QuoteIdentifier(constraint.Name),
+		strings.Join(columnNames, ", "),
+		generateForeignKeyClause(constraint, targetSchema, false),
+	)
+
+	context := &diffContext{
+		Type:                DiffTypeTableConstraint,
+		Operation:           DiffOperationCreate,
+		Path:                fmt.Sprintf("%s.%s.%s", item.table.Schema, item.table.Name, constraint.Name),
+		Source:              constraint,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
 }
 
 // generateModifyTablesSQL generates ALTER TABLE statements
@@ -810,9 +813,11 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 					}
 					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s UNIQUE%s", ir.QuoteIdentifier(constraint.Name), modifier)
 				case ir.ConstraintTypeForeignKey:
-					// For FK, use the generateForeignKeyClause with inline=true
-					fkClause := generateForeignKeyClause(constraint, targetSchema, true)
-					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s%s", ir.QuoteIdentifier(constraint.Name), fkClause)
+					// Defer FK to flush phase so referenced tables and new PK/UNIQUE exist.
+					inlineConstraints[constraint.Name] = true
+					if collector != nil {
+						collector.queueDeferredForeignKey(td.Table, constraint)
+					}
 				case ir.ConstraintTypeCheck:
 					// For CHECK, format the clause inline
 					checkExpr := constraint.CheckClause
@@ -947,30 +952,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			collector.collect(context, canonicalSQL)
 
 		case ir.ConstraintTypeForeignKey:
-			// Sort columns by position
-			columns := sortConstraintColumnsByPosition(constraint.Columns)
-			var columnNames []string
-			for _, col := range columns {
-				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
+			if collector != nil {
+				collector.queueDeferredForeignKey(td.Table, constraint)
 			}
-			if constraint.IsTemporal && len(columnNames) > 0 {
-				columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
-			}
-
-			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
-			canonicalSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
-				tableName, ir.QuoteIdentifier(constraint.Name),
-				strings.Join(columnNames, ", "),
-				generateForeignKeyClause(constraint, targetSchema, false))
-
-			context := &diffContext{
-				Type:                DiffTypeTableConstraint,
-				Operation:           DiffOperationCreate,
-				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, constraint.Name),
-				Source:              constraint,
-				CanRunInTransaction: true,
-			}
-			collector.collect(context, canonicalSQL)
 
 		case ir.ConstraintTypePrimaryKey:
 			// Sort columns by position
@@ -1059,20 +1043,10 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				tableName, ir.QuoteIdentifier(constraint.Name), ensureCheckClauseParens(constraint.CheckClause), suffix)
 
 		case ir.ConstraintTypeForeignKey:
-			// Sort columns by position
-			columns := sortConstraintColumnsByPosition(constraint.Columns)
-			var columnNames []string
-			for _, col := range columns {
-				columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
+			if collector != nil {
+				collector.queueDeferredForeignKey(td.Table, constraint)
 			}
-			if constraint.IsTemporal && len(columnNames) > 0 {
-				columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
-			}
-
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
-				tableName, ir.QuoteIdentifier(constraint.Name),
-				strings.Join(columnNames, ", "),
-				generateForeignKeyClause(constraint, targetSchema, false))
+			addSQL = ""
 
 		case ir.ConstraintTypePrimaryKey:
 			// Sort columns by position
@@ -1100,7 +1074,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 
-		collector.collect(addContext, addSQL)
+		if addSQL != "" {
+			collector.collect(addContext, addSQL)
+		}
 	}
 
 	// Handle RLS changes

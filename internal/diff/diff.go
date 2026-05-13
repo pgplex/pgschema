@@ -42,6 +42,7 @@ const (
 	DiffTypePrivilege
 	DiffTypeRevokedDefaultPrivilege
 	DiffTypeColumnPrivilege
+	DiffTypeSchema
 )
 
 // String returns the string representation of DiffType
@@ -103,6 +104,8 @@ func (d DiffType) String() string {
 		return "revoked_default_privilege"
 	case DiffTypeColumnPrivilege:
 		return "column_privilege"
+	case DiffTypeSchema:
+		return "schema"
 	default:
 		return "unknown"
 	}
@@ -177,6 +180,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeRevokedDefaultPrivilege
 	case "column_privilege":
 		*d = DiffTypeColumnPrivilege
+	case "schema":
+		*d = DiffTypeSchema
 	default:
 		return fmt.Errorf("unknown diff type: %s", s)
 	}
@@ -1401,6 +1406,9 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 
 	// Finally: Modify operations
 	d.generateModifySQL(targetSchema, collector, preDroppedViews)
+
+	// Foreign keys deferred from CREATE TABLE and ALTER TABLE (after all structural DDL).
+	collector.flushDeferredForeignKeys(targetSchema)
 }
 
 // generatePreDropMaterializedViewsSQL drops materialized views that depend on
@@ -1497,7 +1505,7 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 
 // generateCreateSQL generates CREATE statements in dependency order
 func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollector) {
-	// Note: Schema creation is out of scope for schema-level comparisons
+	generateCreateSchemasSQL(d.addedSchemas, collector)
 
 	// Build function lookup early - needed for both domain and table dependency checks
 	newFunctionLookup := buildFunctionLookup(d.addedFunctions)
@@ -1600,10 +1608,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
 	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy)
 
-	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
-	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
+	// Queue foreign key constraints from BOTH batches for a flush after MODIFY so referenced
+	// tables and new PK/UNIQUE constraints from ALTER TABLE exist before ADD FOREIGN KEY.
 	allDeferredConstraints := append(deferredConstraints1, deferredConstraints2...)
-	generateDeferredConstraintsSQL(allDeferredConstraints, targetSchema, collector)
+	for _, dc := range allDeferredConstraints {
+		collector.queueDeferredForeignKey(dc.table, dc.constraint)
+	}
 
 	// Merge deferred policies from both batches
 	allDeferredPolicies := append(deferredPolicies1, deferredPolicies2...)
@@ -1721,8 +1731,8 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Drop types
 	generateDropTypesSQL(d.droppedTypes, targetSchema, collector)
 
-	// Drop schemas
-	// Note: Schema deletion is out of scope for schema-level comparisons
+	// Drop namespaces last (CASCADE removes any remaining objects in the schema).
+	generateDropSchemasSQL(d.droppedSchemas, collector)
 }
 
 // filterPreDroppedViews returns views that haven't been pre-dropped

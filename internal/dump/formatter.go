@@ -247,6 +247,8 @@ func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 		return "procedures"
 	case "table":
 		return "tables"
+	case "schema":
+		return "schemas"
 	case "view":
 		return "views"
 	case "materialized_view":
@@ -279,6 +281,14 @@ func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 func (f *DumpFormatter) getGroupingName(step diff.Diff) string {
 	// For table-related objects, try to extract the table name from Source
 	switch step.Type {
+	case diff.DiffTypeSchema:
+		if step.Source != nil {
+			switch obj := step.Source.(type) {
+			case *ir.Schema:
+				return obj.Name
+			}
+		}
+		return step.Path
 	case diff.DiffTypeTableIndex, diff.DiffTypeTableTrigger, diff.DiffTypeTableConstraint, diff.DiffTypeTablePolicy, diff.DiffTypeTableRLS, diff.DiffTypeTableComment, diff.DiffTypeTableColumnComment, diff.DiffTypeTableIndexComment:
 		if tableName := f.extractTableNameFromContext(step); tableName != "" {
 			return tableName

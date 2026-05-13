@@ -45,7 +45,7 @@ var (
 var PlanCmd = &cobra.Command{
 	Use:          "plan",
 	Short:        "Generate migration plan for a specific schema",
-	Long:         "Generate a migration plan to apply a desired schema state to a target database schema. Compares the desired state (from --file) with the current state of a specific schema (specified by --schema, defaults to 'public').",
+	Long:         "Generate a migration plan to apply a desired schema state to a target database. Compares the desired state (from --file) with the current state. Use --schema with a comma-separated list (e.g. public,app) to compare and inspect multiple PostgreSQL namespaces.",
 	RunE:         runPlan,
 	SilenceUsage: true,
 	PreRunE:      util.PreRunEWithEnvVarsAndConnection(&planDB, &planUser, &planHost, &planPort),
@@ -58,7 +58,7 @@ func init() {
 	PlanCmd.Flags().StringVar(&planDB, "db", "", "Database name (required) (env: PGDATABASE)")
 	PlanCmd.Flags().StringVar(&planUser, "user", "", "Database user name (required) (env: PGUSER)")
 	PlanCmd.Flags().StringVar(&planPassword, "password", "", "Database password (optional, can also use PGPASSWORD env var)")
-	PlanCmd.Flags().StringVar(&planSchema, "schema", "public", "Schema name")
+	PlanCmd.Flags().StringVar(&planSchema, "schema", "public", "Schema name, or comma-separated list for multi-namespace plan (e.g. public,app)")
 
 	// Desired state schema file flag
 	PlanCmd.Flags().StringVar(&planFile, "file", "", "Path to desired state SQL schema file (required)")
@@ -267,6 +267,9 @@ func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.Postgr
 // The caller must provide a non-nil provider instance for validating the desired state schema.
 // The caller is responsible for managing the provider lifecycle (creation and cleanup).
 func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*plan.Plan, error) {
+	planSchemas := util.ParseSchemaList(config.Schema)
+	primarySchema := planSchemas[0]
+
 	// Load ignore configuration
 	ignoreConfig, err := util.LoadIgnoreFileWithStructure()
 	if err != nil {
@@ -287,7 +290,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	}
 
 	// Compute fingerprint of current database state
-	sourceFingerprint, err := fingerprint.ComputeFingerprint(currentStateIR, config.Schema)
+	sourceFingerprint, err := fingerprint.ComputeFingerprintForSchemas(currentStateIR, planSchemas)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute source fingerprint: %w", err)
 	}
@@ -295,7 +298,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	ctx := context.Background()
 
 	// Apply desired state SQL to the provider (embedded postgres or external database)
-	if err := provider.ApplySchema(ctx, config.Schema, desiredState); err != nil {
+	if err := provider.ApplySchema(ctx, primarySchema, desiredState); err != nil {
 		return nil, fmt.Errorf("failed to apply desired state: %w", err)
 	}
 
@@ -307,8 +310,14 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	// (e.g., pgschema_tmp_20251030_154501_123456789) to ensure isolation and prevent conflicts.
 	schemaToInspect := provider.GetSchemaName()
 	if schemaToInspect == "" {
-		schemaToInspect = config.Schema
+		schemaToInspect = primarySchema
 	}
+
+	inspectSchemas := []string{schemaToInspect}
+	for _, s := range planSchemas[1:] {
+		inspectSchemas = append(inspectSchemas, s)
+	}
+	inspectSpec := strings.Join(inspectSchemas, ",")
 
 	// For embedded postgres, always use "disable" since it starts without SSL configured.
 	// For external plan databases, use the configured PlanDBSSLMode (defaulting to "prefer").
@@ -319,7 +328,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 			providerSSLMode = "prefer"
 		}
 	}
-	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig)
+	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, inspectSpec, config.ApplicationName, ignoreConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get desired state: %w", err)
 	}
@@ -329,12 +338,12 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	// because that's where objects were created. We need to replace these with the target
 	// schema name (e.g., "public") so that generated DDL references the correct schema.
 	// Without this normalization, DDL would reference non-existent temporary schemas and fail.
-	if schemaToInspect != config.Schema {
-		normalizeSchemaNames(desiredStateIR, schemaToInspect, config.Schema)
+	if schemaToInspect != primarySchema {
+		normalizeSchemaNames(desiredStateIR, schemaToInspect, primarySchema)
 	}
 
 	// Generate diff (current -> desired) using IR directly
-	diffs := diff.GenerateMigration(currentStateIR, desiredStateIR, config.Schema)
+	diffs := diff.GenerateMigration(currentStateIR, desiredStateIR, primarySchema)
 
 	// Create plan from diffs with fingerprint
 	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint)
