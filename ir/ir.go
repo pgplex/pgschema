@@ -709,4 +709,5 @@ func (p *Procedure) GetObjectName() string  { return p.Name }
 func (v *View) GetObjectName() string       { return v.Name }
 func (s *Sequence) GetObjectName() string   { return s.Name }
 func (t *Type) GetObjectName() string       { return t.Name }
+func (s *Schema) GetObjectName() string     { return s.Name }
 
