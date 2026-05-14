@@ -19,6 +19,7 @@ jobs:
         run: go test -short -v ./...
 
   integration:
+    needs: unit
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,6 +31,7 @@ jobs:
         with:
           go-version: "1.24"
       - name: Run integration tests (PG ${{ matrix.pg-version }})
+        
         env:
           PGSCHEMA_POSTGRES_VERSION: ${{ matrix.pg-version }}
         run: go test -v ./...
