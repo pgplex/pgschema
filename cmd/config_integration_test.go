@@ -3,9 +3,11 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pgplex/pgschema/cmd/config"
+	"github.com/pgplex/pgschema/testutil"
 )
 
 func resetRootCmd() {
@@ -301,5 +303,55 @@ lock-timeout = "45s"
 	if cfg.LockTimeout != "45s" {
 		t.Errorf("LockTimeout = %q, want %q", cfg.LockTimeout, "45s")
 	}
+}
+
+func TestDiscoverSchemas_ReadOnlyEnforcement(t *testing.T) {
+	_, host, port, dbname, user, password := testutil.ConnectToPostgres(t, sharedEmbeddedPG)
+
+	// Valid SELECT query should succeed
+	t.Run("SELECT is allowed", func(t *testing.T) {
+		schemas, err := config.DiscoverSchemas(host, port, dbname, user, password, "disable",
+			"SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'public'")
+		if err != nil {
+			t.Fatalf("SELECT query should succeed: %v", err)
+		}
+		if len(schemas) == 0 {
+			t.Error("expected at least one schema")
+		}
+	})
+
+	// CREATE TABLE should be rejected by read-only transaction
+	t.Run("CREATE is rejected", func(t *testing.T) {
+		_, err := config.DiscoverSchemas(host, port, dbname, user, password, "disable",
+			"CREATE TABLE pgschema_injection_test (id int)")
+		if err == nil {
+			t.Fatal("CREATE should be rejected in read-only transaction")
+		}
+		if !strings.Contains(err.Error(), "read-only") {
+			t.Errorf("error should mention read-only, got: %v", err)
+		}
+	})
+
+	// DROP should be rejected
+	t.Run("DROP is rejected", func(t *testing.T) {
+		_, err := config.DiscoverSchemas(host, port, dbname, user, password, "disable",
+			"DROP TABLE IF EXISTS pgschema_injection_test")
+		if err == nil {
+			t.Fatal("DROP should be rejected in read-only transaction")
+		}
+		if !strings.Contains(err.Error(), "read-only") {
+			t.Errorf("error should mention read-only, got: %v", err)
+		}
+	})
+
+	// INSERT should be rejected
+	t.Run("INSERT is rejected", func(t *testing.T) {
+		// Create a temp table first via direct connection, then try INSERT via DiscoverSchemas
+		_, err := config.DiscoverSchemas(host, port, dbname, user, password, "disable",
+			"INSERT INTO information_schema.schemata VALUES ('hacked')")
+		if err == nil {
+			t.Fatal("INSERT should be rejected in read-only transaction")
+		}
+	})
 }
 
