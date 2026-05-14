@@ -163,7 +163,15 @@ func DiscoverSchemas(host string, port int, db, user, password, sslmode, query s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	rows, err := conn.QueryContext(ctx, query)
+	// Run in a read-only transaction so the discovery query cannot modify data,
+	// even if the config file contains a non-SELECT statement.
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin read-only transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("schema discovery query failed: %w", err)
 	}
