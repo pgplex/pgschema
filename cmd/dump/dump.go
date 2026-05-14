@@ -109,8 +109,6 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 }
 
 func runDump(cmd *cobra.Command, args []string) error {
-	applyConfigToDump(cmd)
-
 	// Derive final password: use flag if provided, otherwise check environment variable
 	finalPassword := password
 	if finalPassword == "" {
