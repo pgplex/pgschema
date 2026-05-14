@@ -50,7 +50,10 @@ var ApplyCmd = &cobra.Command{
 	Long:         "Apply a migration plan to update a database schema. Either provide a desired state file (--file) to generate and apply a plan, or provide a pre-generated plan file (--plan) to execute directly.",
 	RunE:         RunApply,
 	SilenceUsage: true,
-	PreRunE:      util.PreRunEWithEnvVarsAndConnectionAndApp(&applyDB, &applyUser, &applyHost, &applyPort, &applyApplicationName),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		applyConfigToApply(cmd)
+		return util.PreRunEWithEnvVarsAndConnectionAndApp(&applyDB, &applyUser, &applyHost, &applyPort, &applyApplicationName)(cmd, args)
+	},
 }
 
 func init() {
@@ -267,8 +270,6 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 
 // RunApply executes the apply command logic. Exported for testing.
 func RunApply(cmd *cobra.Command, args []string) error {
-	applyConfigToApply(cmd)
-
 	cfg := config.Get()
 	if cfg != nil && cfg.Schemas != nil && cfg.Schemas.Query != "" && !cmd.Flags().Changed("schema") {
 		return runApplyMultiSchema(cmd, cfg)
