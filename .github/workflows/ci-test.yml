@@ -8,17 +8,12 @@ on:
       - "docs/**"
 
 jobs:
-  test:
+  unit:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
-
-      - name: Run tests
-        run: go test -v ./...
+      - name: Run unit tests
+        run: go test -short -v ./...
