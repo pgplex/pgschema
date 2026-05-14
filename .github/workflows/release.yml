@@ -13,9 +13,13 @@ permissions:
   contents: write
 
 jobs:
-  # Test job runs first with all Postgres versions
+  # Test job runs first with all Postgres versions in parallel
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg-version: ["14", "15", "16", "17", "18"]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -27,30 +31,10 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Run tests (PostgreSQL 18)
-        run: |
-          echo "Testing with PostgreSQL 18"
-          PGSCHEMA_POSTGRES_VERSION=18 go test -v ./...
-
-      - name: Run tests (PostgreSQL 17)
-        run: |
-          echo "Testing with PostgreSQL 17"
-          PGSCHEMA_POSTGRES_VERSION=17 go test -v ./...
-
-      - name: Run tests (PostgreSQL 16)
-        run: |
-          echo "Testing with PostgreSQL 16"
-          PGSCHEMA_POSTGRES_VERSION=16 go test -v ./...
-
-      - name: Run tests (PostgreSQL 15)
-        run: |
-          echo "Testing with PostgreSQL 15"
-          PGSCHEMA_POSTGRES_VERSION=15 go test -v ./...
-
-      - name: Run tests (PostgreSQL 14)
-        run: |
-          echo "Testing with PostgreSQL 14"
-          PGSCHEMA_POSTGRES_VERSION=14 go test -v ./...
+      - name: Run tests (PostgreSQL ${{ matrix.pg-version }})
+        env:
+          PGSCHEMA_POSTGRES_VERSION: ${{ matrix.pg-version }}
+        run: go test -v ./...
 
   # Build binaries using native Go cross-compilation
   build-binaries:
