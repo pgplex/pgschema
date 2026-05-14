@@ -1,10 +1,14 @@
 package config
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type ResolvedConfig struct {
@@ -134,6 +138,51 @@ func SetResolved(cfg *ResolvedConfig) {
 
 func Get() *ResolvedConfig {
 	return resolvedCfg
+}
+
+func DiscoverSchemas(host string, port int, db, user, password, sslmode, query string) ([]string, error) {
+	dsn := fmt.Sprintf("host=%s port=%d dbname=%s user=%s sslmode=%s", host, port, db, user, sslmode)
+	if password != "" {
+		dsn += fmt.Sprintf(" password=%s", password)
+	}
+	dsn += " connect_timeout=30"
+
+	conn, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect for schema discovery: %w", err)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("schema discovery query failed: %w", err)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query columns: %w", err)
+	}
+	if len(cols) != 1 {
+		return nil, fmt.Errorf("schema discovery query must return exactly 1 column, got %d", len(cols))
+	}
+
+	var schemas []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan schema name: %w", err)
+		}
+		schemas = append(schemas, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading schema names: %w", err)
+	}
+
+	return schemas, nil
 }
 
 // isDefined checks if a TOML key is explicitly present.

@@ -90,6 +90,11 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--file is required (provide via flag, config file, or environment)")
 	}
 
+	cfg := config.Get()
+	if cfg != nil && cfg.Schemas != nil && cfg.Schemas.Query != "" && !cmd.Flags().Changed("schema") {
+		return runPlanMultiSchema(cmd, cfg)
+	}
+
 	// Apply environment variables to plan database flags
 	util.ApplyPlanDBEnvVars(cmd, &planDBHost, &planDBDatabase, &planDBUser, &planDBPassword, &planDBPort, &planDBSSLMode)
 
@@ -718,6 +723,94 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 		s = typePattern.ReplaceAllString(s, "::")
 		return s
 	}
+}
+
+func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
+	finalPassword := planPassword
+	if finalPassword == "" {
+		if envPassword := os.Getenv("PGPASSWORD"); envPassword != "" {
+			finalPassword = envPassword
+		}
+	}
+	finalSSLMode := planSSLMode
+	if cmd == nil || !cmd.Flags().Changed("sslmode") {
+		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
+			finalSSLMode = envSSLMode
+		}
+	}
+
+	schemas, err := config.DiscoverSchemas(planHost, planPort, planDB, planUser, finalPassword, finalSSLMode, cfg.Schemas.Query)
+	if err != nil {
+		return err
+	}
+
+	if len(schemas) == 0 {
+		fmt.Println("Warning: schema discovery query returned no schemas.")
+		return nil
+	}
+
+	outputs, err := determineOutputs()
+	if err != nil {
+		return err
+	}
+
+	var hasErrors bool
+	withChanges := 0
+
+	for _, schemaName := range schemas {
+		fmt.Printf("\n── Schema: %s ──────────────────────\n", schemaName)
+
+		perSchemaConfig := &PlanConfig{
+			Host:            planHost,
+			Port:            planPort,
+			DB:              planDB,
+			User:            planUser,
+			Password:        finalPassword,
+			Schema:          schemaName,
+			File:            planFile,
+			ApplicationName: "pgschema",
+			SSLMode:         finalSSLMode,
+			PlanDBHost:      planDBHost,
+			PlanDBPort:      planDBPort,
+			PlanDBDatabase:  planDBDatabase,
+			PlanDBUser:      planDBUser,
+			PlanDBPassword:  planDBPassword,
+			PlanDBSSLMode:   planDBSSLMode,
+		}
+
+		provider, err := CreateDesiredStateProvider(perSchemaConfig)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)
+			hasErrors = true
+			continue
+		}
+
+		migrationPlan, err := GeneratePlan(perSchemaConfig, provider)
+		provider.Stop()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)
+			hasErrors = true
+			continue
+		}
+
+		if migrationPlan.HasAnyChanges() {
+			withChanges++
+		}
+
+		for _, output := range outputs {
+			if err := processOutput(migrationPlan, output, cmd); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing output for schema %s: %v\n", schemaName, err)
+				hasErrors = true
+			}
+		}
+	}
+
+	fmt.Printf("\nSummary: %d schemas inspected, %d with changes\n", len(schemas), withChanges)
+
+	if hasErrors {
+		return fmt.Errorf("one or more schemas had errors")
+	}
+	return nil
 }
 
 func applyConfigToPlan(cmd *cobra.Command) {

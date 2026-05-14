@@ -269,6 +269,11 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 func RunApply(cmd *cobra.Command, args []string) error {
 	applyConfigToApply(cmd)
 
+	cfg := config.Get()
+	if cfg != nil && cfg.Schemas != nil && cfg.Schemas.Query != "" && !cmd.Flags().Changed("schema") {
+		return runApplyMultiSchema(cmd, cfg)
+	}
+
 	// Validate that either --file or --plan is provided
 	if applyFile == "" && applyPlan == "" {
 		return fmt.Errorf("either --file or --plan must be specified")
@@ -488,6 +493,95 @@ func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.Exec
 				return fmt.Errorf("failed to execute statement in group %d, step %d: %w", groupNum, stepIdx+1, err)
 			}
 		}
+	}
+	return nil
+}
+
+func runApplyMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
+	finalPassword := applyPassword
+	if finalPassword == "" {
+		if envPassword := os.Getenv("PGPASSWORD"); envPassword != "" {
+			finalPassword = envPassword
+		}
+	}
+	finalSSLMode := applySSLMode
+	if cmd == nil || !cmd.Flags().Changed("sslmode") {
+		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
+			finalSSLMode = envSSLMode
+		}
+	}
+
+	schemas, err := config.DiscoverSchemas(applyHost, applyPort, applyDB, applyUser, finalPassword, finalSSLMode, cfg.Schemas.Query)
+	if err != nil {
+		return err
+	}
+
+	if len(schemas) == 0 {
+		fmt.Println("Warning: schema discovery query returned no schemas.")
+		return nil
+	}
+
+	if applyFile == "" {
+		return fmt.Errorf("--file is required for multi-schema apply")
+	}
+
+	var hasErrors bool
+	for _, schemaName := range schemas {
+		fmt.Printf("\n── Schema: %s ──────────────────────\n", schemaName)
+
+		perSchemaConfig := &ApplyConfig{
+			Host:            applyHost,
+			Port:            applyPort,
+			DB:              applyDB,
+			User:            applyUser,
+			Password:        finalPassword,
+			Schema:          schemaName,
+			File:            applyFile,
+			AutoApprove:     applyAutoApprove,
+			NoColor:         applyNoColor,
+			LockTimeout:     applyLockTimeout,
+			ApplicationName: applyApplicationName,
+			SSLMode:         finalSSLMode,
+			PlanDBHost:      applyPlanDBHost,
+			PlanDBSSLMode:   applyPlanDBSSLMode,
+		}
+
+		planConfig := &planCmd.PlanConfig{
+			Host:            applyHost,
+			Port:            applyPort,
+			DB:              applyDB,
+			User:            applyUser,
+			Password:        finalPassword,
+			Schema:          schemaName,
+			File:            applyFile,
+			ApplicationName: applyApplicationName,
+			SSLMode:         finalSSLMode,
+			PlanDBHost:      applyPlanDBHost,
+			PlanDBPort:      applyPlanDBPort,
+			PlanDBDatabase:  applyPlanDBDatabase,
+			PlanDBUser:      applyPlanDBUser,
+			PlanDBPassword:  applyPlanDBPassword,
+			PlanDBSSLMode:   applyPlanDBSSLMode,
+		}
+
+		provider, err := planCmd.CreateDesiredStateProvider(planConfig)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)
+			hasErrors = true
+			continue
+		}
+
+		err = ApplyMigration(perSchemaConfig, provider)
+		provider.Stop()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)
+			hasErrors = true
+		}
+	}
+
+	fmt.Printf("\nSummary: %d schemas processed\n", len(schemas))
+	if hasErrors {
+		return fmt.Errorf("one or more schemas had errors")
 	}
 	return nil
 }
