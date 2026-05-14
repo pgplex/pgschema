@@ -49,7 +49,10 @@ var PlanCmd = &cobra.Command{
 	Long:         "Generate a migration plan to apply a desired schema state to a target database schema. Compares the desired state (from --file) with the current state of a specific schema (specified by --schema, defaults to 'public').",
 	RunE:         runPlan,
 	SilenceUsage: true,
-	PreRunE:      util.PreRunEWithEnvVarsAndConnection(&planDB, &planUser, &planHost, &planPort),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		applyConfigToPlan(cmd)
+		return util.PreRunEWithEnvVarsAndConnection(&planDB, &planUser, &planHost, &planPort)(cmd, args)
+	},
 }
 
 func init() {
@@ -84,8 +87,6 @@ func init() {
 }
 
 func runPlan(cmd *cobra.Command, args []string) error {
-	applyConfigToPlan(cmd)
-
 	if planFile == "" {
 		return fmt.Errorf("--file is required (provide via flag, config file, or environment)")
 	}

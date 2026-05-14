@@ -45,7 +45,10 @@ var DumpCmd = &cobra.Command{
 	Long:         "Dump and output database schema information for a specific schema. Uses the --schema flag to target a particular schema (defaults to 'public').",
 	RunE:         runDump,
 	SilenceUsage: true,
-	PreRunE:      util.PreRunEWithEnvVarsAndConnection(&db, &user, &host, &port),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		applyConfigToDump(cmd)
+		return util.PreRunEWithEnvVarsAndConnection(&db, &user, &host, &port)(cmd, args)
+	},
 }
 
 func init() {
@@ -106,8 +109,6 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 }
 
 func runDump(cmd *cobra.Command, args []string) error {
-	applyConfigToDump(cmd)
-
 	// Derive final password: use flag if provided, otherwise check environment variable
 	finalPassword := password
 	if finalPassword == "" {
