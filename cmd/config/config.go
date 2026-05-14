@@ -11,6 +11,8 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// ResolvedConfig is the final, flattened configuration consumed by plan/apply/dump commands.
+// It is produced by merging base config with an optional named env override via LoadConfig.
 type ResolvedConfig struct {
 	Host     string
 	Port     int
@@ -49,6 +51,9 @@ type SchemasConfig struct {
 	Query string `toml:"query"`
 }
 
+// envConfig is the TOML deserialization target. It mirrors ResolvedConfig but carries
+// toml struct tags. Both the base level and each [env.*] block parse into this type.
+// It is unexported — callers only see the merged ResolvedConfig.
 type envConfig struct {
 	Host            string         `toml:"host"`
 	Port            int            `toml:"port"`
@@ -76,6 +81,8 @@ type envConfig struct {
 	Schemas         *SchemasConfig `toml:"schemas"`
 }
 
+// fileConfig is the top-level TOML structure: base-level fields (embedded envConfig)
+// plus a map of named environment overrides ([env.dev], [env.prod], etc.).
 type fileConfig struct {
 	envConfig
 	Env map[string]envConfig `toml:"env"`
