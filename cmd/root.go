@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/pgplex/pgschema/cmd/apply"
+	"github.com/pgplex/pgschema/cmd/config"
 	"github.com/pgplex/pgschema/cmd/dump"
 	"github.com/pgplex/pgschema/cmd/plan"
 	globallogger "github.com/pgplex/pgschema/internal/logger"
@@ -15,6 +16,8 @@ import (
 )
 
 var Debug bool
+var configPath string
+var envName string
 var logger *slog.Logger
 
 // Build-time variables set via ldflags
@@ -40,11 +43,14 @@ Use "pgschema [command] --help" for more information about a command.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		setupLogger()
 		globallogger.SetGlobal(logger, Debug)
+		loadConfig(cmd)
 	},
 }
 
 func init() {
 	RootCmd.PersistentFlags().BoolVar(&Debug, "debug", false, "Enable debug logging")
+	RootCmd.PersistentFlags().StringVar(&configPath, "config", "pgschema.toml", "Path to config file")
+	RootCmd.PersistentFlags().StringVar(&envName, "env", "", "Named environment to use from config file")
 	RootCmd.CompletionOptions.DisableDefaultCmd = true
 	RootCmd.AddCommand(dump.DumpCmd)
 	RootCmd.AddCommand(plan.PlanCmd)
@@ -81,6 +87,29 @@ func IsDebug() bool {
 // platform returns the OS/architecture combination
 func platform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
+}
+
+func loadConfig(cmd *cobra.Command) {
+	configExplicit := cmd.Flags().Changed("config")
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if configExplicit {
+			fmt.Fprintf(os.Stderr, "Error: config file not found: %s\n", configPath)
+			os.Exit(1)
+		}
+		if envName != "" {
+			fmt.Fprintf(os.Stderr, "Error: --env requires a config file, but %s not found\n", configPath)
+			os.Exit(1)
+		}
+		return
+	}
+
+	resolved, err := config.LoadConfig(configPath, envName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	config.SetResolved(resolved)
 }
 
 func Execute() {

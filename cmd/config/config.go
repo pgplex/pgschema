@@ -126,6 +126,16 @@ func toResolved(ec *envConfig) *ResolvedConfig {
 	}
 }
 
+var resolvedCfg *ResolvedConfig
+
+func SetResolved(cfg *ResolvedConfig) {
+	resolvedCfg = cfg
+}
+
+func Get() *ResolvedConfig {
+	return resolvedCfg
+}
+
 // isDefined checks if a TOML key is explicitly present.
 // prefix is a dot-separated path like "env.dev", key is the field name.
 func isDefined(meta toml.MetaData, prefix string, key string) bool {
