@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pgplex/pgschema/cmd/config"
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/fingerprint"
@@ -80,10 +81,15 @@ func init() {
 	PlanCmd.Flags().StringVar(&outputSQL, "output-sql", "", "Output SQL format to stdout or file path")
 	PlanCmd.Flags().BoolVar(&planNoColor, "no-color", false, "Disable colored output")
 
-	PlanCmd.MarkFlagRequired("file")
 }
 
 func runPlan(cmd *cobra.Command, args []string) error {
+	applyConfigToPlan(cmd)
+
+	if planFile == "" {
+		return fmt.Errorf("--file is required (provide via flag, config file, or environment)")
+	}
+
 	// Apply environment variables to plan database flags
 	util.ApplyPlanDBEnvVars(cmd, &planDBHost, &planDBDatabase, &planDBUser, &planDBPassword, &planDBPort, &planDBSSLMode)
 
@@ -711,6 +717,68 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
 		s = typePattern.ReplaceAllString(s, "::")
 		return s
+	}
+}
+
+func applyConfigToPlan(cmd *cobra.Command) {
+	cfg := config.Get()
+	if cfg == nil {
+		return
+	}
+
+	if !cmd.Flags().Changed("host") && cfg.Host != "" {
+		planHost = cfg.Host
+	}
+	if !cmd.Flags().Changed("port") && cfg.Port != 0 {
+		planPort = cfg.Port
+	}
+	if !cmd.Flags().Changed("db") && cfg.DB != "" {
+		planDB = cfg.DB
+	}
+	if !cmd.Flags().Changed("user") && cfg.User != "" {
+		planUser = cfg.User
+	}
+	if !cmd.Flags().Changed("password") && cfg.Password != "" {
+		planPassword = cfg.Password
+	}
+	if !cmd.Flags().Changed("schema") && cfg.Schema != "" {
+		planSchema = cfg.Schema
+	}
+	if !cmd.Flags().Changed("file") && cfg.File != "" {
+		planFile = cfg.File
+	}
+	if !cmd.Flags().Changed("sslmode") && cfg.SSLMode != "" {
+		planSSLMode = cfg.SSLMode
+	}
+	if !cmd.Flags().Changed("plan-host") && cfg.PlanHost != "" {
+		planDBHost = cfg.PlanHost
+	}
+	if !cmd.Flags().Changed("plan-port") && cfg.PlanPort != 0 {
+		planDBPort = cfg.PlanPort
+	}
+	if !cmd.Flags().Changed("plan-db") && cfg.PlanDB != "" {
+		planDBDatabase = cfg.PlanDB
+	}
+	if !cmd.Flags().Changed("plan-user") && cfg.PlanUser != "" {
+		planDBUser = cfg.PlanUser
+	}
+	if !cmd.Flags().Changed("plan-password") && cfg.PlanPassword != "" {
+		planDBPassword = cfg.PlanPassword
+	}
+	if !cmd.Flags().Changed("plan-sslmode") && cfg.PlanSSLMode != "" {
+		planDBSSLMode = cfg.PlanSSLMode
+	}
+	if !cmd.Flags().Changed("no-color") && cfg.NoColor {
+		planNoColor = cfg.NoColor
+	}
+	if !cmd.Flags().Changed("output-human") && cfg.OutputHuman != "" {
+		outputHuman = cfg.OutputHuman
+	}
+	if !cmd.Flags().Changed("output-json") && cfg.OutputJSON != "" {
+		outputJSON = cfg.OutputJSON
+	}
+	if !cmd.Flags().Changed("output-sql") && cfg.OutputSQL != "" {
+		outputSQL = cfg.OutputSQL
 	}
 }
 

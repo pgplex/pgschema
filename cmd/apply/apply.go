@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/pgplex/pgschema/cmd/config"
 	planCmd "github.com/pgplex/pgschema/cmd/plan"
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/fingerprint"
@@ -266,6 +267,8 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 
 // RunApply executes the apply command logic. Exported for testing.
 func RunApply(cmd *cobra.Command, args []string) error {
+	applyConfigToApply(cmd)
+
 	// Validate that either --file or --plan is provided
 	if applyFile == "" && applyPlan == "" {
 		return fmt.Errorf("either --file or --plan must be specified")
@@ -487,6 +490,68 @@ func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.Exec
 		}
 	}
 	return nil
+}
+
+func applyConfigToApply(cmd *cobra.Command) {
+	cfg := config.Get()
+	if cfg == nil {
+		return
+	}
+
+	if !cmd.Flags().Changed("host") && cfg.Host != "" {
+		applyHost = cfg.Host
+	}
+	if !cmd.Flags().Changed("port") && cfg.Port != 0 {
+		applyPort = cfg.Port
+	}
+	if !cmd.Flags().Changed("db") && cfg.DB != "" {
+		applyDB = cfg.DB
+	}
+	if !cmd.Flags().Changed("user") && cfg.User != "" {
+		applyUser = cfg.User
+	}
+	if !cmd.Flags().Changed("password") && cfg.Password != "" {
+		applyPassword = cfg.Password
+	}
+	if !cmd.Flags().Changed("schema") && cfg.Schema != "" {
+		applySchema = cfg.Schema
+	}
+	if !cmd.Flags().Changed("file") && cfg.File != "" {
+		applyFile = cfg.File
+	}
+	if !cmd.Flags().Changed("sslmode") && cfg.SSLMode != "" {
+		applySSLMode = cfg.SSLMode
+	}
+	if !cmd.Flags().Changed("lock-timeout") && cfg.LockTimeout != "" {
+		applyLockTimeout = cfg.LockTimeout
+	}
+	if !cmd.Flags().Changed("auto-approve") && cfg.AutoApprove {
+		applyAutoApprove = cfg.AutoApprove
+	}
+	if !cmd.Flags().Changed("application-name") && cfg.ApplicationName != "" {
+		applyApplicationName = cfg.ApplicationName
+	}
+	if !cmd.Flags().Changed("no-color") && cfg.NoColor {
+		applyNoColor = cfg.NoColor
+	}
+	if !cmd.Flags().Changed("plan-host") && cfg.PlanHost != "" {
+		applyPlanDBHost = cfg.PlanHost
+	}
+	if !cmd.Flags().Changed("plan-port") && cfg.PlanPort != 0 {
+		applyPlanDBPort = cfg.PlanPort
+	}
+	if !cmd.Flags().Changed("plan-db") && cfg.PlanDB != "" {
+		applyPlanDBDatabase = cfg.PlanDB
+	}
+	if !cmd.Flags().Changed("plan-user") && cfg.PlanUser != "" {
+		applyPlanDBUser = cfg.PlanUser
+	}
+	if !cmd.Flags().Changed("plan-password") && cfg.PlanPassword != "" {
+		applyPlanDBPassword = cfg.PlanPassword
+	}
+	if !cmd.Flags().Changed("plan-sslmode") && cfg.PlanSSLMode != "" {
+		applyPlanDBSSLMode = cfg.PlanSSLMode
+	}
 }
 
 // truncateSQL truncates a SQL statement for display purposes
