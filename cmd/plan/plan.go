@@ -165,11 +165,15 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	}
 	defer provider.Stop()
 
-	// Generate plan
-	migrationPlan, err := GeneratePlan(config, provider)
+	// Generate per-schema plan
+	schemaPlan, err := GenerateSchemaPlan(config, provider)
 	if err != nil {
 		return err
 	}
+
+	// Wrap in unified Plan
+	migrationPlan := plan.NewPlan()
+	migrationPlan.AddSchema(config.Schema, schemaPlan)
 
 	// Determine which outputs to generate
 	outputs, err := determineOutputs()
@@ -281,7 +285,7 @@ func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.Postgr
 // GeneratePlan generates a migration plan from configuration.
 // The caller must provide a non-nil provider instance for validating the desired state schema.
 // The caller is responsible for managing the provider lifecycle (creation and cleanup).
-func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*plan.Plan, error) {
+func GenerateSchemaPlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*plan.SchemaPlan, error) {
 	// Load ignore configuration
 	ignoreConfig, err := util.LoadIgnoreFileWithStructure()
 	if err != nil {
@@ -351,10 +355,10 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	// Generate diff (current -> desired) using IR directly
 	diffs := diff.GenerateMigration(currentStateIR, desiredStateIR, config.Schema)
 
-	// Create plan from diffs with fingerprint
-	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint)
+	// Create schema plan from diffs with fingerprint
+	schemaPlan := plan.NewSchemaPlanWithFingerprint(diffs, sourceFingerprint)
 
-	return migrationPlan, nil
+	return schemaPlan, nil
 }
 
 // outputSpec represents a single output specification
@@ -403,9 +407,9 @@ func determineOutputs() ([]outputSpec, error) {
 	return outputs, nil
 }
 
-// processOutput writes a plan.Outputter (Plan or MultiPlan) in the specified
+// processOutput writes a plan.Plan in the specified
 // format to the target destination.
-func processOutput(p plan.Outputter, output outputSpec, debug bool) error {
+func processOutput(p *plan.Plan, output outputSpec, debug bool) error {
 	var content string
 	var err error
 
@@ -769,7 +773,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		return err
 	}
 
-	multiPlan := plan.NewMultiPlan()
+	multiPlan := plan.NewPlan()
 	var hasErrors bool
 
 	for _, schemaName := range schemas {
@@ -800,7 +804,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 			continue
 		}
 
-		migrationPlan, err := GeneratePlan(perSchemaConfig, provider)
+		migrationPlan, err := GenerateSchemaPlan(perSchemaConfig, provider)
 		provider.Stop()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)

@@ -80,7 +80,7 @@ CREATE INDEX idx_users_email ON users(email);
 	assert.Contains(t, tempSchema, "pgschema_tmp_", "temporary schema should have timestamp prefix")
 
 	// Generate plan
-	migrationPlan, err := GeneratePlan(config, provider)
+	migrationPlan, err := GenerateSchemaPlan(config, provider)
 	require.NoError(t, err, "should generate plan")
 
 	// Verify plan has changes (target is empty, desired has tables)

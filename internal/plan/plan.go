@@ -1,34 +1,13 @@
 package plan
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/pgplex/pgschema/internal/color"
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/fingerprint"
-	"github.com/pgplex/pgschema/internal/version"
-)
-
-// Outputter is the shared interface for Plan and MultiPlan.
-// Both types can report whether they contain changes and render
-// their content in human-readable, JSON, and SQL formats.
-type Outputter interface {
-	HasAnyChanges() bool
-	HumanColored(enableColor bool) string
-	ToSQL(format SQLFormat) string
-	ToJSON() (string, error)
-	ToJSONWithDebug(includeSource bool) (string, error)
-}
-
-// Compile-time interface checks.
-var (
-	_ Outputter = (*Plan)(nil)
-	_ Outputter = (*MultiPlan)(nil)
 )
 
 // DirectiveType represents the different types of directives
@@ -64,15 +43,10 @@ type ExecutionGroup struct {
 	Steps []Step `json:"steps"`
 }
 
-// Plan represents the migration plan between two DDL states
-type Plan struct {
-	// Version information
-	Version         string `json:"version"`
-	PgschemaVersion string `json:"pgschema_version"`
-
-	// When the plan was created
-	CreatedAt time.Time `json:"created_at"`
-
+// SchemaPlan holds the migration plan for a single schema.
+// It contains execution groups, fingerprint, and diff metadata.
+// The top-level Plan wraps one or more SchemaPlan entries.
+type SchemaPlan struct {
 	// Source database fingerprint when plan was created
 	SourceFingerprint *fingerprint.SchemaFingerprint `json:"source_fingerprint,omitempty"`
 
@@ -236,37 +210,24 @@ func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
 	return groups
 }
 
-// NewPlan creates a new plan from a list of diffs with online operations enabled
-func NewPlan(diffs []diff.Diff) *Plan {
-	// Use environment variable for timestamp if provided, otherwise use current time
-	createdAt := time.Now().Truncate(time.Second)
-	if testTime := os.Getenv("PGSCHEMA_TEST_TIME"); testTime != "" {
-		if parsedTime, err := time.Parse(time.RFC3339, testTime); err == nil {
-			createdAt = parsedTime
-		}
+// NewSchemaPlan creates a new schema plan from a list of diffs with online operations enabled.
+func NewSchemaPlan(diffs []diff.Diff) *SchemaPlan {
+	return &SchemaPlan{
+		Groups:      groupDiffs(diffs),
+		SourceDiffs: diffs,
 	}
-
-	plan := &Plan{
-		Version:         version.PlanFormat(),
-		PgschemaVersion: version.App(),
-		CreatedAt:       createdAt,
-		Groups:          groupDiffs(diffs),
-		SourceDiffs:     diffs,
-	}
-
-	return plan
 }
 
-// NewPlanWithFingerprint creates a new plan from diffs and includes source fingerprint
-func NewPlanWithFingerprint(diffs []diff.Diff, sourceFingerprint *fingerprint.SchemaFingerprint) *Plan {
-	plan := NewPlan(diffs)
-	plan.SourceFingerprint = sourceFingerprint
-	return plan
+// NewSchemaPlanWithFingerprint creates a new schema plan from diffs and includes source fingerprint.
+func NewSchemaPlanWithFingerprint(diffs []diff.Diff, sourceFingerprint *fingerprint.SchemaFingerprint) *SchemaPlan {
+	sp := NewSchemaPlan(diffs)
+	sp.SourceFingerprint = sourceFingerprint
+	return sp
 }
 
 // HasAnyChanges checks if the plan contains any changes by examining the groups
-func (p *Plan) HasAnyChanges() bool {
-	for _, g := range p.Groups {
+func (sp *SchemaPlan) HasAnyChanges() bool {
+	for _, g := range sp.Groups {
 		if len(g.Steps) > 0 {
 			return true
 		}
@@ -275,12 +236,12 @@ func (p *Plan) HasAnyChanges() bool {
 }
 
 // HumanColored returns a human-readable summary of the plan with color support
-func (p *Plan) HumanColored(enableColor bool) string {
+func (sp *SchemaPlan) HumanColored(enableColor bool) string {
 	c := color.New(enableColor)
 	var summary strings.Builder
 
 	// Calculate summary from diffs
-	summaryData := p.calculateSummaryFromSteps()
+	summaryData := sp.calculateSummaryFromSteps()
 
 	if summaryData.Total == 0 {
 		summary.WriteString("No changes detected.\n")
@@ -307,7 +268,7 @@ func (p *Plan) HumanColored(enableColor bool) string {
 		if typeSummary, exists := summaryData.ByType[objTypeStr]; exists && (typeSummary.Add > 0 || typeSummary.Change > 0 || typeSummary.Destroy > 0) {
 			// Capitalize first letter for display
 			displayName := strings.ToUpper(objTypeStr[:1]) + objTypeStr[1:]
-			p.writeDetailedChangesFromSteps(&summary, displayName, objTypeStr, c)
+			sp.writeDetailedChangesFromSteps(&summary, displayName, objTypeStr, c)
 		}
 	}
 
@@ -315,7 +276,7 @@ func (p *Plan) HumanColored(enableColor bool) string {
 	if summaryData.Total > 0 {
 		summary.WriteString(c.Bold("DDL to be executed:") + "\n")
 		summary.WriteString(strings.Repeat("-", 50) + "\n\n")
-		migrationSQL := p.ToSQL(SQLFormatHuman)
+		migrationSQL := sp.ToSQL(SQLFormatHuman)
 		if migrationSQL != "" {
 			summary.WriteString(migrationSQL)
 			if !strings.HasSuffix(migrationSQL, "\n") {
@@ -330,13 +291,13 @@ func (p *Plan) HumanColored(enableColor bool) string {
 }
 
 // ToSQL returns the SQL statements with formatting based on the specified format
-func (p *Plan) ToSQL(format SQLFormat) string {
+func (sp *SchemaPlan) ToSQL(format SQLFormat) string {
 	// Build SQL output from groups
 	var sqlOutput strings.Builder
 
-	for groupIdx, group := range p.Groups {
+	for groupIdx, group := range sp.Groups {
 		// Add transaction group comment for human-readable format
-		if format == SQLFormatHuman && len(p.Groups) > 1 {
+		if format == SQLFormatHuman && len(sp.Groups) > 1 {
 			sqlOutput.WriteString(fmt.Sprintf("-- Transaction Group #%d\n", groupIdx+1))
 		}
 
@@ -353,7 +314,7 @@ func (p *Plan) ToSQL(format SQLFormat) string {
 			}
 
 			// Add blank line between steps except for the last one in the last group
-			if stepIdx < len(group.Steps)-1 || groupIdx < len(p.Groups)-1 {
+			if stepIdx < len(group.Steps)-1 || groupIdx < len(sp.Groups)-1 {
 				sqlOutput.WriteString("\n")
 			}
 		}
@@ -362,51 +323,10 @@ func (p *Plan) ToSQL(format SQLFormat) string {
 	return sqlOutput.String()
 }
 
-// ToJSON returns the plan as structured JSON with only changed statements
-func (p *Plan) ToJSON() (string, error) {
-	return p.ToJSONWithDebug(false)
-}
-
-// ToJSONWithDebug returns the plan as structured JSON with optional source field inclusion
-func (p *Plan) ToJSONWithDebug(includeSource bool) (string, error) {
-	var buf strings.Builder
-	encoder := json.NewEncoder(&buf)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-
-	// Create a copy of the plan to control SourceDiffs serialization
-	planCopy := *p
-	if !includeSource {
-		// Clear SourceDiffs in normal mode to keep JSON clean
-		planCopy.SourceDiffs = nil
-	}
-
-	if err := encoder.Encode(&planCopy); err != nil {
-		return "", fmt.Errorf("failed to marshal plan to JSON: %w", err)
-	}
-
-	// Remove the trailing newline that encoder.Encode adds
-	result := buf.String()
-	if len(result) > 0 && result[len(result)-1] == '\n' {
-		result = result[:len(result)-1]
-	}
-
-	return result, nil
-}
-
-// FromJSON creates a Plan from JSON data
-func FromJSON(jsonData []byte) (*Plan, error) {
-	var plan Plan
-	if err := json.Unmarshal(jsonData, &plan); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal plan JSON: %w", err)
-	}
-	return &plan, nil
-}
-
 // ========== PRIVATE METHODS ==========
 
 // calculateSummaryFromSteps calculates summary statistics from the plan diffs
-func (p *Plan) calculateSummaryFromSteps() PlanSummary {
+func (sp *SchemaPlan) calculateSummaryFromSteps() PlanSummary {
 	summary := PlanSummary{
 		ByType: make(map[string]TypeSummary),
 	}
@@ -447,9 +367,9 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 		Path      string
 	}
 
-	if len(p.SourceDiffs) > 0 {
+	if len(sp.SourceDiffs) > 0 {
 		// Use SourceDiffs (for freshly generated plans)
-		for _, diff := range p.SourceDiffs {
+		for _, diff := range sp.SourceDiffs {
 			dataToProcess = append(dataToProcess, struct {
 				Type      string
 				Operation string
@@ -462,7 +382,7 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 		}
 	} else {
 		// Use Steps metadata (for plans loaded from JSON)
-		for _, group := range p.Groups {
+		for _, group := range sp.Groups {
 			for _, step := range group.Steps {
 				if step.Type != "" && step.Operation != "" && step.Path != "" {
 					dataToProcess = append(dataToProcess, struct {
@@ -657,28 +577,28 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 }
 
 // writeDetailedChangesFromSteps writes detailed changes from plan diffs
-func (p *Plan) writeDetailedChangesFromSteps(summary *strings.Builder, displayName, objType string, c *color.Color) {
+func (sp *SchemaPlan) writeDetailedChangesFromSteps(summary *strings.Builder, displayName, objType string, c *color.Color) {
 	fmt.Fprintf(summary, "%s:\n", c.Bold(displayName))
 
 	if objType == "tables" {
 		// For tables, group all changes by table path to avoid duplicates
-		p.writeTableChanges(summary, c)
+		sp.writeTableChanges(summary, c)
 	} else if objType == "views" {
 		// For views, group all changes by view path to avoid duplicates
-		p.writeViewChanges(summary, c)
+		sp.writeViewChanges(summary, c)
 	} else if objType == "materialized views" {
 		// For materialized views, group all changes by path to avoid duplicates
-		p.writeMaterializedViewChanges(summary, c)
+		sp.writeMaterializedViewChanges(summary, c)
 	} else {
 		// For non-table/non-view objects, use the original logic
-		p.writeNonTableChanges(summary, objType, c)
+		sp.writeNonTableChanges(summary, objType, c)
 	}
 
 	summary.WriteString("\n")
 }
 
 // writeTableChanges handles table-specific output with proper grouping
-func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
+func (sp *SchemaPlan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 	// Group all changes by table path and track operations
 	tableOperations := make(map[string]string) // table_path -> operation
 	subResources := make(map[string][]struct {
@@ -692,7 +612,7 @@ func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 	seenOperations := make(map[string]bool) // "path.operation.subType" -> true
 
 	// Use source diffs for summary calculation
-	for _, step := range p.SourceDiffs {
+	for _, step := range sp.SourceDiffs {
 		// Normalize object type
 		stepObjTypeStr := step.Type.String()
 		if !strings.HasSuffix(stepObjTypeStr, "s") {
@@ -807,7 +727,7 @@ func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 }
 
 // writeViewChanges handles view-specific output with proper grouping
-func (p *Plan) writeViewChanges(summary *strings.Builder, c *color.Color) {
+func (sp *SchemaPlan) writeViewChanges(summary *strings.Builder, c *color.Color) {
 	// Group all changes by view path and track operations
 	viewOperations := make(map[string]string) // view_path -> operation
 	subResources := make(map[string][]struct {
@@ -820,7 +740,7 @@ func (p *Plan) writeViewChanges(summary *strings.Builder, c *color.Color) {
 	seenOperations := make(map[string]bool) // "path.operation.subType" -> true
 
 	// Use source diffs for summary calculation
-	for _, step := range p.SourceDiffs {
+	for _, step := range sp.SourceDiffs {
 		// Normalize object type
 		stepObjTypeStr := step.Type.String()
 		if !strings.HasSuffix(stepObjTypeStr, "s") {
@@ -922,7 +842,7 @@ func (p *Plan) writeViewChanges(summary *strings.Builder, c *color.Color) {
 }
 
 // writeMaterializedViewChanges handles materialized view-specific output with proper grouping
-func (p *Plan) writeMaterializedViewChanges(summary *strings.Builder, c *color.Color) {
+func (sp *SchemaPlan) writeMaterializedViewChanges(summary *strings.Builder, c *color.Color) {
 	// Group all changes by materialized view path and track operations
 	mvOperations := make(map[string]string) // mv_path -> operation
 	subResources := make(map[string][]struct {
@@ -938,7 +858,7 @@ func (p *Plan) writeMaterializedViewChanges(summary *strings.Builder, c *color.C
 	mvsRecreating := make(map[string]bool)
 
 	// Use source diffs for summary calculation
-	for _, step := range p.SourceDiffs {
+	for _, step := range sp.SourceDiffs {
 		// Normalize object type
 		stepObjTypeStr := step.Type.String()
 		if !strings.HasSuffix(stepObjTypeStr, "s") {
@@ -1057,7 +977,7 @@ func (p *Plan) writeMaterializedViewChanges(summary *strings.Builder, c *color.C
 }
 
 // writeNonTableChanges handles non-table objects with the original logic
-func (p *Plan) writeNonTableChanges(summary *strings.Builder, objType string, c *color.Color) {
+func (sp *SchemaPlan) writeNonTableChanges(summary *strings.Builder, objType string, c *color.Color) {
 	// Collect changes for this object type
 	var changes []struct {
 		operation string
@@ -1065,7 +985,7 @@ func (p *Plan) writeNonTableChanges(summary *strings.Builder, objType string, c 
 	}
 
 	// Use source diffs for summary calculation
-	for _, step := range p.SourceDiffs {
+	for _, step := range sp.SourceDiffs {
 		// Normalize object type
 		stepObjTypeStr := step.Type.String()
 		if !strings.HasSuffix(stepObjTypeStr, "s") {

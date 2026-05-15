@@ -57,7 +57,7 @@ func parseSQL(t *testing.T, sql string) *ir.IR {
 	return testutil.ParseSQLToIR(t, sharedTestPostgres, sql, "public")
 }
 
-func TestPlanSummary(t *testing.T) {
+func TestSchemaPlanSummary(t *testing.T) {
 	oldSQL := `CREATE TABLE users (
 		id integer NOT NULL
 	);`
@@ -75,8 +75,8 @@ func TestPlanSummary(t *testing.T) {
 	newIR := parseSQL(t, newSQL)
 	diffs := diff.GenerateMigration(oldIR, newIR, "public")
 
-	plan := NewPlan(diffs)
-	summary := plan.HumanColored(false)
+	sp := NewSchemaPlan(diffs)
+	summary := sp.HumanColored(false)
 
 	// Debug: print the summary to see what it looks like
 	t.Logf("Summary output:\n%s", summary)
@@ -178,7 +178,7 @@ func TestPlanJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPlanNoChanges(t *testing.T) {
+func TestSchemaPlanNoChanges(t *testing.T) {
 	sql := `CREATE TABLE users (
                 id integer NOT NULL
         );`
@@ -187,8 +187,8 @@ func TestPlanNoChanges(t *testing.T) {
 	newIR := parseSQL(t, sql)
 	diffs := diff.GenerateMigration(oldIR, newIR, "public")
 
-	plan := NewPlan(diffs)
-	summary := strings.TrimSpace(plan.HumanColored(false))
+	sp := NewSchemaPlan(diffs)
+	summary := strings.TrimSpace(sp.HumanColored(false))
 
 	if summary != "No changes detected." {
 		t.Errorf("expected %q, got %q", "No changes detected.", summary)
@@ -197,12 +197,11 @@ func TestPlanNoChanges(t *testing.T) {
 
 func TestPlanJSONLoadedSummary(t *testing.T) {
 	// Test that plans loaded from JSON can generate summaries using Steps metadata
+	t.Setenv("PGSCHEMA_TEST_TIME", "2025-01-01T00:00:00Z")
 
 	// Create a plan with steps that have metadata
-	originalPlan := &Plan{
-		Version:         "1.0.0",
-		PgschemaVersion: "1.0.0",
-		CreatedAt:       time.Unix(0, 0).UTC(),
+	p := NewPlan()
+	p.AddSchema("public", &SchemaPlan{
 		Groups: []ExecutionGroup{
 			{
 				Steps: []Step{
@@ -221,10 +220,10 @@ func TestPlanJSONLoadedSummary(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 
 	// Serialize to JSON (without SourceDiffs)
-	jsonData, err := originalPlan.ToJSON()
+	jsonData, err := p.ToJSON()
 	if err != nil {
 		t.Fatalf("Failed to serialize plan to JSON: %v", err)
 	}
@@ -236,12 +235,13 @@ func TestPlanJSONLoadedSummary(t *testing.T) {
 	}
 
 	// Verify SourceDiffs is empty (as expected for JSON-loaded plans)
-	if len(loadedPlan.SourceDiffs) != 0 {
-		t.Errorf("Expected empty SourceDiffs, got %d", len(loadedPlan.SourceDiffs))
+	loadedSP := loadedPlan.Schemas["public"]
+	if len(loadedSP.SourceDiffs) != 0 {
+		t.Errorf("Expected empty SourceDiffs, got %d", len(loadedSP.SourceDiffs))
 	}
 
 	// Generate summary - this should work using Steps metadata
-	summary := loadedPlan.HumanColored(false)
+	summary := loadedSP.HumanColored(false)
 
 	// Verify summary contains expected information
 	if !strings.Contains(summary, "1 to add") {
@@ -265,6 +265,8 @@ func TestPlanDebugJSONRoundTrip(t *testing.T) {
 	// Issue #305: Plans generated with --debug produce JSON that cannot be
 	// deserialized by FromJSON() because the Diff.Source field is a Go interface
 	// (DiffSource) that json.Unmarshal cannot reconstruct.
+	t.Setenv("PGSCHEMA_TEST_TIME", "2025-01-01T00:00:00Z")
+
 	oldSQL := `CREATE TABLE users (
 		id integer NOT NULL
 	);`
@@ -282,7 +284,9 @@ func TestPlanDebugJSONRoundTrip(t *testing.T) {
 	newIR := parseSQL(t, newSQL)
 	diffs := diff.GenerateMigration(oldIR, newIR, "public")
 
-	p := NewPlan(diffs)
+	sp := NewSchemaPlan(diffs)
+	p := NewPlan()
+	p.AddSchema("public", sp)
 
 	// Serialize with debug mode (includes SourceDiffs; Diff.Source is excluded via json:"-")
 	debugJSON, err := p.ToJSONWithDebug(true)
@@ -297,12 +301,13 @@ func TestPlanDebugJSONRoundTrip(t *testing.T) {
 	}
 
 	// Verify debug mode actually included SourceDiffs
-	if len(loaded.SourceDiffs) == 0 {
+	loadedSP := loaded.Schemas["public"]
+	if len(loadedSP.SourceDiffs) == 0 {
 		t.Error("Debug plan should include SourceDiffs")
 	}
 
 	// Verify the loaded plan has valid groups and steps
-	if len(loaded.Groups) == 0 {
+	if len(loadedSP.Groups) == 0 {
 		t.Error("Loaded plan should have at least one execution group")
 	}
 
@@ -317,7 +322,23 @@ func TestPlanDebugJSONRoundTrip(t *testing.T) {
 		t.Fatalf("Failed to deserialize re-serialized plan: %v", err)
 	}
 
-	if len(loaded2.Groups) != len(loaded.Groups) {
-		t.Errorf("Group count mismatch: got %d, want %d", len(loaded2.Groups), len(loaded.Groups))
+	loadedSP2 := loaded2.Schemas["public"]
+	if len(loadedSP2.Groups) != len(loadedSP.Groups) {
+		t.Errorf("Group count mismatch: got %d, want %d", len(loadedSP2.Groups), len(loadedSP.Groups))
 	}
 }
+
+// TestPlanSingleSchemaOmitsHeader verifies that single-schema plans
+// render without a "Schema: ..." header line.
+func TestPlanSingleSchemaOmitsHeader(t *testing.T) {
+	p := NewPlan()
+	p.AddSchema("public", NewSchemaPlan(nil))
+
+	output := p.HumanColored(false)
+	if strings.Contains(output, "Schema:") {
+		t.Error("single-schema plan should not contain schema header")
+	}
+}
+
+// ignore unused import warning for time
+var _ = time.Now

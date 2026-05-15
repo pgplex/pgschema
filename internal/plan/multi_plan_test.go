@@ -10,19 +10,19 @@ import (
 	"github.com/pgplex/pgschema/internal/fingerprint"
 )
 
-func TestMultiPlan_AddSchemaAndHasAnyChanges(t *testing.T) {
-	mp := NewMultiPlan()
+func TestPlan_AddSchemaAndHasAnyChanges(t *testing.T) {
+	p := NewPlan()
 
-	// Empty multi-plan has no changes
-	if mp.HasAnyChanges() {
-		t.Error("empty multi-plan should have no changes")
+	// Empty plan has no changes
+	if p.HasAnyChanges() {
+		t.Error("empty plan should have no changes")
 	}
 
 	// Add a schema with no changes
-	emptyPlan := NewPlan(nil)
-	mp.AddSchema("tenant_1", emptyPlan)
-	if mp.HasAnyChanges() {
-		t.Error("multi-plan with empty schema should have no changes")
+	emptySP := NewSchemaPlan(nil)
+	p.AddSchema("tenant_1", emptySP)
+	if p.HasAnyChanges() {
+		t.Error("plan with empty schema should have no changes")
 	}
 
 	// Add a schema with changes
@@ -36,20 +36,20 @@ func TestMultiPlan_AddSchemaAndHasAnyChanges(t *testing.T) {
 			},
 		},
 	}
-	planWithChanges := NewPlan(diffs)
-	mp.AddSchema("tenant_2", planWithChanges)
-	if !mp.HasAnyChanges() {
-		t.Error("multi-plan with changes should report has changes")
+	spWithChanges := NewSchemaPlan(diffs)
+	p.AddSchema("tenant_2", spWithChanges)
+	if !p.HasAnyChanges() {
+		t.Error("plan with changes should report has changes")
 	}
 }
 
-func TestMultiPlan_SortedSchemaNames(t *testing.T) {
-	mp := NewMultiPlan()
-	mp.AddSchema("tenant_c", NewPlan(nil))
-	mp.AddSchema("tenant_a", NewPlan(nil))
-	mp.AddSchema("tenant_b", NewPlan(nil))
+func TestPlan_SortedSchemaNames(t *testing.T) {
+	p := NewPlan()
+	p.AddSchema("tenant_c", NewSchemaPlan(nil))
+	p.AddSchema("tenant_a", NewSchemaPlan(nil))
+	p.AddSchema("tenant_b", NewSchemaPlan(nil))
 
-	names := mp.SortedSchemaNames()
+	names := p.SortedSchemaNames()
 	expected := []string{"tenant_a", "tenant_b", "tenant_c"}
 	if len(names) != len(expected) {
 		t.Fatalf("expected %d names, got %d", len(expected), len(names))
@@ -61,10 +61,10 @@ func TestMultiPlan_SortedSchemaNames(t *testing.T) {
 	}
 }
 
-func TestMultiPlan_ToJSON_RoundTrip(t *testing.T) {
+func TestPlan_ToJSON_RoundTrip(t *testing.T) {
 	t.Setenv("PGSCHEMA_TEST_TIME", "2025-01-01T00:00:00Z")
 
-	mp := NewMultiPlan()
+	p := NewPlan()
 
 	// Add schema with fingerprint and changes
 	fp := &fingerprint.SchemaFingerprint{Hash: "abc123"}
@@ -78,14 +78,14 @@ func TestMultiPlan_ToJSON_RoundTrip(t *testing.T) {
 			},
 		},
 	}
-	p := NewPlanWithFingerprint(diffs, fp)
-	mp.AddSchema("tenant_1", p)
+	sp := NewSchemaPlanWithFingerprint(diffs, fp)
+	p.AddSchema("tenant_1", sp)
 
 	// Add empty schema
-	mp.AddSchema("tenant_2", NewPlan(nil))
+	p.AddSchema("tenant_2", NewSchemaPlan(nil))
 
 	// Serialize
-	jsonStr, err := mp.ToJSON()
+	jsonStr, err := p.ToJSON()
 	if err != nil {
 		t.Fatalf("ToJSON failed: %v", err)
 	}
@@ -113,9 +113,9 @@ func TestMultiPlan_ToJSON_RoundTrip(t *testing.T) {
 	}
 
 	// Deserialize
-	loaded, err := MultiPlanFromJSON([]byte(jsonStr))
+	loaded, err := FromJSON([]byte(jsonStr))
 	if err != nil {
-		t.Fatalf("MultiPlanFromJSON failed: %v", err)
+		t.Fatalf("FromJSON failed: %v", err)
 	}
 
 	if len(loaded.Schemas) != 2 {
@@ -123,42 +123,42 @@ func TestMultiPlan_ToJSON_RoundTrip(t *testing.T) {
 	}
 
 	// Verify tenant_1 has changes
-	entry1, ok := loaded.Schemas["tenant_1"]
+	sp1, ok := loaded.Schemas["tenant_1"]
 	if !ok {
 		t.Fatal("missing tenant_1 schema")
 	}
-	if !entry1.Plan.HasAnyChanges() {
+	if !sp1.HasAnyChanges() {
 		t.Error("tenant_1 should have changes")
 	}
-	if entry1.Plan.SourceFingerprint == nil || entry1.Plan.SourceFingerprint.Hash != "abc123" {
+	if sp1.SourceFingerprint == nil || sp1.SourceFingerprint.Hash != "abc123" {
 		t.Error("tenant_1 fingerprint not preserved")
 	}
 
 	// Verify tenant_2 has no changes
-	entry2, ok := loaded.Schemas["tenant_2"]
+	sp2, ok := loaded.Schemas["tenant_2"]
 	if !ok {
 		t.Fatal("missing tenant_2 schema")
 	}
-	if entry2.Plan.HasAnyChanges() {
+	if sp2.HasAnyChanges() {
 		t.Error("tenant_2 should have no changes")
 	}
 
 	// Verify version fields are populated from parent
-	if loaded.Version != mp.Version {
-		t.Errorf("version = %q, want %q", loaded.Version, mp.Version)
+	if loaded.Version != p.Version {
+		t.Errorf("version = %q, want %q", loaded.Version, p.Version)
 	}
-	if loaded.PgschemaVersion != mp.PgschemaVersion {
-		t.Errorf("pgschema_version = %q, want %q", loaded.PgschemaVersion, mp.PgschemaVersion)
+	if loaded.PgschemaVersion != p.PgschemaVersion {
+		t.Errorf("pgschema_version = %q, want %q", loaded.PgschemaVersion, p.PgschemaVersion)
 	}
 }
 
-func TestMultiPlan_SchemaEntry_ExcludesTopLevelFields(t *testing.T) {
+func TestPlan_SchemaEntry_ExcludesTopLevelFields(t *testing.T) {
 	t.Setenv("PGSCHEMA_TEST_TIME", "2025-01-01T00:00:00Z")
 
-	mp := NewMultiPlan()
-	mp.AddSchema("test_schema", NewPlan(nil))
+	p := NewPlan()
+	p.AddSchema("test_schema", NewSchemaPlan(nil))
 
-	jsonStr, err := mp.ToJSON()
+	jsonStr, err := p.ToJSON()
 	if err != nil {
 		t.Fatalf("ToJSON failed: %v", err)
 	}
@@ -190,8 +190,8 @@ func TestMultiPlan_SchemaEntry_ExcludesTopLevelFields(t *testing.T) {
 	}
 }
 
-func TestLoadPlanFile_DetectsMultiPlan(t *testing.T) {
-	multiPlanJSON := `{
+func TestFromJSON_ValidPlan(t *testing.T) {
+	planJSON := `{
 		"version": "1.0.0",
 		"pgschema_version": "1.9.0",
 		"created_at": "2025-01-01T00:00:00Z",
@@ -202,71 +202,33 @@ func TestLoadPlanFile_DetectsMultiPlan(t *testing.T) {
 		}
 	}`
 
-	loaded, err := LoadPlanFile([]byte(multiPlanJSON))
+	loaded, err := FromJSON([]byte(planJSON))
 	if err != nil {
-		t.Fatalf("LoadPlanFile failed: %v", err)
+		t.Fatalf("FromJSON failed: %v", err)
 	}
-
-	mp, ok := loaded.(*MultiPlan)
-	if !ok {
-		t.Fatalf("expected *MultiPlan, got %T", loaded)
-	}
-	if len(mp.Schemas) != 1 {
-		t.Errorf("expected 1 schema, got %d", len(mp.Schemas))
+	if len(loaded.Schemas) != 1 {
+		t.Errorf("expected 1 schema, got %d", len(loaded.Schemas))
 	}
 }
 
-func TestLoadPlanFile_DetectsSinglePlan(t *testing.T) {
-	singlePlanJSON := `{
-		"version": "1.0.0",
-		"pgschema_version": "1.9.0",
-		"created_at": "2025-01-01T00:00:00Z",
-		"groups": [
-			{
-				"steps": [
-					{
-						"sql": "CREATE TABLE users (id integer);",
-						"type": "table",
-						"operation": "create",
-						"path": "public.users"
-					}
-				]
-			}
-		]
-	}`
-
-	loaded, err := LoadPlanFile([]byte(singlePlanJSON))
-	if err != nil {
-		t.Fatalf("LoadPlanFile failed: %v", err)
-	}
-
-	p, ok := loaded.(*Plan)
-	if !ok {
-		t.Fatalf("expected *Plan, got %T", loaded)
-	}
-	if !p.HasAnyChanges() {
-		t.Error("plan should have changes")
-	}
-}
-
-func TestLoadPlanFile_InvalidJSON(t *testing.T) {
-	_, err := LoadPlanFile([]byte(`{invalid`))
+func TestFromJSON_InvalidJSON(t *testing.T) {
+	_, err := FromJSON([]byte(`{invalid`))
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
 }
 
-func TestMultiPlan_SummaryString(t *testing.T) {
-	mp := NewMultiPlan()
+func TestPlan_SummaryString(t *testing.T) {
+	p := NewPlan()
 
 	// Empty
-	s := mp.SummaryString()
+	s := p.SummaryString()
 	if s != "Summary: 0 schemas inspected, 0 with changes" {
 		t.Errorf("unexpected summary: %s", s)
 	}
 
 	// With schemas
-	mp.AddSchema("s1", NewPlan(nil))
+	p.AddSchema("s1", NewSchemaPlan(nil))
 	diffs := []diff.Diff{
 		{
 			Type:      diff.DiffTypeTable,
@@ -277,20 +239,20 @@ func TestMultiPlan_SummaryString(t *testing.T) {
 			},
 		},
 	}
-	mp.AddSchema("s2", NewPlan(diffs))
+	p.AddSchema("s2", NewSchemaPlan(diffs))
 
-	s = mp.SummaryString()
+	s = p.SummaryString()
 	if s != "Summary: 2 schemas inspected, 1 with changes" {
 		t.Errorf("unexpected summary: %s", s)
 	}
 }
 
-func TestMultiPlan_HumanColored(t *testing.T) {
-	mp := NewMultiPlan()
-	mp.AddSchema("schema_a", NewPlan(nil))
-	mp.AddSchema("schema_b", NewPlan(nil))
+func TestPlan_HumanColored_MultiSchema(t *testing.T) {
+	p := NewPlan()
+	p.AddSchema("schema_a", NewSchemaPlan(nil))
+	p.AddSchema("schema_b", NewSchemaPlan(nil))
 
-	output := mp.HumanColored(false)
+	output := p.HumanColored(false)
 
 	// Should contain schema headers in sorted order
 	idxA := strings.Index(output, "Schema: schema_a")
@@ -306,8 +268,8 @@ func TestMultiPlan_HumanColored(t *testing.T) {
 	}
 }
 
-func TestMultiPlan_ToSQL(t *testing.T) {
-	mp := NewMultiPlan()
+func TestPlan_ToSQL_MultiSchema(t *testing.T) {
+	p := NewPlan()
 	diffs := []diff.Diff{
 		{
 			Type:      diff.DiffTypeTable,
@@ -318,10 +280,10 @@ func TestMultiPlan_ToSQL(t *testing.T) {
 			},
 		},
 	}
-	mp.AddSchema("s1", NewPlan(diffs))
-	mp.AddSchema("s2", NewPlan(nil))
+	p.AddSchema("s1", NewSchemaPlan(diffs))
+	p.AddSchema("s2", NewSchemaPlan(nil))
 
-	sql := mp.ToSQL(SQLFormatRaw)
+	sql := p.ToSQL(SQLFormatRaw)
 
 	// Should contain header for s1 (has SQL)
 	if !strings.Contains(sql, "-- Schema: s1") {
@@ -336,12 +298,12 @@ func TestMultiPlan_ToSQL(t *testing.T) {
 	}
 }
 
-func TestMultiPlan_CreatedAt_UsesTestTime(t *testing.T) {
+func TestPlan_CreatedAt_UsesTestTime(t *testing.T) {
 	t.Setenv("PGSCHEMA_TEST_TIME", "2024-06-15T12:00:00Z")
-	mp := NewMultiPlan()
+	p := NewPlan()
 
 	expected, _ := time.Parse(time.RFC3339, "2024-06-15T12:00:00Z")
-	if !mp.CreatedAt.Equal(expected) {
-		t.Errorf("created_at = %v, want %v", mp.CreatedAt, expected)
+	if !p.CreatedAt.Equal(expected) {
+		t.Errorf("created_at = %v, want %v", p.CreatedAt, expected)
 	}
 }

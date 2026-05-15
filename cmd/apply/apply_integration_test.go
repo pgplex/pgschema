@@ -163,7 +163,7 @@ func TestApplyCommand_TransactionRollback(t *testing.T) {
 		ApplicationName: "pgschema",
 	}
 
-	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	migrationPlan, err := planCmd.GenerateSchemaPlan(planConfig, sharedEmbeddedPG)
 	if err != nil {
 		t.Fatalf("Failed to generate migration plan: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestApplyCommand_CreateIndexConcurrently(t *testing.T) {
 		ApplicationName: "pgschema",
 	}
 
-	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	migrationPlan, err := planCmd.GenerateSchemaPlan(planConfig, sharedEmbeddedPG)
 	if err != nil {
 		t.Fatalf("Failed to generate migration plan: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestApplyCommand_WithPlanFile(t *testing.T) {
 		ApplicationName: "pgschema",
 	}
 
-	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	migrationPlan, err := planCmd.GenerateSchemaPlan(planConfig, sharedEmbeddedPG)
 	if err != nil {
 		t.Fatalf("Failed to generate migration plan: %v", err)
 	}
@@ -826,7 +826,7 @@ func TestApplyCommand_FingerprintMismatch(t *testing.T) {
 		ApplicationName: "pgschema",
 	}
 
-	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	migrationPlan, err := planCmd.GenerateSchemaPlan(planConfig, sharedEmbeddedPG)
 	if err != nil {
 		t.Fatalf("Failed to generate migration plan: %v", err)
 	}
@@ -1032,7 +1032,7 @@ func TestApplyCommand_WaitDirective(t *testing.T) {
 		ApplicationName: "pgschema",
 	}
 
-	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	migrationPlan, err := planCmd.GenerateSchemaPlan(planConfig, sharedEmbeddedPG)
 	if err != nil {
 		t.Fatalf("Failed to generate plan: %v", err)
 	}
@@ -1276,8 +1276,12 @@ CREATE TABLE users (
 	require.NoError(t, err, "should create provider")
 	defer provider.Stop()
 
-	generatedPlan, err := planCmd.GeneratePlan(planConfig, provider)
+	generatedSchemaPlan, err := planCmd.GenerateSchemaPlan(planConfig, provider)
 	require.NoError(t, err, "should generate plan")
+
+	// Wrap in unified Plan for JSON serialization
+	generatedPlan := plan.NewPlan()
+	generatedPlan.AddSchema("public", generatedSchemaPlan)
 
 	// Save plan to JSON file
 	planJSON, err := generatedPlan.ToJSON()
@@ -1306,10 +1310,10 @@ CREATE TABLE users (
 	planData, err := os.ReadFile(planFile)
 	require.NoError(t, err, "should read plan file")
 
-	migrationPlan, err := plan.FromJSON(planData)
+	loadedPlan, err := plan.FromJSON(planData)
 	require.NoError(t, err, "should load plan from JSON")
 
-	config.Plan = migrationPlan
+	config.Plan = loadedPlan.Schemas["public"]
 
 	// Set environment variables with INVALID plan database configuration
 	// This would normally fail validation, but should be ignored in Plan Mode
