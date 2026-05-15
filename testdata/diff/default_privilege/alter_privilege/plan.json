@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "e8f50b636ad809e723b6c4911b9af2cc6a9b55b2f63ef598aeeee7ba4dcc7167"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "e8f50b636ad809e723b6c4911b9af2cc6a9b55b2f63ef598aeeee7ba4dcc7167"
+      },
+      "groups": [
         {
-          "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public REVOKE USAGE ON SEQUENCES FROM app_user;",
-          "type": "default_privilege",
-          "operation": "drop",
-          "path": "default_privileges.testuser.SEQUENCES.app_user"
-        },
-        {
-          "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT INSERT, UPDATE ON TABLES TO app_user;",
-          "type": "default_privilege",
-          "operation": "alter",
-          "path": "default_privileges.testuser.TABLES.app_user"
+          "steps": [
+            {
+              "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public REVOKE USAGE ON SEQUENCES FROM app_user;",
+              "type": "default_privilege",
+              "operation": "drop",
+              "path": "default_privileges.testuser.SEQUENCES.app_user"
+            },
+            {
+              "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT INSERT, UPDATE ON TABLES TO app_user;",
+              "type": "default_privilege",
+              "operation": "alter",
+              "path": "default_privileges.testuser.TABLES.app_user"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

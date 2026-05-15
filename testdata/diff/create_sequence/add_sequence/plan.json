@@ -2,43 +2,47 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE SEQUENCE IF NOT EXISTS big_seq AS bigint MAXVALUE 1000000 CACHE 10;",
-          "type": "sequence",
-          "operation": "create",
-          "path": "public.big_seq"
-        },
-        {
-          "sql": "CREATE SEQUENCE IF NOT EXISTS int_seq AS integer START WITH 100 CACHE 5;",
-          "type": "sequence",
-          "operation": "create",
-          "path": "public.int_seq"
-        },
-        {
-          "sql": "CREATE SEQUENCE IF NOT EXISTS order_seq INCREMENT BY 10 CYCLE;",
-          "type": "sequence",
-          "operation": "create",
-          "path": "public.order_seq"
-        },
-        {
-          "sql": "CREATE SEQUENCE IF NOT EXISTS small_seq AS smallint CACHE 20;",
-          "type": "sequence",
-          "operation": "create",
-          "path": "public.small_seq"
-        },
-        {
-          "sql": "CREATE SEQUENCE IF NOT EXISTS user_id_seq;",
-          "type": "sequence",
-          "operation": "create",
-          "path": "public.user_id_seq"
+          "steps": [
+            {
+              "sql": "CREATE SEQUENCE IF NOT EXISTS big_seq AS bigint MAXVALUE 1000000 CACHE 10;",
+              "type": "sequence",
+              "operation": "create",
+              "path": "public.big_seq"
+            },
+            {
+              "sql": "CREATE SEQUENCE IF NOT EXISTS int_seq AS integer START WITH 100 CACHE 5;",
+              "type": "sequence",
+              "operation": "create",
+              "path": "public.int_seq"
+            },
+            {
+              "sql": "CREATE SEQUENCE IF NOT EXISTS order_seq INCREMENT BY 10 CYCLE;",
+              "type": "sequence",
+              "operation": "create",
+              "path": "public.order_seq"
+            },
+            {
+              "sql": "CREATE SEQUENCE IF NOT EXISTS small_seq AS smallint CACHE 20;",
+              "type": "sequence",
+              "operation": "create",
+              "path": "public.small_seq"
+            },
+            {
+              "sql": "CREATE SEQUENCE IF NOT EXISTS user_id_seq;",
+              "type": "sequence",
+              "operation": "create",
+              "path": "public.user_id_seq"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

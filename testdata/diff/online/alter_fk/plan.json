@@ -2,31 +2,35 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "eb60afcd651f636a432f85e7ec5571c6f9074518bc06d3a5fbc87df688e534ca"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "eb60afcd651f636a432f85e7ec5571c6f9074518bc06d3a5fbc87df688e534ca"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE employees DROP CONSTRAINT employees_company_fkey;",
-          "type": "table.constraint",
-          "operation": "drop",
-          "path": "public.employees.employees_company_fkey"
-        },
-        {
-          "sql": "ALTER TABLE employees\nADD CONSTRAINT employees_company_fkey FOREIGN KEY (tenant_id, company_id) REFERENCES companies (tenant_id, company_id) ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.employees.employees_company_fkey"
-        },
-        {
-          "sql": "ALTER TABLE employees VALIDATE CONSTRAINT employees_company_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.employees.employees_company_fkey"
+          "steps": [
+            {
+              "sql": "ALTER TABLE employees DROP CONSTRAINT employees_company_fkey;",
+              "type": "table.constraint",
+              "operation": "drop",
+              "path": "public.employees.employees_company_fkey"
+            },
+            {
+              "sql": "ALTER TABLE employees\nADD CONSTRAINT employees_company_fkey FOREIGN KEY (tenant_id, company_id) REFERENCES companies (tenant_id, company_id) ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.employees.employees_company_fkey"
+            },
+            {
+              "sql": "ALTER TABLE employees VALIDATE CONSTRAINT employees_company_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.employees.employees_company_fkey"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

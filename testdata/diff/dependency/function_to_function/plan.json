@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE OR REPLACE FUNCTION get_raw_result()\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nRETURN 42;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.get_raw_result"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION process_result(\n    val integer DEFAULT get_raw_result()\n)\nRETURNS text\nLANGUAGE sql\nVOLATILE\nRETURN ('Processed: '::text || (val)::text);",
-          "type": "function",
-          "operation": "create",
-          "path": "public.process_result"
+          "steps": [
+            {
+              "sql": "CREATE OR REPLACE FUNCTION get_raw_result()\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nRETURN 42;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.get_raw_result"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION process_result(\n    val integer DEFAULT get_raw_result()\n)\nRETURNS text\nLANGUAGE sql\nVOLATILE\nRETURN ('Processed: '::text || (val)::text);",
+              "type": "function",
+              "operation": "create",
+              "path": "public.process_result"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

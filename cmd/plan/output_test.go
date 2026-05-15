@@ -9,13 +9,13 @@ import (
 
 func TestDetermineOutputs(t *testing.T) {
 	tests := []struct {
-		name         string
-		outputHuman  string
-		outputJSON   string
-		outputSQL    string
-		expectError  bool
-		errorMsg     string
-		expectCount  int
+		name        string
+		outputHuman string
+		outputJSON  string
+		outputSQL   string
+		expectError bool
+		errorMsg    string
+		expectCount int
 	}{
 		{
 			name:        "no flags - default to human stdout",

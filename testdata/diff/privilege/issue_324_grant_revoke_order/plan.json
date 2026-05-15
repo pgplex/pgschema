@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "2f50f8550c48f6ac58cde417097cdd7c293b3ae0d9bd8861b197edb73e80b148"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "2f50f8550c48f6ac58cde417097cdd7c293b3ae0d9bd8861b197edb73e80b148"
+      },
+      "groups": [
         {
-          "sql": "REVOKE UPDATE ON TABLE sometable FROM app_user;",
-          "type": "privilege",
-          "operation": "drop",
-          "path": "privileges.TABLE.sometable.app_user"
-        },
-        {
-          "sql": "GRANT UPDATE (somecolumn) ON TABLE sometable TO app_user;",
-          "type": "column_privilege",
-          "operation": "create",
-          "path": "column_privileges.TABLE.sometable.somecolumn.app_user"
+          "steps": [
+            {
+              "sql": "REVOKE UPDATE ON TABLE sometable FROM app_user;",
+              "type": "privilege",
+              "operation": "drop",
+              "path": "privileges.TABLE.sometable.app_user"
+            },
+            {
+              "sql": "GRANT UPDATE (somecolumn) ON TABLE sometable TO app_user;",
+              "type": "column_privilege",
+              "operation": "create",
+              "path": "column_privileges.TABLE.sometable.somecolumn.app_user"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

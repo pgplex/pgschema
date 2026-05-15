@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "5b049e926c4be3b7398c0f37d3f1c3b84c6721f3e07be244cfc34b568000e803"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "5b049e926c4be3b7398c0f37d3f1c3b84c6721f3e07be244cfc34b568000e803"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE user_sessions\nADD CONSTRAINT user_sessions_token_device_key UNIQUE (session_token, device_fingerprint);",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.user_sessions.user_sessions_token_device_key"
-        },
-        {
-          "sql": "ALTER TABLE user_sessions\nADD CONSTRAINT user_sessions_user_device_key UNIQUE (user_id, device_fingerprint);",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.user_sessions.user_sessions_user_device_key"
+          "steps": [
+            {
+              "sql": "ALTER TABLE user_sessions\nADD CONSTRAINT user_sessions_token_device_key UNIQUE (session_token, device_fingerprint);",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.user_sessions.user_sessions_token_device_key"
+            },
+            {
+              "sql": "ALTER TABLE user_sessions\nADD CONSTRAINT user_sessions_user_device_key UNIQUE (user_id, device_fingerprint);",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.user_sessions.user_sessions_user_device_key"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

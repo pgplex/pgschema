@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "61c520955d9df95c9d233b93c7500d90fe0a5aabed7dbe61ab394a02cef98940"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "61c520955d9df95c9d233b93c7500d90fe0a5aabed7dbe61ab394a02cef98940"
+      },
+      "groups": [
         {
-          "sql": "GRANT SELECT ON TABLE users TO readonly_role;",
-          "type": "privilege",
-          "operation": "create",
-          "path": "privileges.TABLE.users.readonly_role"
-        },
-        {
-          "sql": "GRANT SELECT (id) ON TABLE users TO column_reader;",
-          "type": "column_privilege",
-          "operation": "create",
-          "path": "column_privileges.TABLE.users.id.column_reader"
+          "steps": [
+            {
+              "sql": "GRANT SELECT ON TABLE users TO readonly_role;",
+              "type": "privilege",
+              "operation": "create",
+              "path": "privileges.TABLE.users.readonly_role"
+            },
+            {
+              "sql": "GRANT SELECT (id) ON TABLE users TO column_reader;",
+              "type": "column_privilege",
+              "operation": "create",
+              "path": "column_privileges.TABLE.users.id.column_reader"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

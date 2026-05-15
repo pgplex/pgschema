@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "a47459950b6b41998921f1284295631251e890d54891c8ab378c1d3c7c7abff4"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "a47459950b6b41998921f1284295631251e890d54891c8ab378c1d3c7c7abff4"
+      },
+      "groups": [
         {
-          "sql": "CREATE CONSTRAINT TRIGGER prevent_code_update_trigger\n    AFTER UPDATE ON products\n    DEFERRABLE INITIALLY IMMEDIATE\n    FOR EACH ROW\n    EXECUTE FUNCTION prevent_code_update();",
-          "type": "table.trigger",
-          "operation": "create",
-          "path": "public.products.prevent_code_update_trigger"
+          "steps": [
+            {
+              "sql": "CREATE CONSTRAINT TRIGGER prevent_code_update_trigger\n    AFTER UPDATE ON products\n    DEFERRABLE INITIALLY IMMEDIATE\n    FOR EACH ROW\n    EXECUTE FUNCTION prevent_code_update();",
+              "type": "table.trigger",
+              "operation": "create",
+              "path": "public.products.prevent_code_update_trigger"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

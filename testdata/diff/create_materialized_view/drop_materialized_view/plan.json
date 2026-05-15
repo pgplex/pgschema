@@ -2,73 +2,77 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "a90a90090750b18a9aaffb6de253bd12234fe30ccf9cfc35b82c34ac834f1360"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "a90a90090750b18a9aaffb6de253bd12234fe30ccf9cfc35b82c34ac834f1360"
+      },
+      "groups": [
         {
-          "sql": "DROP VIEW IF EXISTS employee_summary RESTRICT;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.employee_summary"
-        },
-        {
-          "sql": "DROP VIEW IF EXISTS employee_ids RESTRICT;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.employee_ids"
-        },
-        {
-          "sql": "DROP VIEW IF EXISTS employee_names RESTRICT;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.employee_names"
-        },
-        {
-          "sql": "DROP MATERIALIZED VIEW active_employees RESTRICT;",
-          "type": "materialized_view",
-          "operation": "alter",
-          "path": "public.active_employees"
-        },
-        {
-          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS active_employees AS\n SELECT id,\n    name,\n    salary,\n    'active'::text AS status_label\n   FROM employees\n  WHERE status::text = 'active'::text;",
-          "type": "materialized_view",
-          "operation": "alter",
-          "path": "public.active_employees"
-        },
-        {
-          "sql": "DROP MATERIALIZED VIEW dept_stats RESTRICT;",
-          "type": "materialized_view",
-          "operation": "alter",
-          "path": "public.dept_stats"
-        },
-        {
-          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS dept_stats AS\n SELECT department,\n    count(*) AS employee_count,\n    avg(salary) AS avg_salary\n   FROM employees\n  GROUP BY department;",
-          "type": "materialized_view",
-          "operation": "alter",
-          "path": "public.dept_stats"
-        },
-        {
-          "sql": "CREATE OR REPLACE VIEW employee_names AS\n SELECT id,\n    name\n   FROM active_employees;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.employee_names"
-        },
-        {
-          "sql": "CREATE OR REPLACE VIEW employee_ids AS\n SELECT id\n   FROM employee_names;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.employee_ids"
-        },
-        {
-          "sql": "CREATE OR REPLACE VIEW employee_summary AS\n SELECT ae.id,\n    ae.name,\n    ds.employee_count AS dept_size\n   FROM active_employees ae\n     CROSS JOIN dept_stats ds\n LIMIT 10;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.employee_summary"
+          "steps": [
+            {
+              "sql": "DROP VIEW IF EXISTS employee_summary RESTRICT;",
+              "type": "view",
+              "operation": "recreate",
+              "path": "public.employee_summary"
+            },
+            {
+              "sql": "DROP VIEW IF EXISTS employee_ids RESTRICT;",
+              "type": "view",
+              "operation": "recreate",
+              "path": "public.employee_ids"
+            },
+            {
+              "sql": "DROP VIEW IF EXISTS employee_names RESTRICT;",
+              "type": "view",
+              "operation": "recreate",
+              "path": "public.employee_names"
+            },
+            {
+              "sql": "DROP MATERIALIZED VIEW active_employees RESTRICT;",
+              "type": "materialized_view",
+              "operation": "alter",
+              "path": "public.active_employees"
+            },
+            {
+              "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS active_employees AS\n SELECT id,\n    name,\n    salary,\n    'active'::text AS status_label\n   FROM employees\n  WHERE status::text = 'active'::text;",
+              "type": "materialized_view",
+              "operation": "alter",
+              "path": "public.active_employees"
+            },
+            {
+              "sql": "DROP MATERIALIZED VIEW dept_stats RESTRICT;",
+              "type": "materialized_view",
+              "operation": "alter",
+              "path": "public.dept_stats"
+            },
+            {
+              "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS dept_stats AS\n SELECT department,\n    count(*) AS employee_count,\n    avg(salary) AS avg_salary\n   FROM employees\n  GROUP BY department;",
+              "type": "materialized_view",
+              "operation": "alter",
+              "path": "public.dept_stats"
+            },
+            {
+              "sql": "CREATE OR REPLACE VIEW employee_names AS\n SELECT id,\n    name\n   FROM active_employees;",
+              "type": "view",
+              "operation": "recreate",
+              "path": "public.employee_names"
+            },
+            {
+              "sql": "CREATE OR REPLACE VIEW employee_ids AS\n SELECT id\n   FROM employee_names;",
+              "type": "view",
+              "operation": "recreate",
+              "path": "public.employee_ids"
+            },
+            {
+              "sql": "CREATE OR REPLACE VIEW employee_summary AS\n SELECT ae.id,\n    ae.name,\n    ds.employee_count AS dept_size\n   FROM active_employees ae\n     CROSS JOIN dept_stats ds\n LIMIT 10;",
+              "type": "view",
+              "operation": "recreate",
+              "path": "public.employee_summary"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "e4687125bf0145e37b9703d74c5cf09f0e69733284549b1f28498afd7753a102"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "e4687125bf0145e37b9703d74c5cf09f0e69733284549b1f28498afd7753a102"
+      },
+      "groups": [
         {
-          "sql": "DROP PROCEDURE IF EXISTS process_payment(IN order_id integer, IN amount numeric);",
-          "type": "procedure",
-          "operation": "drop",
-          "path": "public.process_payment"
-        },
-        {
-          "sql": "CREATE OR REPLACE PROCEDURE process_payment(\n    IN order_id integer,\n    IN amount numeric,\n    IN payment_method text DEFAULT 'credit_card'\n)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    UPDATE orders \n    SET status = 'paid', \n        payment_amount = amount,\n        payment_method = payment_method,\n        processed_at = NOW()\n    WHERE id = order_id;\n    \n    INSERT INTO payment_history (order_id, amount, method, processed_at)\n    VALUES (order_id, amount, payment_method, NOW());\n    \n    COMMIT;\nEND;\n$$;",
-          "type": "procedure",
-          "operation": "create",
-          "path": "public.process_payment"
+          "steps": [
+            {
+              "sql": "DROP PROCEDURE IF EXISTS process_payment(IN order_id integer, IN amount numeric);",
+              "type": "procedure",
+              "operation": "drop",
+              "path": "public.process_payment"
+            },
+            {
+              "sql": "CREATE OR REPLACE PROCEDURE process_payment(\n    IN order_id integer,\n    IN amount numeric,\n    IN payment_method text DEFAULT 'credit_card'\n)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    UPDATE orders \n    SET status = 'paid', \n        payment_amount = amount,\n        payment_method = payment_method,\n        processed_at = NOW()\n    WHERE id = order_id;\n    \n    INSERT INTO payment_history (order_id, amount, method, processed_at)\n    VALUES (order_id, amount, payment_method, NOW());\n    \n    COMMIT;\nEND;\n$$;",
+              "type": "procedure",
+              "operation": "create",
+              "path": "public.process_payment"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

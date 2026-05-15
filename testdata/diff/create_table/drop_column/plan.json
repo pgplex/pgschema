@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "de93945f2adbf913ad174b88f9a092ae770871ee6df38fa3b45fdbb83fdde371"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "de93945f2adbf913ad174b88f9a092ae770871ee6df38fa3b45fdbb83fdde371"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE users DROP COLUMN email;",
-          "type": "table.column",
-          "operation": "drop",
-          "path": "public.users.email"
+          "steps": [
+            {
+              "sql": "ALTER TABLE users DROP COLUMN email;",
+              "type": "table.column",
+              "operation": "drop",
+              "path": "public.users.email"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

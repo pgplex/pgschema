@@ -121,6 +121,75 @@ If the build fails with a `vendorHash` mismatch, update `nix/pgschema.nix` with 
 - [Docs](https://www.pgschema.com)
 - [GitHub issues](https://github.com/pgplex/pgschema/issues)
 
+## Configuration file
+
+Instead of passing flags every time, you can create a `pgschema.toml` config file:
+
+```toml
+host = "localhost"
+port = 5432
+db = "myapp"
+user = "postgres"
+schema = "public"
+file = "schema.sql"
+```
+
+Then simply run:
+
+```bash
+pgschema plan
+pgschema apply
+```
+
+### Named environments
+
+Use `[env.*]` blocks to define per-environment overrides. Values inherit from the base level:
+
+```toml
+schema = "public"
+file = "schema.sql"
+
+[env.dev]
+host = "localhost"
+db = "myapp_dev"
+user = "postgres"
+
+[env.prod]
+host = "prod-db.internal"
+db = "myapp_prod"
+user = "app_user"
+lock-timeout = "30s"
+auto-approve = false
+```
+
+```bash
+pgschema plan --env dev
+pgschema apply --env prod
+```
+
+### Multi-tenant schema loop
+
+For multi-tenant setups where each tenant has its own schema, define a `[schemas]` block with a SQL query that returns schema names. `plan` and `apply` will iterate over all discovered schemas automatically:
+
+```toml
+host = "localhost"
+db = "myapp"
+user = "postgres"
+file = "tenant.sql"
+
+[schemas]
+query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'tenant_%'"
+```
+
+```bash
+pgschema plan    # plans migration for each tenant schema
+pgschema apply   # applies migration to each tenant schema
+```
+
+### Priority
+
+CLI flags always take precedence: **CLI flags > env vars > config env > config base > defaults**.
+
 ## Quick example
 
 ### Step 1: Dump schema

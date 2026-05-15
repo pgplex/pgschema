@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS organizations (\n    tenant_id integer,\n    org_id integer,\n    org_name text NOT NULL,\n    org_type text NOT NULL,\n    CONSTRAINT organizations_pkey PRIMARY KEY (tenant_id, org_id),\n    CONSTRAINT organizations_org_type_org_id_tenant_id_key UNIQUE (org_type, org_id, tenant_id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.organizations"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS projects (\n    tenant_id integer,\n    org_id integer,\n    project_id integer,\n    project_name text NOT NULL,\n    project_code text NOT NULL,\n    description text,\n    CONSTRAINT projects_pkey PRIMARY KEY (tenant_id, org_id, project_id),\n    CONSTRAINT projects_project_name_tenant_id_project_id_key UNIQUE (project_name, tenant_id, project_id),\n    CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.projects"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS organizations (\n    tenant_id integer,\n    org_id integer,\n    org_name text NOT NULL,\n    org_type text NOT NULL,\n    CONSTRAINT organizations_pkey PRIMARY KEY (tenant_id, org_id),\n    CONSTRAINT organizations_org_type_org_id_tenant_id_key UNIQUE (org_type, org_id, tenant_id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.organizations"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS projects (\n    tenant_id integer,\n    org_id integer,\n    project_id integer,\n    project_name text NOT NULL,\n    project_code text NOT NULL,\n    description text,\n    CONSTRAINT projects_pkey PRIMARY KEY (tenant_id, org_id, project_id),\n    CONSTRAINT projects_project_name_tenant_id_project_id_key UNIQUE (project_name, tenant_id, project_id),\n    CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.projects"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

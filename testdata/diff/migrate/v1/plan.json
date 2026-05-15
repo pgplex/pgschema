@@ -2,49 +2,53 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS department (\n    dept_no text,\n    dept_name text NOT NULL,\n    CONSTRAINT department_pkey PRIMARY KEY (dept_no)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.department"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS employee (\n    emp_no SERIAL,\n    birth_date date NOT NULL,\n    first_name text NOT NULL,\n    last_name text NOT NULL,\n    gender text NOT NULL,\n    hire_date date NOT NULL,\n    CONSTRAINT employee_pkey PRIMARY KEY (emp_no)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.employee"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS dept_emp (\n    emp_no integer,\n    dept_no text,\n    from_date date NOT NULL,\n    to_date date NOT NULL,\n    CONSTRAINT dept_emp_pkey PRIMARY KEY (emp_no, dept_no),\n    CONSTRAINT dept_emp_dept_no_fkey FOREIGN KEY (dept_no) REFERENCES department (dept_no),\n    CONSTRAINT dept_emp_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.dept_emp"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS dept_manager (\n    emp_no integer,\n    dept_no text,\n    from_date date NOT NULL,\n    to_date date NOT NULL,\n    CONSTRAINT dept_manager_pkey PRIMARY KEY (emp_no, dept_no),\n    CONSTRAINT dept_manager_dept_no_fkey FOREIGN KEY (dept_no) REFERENCES department (dept_no),\n    CONSTRAINT dept_manager_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.dept_manager"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS salary (\n    emp_no integer,\n    amount integer NOT NULL,\n    from_date date,\n    to_date date NOT NULL,\n    CONSTRAINT salary_pkey PRIMARY KEY (emp_no, from_date),\n    CONSTRAINT salary_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.salary"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS title (\n    emp_no integer,\n    title text,\n    from_date date,\n    to_date date,\n    CONSTRAINT title_pkey PRIMARY KEY (emp_no, title, from_date),\n    CONSTRAINT title_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.title"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS department (\n    dept_no text,\n    dept_name text NOT NULL,\n    CONSTRAINT department_pkey PRIMARY KEY (dept_no)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.department"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS employee (\n    emp_no SERIAL,\n    birth_date date NOT NULL,\n    first_name text NOT NULL,\n    last_name text NOT NULL,\n    gender text NOT NULL,\n    hire_date date NOT NULL,\n    CONSTRAINT employee_pkey PRIMARY KEY (emp_no)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.employee"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS dept_emp (\n    emp_no integer,\n    dept_no text,\n    from_date date NOT NULL,\n    to_date date NOT NULL,\n    CONSTRAINT dept_emp_pkey PRIMARY KEY (emp_no, dept_no),\n    CONSTRAINT dept_emp_dept_no_fkey FOREIGN KEY (dept_no) REFERENCES department (dept_no),\n    CONSTRAINT dept_emp_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.dept_emp"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS dept_manager (\n    emp_no integer,\n    dept_no text,\n    from_date date NOT NULL,\n    to_date date NOT NULL,\n    CONSTRAINT dept_manager_pkey PRIMARY KEY (emp_no, dept_no),\n    CONSTRAINT dept_manager_dept_no_fkey FOREIGN KEY (dept_no) REFERENCES department (dept_no),\n    CONSTRAINT dept_manager_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.dept_manager"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS salary (\n    emp_no integer,\n    amount integer NOT NULL,\n    from_date date,\n    to_date date NOT NULL,\n    CONSTRAINT salary_pkey PRIMARY KEY (emp_no, from_date),\n    CONSTRAINT salary_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.salary"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS title (\n    emp_no integer,\n    title text,\n    from_date date,\n    to_date date,\n    CONSTRAINT title_pkey PRIMARY KEY (emp_no, title, from_date),\n    CONSTRAINT title_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.title"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

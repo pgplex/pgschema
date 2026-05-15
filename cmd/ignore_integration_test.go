@@ -803,7 +803,7 @@ func executeIgnorePlanCommand(t *testing.T, containerInfo *struct {
 	}
 
 	// Generate the plan (reuse shared embedded postgres from migrate_integration_test.go)
-	migrationPlan, err := planCmd.GeneratePlan(config, sharedEmbeddedPG)
+	migrationPlan, err := planCmd.GenerateSchemaPlan(config, sharedEmbeddedPG)
 	if err != nil {
 		t.Fatalf("Failed to execute plan command: %v", err)
 	}

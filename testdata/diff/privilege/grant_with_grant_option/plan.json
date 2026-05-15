@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "ebd29a0231408c46d6b2733a4671e806b669cb4d27d79a4e7afb81db15f12445"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "ebd29a0231408c46d6b2733a4671e806b669cb4d27d79a4e7afb81db15f12445"
+      },
+      "groups": [
         {
-          "sql": "GRANT SELECT ON TABLE products TO admin_role WITH GRANT OPTION;",
-          "type": "privilege",
-          "operation": "create",
-          "path": "privileges.TABLE.products.admin_role"
+          "steps": [
+            {
+              "sql": "GRANT SELECT ON TABLE products TO admin_role WITH GRANT OPTION;",
+              "type": "privilege",
+              "operation": "create",
+              "path": "privileges.TABLE.products.admin_role"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

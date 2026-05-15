@@ -2,37 +2,41 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "9e37fb057af32b98c899ee94f42f4916403b6ddf361b29beccb9b657b58abc1f"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "9e37fb057af32b98c899ee94f42f4916403b6ddf361b29beccb9b657b58abc1f"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS audit (\n    id SERIAL,\n    operation text NOT NULL,\n    query text,\n    user_name text NOT NULL,\n    changed_at timestamptz DEFAULT CURRENT_TIMESTAMP,\n    CONSTRAINT audit_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.audit"
-        },
-        {
-          "sql": "CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON audit (changed_at);",
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.audit.idx_audit_changed_at"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION log_dml_operations()\nRETURNS trigger\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    IF (TG_OP = 'INSERT') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES ('INSERT', current_query(), current_user);\n        RETURN NEW;\n    ELSIF (TG_OP = 'UPDATE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES ('UPDATE', current_query(), current_user);\n        RETURN NEW;\n    ELSIF (TG_OP = 'DELETE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES ('DELETE', current_query(), current_user);\n        RETURN OLD;\n    END IF;\n    RETURN NULL;\nEND;\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.log_dml_operations"
-        },
-        {
-          "sql": "CREATE OR REPLACE TRIGGER salary_log_trigger\n    AFTER UPDATE OR DELETE ON salary\n    FOR EACH ROW\n    EXECUTE FUNCTION log_dml_operations();",
-          "type": "table.trigger",
-          "operation": "create",
-          "path": "public.salary.salary_log_trigger"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS audit (\n    id SERIAL,\n    operation text NOT NULL,\n    query text,\n    user_name text NOT NULL,\n    changed_at timestamptz DEFAULT CURRENT_TIMESTAMP,\n    CONSTRAINT audit_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.audit"
+            },
+            {
+              "sql": "CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON audit (changed_at);",
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.audit.idx_audit_changed_at"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION log_dml_operations()\nRETURNS trigger\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    IF (TG_OP = 'INSERT') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES ('INSERT', current_query(), current_user);\n        RETURN NEW;\n    ELSIF (TG_OP = 'UPDATE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES ('UPDATE', current_query(), current_user);\n        RETURN NEW;\n    ELSIF (TG_OP = 'DELETE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES ('DELETE', current_query(), current_user);\n        RETURN OLD;\n    END IF;\n    RETURN NULL;\nEND;\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.log_dml_operations"
+            },
+            {
+              "sql": "CREATE OR REPLACE TRIGGER salary_log_trigger\n    AFTER UPDATE OR DELETE ON salary\n    FOR EACH ROW\n    EXECUTE FUNCTION log_dml_operations();",
+              "type": "table.trigger",
+              "operation": "create",
+              "path": "public.salary.salary_log_trigger"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

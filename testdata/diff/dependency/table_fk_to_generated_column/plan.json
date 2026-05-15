@@ -2,37 +2,41 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS articlesource (\n    id integer,\n    article_id integer NOT NULL,\n    source_url text,\n    CONSTRAINT articlesource_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.articlesource"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION calc_priority()\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$SELECT 1\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.calc_priority"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS article (\n    id integer,\n    title text NOT NULL,\n    priority integer GENERATED ALWAYS AS (calc_priority()) STORED,\n    CONSTRAINT article_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.article"
-        },
-        {
-          "sql": "ALTER TABLE articlesource\nADD CONSTRAINT articlesource_article_id_fkey FOREIGN KEY (article_id) REFERENCES article (id);",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.articlesource.articlesource_article_id_fkey"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS articlesource (\n    id integer,\n    article_id integer NOT NULL,\n    source_url text,\n    CONSTRAINT articlesource_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.articlesource"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION calc_priority()\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$SELECT 1\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.calc_priority"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS article (\n    id integer,\n    title text NOT NULL,\n    priority integer GENERATED ALWAYS AS (calc_priority()) STORED,\n    CONSTRAINT article_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.article"
+            },
+            {
+              "sql": "ALTER TABLE articlesource\nADD CONSTRAINT articlesource_article_id_fkey FOREIGN KEY (article_id) REFERENCES article (id);",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.articlesource.articlesource_article_id_fkey"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

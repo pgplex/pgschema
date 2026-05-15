@@ -2,43 +2,47 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "e67f1222093d3d30328f364981301ac4aa2c0c7678df5494fbf07bd3a01096ff"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "e67f1222093d3d30328f364981301ac4aa2c0c7678df5494fbf07bd3a01096ff"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE z_companies\nADD CONSTRAINT z_companies_company_id_name_key UNIQUE (company_id, company_name);",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.z_companies.z_companies_company_id_name_key"
-        },
-        {
-          "sql": "ALTER TABLE a_employees\nADD CONSTRAINT a_employees_company_fkey FOREIGN KEY (tenant_id, company_id) REFERENCES z_companies (tenant_id, company_id) ON UPDATE CASCADE ON DELETE RESTRICT DEFERRABLE NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.a_employees.a_employees_company_fkey"
-        },
-        {
-          "sql": "ALTER TABLE a_employees VALIDATE CONSTRAINT a_employees_company_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.a_employees.a_employees_company_fkey"
-        },
-        {
-          "sql": "ALTER TABLE a_employees\nADD CONSTRAINT a_employees_company_name_fkey FOREIGN KEY (company_id, company_name) REFERENCES z_companies (company_id, company_name) ON UPDATE CASCADE ON DELETE RESTRICT DEFERRABLE NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.a_employees.a_employees_company_name_fkey"
-        },
-        {
-          "sql": "ALTER TABLE a_employees VALIDATE CONSTRAINT a_employees_company_name_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.a_employees.a_employees_company_name_fkey"
+          "steps": [
+            {
+              "sql": "ALTER TABLE z_companies\nADD CONSTRAINT z_companies_company_id_name_key UNIQUE (company_id, company_name);",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.z_companies.z_companies_company_id_name_key"
+            },
+            {
+              "sql": "ALTER TABLE a_employees\nADD CONSTRAINT a_employees_company_fkey FOREIGN KEY (tenant_id, company_id) REFERENCES z_companies (tenant_id, company_id) ON UPDATE CASCADE ON DELETE RESTRICT DEFERRABLE NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.a_employees.a_employees_company_fkey"
+            },
+            {
+              "sql": "ALTER TABLE a_employees VALIDATE CONSTRAINT a_employees_company_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.a_employees.a_employees_company_fkey"
+            },
+            {
+              "sql": "ALTER TABLE a_employees\nADD CONSTRAINT a_employees_company_name_fkey FOREIGN KEY (company_id, company_name) REFERENCES z_companies (company_id, company_name) ON UPDATE CASCADE ON DELETE RESTRICT DEFERRABLE NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.a_employees.a_employees_company_name_fkey"
+            },
+            {
+              "sql": "ALTER TABLE a_employees VALIDATE CONSTRAINT a_employees_company_name_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.a_employees.a_employees_company_name_fkey"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

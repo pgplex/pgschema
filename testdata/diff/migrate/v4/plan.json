@@ -2,107 +2,111 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "bdbae04ce681eb5be9912131759a7b327273fb07c3d1ad5648fd160cda572454"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "bdbae04ce681eb5be9912131759a7b327273fb07c3d1ad5648fd160cda572454"
+      },
+      "groups": [
         {
-          "sql": "CREATE OR REPLACE PROCEDURE simple_salary_update(\n    IN p_emp_no integer,\n    IN p_amount integer\n)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- Simple update of salary amount\n    UPDATE salary \n    SET amount = p_amount \n    WHERE emp_no = p_emp_no \n    AND to_date = '9999-01-01';\n    \n    RAISE NOTICE 'Updated salary for employee % to $%', p_emp_no, p_amount;\nEND;\n$$;",
-          "type": "procedure",
-          "operation": "create",
-          "path": "public.simple_salary_update"
+          "steps": [
+            {
+              "sql": "CREATE OR REPLACE PROCEDURE simple_salary_update(\n    IN p_emp_no integer,\n    IN p_amount integer\n)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- Simple update of salary amount\n    UPDATE salary \n    SET amount = p_amount \n    WHERE emp_no = p_emp_no \n    AND to_date = '9999-01-01';\n    \n    RAISE NOTICE 'Updated salary for employee % to $%', p_emp_no, p_amount;\nEND;\n$$;",
+              "type": "procedure",
+              "operation": "create",
+              "path": "public.simple_salary_update"
+            },
+            {
+              "sql": "CREATE OR REPLACE VIEW dept_emp_latest_date AS\n SELECT emp_no,\n    max(from_date) AS from_date,\n    max(to_date) AS to_date\n   FROM dept_emp\n  GROUP BY emp_no;",
+              "type": "view",
+              "operation": "create",
+              "path": "public.dept_emp_latest_date"
+            },
+            {
+              "sql": "CREATE OR REPLACE VIEW current_dept_emp AS\n SELECT l.emp_no,\n    d.dept_no,\n    l.from_date,\n    l.to_date\n   FROM dept_emp d\n     JOIN dept_emp_latest_date l ON d.emp_no = l.emp_no AND d.from_date = l.from_date AND l.to_date = d.to_date;",
+              "type": "view",
+              "operation": "create",
+              "path": "public.current_dept_emp"
+            },
+            {
+              "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS employee_salary_summary AS\n SELECT d.dept_no,\n    d.dept_name,\n    count(DISTINCT e.emp_no) AS employee_count,\n    avg(s.amount) AS avg_salary,\n    max(s.amount) AS max_salary,\n    min(s.amount) AS min_salary\n   FROM employee e\n     JOIN dept_emp de ON e.emp_no = de.emp_no\n     JOIN department d ON de.dept_no = d.dept_no\n     JOIN salary s ON e.emp_no = s.emp_no\n  WHERE de.to_date = '9999-01-01'::date AND s.to_date = '9999-01-01'::date\n  GROUP BY d.dept_no, d.dept_name;",
+              "type": "materialized_view",
+              "operation": "create",
+              "path": "public.employee_salary_summary"
+            },
+            {
+              "sql": "CREATE INDEX IF NOT EXISTS idx_emp_salary_summary_dept_no ON employee_salary_summary (dept_no);",
+              "type": "materialized_view.index",
+              "operation": "create",
+              "path": "public.employee_salary_summary.idx_emp_salary_summary_dept_no"
+            }
+          ]
         },
         {
-          "sql": "CREATE OR REPLACE VIEW dept_emp_latest_date AS\n SELECT emp_no,\n    max(from_date) AS from_date,\n    max(to_date) AS to_date\n   FROM dept_emp\n  GROUP BY emp_no;",
-          "type": "view",
-          "operation": "create",
-          "path": "public.dept_emp_latest_date"
+          "steps": [
+            {
+              "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_operation ON audit (operation);",
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.audit.idx_audit_operation"
+            }
+          ]
         },
         {
-          "sql": "CREATE OR REPLACE VIEW current_dept_emp AS\n SELECT l.emp_no,\n    d.dept_no,\n    l.from_date,\n    l.to_date\n   FROM dept_emp d\n     JOIN dept_emp_latest_date l ON d.emp_no = l.emp_no AND d.from_date = l.from_date AND l.to_date = d.to_date;",
-          "type": "view",
-          "operation": "create",
-          "path": "public.current_dept_emp"
+          "steps": [
+            {
+              "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_audit_operation';",
+              "directive": {
+                "type": "wait",
+                "message": "Creating index idx_audit_operation"
+              },
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.audit.idx_audit_operation"
+            }
+          ]
         },
         {
-          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS employee_salary_summary AS\n SELECT d.dept_no,\n    d.dept_name,\n    count(DISTINCT e.emp_no) AS employee_count,\n    avg(s.amount) AS avg_salary,\n    max(s.amount) AS max_salary,\n    min(s.amount) AS min_salary\n   FROM employee e\n     JOIN dept_emp de ON e.emp_no = de.emp_no\n     JOIN department d ON de.dept_no = d.dept_no\n     JOIN salary s ON e.emp_no = s.emp_no\n  WHERE de.to_date = '9999-01-01'::date AND s.to_date = '9999-01-01'::date\n  GROUP BY d.dept_no, d.dept_name;",
-          "type": "materialized_view",
-          "operation": "create",
-          "path": "public.employee_salary_summary"
+          "steps": [
+            {
+              "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_username ON audit (user_name);",
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.audit.idx_audit_username"
+            }
+          ]
         },
         {
-          "sql": "CREATE INDEX IF NOT EXISTS idx_emp_salary_summary_dept_no ON employee_salary_summary (dept_no);",
-          "type": "materialized_view.index",
-          "operation": "create",
-          "path": "public.employee_salary_summary.idx_emp_salary_summary_dept_no"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_operation ON audit (operation);",
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.audit.idx_audit_operation"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_audit_operation';",
-          "directive": {
-            "type": "wait",
-            "message": "Creating index idx_audit_operation"
-          },
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.audit.idx_audit_operation"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_username ON audit (user_name);",
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.audit.idx_audit_username"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_audit_username';",
-          "directive": {
-            "type": "wait",
-            "message": "Creating index idx_audit_username"
-          },
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.audit.idx_audit_username"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "CREATE OR REPLACE TRIGGER salary_log_trigger\n    AFTER UPDATE OR DELETE ON salary\n    FOR EACH ROW\n    EXECUTE FUNCTION log_dml_operations('payroll', 'high');",
-          "type": "table.trigger",
-          "operation": "alter",
-          "path": "public.salary.salary_log_trigger"
+          "steps": [
+            {
+              "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_audit_username';",
+              "directive": {
+                "type": "wait",
+                "message": "Creating index idx_audit_username"
+              },
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.audit.idx_audit_username"
+            }
+          ]
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION log_dml_operations()\nRETURNS trigger\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nDECLARE\n    table_category TEXT;\n    log_level TEXT;\nBEGIN\n    -- Get arguments passed from trigger (if any)\n    -- TG_ARGV[0] is the first argument, TG_ARGV[1] is the second\n    table_category := COALESCE(TG_ARGV[0], 'default');\n    log_level := COALESCE(TG_ARGV[1], 'standard');\n\n    IF (TG_OP = 'INSERT') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES (\n            'INSERT [' || table_category || ':' || log_level || ']',\n            current_query(),\n            current_user\n        );\n        RETURN NEW;\n    ELSIF (TG_OP = 'UPDATE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES (\n            'UPDATE [' || table_category || ':' || log_level || ']',\n            current_query(),\n            current_user\n        );\n        RETURN NEW;\n    ELSIF (TG_OP = 'DELETE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES (\n            'DELETE [' || table_category || ':' || log_level || ']',\n            current_query(),\n            current_user\n        );\n        RETURN OLD;\n    END IF;\n    RETURN NULL;\nEND;\n$$;",
-          "type": "function",
-          "operation": "alter",
-          "path": "public.log_dml_operations"
+          "steps": [
+            {
+              "sql": "CREATE OR REPLACE TRIGGER salary_log_trigger\n    AFTER UPDATE OR DELETE ON salary\n    FOR EACH ROW\n    EXECUTE FUNCTION log_dml_operations('payroll', 'high');",
+              "type": "table.trigger",
+              "operation": "alter",
+              "path": "public.salary.salary_log_trigger"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION log_dml_operations()\nRETURNS trigger\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nDECLARE\n    table_category TEXT;\n    log_level TEXT;\nBEGIN\n    -- Get arguments passed from trigger (if any)\n    -- TG_ARGV[0] is the first argument, TG_ARGV[1] is the second\n    table_category := COALESCE(TG_ARGV[0], 'default');\n    log_level := COALESCE(TG_ARGV[1], 'standard');\n\n    IF (TG_OP = 'INSERT') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES (\n            'INSERT [' || table_category || ':' || log_level || ']',\n            current_query(),\n            current_user\n        );\n        RETURN NEW;\n    ELSIF (TG_OP = 'UPDATE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES (\n            'UPDATE [' || table_category || ':' || log_level || ']',\n            current_query(),\n            current_user\n        );\n        RETURN NEW;\n    ELSIF (TG_OP = 'DELETE') THEN\n        INSERT INTO audit (operation, query, user_name)\n        VALUES (\n            'DELETE [' || table_category || ':' || log_level || ']',\n            current_query(),\n            current_user\n        );\n        RETURN OLD;\n    END IF;\n    RETURN NULL;\nEND;\n$$;",
+              "type": "function",
+              "operation": "alter",
+              "path": "public.log_dml_operations"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

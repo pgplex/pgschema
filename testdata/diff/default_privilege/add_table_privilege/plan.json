@@ -2,31 +2,35 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC;",
-          "type": "default_privilege",
-          "operation": "create",
-          "path": "default_privileges.testuser.TABLES.PUBLIC"
-        },
-        {
-          "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT INSERT, UPDATE ON TABLES TO app_user;",
-          "type": "default_privilege",
-          "operation": "create",
-          "path": "default_privileges.testuser.TABLES.app_user"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS users (\n    id integer,\n    name text NOT NULL,\n    CONSTRAINT users_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.users"
+          "steps": [
+            {
+              "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC;",
+              "type": "default_privilege",
+              "operation": "create",
+              "path": "default_privileges.testuser.TABLES.PUBLIC"
+            },
+            {
+              "sql": "ALTER DEFAULT PRIVILEGES FOR ROLE testuser IN SCHEMA public GRANT INSERT, UPDATE ON TABLES TO app_user;",
+              "type": "default_privilege",
+              "operation": "create",
+              "path": "default_privileges.testuser.TABLES.app_user"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS users (\n    id integer,\n    name text NOT NULL,\n    CONSTRAINT users_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.users"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

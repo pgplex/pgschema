@@ -2,43 +2,47 @@
   "version": "1.0.0",
   "pgschema_version": "1.7.1",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "0000000000000000000000000000000000000000000000000000000000000000"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE activity ADD COLUMN embedding halfvec(384);",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.activity.embedding"
-        }
-      ]
-    },
-    {
-      "steps": [
+          "steps": [
+            {
+              "sql": "ALTER TABLE activity ADD COLUMN embedding halfvec(384);",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.activity.embedding"
+            }
+          ]
+        },
         {
-          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS activity_embedding_idx ON activity USING hnsw (embedding halfvec_cosine_ops);",
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.activity.activity_embedding_idx"
-        }
-      ]
-    },
-    {
-      "steps": [
+          "steps": [
+            {
+              "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS activity_embedding_idx ON activity USING hnsw (embedding halfvec_cosine_ops);",
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.activity.activity_embedding_idx"
+            }
+          ]
+        },
         {
-          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'activity_embedding_idx';",
-          "directive": {
-            "type": "wait",
-            "message": "Creating index activity_embedding_idx"
-          },
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.activity.activity_embedding_idx"
+          "steps": [
+            {
+              "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'activity_embedding_idx';",
+              "directive": {
+                "type": "wait",
+                "message": "Creating index activity_embedding_idx"
+              },
+              "type": "table.index",
+              "operation": "create",
+              "path": "public.activity.activity_embedding_idx"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

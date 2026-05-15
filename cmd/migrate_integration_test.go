@@ -457,11 +457,15 @@ func generatePlanOutput(host string, port int, database, user, password, schema,
 		ApplicationName: "pgschema",
 	}
 
-	// Generate the plan (reuse shared embedded postgres for performance)
-	migrationPlan, err := planCmd.GeneratePlan(config, sharedEmbeddedPG)
+	// Generate the per-schema plan (reuse shared embedded postgres for performance)
+	schemaPlan, err := planCmd.GenerateSchemaPlan(config, sharedEmbeddedPG)
 	if err != nil {
 		return "", err
 	}
+
+	// Wrap in unified Plan for output
+	migrationPlan := plan.NewPlan()
+	migrationPlan.AddSchema(schema, schemaPlan)
 
 	// Format output based on the requested format
 	var output string

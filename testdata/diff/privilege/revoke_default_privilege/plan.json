@@ -2,37 +2,41 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "60a01e6c2c18215bcce70b3d9d1153e7ca0371ef8e12252c152547462d1d92bd"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "60a01e6c2c18215bcce70b3d9d1153e7ca0371ef8e12252c152547462d1d92bd"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS readonly_data (\n    id integer,\n    value text,\n    CONSTRAINT readonly_data_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.readonly_data"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS secrets (\n    id integer,\n    data text,\n    CONSTRAINT secrets_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.secrets"
-        },
-        {
-          "sql": "REVOKE DELETE, INSERT, UPDATE ON TABLE readonly_data FROM app_user;",
-          "type": "privilege",
-          "operation": "drop",
-          "path": "privileges.TABLE.readonly_data.app_user"
-        },
-        {
-          "sql": "REVOKE SELECT ON TABLE secrets FROM reader;",
-          "type": "privilege",
-          "operation": "drop",
-          "path": "privileges.TABLE.secrets.reader"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS readonly_data (\n    id integer,\n    value text,\n    CONSTRAINT readonly_data_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.readonly_data"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS secrets (\n    id integer,\n    data text,\n    CONSTRAINT secrets_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.secrets"
+            },
+            {
+              "sql": "REVOKE DELETE, INSERT, UPDATE ON TABLE readonly_data FROM app_user;",
+              "type": "privilege",
+              "operation": "drop",
+              "path": "privileges.TABLE.readonly_data.app_user"
+            },
+            {
+              "sql": "REVOKE SELECT ON TABLE secrets FROM reader;",
+              "type": "privilege",
+              "operation": "drop",
+              "path": "privileges.TABLE.secrets.reader"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

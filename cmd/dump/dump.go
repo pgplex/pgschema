@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/pgplex/pgschema/cmd/config"
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/dump"
@@ -44,7 +45,10 @@ var DumpCmd = &cobra.Command{
 	Long:         "Dump and output database schema information for a specific schema. Uses the --schema flag to target a particular schema (defaults to 'public').",
 	RunE:         runDump,
 	SilenceUsage: true,
-	PreRunE:      util.PreRunEWithEnvVarsAndConnection(&db, &user, &host, &port),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		applyConfigToDump(cmd)
+		return util.PreRunEWithEnvVarsAndConnection(&db, &user, &host, &port)(cmd, args)
+	},
 }
 
 func init() {
@@ -152,4 +156,42 @@ func runDump(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func applyConfigToDump(cmd *cobra.Command) {
+	cfg := config.Get()
+	if cfg == nil {
+		return
+	}
+
+	if !cmd.Flags().Changed("host") && cfg.Host != "" {
+		host = cfg.Host
+	}
+	if !cmd.Flags().Changed("port") && cfg.Port != 0 {
+		port = cfg.Port
+	}
+	if !cmd.Flags().Changed("db") && cfg.DB != "" {
+		db = cfg.DB
+	}
+	if !cmd.Flags().Changed("user") && cfg.User != "" {
+		user = cfg.User
+	}
+	if !cmd.Flags().Changed("password") && cfg.Password != "" {
+		password = cfg.Password
+	}
+	if !cmd.Flags().Changed("schema") && cfg.Schema != "" {
+		schema = cfg.Schema
+	}
+	if !cmd.Flags().Changed("sslmode") && cfg.SSLMode != "" {
+		sslmode = cfg.SSLMode
+	}
+	if !cmd.Flags().Changed("multi-file") && cfg.MultiFile {
+		multiFile = cfg.MultiFile
+	}
+	if !cmd.Flags().Changed("file") && cfg.File != "" {
+		file = cfg.File
+	}
+	if !cmd.Flags().Changed("no-comments") && cfg.NoComments {
+		noComments = cfg.NoComments
+	}
 }

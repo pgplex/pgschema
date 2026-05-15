@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TYPE status_type AS ENUM (\n    'active',\n    'inactive'\n);",
-          "type": "type",
-          "operation": "create",
-          "path": "public.status_type"
-        },
-        {
-          "sql": "CREATE TYPE record_type AS (id integer, status status_type);",
-          "type": "type",
-          "operation": "create",
-          "path": "public.record_type"
+          "steps": [
+            {
+              "sql": "CREATE TYPE status_type AS ENUM (\n    'active',\n    'inactive'\n);",
+              "type": "type",
+              "operation": "create",
+              "path": "public.status_type"
+            },
+            {
+              "sql": "CREATE TYPE record_type AS (id integer, status status_type);",
+              "type": "type",
+              "operation": "create",
+              "path": "public.record_type"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }
