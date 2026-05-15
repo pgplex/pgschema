@@ -1,0 +1,16 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ orders
+    + order_status (column)
+    - status (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE orders DROP COLUMN status;
+
+ALTER TABLE orders ADD COLUMN order_status integer NOT NULL;

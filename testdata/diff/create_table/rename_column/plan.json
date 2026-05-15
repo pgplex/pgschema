@@ -3,16 +3,16 @@
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "7fcec59d1a0d260fce77ca55af1cad30ebc8768996825647c4002962d1a8f8ee"
+    "hash": "2269947753a914ccaf56d792f2240cbe65cb6aea022eab92bb484aff584e22f4"
   },
   "groups": [
     {
       "steps": [
         {
-          "sql": "ALTER TABLE a RENAME COLUMN revision TO current_revision;",
+          "sql": "ALTER TABLE users RENAME COLUMN active TO is_active;",
           "type": "table.column_rename",
           "operation": "alter",
-          "path": "public.a.current_revision"
+          "path": "public.users.is_active"
         }
       ]
     }
