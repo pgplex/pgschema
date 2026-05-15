@@ -223,3 +223,34 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 
 	return true
 }
+
+// applyRenameMapToConstraint returns a shallow copy of the constraint with
+// column names updated according to the rename map. This is used to compare
+// constraints after column renames — PostgreSQL automatically updates constraint
+// column references when a column is renamed.
+func applyRenameMapToConstraint(c *ir.Constraint, renameMap map[string]string) *ir.Constraint {
+	needsUpdate := false
+	for _, col := range c.Columns {
+		if _, ok := renameMap[col.Name]; ok {
+			needsUpdate = true
+			break
+		}
+	}
+	if !needsUpdate {
+		return c
+	}
+
+	// Shallow copy the constraint and update column names
+	copy := *c
+	copy.Columns = make([]*ir.ConstraintColumn, len(c.Columns))
+	for i, col := range c.Columns {
+		if newName, ok := renameMap[col.Name]; ok {
+			colCopy := *col
+			colCopy.Name = newName
+			copy.Columns[i] = &colCopy
+		} else {
+			copy.Columns[i] = col
+		}
+	}
+	return &copy
+}

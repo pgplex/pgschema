@@ -225,6 +225,12 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		}
 	}
 
+	// Build rename map (old name -> new name) for constraint comparison
+	renameMap := make(map[string]string, len(diff.RenamedColumns))
+	for _, rename := range diff.RenamedColumns {
+		renameMap[rename.Old.Name] = rename.New.Name
+	}
+
 	// Compare constraints
 	oldConstraints := make(map[string]*ir.Constraint)
 	newConstraints := make(map[string]*ir.Constraint)
@@ -258,7 +264,14 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified constraints
 	for name, newConstraint := range newConstraints {
 		if oldConstraint, exists := oldConstraints[name]; exists {
-			if !constraintsEqual(oldConstraint, newConstraint) {
+			// When columns are renamed, apply the rename map to the old constraint's
+			// column names before comparing, since PostgreSQL automatically updates
+			// constraint column references when a column is renamed.
+			oldForComparison := oldConstraint
+			if len(renameMap) > 0 {
+				oldForComparison = applyRenameMapToConstraint(oldConstraint, renameMap)
+			}
+			if !constraintsEqual(oldForComparison, newConstraint) {
 				diff.ModifiedConstraints = append(diff.ModifiedConstraints, &ConstraintDiff{
 					Old: oldConstraint,
 					New: newConstraint,
@@ -768,6 +781,22 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			Operation:           DiffOperationAlter,
 			Path:                fmt.Sprintf("%s.%s", td.Table.Schema, td.Table.Name),
 			Source:              td.Table,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+
+	// Rename columns before any drops/adds to preserve data
+	for _, rename := range td.RenamedColumns {
+		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+		sql := fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s;",
+			tableName, ir.QuoteIdentifier(rename.Old.Name), ir.QuoteIdentifier(rename.New.Name))
+
+		context := &diffContext{
+			Type:                DiffTypeTableColumnRename,
+			Operation:           DiffOperationAlter,
+			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, rename.New.Name),
+			Source:              rename,
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
@@ -1372,6 +1401,28 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				Operation:           DiffOperationAlter,
 				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, colDiff.New.Name),
 				Source:              colDiff,
+				CanRunInTransaction: true,
+			}
+			collector.collect(context, sql)
+		}
+	}
+
+	// Handle comment changes on renamed columns
+	for _, rename := range td.RenamedColumns {
+		if rename.Old.Comment != rename.New.Comment {
+			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+			var sql string
+			if rename.New.Comment == "" {
+				sql = fmt.Sprintf("COMMENT ON COLUMN %s.%s IS NULL;", tableName, ir.QuoteIdentifier(rename.New.Name))
+			} else {
+				sql = fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", tableName, ir.QuoteIdentifier(rename.New.Name), quoteString(rename.New.Comment))
+			}
+
+			context := &diffContext{
+				Type:                DiffTypeTableColumnComment,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, rename.New.Name),
+				Source:              rename,
 				CanRunInTransaction: true,
 			}
 			collector.collect(context, sql)
