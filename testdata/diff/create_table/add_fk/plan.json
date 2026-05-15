@@ -2,145 +2,149 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "9b85e377059726a1c480a565f28fa2caf1e39ba1512de5c1adc8efbabc669dc1"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "9b85e377059726a1c480a565f28fa2caf1e39ba1512de5c1adc8efbabc669dc1"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE books\nADD CONSTRAINT books_author_id_fkey FOREIGN KEY (author_id) REFERENCES authors (id) ON DELETE CASCADE NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.books.books_author_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE books VALIDATE CONSTRAINT books_author_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.books.books_author_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE employees\nADD CONSTRAINT employees_department_id_fkey FOREIGN KEY (department_id) REFERENCES departments (id) NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.employees.employees_department_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE employees VALIDATE CONSTRAINT employees_department_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.employees.employees_department_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE nodes\nADD CONSTRAINT nodes_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES nodes (id) NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.nodes.nodes_parent_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE nodes VALIDATE CONSTRAINT nodes_parent_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.nodes.nodes_parent_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customers (id) NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.orders.orders_customer_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_customer_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.orders.orders_customer_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.orders.orders_manager_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_manager_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.orders.orders_manager_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.orders.orders_product_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_product_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.orders.orders_product_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE price_adjustments\nADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period) NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.price_adjustments.price_adjustments_product_fkey"
-        },
-        {
-          "sql": "ALTER TABLE price_adjustments VALIDATE CONSTRAINT price_adjustments_product_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.price_adjustments.price_adjustments_product_fkey"
-        },
-        {
-          "sql": "ALTER TABLE products\nADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.products.products_category_code_fkey"
-        },
-        {
-          "sql": "ALTER TABLE products VALIDATE CONSTRAINT products_category_code_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.products.products_category_code_fkey"
-        },
-        {
-          "sql": "ALTER TABLE projects\nADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id) NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.projects.projects_tenant_id_org_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE projects VALIDATE CONSTRAINT projects_tenant_id_org_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.projects.projects_tenant_id_org_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE teams\nADD CONSTRAINT teams_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.teams.teams_manager_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE teams VALIDATE CONSTRAINT teams_manager_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.teams.teams_manager_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE user_profiles\nADD CONSTRAINT user_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED NOT VALID;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.user_profiles.user_profiles_user_id_fkey"
-        },
-        {
-          "sql": "ALTER TABLE user_profiles VALIDATE CONSTRAINT user_profiles_user_id_fkey;",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.user_profiles.user_profiles_user_id_fkey"
+          "steps": [
+            {
+              "sql": "ALTER TABLE books\nADD CONSTRAINT books_author_id_fkey FOREIGN KEY (author_id) REFERENCES authors (id) ON DELETE CASCADE NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.books.books_author_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE books VALIDATE CONSTRAINT books_author_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.books.books_author_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE employees\nADD CONSTRAINT employees_department_id_fkey FOREIGN KEY (department_id) REFERENCES departments (id) NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.employees.employees_department_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE employees VALIDATE CONSTRAINT employees_department_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.employees.employees_department_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE nodes\nADD CONSTRAINT nodes_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES nodes (id) NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.nodes.nodes_parent_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE nodes VALIDATE CONSTRAINT nodes_parent_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.nodes.nodes_parent_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customers (id) NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.orders.orders_customer_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_customer_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.orders.orders_customer_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.orders.orders_manager_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_manager_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.orders.orders_manager_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.orders.orders_product_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_product_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.orders.orders_product_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE price_adjustments\nADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period) NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.price_adjustments.price_adjustments_product_fkey"
+            },
+            {
+              "sql": "ALTER TABLE price_adjustments VALIDATE CONSTRAINT price_adjustments_product_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.price_adjustments.price_adjustments_product_fkey"
+            },
+            {
+              "sql": "ALTER TABLE products\nADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.products.products_category_code_fkey"
+            },
+            {
+              "sql": "ALTER TABLE products VALIDATE CONSTRAINT products_category_code_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.products.products_category_code_fkey"
+            },
+            {
+              "sql": "ALTER TABLE projects\nADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id) NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.projects.projects_tenant_id_org_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE projects VALIDATE CONSTRAINT projects_tenant_id_org_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.projects.projects_tenant_id_org_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE teams\nADD CONSTRAINT teams_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.teams.teams_manager_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE teams VALIDATE CONSTRAINT teams_manager_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.teams.teams_manager_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE user_profiles\nADD CONSTRAINT user_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED NOT VALID;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.user_profiles.user_profiles_user_id_fkey"
+            },
+            {
+              "sql": "ALTER TABLE user_profiles VALIDATE CONSTRAINT user_profiles_user_id_fkey;",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.user_profiles.user_profiles_user_id_fkey"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

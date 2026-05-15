@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE OR REPLACE FUNCTION validate_custom_id(\n    val text\n)\nRETURNS boolean\nLANGUAGE plpgsql\nIMMUTABLE\nAS $$\nBEGIN\n  -- Simple validation: must start with 'id_' and be at least 5 characters\n  RETURN val IS NOT NULL AND val LIKE 'id_%' AND length(val) >= 5;\nEND\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.validate_custom_id"
-        },
-        {
-          "sql": "CREATE DOMAIN custom_id AS text\n  CONSTRAINT custom_id_check CHECK (validate_custom_id(VALUE));",
-          "type": "domain",
-          "operation": "create",
-          "path": "public.custom_id"
+          "steps": [
+            {
+              "sql": "CREATE OR REPLACE FUNCTION validate_custom_id(\n    val text\n)\nRETURNS boolean\nLANGUAGE plpgsql\nIMMUTABLE\nAS $$\nBEGIN\n  -- Simple validation: must start with 'id_' and be at least 5 characters\n  RETURN val IS NOT NULL AND val LIKE 'id_%' AND length(val) >= 5;\nEND\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.validate_custom_id"
+            },
+            {
+              "sql": "CREATE DOMAIN custom_id AS text\n  CONSTRAINT custom_id_check CHECK (validate_custom_id(VALUE));",
+              "type": "domain",
+              "operation": "create",
+              "path": "public.custom_id"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

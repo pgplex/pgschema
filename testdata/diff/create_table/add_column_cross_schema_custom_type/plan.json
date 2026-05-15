@@ -2,37 +2,41 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "0d7287d9b46eed0ab41e966b5101db966c24ad8f09f5b52f20c5c04a2132ea64"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "0d7287d9b46eed0ab41e966b5101db966c24ad8f09f5b52f20c5c04a2132ea64"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE users ADD COLUMN fqdn citext NOT NULL;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.users.fqdn"
-        },
-        {
-          "sql": "ALTER TABLE users ADD COLUMN metadata utils.hstore;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.users.metadata"
-        },
-        {
-          "sql": "ALTER TABLE users ADD COLUMN description utils.custom_text;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.users.description"
-        },
-        {
-          "sql": "ALTER TABLE users ADD COLUMN status utils.custom_enum DEFAULT 'active'::utils.custom_enum;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.users.status"
+          "steps": [
+            {
+              "sql": "ALTER TABLE users ADD COLUMN fqdn citext NOT NULL;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.users.fqdn"
+            },
+            {
+              "sql": "ALTER TABLE users ADD COLUMN metadata utils.hstore;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.users.metadata"
+            },
+            {
+              "sql": "ALTER TABLE users ADD COLUMN description utils.custom_text;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.users.description"
+            },
+            {
+              "sql": "ALTER TABLE users ADD COLUMN status utils.custom_enum DEFAULT 'active'::utils.custom_enum;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.users.status"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

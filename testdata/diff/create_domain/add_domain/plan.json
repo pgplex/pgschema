@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE DOMAIN email_address AS text\n  DEFAULT 'example@acme.com'\n  NOT NULL\n  CONSTRAINT email_address_check CHECK (VALUE ~ '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');",
-          "type": "domain",
-          "operation": "create",
-          "path": "public.email_address"
+          "steps": [
+            {
+              "sql": "CREATE DOMAIN email_address AS text\n  DEFAULT 'example@acme.com'\n  NOT NULL\n  CONSTRAINT email_address_check CHECK (VALUE ~ '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');",
+              "type": "domain",
+              "operation": "create",
+              "path": "public.email_address"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

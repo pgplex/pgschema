@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "7027e39d7e59e0103d597e7cd942af1e42217adff9a2c893a46d9b16c6a2ee25"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "7027e39d7e59e0103d597e7cd942af1e42217adff9a2c893a46d9b16c6a2ee25"
+      },
+      "groups": [
         {
-          "sql": "GRANT SELECT, USAGE ON SEQUENCE order_id_seq TO app_role;",
-          "type": "privilege",
-          "operation": "create",
-          "path": "privileges.SEQUENCE.order_id_seq.app_role"
+          "steps": [
+            {
+              "sql": "GRANT SELECT, USAGE ON SEQUENCE order_id_seq TO app_role;",
+              "type": "privilege",
+              "operation": "create",
+              "path": "privileges.SEQUENCE.order_id_seq.app_role"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

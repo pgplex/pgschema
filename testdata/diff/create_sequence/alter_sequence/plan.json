@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "a6d455e0695bf779e36a81592e6b9e2cbb29cd0d7778dc021d19ed76feacfe53"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "a6d455e0695bf779e36a81592e6b9e2cbb29cd0d7778dc021d19ed76feacfe53"
+      },
+      "groups": [
         {
-          "sql": "ALTER SEQUENCE user_id_seq INCREMENT BY 5 CYCLE;",
-          "type": "sequence",
-          "operation": "alter",
-          "path": "public.user_id_seq"
+          "steps": [
+            {
+              "sql": "ALTER SEQUENCE user_id_seq INCREMENT BY 5 CYCLE;",
+              "type": "sequence",
+              "operation": "alter",
+              "path": "public.user_id_seq"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

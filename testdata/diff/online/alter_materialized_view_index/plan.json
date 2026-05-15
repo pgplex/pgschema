@@ -2,49 +2,53 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "bc770ddaf5f2a6240a64435aded0de44672a1e62b8f2d4702ea2833d2074c825"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "bc770ddaf5f2a6240a64435aded0de44672a1e62b8f2d4702ea2833d2074c825"
+      },
+      "groups": [
         {
-          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_summary_email_pgschema_new ON user_summary (email, status);",
-          "type": "materialized_view.index",
-          "operation": "alter",
-          "path": "public.user_summary.idx_user_summary_email"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_user_summary_email_pgschema_new';",
-          "directive": {
-            "type": "wait",
-            "message": "Creating index idx_user_summary_email_pgschema_new"
-          },
-          "type": "materialized_view.index",
-          "operation": "alter",
-          "path": "public.user_summary.idx_user_summary_email"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "DROP INDEX idx_user_summary_email;",
-          "type": "materialized_view.index",
-          "operation": "alter",
-          "path": "public.user_summary.idx_user_summary_email"
+          "steps": [
+            {
+              "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_summary_email_pgschema_new ON user_summary (email, status);",
+              "type": "materialized_view.index",
+              "operation": "alter",
+              "path": "public.user_summary.idx_user_summary_email"
+            }
+          ]
         },
         {
-          "sql": "ALTER INDEX idx_user_summary_email_pgschema_new RENAME TO idx_user_summary_email;",
-          "type": "materialized_view.index",
-          "operation": "alter",
-          "path": "public.user_summary.idx_user_summary_email"
+          "steps": [
+            {
+              "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_user_summary_email_pgschema_new';",
+              "directive": {
+                "type": "wait",
+                "message": "Creating index idx_user_summary_email_pgschema_new"
+              },
+              "type": "materialized_view.index",
+              "operation": "alter",
+              "path": "public.user_summary.idx_user_summary_email"
+            }
+          ]
+        },
+        {
+          "steps": [
+            {
+              "sql": "DROP INDEX idx_user_summary_email;",
+              "type": "materialized_view.index",
+              "operation": "alter",
+              "path": "public.user_summary.idx_user_summary_email"
+            },
+            {
+              "sql": "ALTER INDEX idx_user_summary_email_pgschema_new RENAME TO idx_user_summary_email;",
+              "type": "materialized_view.index",
+              "operation": "alter",
+              "path": "public.user_summary.idx_user_summary_email"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

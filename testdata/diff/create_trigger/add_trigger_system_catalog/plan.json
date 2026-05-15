@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "43d9524fe7d4f30f7e7dc91616162b92fb4833343be7ac06d3c35f9cb60ccc40"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "43d9524fe7d4f30f7e7dc91616162b92fb4833343be7ac06d3c35f9cb60ccc40"
+      },
+      "groups": [
         {
-          "sql": "CREATE OR REPLACE TRIGGER employees_update_check\n    BEFORE UPDATE ON employees\n    FOR EACH ROW\n    EXECUTE FUNCTION suppress_redundant_updates_trigger();",
-          "type": "table.trigger",
-          "operation": "create",
-          "path": "public.employees.employees_update_check"
+          "steps": [
+            {
+              "sql": "CREATE OR REPLACE TRIGGER employees_update_check\n    BEFORE UPDATE ON employees\n    FOR EACH ROW\n    EXECUTE FUNCTION suppress_redundant_updates_trigger();",
+              "type": "table.trigger",
+              "operation": "create",
+              "path": "public.employees.employees_update_check"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

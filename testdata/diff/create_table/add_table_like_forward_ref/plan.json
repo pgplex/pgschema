@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS customers (\n    customer_id integer NOT NULL,\n    name varchar(100) NOT NULL,\n    email varchar(255),\n    created_at timestamp DEFAULT now(),\n    updated_at timestamp DEFAULT now(),\n    CONSTRAINT customers_email_key UNIQUE (email)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.customers"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS orders (\n    id SERIAL,\n    order_date date NOT NULL,\n    customer_id integer NOT NULL,\n    name varchar(100) NOT NULL,\n    email varchar(255),\n    created_at timestamp DEFAULT now(),\n    updated_at timestamp DEFAULT now(),\n    CONSTRAINT orders_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.orders"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS customers (\n    customer_id integer NOT NULL,\n    name varchar(100) NOT NULL,\n    email varchar(255),\n    created_at timestamp DEFAULT now(),\n    updated_at timestamp DEFAULT now(),\n    CONSTRAINT customers_email_key UNIQUE (email)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.customers"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS orders (\n    id SERIAL,\n    order_date date NOT NULL,\n    customer_id integer NOT NULL,\n    name varchar(100) NOT NULL,\n    email varchar(255),\n    created_at timestamp DEFAULT now(),\n    updated_at timestamp DEFAULT now(),\n    CONSTRAINT orders_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.orders"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

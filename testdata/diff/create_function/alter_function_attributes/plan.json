@@ -2,43 +2,47 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "1f121ae09b8a9c9a88444396c16c27b8690f6ff7a123cf72c204103111a49649"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "1f121ae09b8a9c9a88444396c16c27b8690f6ff7a123cf72c204103111a49649"
+      },
+      "groups": [
         {
-          "sql": "ALTER FUNCTION calculate_total(numeric, numeric) PARALLEL SAFE;",
-          "type": "function",
-          "operation": "alter",
-          "path": "public.calculate_total"
-        },
-        {
-          "sql": "ALTER FUNCTION calculate_total(numeric, numeric) LEAKPROOF;",
-          "type": "function",
-          "operation": "alter",
-          "path": "public.calculate_total"
-        },
-        {
-          "sql": "ALTER FUNCTION process_data(text) PARALLEL SAFE;",
-          "type": "function",
-          "operation": "alter",
-          "path": "public.process_data"
-        },
-        {
-          "sql": "ALTER FUNCTION process_data(text) LEAKPROOF;",
-          "type": "function",
-          "operation": "alter",
-          "path": "public.process_data"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION secure_lookup(\n    id integer\n)\nRETURNS text\nLANGUAGE plpgsql\nVOLATILE\nSET search_path = pg_catalog\nAS $$\nBEGIN\n    RETURN 'result';\nEND;\n$$;",
-          "type": "function",
-          "operation": "alter",
-          "path": "public.secure_lookup"
+          "steps": [
+            {
+              "sql": "ALTER FUNCTION calculate_total(numeric, numeric) PARALLEL SAFE;",
+              "type": "function",
+              "operation": "alter",
+              "path": "public.calculate_total"
+            },
+            {
+              "sql": "ALTER FUNCTION calculate_total(numeric, numeric) LEAKPROOF;",
+              "type": "function",
+              "operation": "alter",
+              "path": "public.calculate_total"
+            },
+            {
+              "sql": "ALTER FUNCTION process_data(text) PARALLEL SAFE;",
+              "type": "function",
+              "operation": "alter",
+              "path": "public.process_data"
+            },
+            {
+              "sql": "ALTER FUNCTION process_data(text) LEAKPROOF;",
+              "type": "function",
+              "operation": "alter",
+              "path": "public.process_data"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION secure_lookup(\n    id integer\n)\nRETURNS text\nLANGUAGE plpgsql\nVOLATILE\nSET search_path = pg_catalog\nAS $$\nBEGIN\n    RETURN 'result';\nEND;\n$$;",
+              "type": "function",
+              "operation": "alter",
+              "path": "public.secure_lookup"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

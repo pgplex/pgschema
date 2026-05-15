@@ -2,115 +2,119 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "84e9a9b7c080fc6d686f528f11d070d030b1ab82e66a2ad98050868d66d2f98a"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "84e9a9b7c080fc6d686f528f11d070d030b1ab82e66a2ad98050868d66d2f98a"
+      },
+      "groups": [
         {
-          "sql": "COMMENT ON TABLE categories IS 'Hierarchical category system for posts';",
-          "type": "table.comment",
-          "operation": "alter",
-          "path": "public.categories"
-        },
-        {
-          "sql": "COMMENT ON COLUMN categories.id IS 'Category unique identifier';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.categories.id"
-        },
-        {
-          "sql": "COMMENT ON COLUMN categories.name IS 'Category display name';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.categories.name"
-        },
-        {
-          "sql": "COMMENT ON COLUMN categories.description IS 'Optional category description';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.categories.description"
-        },
-        {
-          "sql": "COMMENT ON COLUMN categories.parent_id IS 'Parent category for hierarchical structure';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.categories.parent_id"
-        },
-        {
-          "sql": "COMMENT ON COLUMN categories.created_at IS 'Category creation timestamp';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.categories.created_at"
-        },
-        {
-          "sql": "COMMENT ON INDEX idx_categories_parent IS 'Index for hierarchical category queries';",
-          "type": "table.index.comment",
-          "operation": "alter",
-          "path": "public.categories.idx_categories_parent"
-        },
-        {
-          "sql": "ALTER TABLE posts ADD COLUMN views integer DEFAULT 0;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.posts.views"
-        },
-        {
-          "sql": "COMMENT ON COLUMN posts.views IS 'Number of post views';",
-          "type": "table.column.comment",
-          "operation": "create",
-          "path": "public.posts.views"
-        },
-        {
-          "sql": "COMMENT ON TABLE posts IS 'Blog posts and articles';",
-          "type": "table.comment",
-          "operation": "alter",
-          "path": "public.posts"
-        },
-        {
-          "sql": "COMMENT ON COLUMN posts.id IS 'Unique post identifier';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.posts.id"
-        },
-        {
-          "sql": "COMMENT ON COLUMN posts.title IS 'Post title, max 200 characters';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.posts.title"
-        },
-        {
-          "sql": "COMMENT ON COLUMN posts.content IS 'Post body in markdown format';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.posts.content"
-        },
-        {
-          "sql": "COMMENT ON COLUMN posts.author_id IS 'Foreign key to users table';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.posts.author_id"
-        },
-        {
-          "sql": "COMMENT ON COLUMN posts.published_at IS 'Publication timestamp, NULL for drafts';",
-          "type": "table.column.comment",
-          "operation": "alter",
-          "path": "public.posts.published_at"
-        },
-        {
-          "sql": "COMMENT ON INDEX idx_posts_author IS 'Index for finding posts by author';",
-          "type": "table.index.comment",
-          "operation": "alter",
-          "path": "public.posts.idx_posts_author"
-        },
-        {
-          "sql": "COMMENT ON INDEX idx_posts_published IS 'Partial index for published posts only';",
-          "type": "table.index.comment",
-          "operation": "alter",
-          "path": "public.posts.idx_posts_published"
+          "steps": [
+            {
+              "sql": "COMMENT ON TABLE categories IS 'Hierarchical category system for posts';",
+              "type": "table.comment",
+              "operation": "alter",
+              "path": "public.categories"
+            },
+            {
+              "sql": "COMMENT ON COLUMN categories.id IS 'Category unique identifier';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.categories.id"
+            },
+            {
+              "sql": "COMMENT ON COLUMN categories.name IS 'Category display name';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.categories.name"
+            },
+            {
+              "sql": "COMMENT ON COLUMN categories.description IS 'Optional category description';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.categories.description"
+            },
+            {
+              "sql": "COMMENT ON COLUMN categories.parent_id IS 'Parent category for hierarchical structure';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.categories.parent_id"
+            },
+            {
+              "sql": "COMMENT ON COLUMN categories.created_at IS 'Category creation timestamp';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.categories.created_at"
+            },
+            {
+              "sql": "COMMENT ON INDEX idx_categories_parent IS 'Index for hierarchical category queries';",
+              "type": "table.index.comment",
+              "operation": "alter",
+              "path": "public.categories.idx_categories_parent"
+            },
+            {
+              "sql": "ALTER TABLE posts ADD COLUMN views integer DEFAULT 0;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.posts.views"
+            },
+            {
+              "sql": "COMMENT ON COLUMN posts.views IS 'Number of post views';",
+              "type": "table.column.comment",
+              "operation": "create",
+              "path": "public.posts.views"
+            },
+            {
+              "sql": "COMMENT ON TABLE posts IS 'Blog posts and articles';",
+              "type": "table.comment",
+              "operation": "alter",
+              "path": "public.posts"
+            },
+            {
+              "sql": "COMMENT ON COLUMN posts.id IS 'Unique post identifier';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.posts.id"
+            },
+            {
+              "sql": "COMMENT ON COLUMN posts.title IS 'Post title, max 200 characters';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.posts.title"
+            },
+            {
+              "sql": "COMMENT ON COLUMN posts.content IS 'Post body in markdown format';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.posts.content"
+            },
+            {
+              "sql": "COMMENT ON COLUMN posts.author_id IS 'Foreign key to users table';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.posts.author_id"
+            },
+            {
+              "sql": "COMMENT ON COLUMN posts.published_at IS 'Publication timestamp, NULL for drafts';",
+              "type": "table.column.comment",
+              "operation": "alter",
+              "path": "public.posts.published_at"
+            },
+            {
+              "sql": "COMMENT ON INDEX idx_posts_author IS 'Index for finding posts by author';",
+              "type": "table.index.comment",
+              "operation": "alter",
+              "path": "public.posts.idx_posts_author"
+            },
+            {
+              "sql": "COMMENT ON INDEX idx_posts_published IS 'Partial index for published posts only';",
+              "type": "table.index.comment",
+              "operation": "alter",
+              "path": "public.posts.idx_posts_published"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

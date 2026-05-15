@@ -2,31 +2,35 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS departments (\n    id integer,\n    name text NOT NULL,\n    manager_id integer,\n    CONSTRAINT departments_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.departments"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS users (\n    id integer,\n    name text,\n    email text,\n    department_id integer,\n    CONSTRAINT users_pkey PRIMARY KEY (id),\n    CONSTRAINT users_email_key UNIQUE (email),\n    CONSTRAINT users_department_id_fkey FOREIGN KEY (department_id) REFERENCES departments (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.users"
-        },
-        {
-          "sql": "ALTER TABLE departments\nADD CONSTRAINT departments_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES users (id);",
-          "type": "table.constraint",
-          "operation": "create",
-          "path": "public.departments.departments_manager_id_fkey"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS departments (\n    id integer,\n    name text NOT NULL,\n    manager_id integer,\n    CONSTRAINT departments_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.departments"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS users (\n    id integer,\n    name text,\n    email text,\n    department_id integer,\n    CONSTRAINT users_pkey PRIMARY KEY (id),\n    CONSTRAINT users_email_key UNIQUE (email),\n    CONSTRAINT users_department_id_fkey FOREIGN KEY (department_id) REFERENCES departments (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.users"
+            },
+            {
+              "sql": "ALTER TABLE departments\nADD CONSTRAINT departments_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES users (id);",
+              "type": "table.constraint",
+              "operation": "create",
+              "path": "public.departments.departments_manager_id_fkey"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

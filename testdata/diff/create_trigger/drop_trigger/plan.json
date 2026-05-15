@@ -2,19 +2,23 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "e80a9a1556e42c582c28840b5597b70cc7ee51f34627e869efd7b5d1ed2a2c49"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "e80a9a1556e42c582c28840b5597b70cc7ee51f34627e869efd7b5d1ed2a2c49"
+      },
+      "groups": [
         {
-          "sql": "DROP TRIGGER IF EXISTS employees_last_modified_trigger ON employees;",
-          "type": "table.trigger",
-          "operation": "drop",
-          "path": "public.employees.employees_last_modified_trigger"
+          "steps": [
+            {
+              "sql": "DROP TRIGGER IF EXISTS employees_last_modified_trigger ON employees;",
+              "type": "table.trigger",
+              "operation": "drop",
+              "path": "public.employees.employees_last_modified_trigger"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

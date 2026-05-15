@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "897bceabded15a8e2f91cc1081213c355d1c54584f1787dd4f7a81f9aa038636"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "897bceabded15a8e2f91cc1081213c355d1c54584f1787dd4f7a81f9aa038636"
+      },
+      "groups": [
         {
-          "sql": "DROP FUNCTION IF EXISTS process_order(integer, numeric);",
-          "type": "function",
-          "operation": "drop",
-          "path": "public.process_order"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION process_order(\n    customer_email text,\n    priority boolean\n)\nRETURNS TABLE(status text, processed_at timestamp)\nLANGUAGE plpgsql\nSTABLE\nSECURITY DEFINER\nAS $$\nBEGIN\n    RETURN QUERY\n    SELECT 'completed'::text, NOW()\n    WHERE priority = true;\nEND;\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.process_order"
+          "steps": [
+            {
+              "sql": "DROP FUNCTION IF EXISTS process_order(integer, numeric);",
+              "type": "function",
+              "operation": "drop",
+              "path": "public.process_order"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION process_order(\n    customer_email text,\n    priority boolean\n)\nRETURNS TABLE(status text, processed_at timestamp)\nLANGUAGE plpgsql\nSTABLE\nSECURITY DEFINER\nAS $$\nBEGIN\n    RETURN QUERY\n    SELECT 'completed'::text, NOW()\n    WHERE priority = true;\nEND;\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.process_order"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

@@ -2,37 +2,41 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE OR REPLACE FUNCTION add_with_tax(\n    amount numeric,\n    tax_rate numeric DEFAULT 0.1\n)\nRETURNS numeric\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n SELECT (amount + (amount * tax_rate));\nEND;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.add_with_tax"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION calculate_tax(\n    amount numeric,\n    rate numeric\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nPARALLEL SAFE\nAS $$\n    SELECT amount * rate;\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.calculate_tax"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION mask_sensitive_data(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nSTABLE\nLEAKPROOF\nAS $$\n    SELECT '***' || substring(input from 4);\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.mask_sensitive_data"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION process_order(\n    order_id integer,\n    discount_percent numeric DEFAULT 0,\n    priority_level integer DEFAULT 1,\n    note varchar DEFAULT '',\n    status text DEFAULT 'pending',\n    apply_tax boolean DEFAULT true,\n    is_priority boolean DEFAULT false,\n    expiry_date date DEFAULT (CURRENT_DATE + '1 year'::interval)\n)\nRETURNS numeric\nLANGUAGE plpgsql\nVOLATILE\nSTRICT\nSECURITY DEFINER\nLEAKPROOF\nPARALLEL RESTRICTED\nSET search_path = pg_catalog, public\nAS $$\nDECLARE\n    total numeric;\nBEGIN\n    SELECT amount INTO total FROM orders WHERE id = order_id;\n    RETURN total - (total * discount_percent / 100);\nEND;\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.process_order"
+          "steps": [
+            {
+              "sql": "CREATE OR REPLACE FUNCTION add_with_tax(\n    amount numeric,\n    tax_rate numeric DEFAULT 0.1\n)\nRETURNS numeric\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n SELECT (amount + (amount * tax_rate));\nEND;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.add_with_tax"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION calculate_tax(\n    amount numeric,\n    rate numeric\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nPARALLEL SAFE\nAS $$\n    SELECT amount * rate;\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.calculate_tax"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION mask_sensitive_data(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nSTABLE\nLEAKPROOF\nAS $$\n    SELECT '***' || substring(input from 4);\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.mask_sensitive_data"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION process_order(\n    order_id integer,\n    discount_percent numeric DEFAULT 0,\n    priority_level integer DEFAULT 1,\n    note varchar DEFAULT '',\n    status text DEFAULT 'pending',\n    apply_tax boolean DEFAULT true,\n    is_priority boolean DEFAULT false,\n    expiry_date date DEFAULT (CURRENT_DATE + '1 year'::interval)\n)\nRETURNS numeric\nLANGUAGE plpgsql\nVOLATILE\nSTRICT\nSECURITY DEFINER\nLEAKPROOF\nPARALLEL RESTRICTED\nSET search_path = pg_catalog, public\nAS $$\nDECLARE\n    total numeric;\nBEGIN\n    SELECT amount INTO total FROM orders WHERE id = order_id;\n    RETURN total - (total * discount_percent / 100);\nEND;\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.process_order"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

@@ -2,31 +2,35 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "d570de7a7448f1c04bf2bbb4e3a788a9a6242254255b68b60447dba542f34222"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "d570de7a7448f1c04bf2bbb4e3a788a9a6242254255b68b60447dba542f34222"
+      },
+      "groups": [
         {
-          "sql": "ALTER DOMAIN user_rating SET DEFAULT 3;",
-          "type": "domain",
-          "operation": "alter",
-          "path": "public.user_rating"
-        },
-        {
-          "sql": "ALTER DOMAIN user_rating DROP CONSTRAINT user_rating_check;",
-          "type": "domain",
-          "operation": "alter",
-          "path": "public.user_rating"
-        },
-        {
-          "sql": "ALTER DOMAIN user_rating ADD CONSTRAINT user_rating_check CHECK (VALUE >= 1 AND VALUE <= 10);",
-          "type": "domain",
-          "operation": "alter",
-          "path": "public.user_rating"
+          "steps": [
+            {
+              "sql": "ALTER DOMAIN user_rating SET DEFAULT 3;",
+              "type": "domain",
+              "operation": "alter",
+              "path": "public.user_rating"
+            },
+            {
+              "sql": "ALTER DOMAIN user_rating DROP CONSTRAINT user_rating_check;",
+              "type": "domain",
+              "operation": "alter",
+              "path": "public.user_rating"
+            },
+            {
+              "sql": "ALTER DOMAIN user_rating ADD CONSTRAINT user_rating_check CHECK (VALUE >= 1 AND VALUE <= 10);",
+              "type": "domain",
+              "operation": "alter",
+              "path": "public.user_rating"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

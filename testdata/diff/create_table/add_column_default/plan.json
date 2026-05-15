@@ -2,67 +2,71 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "2f64297440983715c85dd0e94e5e6990670d02d31d18fef2170a27df2e2176dc"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "2f64297440983715c85dd0e94e5e6990670d02d31d18fef2170a27df2e2176dc"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE events ADD COLUMN status text DEFAULT 'active' NOT NULL;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.status"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN priority integer DEFAULT 0;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.priority"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN score numeric DEFAULT 0.0;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.score"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN is_active boolean DEFAULT true;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.is_active"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN created_at timestamp DEFAULT CURRENT_TIMESTAMP;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.created_at"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN updated_at timestamp DEFAULT now();",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.updated_at"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN config jsonb DEFAULT '{}';",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.config"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN tags text[] DEFAULT '{}';",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.tags"
-        },
-        {
-          "sql": "ALTER TABLE events ADD COLUMN created_at_utc timestamp DEFAULT (now() AT TIME ZONE 'utc') NOT NULL;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.events.created_at_utc"
+          "steps": [
+            {
+              "sql": "ALTER TABLE events ADD COLUMN status text DEFAULT 'active' NOT NULL;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.status"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN priority integer DEFAULT 0;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.priority"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN score numeric DEFAULT 0.0;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.score"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN is_active boolean DEFAULT true;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.is_active"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN created_at timestamp DEFAULT CURRENT_TIMESTAMP;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.created_at"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN updated_at timestamp DEFAULT now();",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.updated_at"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN config jsonb DEFAULT '{}';",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.config"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN tags text[] DEFAULT '{}';",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.tags"
+            },
+            {
+              "sql": "ALTER TABLE events ADD COLUMN created_at_utc timestamp DEFAULT (now() AT TIME ZONE 'utc') NOT NULL;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.events.created_at_utc"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS documents (\n    id SERIAL,\n    title text NOT NULL,\n    content text,\n    created_at timestamp DEFAULT CURRENT_TIMESTAMP,\n    CONSTRAINT documents_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.documents"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION get_document_count()\nRETURNS integer\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN (SELECT COUNT(*) FROM public.documents);\nEND;\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.get_document_count"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS documents (\n    id SERIAL,\n    title text NOT NULL,\n    content text,\n    created_at timestamp DEFAULT CURRENT_TIMESTAMP,\n    CONSTRAINT documents_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.documents"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION get_document_count()\nRETURNS integer\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN (SELECT COUNT(*) FROM public.documents);\nEND;\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.get_document_count"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

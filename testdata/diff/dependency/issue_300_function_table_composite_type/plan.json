@@ -2,37 +2,41 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+      },
+      "groups": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS activity (\n    id uuid,\n    author_id uuid,\n    CONSTRAINT activity_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.activity"
-        },
-        {
-          "sql": "CREATE TABLE IF NOT EXISTS contact (\n    id uuid,\n    name text NOT NULL,\n    CONSTRAINT contact_pkey PRIMARY KEY (id)\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.contact"
-        },
-        {
-          "sql": "CREATE OR REPLACE VIEW actor AS\n SELECT id,\n    name\n   FROM contact;",
-          "type": "view",
-          "operation": "create",
-          "path": "public.actor"
-        },
-        {
-          "sql": "CREATE OR REPLACE FUNCTION get_actor(\n    activity activity\n)\nRETURNS SETOF actor\nLANGUAGE sql\nSTABLE\nAS $$ SELECT actor.* FROM actor WHERE actor.id = activity.author_id\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.get_actor"
+          "steps": [
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS activity (\n    id uuid,\n    author_id uuid,\n    CONSTRAINT activity_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.activity"
+            },
+            {
+              "sql": "CREATE TABLE IF NOT EXISTS contact (\n    id uuid,\n    name text NOT NULL,\n    CONSTRAINT contact_pkey PRIMARY KEY (id)\n);",
+              "type": "table",
+              "operation": "create",
+              "path": "public.contact"
+            },
+            {
+              "sql": "CREATE OR REPLACE VIEW actor AS\n SELECT id,\n    name\n   FROM contact;",
+              "type": "view",
+              "operation": "create",
+              "path": "public.actor"
+            },
+            {
+              "sql": "CREATE OR REPLACE FUNCTION get_actor(\n    activity activity\n)\nRETURNS SETOF actor\nLANGUAGE sql\nSTABLE\nAS $$ SELECT actor.* FROM actor WHERE actor.id = activity.author_id\n$$;",
+              "type": "function",
+              "operation": "create",
+              "path": "public.get_actor"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }
