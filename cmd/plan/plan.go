@@ -400,18 +400,6 @@ func determineOutputs() ([]outputSpec, error) {
 	return outputs, nil
 }
 
-// deriveSchemaOutputTarget returns a per-schema output target by inserting the schema
-// name before the file extension. For "stdout" targets the value is returned unchanged.
-// Example: "plan.json" + "tenant_1" -> "plan_tenant_1.json"
-func deriveSchemaOutputTarget(target, schemaName string) string {
-	if target == "stdout" {
-		return target
-	}
-	ext := filepath.Ext(target)
-	base := strings.TrimSuffix(target, ext)
-	return fmt.Sprintf("%s_%s%s", base, schemaName, ext)
-}
-
 // processOutput writes the plan in the specified format to the target destination
 func processOutput(migrationPlan *plan.Plan, output outputSpec, cmd *cobra.Command) error {
 	var content string
@@ -783,8 +771,8 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		return err
 	}
 
+	multiPlan := plan.NewMultiPlan()
 	var hasErrors bool
-	withChanges := 0
 
 	for _, schemaName := range schemas {
 		fmt.Fprintf(os.Stderr, "\n── Schema: %s ──────────────────────\n", schemaName)
@@ -822,26 +810,54 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 			continue
 		}
 
-		if migrationPlan.HasAnyChanges() {
-			withChanges++
-		}
+		multiPlan.AddSchema(schemaName, migrationPlan)
+	}
 
-		for _, output := range outputs {
-			schemaOutput := outputSpec{
-				format: output.format,
-				target: deriveSchemaOutputTarget(output.target, schemaName),
-			}
-			if err := processOutput(migrationPlan, schemaOutput, cmd); err != nil {
-				fmt.Fprintf(os.Stderr, "Error writing output for schema %s: %v\n", schemaName, err)
-				hasErrors = true
-			}
+	// Check if debug flag is set
+	debug, _ := cmd.Root().PersistentFlags().GetBool("debug")
+
+	// Write combined output for all schemas
+	for _, output := range outputs {
+		if err := processMultiPlanOutput(multiPlan, output, debug); err != nil {
+			return err
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "\nSummary: %d schemas inspected, %d with changes\n", len(schemas), withChanges)
+	fmt.Fprintln(os.Stderr, "\n"+multiPlan.SummaryString())
 
 	if hasErrors {
 		return fmt.Errorf("one or more schemas had errors")
+	}
+	return nil
+}
+
+// processMultiPlanOutput writes a MultiPlan in the specified format to the target destination.
+func processMultiPlanOutput(mp *plan.MultiPlan, output outputSpec, debug bool) error {
+	var content string
+	var err error
+
+	switch output.format {
+	case "human":
+		useColor := output.target == "stdout" && !planNoColor
+		content = mp.HumanColored(useColor)
+	case "json":
+		content, err = mp.ToJSONWithDebug(debug)
+		if err != nil {
+			return fmt.Errorf("failed to generate JSON output: %w", err)
+		}
+		content += "\n"
+	case "sql":
+		content = mp.ToSQL(plan.SQLFormatRaw)
+	default:
+		return fmt.Errorf("unknown output format: %s", output.format)
+	}
+
+	if output.target == "stdout" {
+		fmt.Print(content)
+	} else {
+		if err := os.WriteFile(output.target, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write %s output to %s: %w", output.format, output.target, err)
+		}
 	}
 	return nil
 }

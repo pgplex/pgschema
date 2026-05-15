@@ -96,62 +96,6 @@ func TestDetermineOutputs(t *testing.T) {
 	}
 }
 
-func TestDeriveSchemaOutputTarget(t *testing.T) {
-	tests := []struct {
-		name       string
-		target     string
-		schemaName string
-		expected   string
-	}{
-		{
-			name:       "stdout is unchanged",
-			target:     "stdout",
-			schemaName: "tenant_1",
-			expected:   "stdout",
-		},
-		{
-			name:       "json file gets schema suffix",
-			target:     "plan.json",
-			schemaName: "tenant_1",
-			expected:   "plan_tenant_1.json",
-		},
-		{
-			name:       "sql file gets schema suffix",
-			target:     "plan.sql",
-			schemaName: "public",
-			expected:   "plan_public.sql",
-		},
-		{
-			name:       "txt file gets schema suffix",
-			target:     "output.txt",
-			schemaName: "tenant_abc",
-			expected:   "output_tenant_abc.txt",
-		},
-		{
-			name:       "file with directory path",
-			target:     "/tmp/plans/plan.json",
-			schemaName: "tenant_2",
-			expected:   "/tmp/plans/plan_tenant_2.json",
-		},
-		{
-			name:       "file without extension",
-			target:     "plan",
-			schemaName: "tenant_1",
-			expected:   "plan_tenant_1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := deriveSchemaOutputTarget(tt.target, tt.schemaName)
-			if got != tt.expected {
-				t.Errorf("deriveSchemaOutputTarget(%q, %q) = %q, want %q",
-					tt.target, tt.schemaName, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestProcessOutput_FileCreation(t *testing.T) {
 	// This test would require a mock plan object
 	// For now, we'll just verify the file writing logic works
