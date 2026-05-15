@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pgplex/pgschema/cmd/config"
 	"github.com/pgplex/pgschema/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -539,5 +540,49 @@ func TestApplyCommand_PlanDatabaseFlags(t *testing.T) {
 	}
 	if planPasswordFlag.DefValue != "" {
 		t.Errorf("Expected default plan-password to be empty, got '%s'", planPasswordFlag.DefValue)
+	}
+}
+
+func TestRunApply_PlanFlagSkipsMultiSchema(t *testing.T) {
+	// When --plan is provided alongside a [schemas] config, RunApply must NOT enter
+	// the multi-schema path. If it did, it would return "--file is required for
+	// multi-schema apply" instead of the expected plan-loading error.
+
+	// Set up a config that has a schemas query
+	cfg := &config.ResolvedConfig{
+		Schemas: &config.SchemasConfig{Query: "SELECT schema_name FROM information_schema.schemata"},
+	}
+	config.SetResolved(cfg)
+	defer config.SetResolved(nil)
+
+	// Create a minimal (but invalid version) plan file to trigger a version error,
+	// not a "file required" error.
+	tmpDir := t.TempDir()
+	planPath := filepath.Join(tmpDir, "plan.json")
+	planJSON := `{"version":"0.0.0","pgschema_version":"test","created_at":"2024-01-01T00:00:00Z","transaction":true,"summary":{"total":0,"add":0,"change":0,"destroy":0,"by_type":{}},"diffs":[]}`
+	if err := os.WriteFile(planPath, []byte(planJSON), 0644); err != nil {
+		t.Fatalf("Failed to write plan file: %v", err)
+	}
+
+	applyDB = "testdb"
+	applyUser = "testuser"
+	applyFile = ""
+	applyPlan = planPath
+	defer func() {
+		applyDB = ""
+		applyUser = ""
+		applyFile = ""
+		applyPlan = ""
+	}()
+
+	// Mark --plan as explicitly set so the guard can detect it
+	ApplyCmd.Flags().Set("plan", planPath)
+	defer ApplyCmd.Flags().Set("plan", "")
+
+	err := RunApply(ApplyCmd, []string{})
+
+	// Must NOT be the multi-schema error
+	if err != nil && strings.Contains(err.Error(), "--file is required for multi-schema apply") {
+		t.Errorf("--plan flag should prevent entering multi-schema path, got: %v", err)
 	}
 }
