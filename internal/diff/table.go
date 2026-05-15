@@ -119,6 +119,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		AddedColumns:        []*ir.Column{},
 		DroppedColumns:      []*ir.Column{},
 		ModifiedColumns:     []*ColumnDiff{},
+		RenamedColumns:      []*ColumnRename{},
 		AddedConstraints:    []*ir.Constraint{},
 		DroppedConstraints:  []*ir.Constraint{},
 		ModifiedConstraints: []*ConstraintDiff{},
@@ -335,7 +336,8 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 
 	// Return nil if no changes
 	if len(diff.AddedColumns) == 0 && len(diff.DroppedColumns) == 0 &&
-		len(diff.ModifiedColumns) == 0 && len(diff.AddedConstraints) == 0 &&
+		len(diff.ModifiedColumns) == 0 && len(diff.RenamedColumns) == 0 &&
+		len(diff.AddedConstraints) == 0 &&
 		len(diff.DroppedConstraints) == 0 && len(diff.ModifiedConstraints) == 0 &&
 		len(diff.AddedIndexes) == 0 && len(diff.DroppedIndexes) == 0 &&
 		len(diff.ModifiedIndexes) == 0 && len(diff.AddedTriggers) == 0 &&
@@ -357,6 +359,7 @@ func diffExternalTable(oldTable, newTable *ir.Table) *tableDiff {
 		AddedColumns:        []*ir.Column{},
 		DroppedColumns:      []*ir.Column{},
 		ModifiedColumns:     []*ColumnDiff{},
+		RenamedColumns:      []*ColumnRename{},
 		AddedConstraints:    []*ir.Constraint{},
 		DroppedConstraints:  []*ir.Constraint{},
 		ModifiedConstraints: []*ConstraintDiff{},
