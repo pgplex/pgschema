@@ -535,7 +535,7 @@ func runApplyMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 	}
 
 	if len(schemas) == 0 {
-		fmt.Println("Warning: schema discovery query returned no schemas.")
+		fmt.Fprintln(os.Stderr, "Warning: schema discovery query returned no schemas.")
 		return nil
 	}
 
@@ -545,7 +545,7 @@ func runApplyMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 
 	var hasErrors bool
 	for _, schemaName := range schemas {
-		fmt.Printf("\n── Schema: %s ──────────────────────\n", schemaName)
+		fmt.Fprintf(os.Stderr, "\n── Schema: %s ──────────────────────\n", schemaName)
 
 		perSchemaConfig := &ApplyConfig{
 			Host:            applyHost,
@@ -597,7 +597,7 @@ func runApplyMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		}
 	}
 
-	fmt.Printf("\nSummary: %d schemas processed\n", len(schemas))
+	fmt.Fprintf(os.Stderr, "\nSummary: %d schemas processed\n", len(schemas))
 	if hasErrors {
 		return fmt.Errorf("one or more schemas had errors")
 	}

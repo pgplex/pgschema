@@ -762,7 +762,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 	}
 
 	if len(schemas) == 0 {
-		fmt.Println("Warning: schema discovery query returned no schemas.")
+		fmt.Fprintln(os.Stderr, "Warning: schema discovery query returned no schemas.")
 		return nil
 	}
 
@@ -775,7 +775,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 	withChanges := 0
 
 	for _, schemaName := range schemas {
-		fmt.Printf("\n── Schema: %s ──────────────────────\n", schemaName)
+		fmt.Fprintf(os.Stderr, "\n── Schema: %s ──────────────────────\n", schemaName)
 
 		perSchemaConfig := &PlanConfig{
 			Host:            planHost,
@@ -822,7 +822,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		}
 	}
 
-	fmt.Printf("\nSummary: %d schemas inspected, %d with changes\n", len(schemas), withChanges)
+	fmt.Fprintf(os.Stderr, "\nSummary: %d schemas inspected, %d with changes\n", len(schemas), withChanges)
 
 	if hasErrors {
 		return fmt.Errorf("one or more schemas had errors")
