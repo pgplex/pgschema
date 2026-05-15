@@ -1,8 +1,1 @@
-ALTER TABLE a DROP COLUMN revision;
-
-ALTER TABLE a ADD COLUMN current_revision bigint;
-
-ALTER TABLE a
-ADD CONSTRAINT a_revision_fkey FOREIGN KEY (current_revision) REFERENCES b (id) NOT VALID;
-
-ALTER TABLE a VALIDATE CONSTRAINT a_revision_fkey;
+ALTER TABLE a RENAME COLUMN revision TO current_revision;
