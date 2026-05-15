@@ -111,6 +111,50 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 	}
 }
 
+// detectColumnRenames finds column pairs that were renamed (same position + properties, different name).
+// Returns the detected renames and the remaining added/dropped columns that are not renames.
+func detectColumnRenames(added, dropped []*ir.Column, targetSchema string) (
+	renames []*ColumnRename,
+	remainingAdded []*ir.Column,
+	remainingDropped []*ir.Column,
+) {
+	// Build a map of dropped columns keyed by position
+	droppedByPosition := make(map[int]*ir.Column)
+	for _, col := range dropped {
+		droppedByPosition[col.Position] = col
+	}
+
+	matchedDropped := make(map[string]bool)
+	matchedAdded := make(map[string]bool)
+
+	for _, addedCol := range added {
+		if droppedCol, exists := droppedByPosition[addedCol.Position]; exists {
+			if !matchedDropped[droppedCol.Name] && columnsMatchForRename(droppedCol, addedCol, targetSchema) {
+				renames = append(renames, &ColumnRename{
+					Old: droppedCol,
+					New: addedCol,
+				})
+				matchedDropped[droppedCol.Name] = true
+				matchedAdded[addedCol.Name] = true
+			}
+		}
+	}
+
+	// Build remaining lists
+	for _, col := range added {
+		if !matchedAdded[col.Name] {
+			remainingAdded = append(remainingAdded, col)
+		}
+	}
+	for _, col := range dropped {
+		if !matchedDropped[col.Name] {
+			remainingDropped = append(remainingDropped, col)
+		}
+	}
+
+	return renames, remainingAdded, remainingDropped
+}
+
 // diffTables compares two tables and returns the differences
 // targetSchema is used to normalize type names before comparison
 func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
@@ -119,6 +163,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		AddedColumns:        []*ir.Column{},
 		DroppedColumns:      []*ir.Column{},
 		ModifiedColumns:     []*ColumnDiff{},
+		RenamedColumns:      []*ColumnRename{},
 		AddedConstraints:    []*ir.Constraint{},
 		DroppedConstraints:  []*ir.Constraint{},
 		ModifiedConstraints: []*ConstraintDiff{},
@@ -160,6 +205,14 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		}
 	}
 
+	// Detect column renames from added/dropped pairs
+	renames, remainingAdded, remainingDropped := detectColumnRenames(diff.AddedColumns, diff.DroppedColumns, targetSchema)
+	if len(renames) > 0 {
+		diff.RenamedColumns = renames
+		diff.AddedColumns = remainingAdded
+		diff.DroppedColumns = remainingDropped
+	}
+
 	// Find modified columns
 	for name, newColumn := range newColumns {
 		if oldColumn, exists := oldColumns[name]; exists {
@@ -170,6 +223,12 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 				})
 			}
 		}
+	}
+
+	// Build rename map (old name -> new name) for constraint comparison
+	renameMap := make(map[string]string, len(diff.RenamedColumns))
+	for _, rename := range diff.RenamedColumns {
+		renameMap[rename.Old.Name] = rename.New.Name
 	}
 
 	// Compare constraints
@@ -205,7 +264,14 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified constraints
 	for name, newConstraint := range newConstraints {
 		if oldConstraint, exists := oldConstraints[name]; exists {
-			if !constraintsEqual(oldConstraint, newConstraint) {
+			// When columns are renamed, apply the rename map to the old constraint's
+			// column names before comparing, since PostgreSQL automatically updates
+			// constraint column references when a column is renamed.
+			oldForComparison := oldConstraint
+			if len(renameMap) > 0 {
+				oldForComparison = applyRenameMapToConstraint(oldConstraint, renameMap)
+			}
+			if !constraintsEqual(oldForComparison, newConstraint) {
 				diff.ModifiedConstraints = append(diff.ModifiedConstraints, &ConstraintDiff{
 					Old: oldConstraint,
 					New: newConstraint,
@@ -335,7 +401,8 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 
 	// Return nil if no changes
 	if len(diff.AddedColumns) == 0 && len(diff.DroppedColumns) == 0 &&
-		len(diff.ModifiedColumns) == 0 && len(diff.AddedConstraints) == 0 &&
+		len(diff.ModifiedColumns) == 0 && len(diff.RenamedColumns) == 0 &&
+		len(diff.AddedConstraints) == 0 &&
 		len(diff.DroppedConstraints) == 0 && len(diff.ModifiedConstraints) == 0 &&
 		len(diff.AddedIndexes) == 0 && len(diff.DroppedIndexes) == 0 &&
 		len(diff.ModifiedIndexes) == 0 && len(diff.AddedTriggers) == 0 &&
@@ -357,6 +424,7 @@ func diffExternalTable(oldTable, newTable *ir.Table) *tableDiff {
 		AddedColumns:        []*ir.Column{},
 		DroppedColumns:      []*ir.Column{},
 		ModifiedColumns:     []*ColumnDiff{},
+		RenamedColumns:      []*ColumnRename{},
 		AddedConstraints:    []*ir.Constraint{},
 		DroppedConstraints:  []*ir.Constraint{},
 		ModifiedConstraints: []*ConstraintDiff{},
@@ -713,6 +781,22 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			Operation:           DiffOperationAlter,
 			Path:                fmt.Sprintf("%s.%s", td.Table.Schema, td.Table.Name),
 			Source:              td.Table,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+
+	// Rename columns before any drops/adds to preserve data
+	for _, rename := range td.RenamedColumns {
+		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+		sql := fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s;",
+			tableName, ir.QuoteIdentifier(rename.Old.Name), ir.QuoteIdentifier(rename.New.Name))
+
+		context := &diffContext{
+			Type:                DiffTypeTableColumnRename,
+			Operation:           DiffOperationAlter,
+			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, rename.New.Name),
+			Source:              rename,
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
@@ -1317,6 +1401,28 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				Operation:           DiffOperationAlter,
 				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, colDiff.New.Name),
 				Source:              colDiff,
+				CanRunInTransaction: true,
+			}
+			collector.collect(context, sql)
+		}
+	}
+
+	// Handle comment changes on renamed columns
+	for _, rename := range td.RenamedColumns {
+		if rename.Old.Comment != rename.New.Comment {
+			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+			var sql string
+			if rename.New.Comment == "" {
+				sql = fmt.Sprintf("COMMENT ON COLUMN %s.%s IS NULL;", tableName, ir.QuoteIdentifier(rename.New.Name))
+			} else {
+				sql = fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", tableName, ir.QuoteIdentifier(rename.New.Name), quoteString(rename.New.Comment))
+			}
+
+			context := &diffContext{
+				Type:                DiffTypeTableColumnComment,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, rename.New.Name),
+				Source:              rename,
 				CanRunInTransaction: true,
 			}
 			collector.collect(context, sql)

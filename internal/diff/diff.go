@@ -25,6 +25,7 @@ const (
 	DiffTypeTableColumnComment
 	DiffTypeTableIndexComment
 	DiffTypeTablePersistence
+	DiffTypeTableColumnRename
 	DiffTypeView
 	DiffTypeViewTrigger
 	DiffTypeViewComment
@@ -69,6 +70,8 @@ func (d DiffType) String() string {
 		return "table.index.comment"
 	case DiffTypeTablePersistence:
 		return "table.persistence"
+	case DiffTypeTableColumnRename:
+		return "table.column_rename"
 	case DiffTypeView:
 		return "view"
 	case DiffTypeViewTrigger:
@@ -143,6 +146,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeTableIndexComment
 	case "table.persistence":
 		*d = DiffTypeTablePersistence
+	case "table.column_rename":
+		*d = DiffTypeTableColumnRename
 	case "view":
 		*d = DiffTypeView
 	case "view.trigger":
@@ -375,6 +380,7 @@ type tableDiff struct {
 	AddedColumns        []*ir.Column
 	DroppedColumns      []*ir.Column
 	ModifiedColumns     []*ColumnDiff
+	RenamedColumns      []*ColumnRename
 	AddedConstraints    []*ir.Constraint
 	DroppedConstraints  []*ir.Constraint
 	ModifiedConstraints []*ConstraintDiff
@@ -396,6 +402,12 @@ type tableDiff struct {
 
 // ColumnDiff represents changes to a column
 type ColumnDiff struct {
+	Old *ir.Column
+	New *ir.Column
+}
+
+// ColumnRename represents a column that was renamed
+type ColumnRename struct {
 	Old *ir.Column
 	New *ir.Column
 }
@@ -1857,6 +1869,10 @@ func sortTableObjects(tables []*tableDiff) {
 		sort.Slice(tableDiff.ModifiedColumns, func(i, j int) bool {
 			return tableDiff.ModifiedColumns[i].New.Position < tableDiff.ModifiedColumns[j].New.Position
 		})
+
+		sort.Slice(tableDiff.RenamedColumns, func(i, j int) bool {
+			return tableDiff.RenamedColumns[i].Old.Position < tableDiff.RenamedColumns[j].Old.Position
+		})
 	}
 }
 
@@ -2166,6 +2182,7 @@ func (d *triggerDiff) GetObjectName() string    { return d.New.Name }
 func (d *viewDiff) GetObjectName() string       { return d.New.Name }
 func (d *tableDiff) GetObjectName() string      { return d.Table.Name }
 func (d *ColumnDiff) GetObjectName() string     { return d.New.Name }
+func (d *ColumnRename) GetObjectName() string   { return d.New.Name }
 func (d *ConstraintDiff) GetObjectName() string { return d.New.Name }
 func (d *IndexDiff) GetObjectName() string      { return d.New.Name }
 func (d *policyDiff) GetObjectName() string     { return d.New.Name }
