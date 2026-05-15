@@ -101,6 +101,7 @@ func loadConfig(cmd *cobra.Command) {
 			fmt.Fprintf(os.Stderr, "Error: --env requires a config file, but %s not found\n", configPath)
 			os.Exit(1)
 		}
+		config.SetResolved(nil)
 		return
 	}
 
