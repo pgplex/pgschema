@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -148,11 +149,19 @@ func Get() *ResolvedConfig {
 }
 
 func DiscoverSchemas(host string, port int, db, user, password, sslmode, query string) ([]string, error) {
-	dsn := fmt.Sprintf("host=%s port=%d dbname=%s user=%s sslmode=%s", host, port, db, user, sslmode)
-	if password != "" {
-		dsn += fmt.Sprintf(" password=%s", password)
+	u := &url.URL{
+		Scheme: "postgres",
+		Host:   fmt.Sprintf("%s:%d", host, port),
+		Path:   "/" + db,
 	}
-	dsn += " connect_timeout=30"
+	if user != "" || password != "" {
+		u.User = url.UserPassword(user, password)
+	}
+	q := url.Values{}
+	q.Set("sslmode", sslmode)
+	q.Set("connect_timeout", "30")
+	u.RawQuery = q.Encode()
+	dsn := u.String()
 
 	conn, err := sql.Open("pgx", dsn)
 	if err != nil {
