@@ -2,25 +2,29 @@
   "version": "1.0.0",
   "pgschema_version": "1.9.0",
   "created_at": "1970-01-01T00:00:00Z",
-  "source_fingerprint": {
-    "hash": "257331bc006ad99a91cdba3a4c7fe7a0cedd09b17fb127ed74d1b4892f93463b"
-  },
-  "groups": [
-    {
-      "steps": [
+  "schemas": {
+    "public": {
+      "source_fingerprint": {
+        "hash": "257331bc006ad99a91cdba3a4c7fe7a0cedd09b17fb127ed74d1b4892f93463b"
+      },
+      "groups": [
         {
-          "sql": "ALTER TABLE orders DROP COLUMN status;",
-          "type": "table.column",
-          "operation": "drop",
-          "path": "public.orders.status"
-        },
-        {
-          "sql": "ALTER TABLE orders ADD COLUMN order_status integer NOT NULL;",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.orders.order_status"
+          "steps": [
+            {
+              "sql": "ALTER TABLE orders DROP COLUMN status;",
+              "type": "table.column",
+              "operation": "drop",
+              "path": "public.orders.status"
+            },
+            {
+              "sql": "ALTER TABLE orders ADD COLUMN order_status integer NOT NULL;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.orders.order_status"
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }

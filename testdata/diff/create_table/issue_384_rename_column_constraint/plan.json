@@ -9,10 +9,14 @@
       },
       "groups": [
         {
-          "sql": "ALTER TABLE a RENAME COLUMN revision TO current_revision;",
-          "type": "table.column_rename",
-          "operation": "alter",
-          "path": "public.a.current_revision"
+          "steps": [
+            {
+              "sql": "ALTER TABLE a RENAME COLUMN revision TO current_revision;",
+              "type": "table.column_rename",
+              "operation": "alter",
+              "path": "public.a.current_revision"
+            }
+          ]
         }
       ]
     }
