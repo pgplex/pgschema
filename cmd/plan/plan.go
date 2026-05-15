@@ -727,6 +727,14 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 }
 
 func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
+	// Apply plan DB environment variables (same as single-schema path)
+	util.ApplyPlanDBEnvVars(cmd, &planDBHost, &planDBDatabase, &planDBUser, &planDBPassword, &planDBPort, &planDBSSLMode)
+
+	// Validate plan database flags if plan-host is provided
+	if err := util.ValidatePlanDBFlags(planDBHost, planDBDatabase, planDBUser); err != nil {
+		return err
+	}
+
 	finalPassword := planPassword
 	if finalPassword == "" {
 		if envPassword := os.Getenv("PGPASSWORD"); envPassword != "" {
@@ -737,6 +745,14 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 	if cmd == nil || !cmd.Flags().Changed("sslmode") {
 		if envSSLMode := os.Getenv("PGSSLMODE"); envSSLMode != "" {
 			finalSSLMode = envSSLMode
+		}
+	}
+
+	// Derive final plan database password
+	finalPlanPassword := planDBPassword
+	if finalPlanPassword == "" {
+		if envPassword := os.Getenv("PGSCHEMA_PLAN_PASSWORD"); envPassword != "" {
+			finalPlanPassword = envPassword
 		}
 	}
 
@@ -775,7 +791,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 			PlanDBPort:      planDBPort,
 			PlanDBDatabase:  planDBDatabase,
 			PlanDBUser:      planDBUser,
-			PlanDBPassword:  planDBPassword,
+			PlanDBPassword:  finalPlanPassword,
 			PlanDBSSLMode:   planDBSSLMode,
 		}
 
