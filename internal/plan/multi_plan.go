@@ -153,10 +153,10 @@ type multiPlanDetect struct {
 	Groups  json.RawMessage `json:"groups"`
 }
 
-// LoadPlanFile reads a plan JSON file and returns either a *Plan or *MultiPlan.
+// LoadPlanFile reads a plan JSON file and returns an Outputter.
 // It auto-detects the format by checking for the "schemas" key (MultiPlan)
 // vs "groups" key (single Plan).
-func LoadPlanFile(data []byte) (any, error) {
+func LoadPlanFile(data []byte) (Outputter, error) {
 	var detect multiPlanDetect
 	if err := json.Unmarshal(data, &detect); err != nil {
 		return nil, fmt.Errorf("failed to parse plan file: %w", err)

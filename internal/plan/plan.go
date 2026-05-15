@@ -14,6 +14,23 @@ import (
 	"github.com/pgplex/pgschema/internal/version"
 )
 
+// Outputter is the shared interface for Plan and MultiPlan.
+// Both types can report whether they contain changes and render
+// their content in human-readable, JSON, and SQL formats.
+type Outputter interface {
+	HasAnyChanges() bool
+	HumanColored(enableColor bool) string
+	ToSQL(format SQLFormat) string
+	ToJSON() (string, error)
+	ToJSONWithDebug(includeSource bool) (string, error)
+}
+
+// Compile-time interface checks.
+var (
+	_ Outputter = (*Plan)(nil)
+	_ Outputter = (*MultiPlan)(nil)
+)
+
 // DirectiveType represents the different types of directives
 type DirectiveType string
 

@@ -177,9 +177,12 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Check if debug flag is set
+	debug, _ := cmd.Root().PersistentFlags().GetBool("debug")
+
 	// Process each output
 	for _, output := range outputs {
-		if err := processOutput(migrationPlan, output, cmd); err != nil {
+		if err := processOutput(migrationPlan, output, debug); err != nil {
 			return err
 		}
 	}
@@ -400,36 +403,31 @@ func determineOutputs() ([]outputSpec, error) {
 	return outputs, nil
 }
 
-// processOutput writes the plan in the specified format to the target destination
-func processOutput(migrationPlan *plan.Plan, output outputSpec, cmd *cobra.Command) error {
+// processOutput writes a plan.Outputter (Plan or MultiPlan) in the specified
+// format to the target destination.
+func processOutput(p plan.Outputter, output outputSpec, debug bool) error {
 	var content string
 	var err error
 
-	// Generate content based on format
 	switch output.format {
 	case "human":
-		// For human format, use colored output when writing to stdout, unless explicitly disabled
 		useColor := output.target == "stdout" && !planNoColor
-		content = migrationPlan.HumanColored(useColor)
+		content = p.HumanColored(useColor)
 	case "json":
-		// Check if debug flag is set on the root command
-		debug, _ := cmd.Root().PersistentFlags().GetBool("debug")
-		content, err = migrationPlan.ToJSONWithDebug(debug)
+		content, err = p.ToJSONWithDebug(debug)
 		if err != nil {
 			return fmt.Errorf("failed to generate JSON output: %w", err)
 		}
 		content += "\n"
 	case "sql":
-		content = migrationPlan.ToSQL(plan.SQLFormatRaw)
+		content = p.ToSQL(plan.SQLFormatRaw)
 	default:
 		return fmt.Errorf("unknown output format: %s", output.format)
 	}
 
-	// Write to target
 	if output.target == "stdout" {
 		fmt.Print(content)
 	} else {
-		// Write to file
 		if err := os.WriteFile(output.target, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to write %s output to %s: %w", output.format, output.target, err)
 		}
@@ -818,7 +816,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 
 	// Write combined output for all schemas
 	for _, output := range outputs {
-		if err := processMultiPlanOutput(multiPlan, output, debug); err != nil {
+		if err := processOutput(multiPlan, output, debug); err != nil {
 			return err
 		}
 	}
@@ -831,36 +829,6 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 	return nil
 }
 
-// processMultiPlanOutput writes a MultiPlan in the specified format to the target destination.
-func processMultiPlanOutput(mp *plan.MultiPlan, output outputSpec, debug bool) error {
-	var content string
-	var err error
-
-	switch output.format {
-	case "human":
-		useColor := output.target == "stdout" && !planNoColor
-		content = mp.HumanColored(useColor)
-	case "json":
-		content, err = mp.ToJSONWithDebug(debug)
-		if err != nil {
-			return fmt.Errorf("failed to generate JSON output: %w", err)
-		}
-		content += "\n"
-	case "sql":
-		content = mp.ToSQL(plan.SQLFormatRaw)
-	default:
-		return fmt.Errorf("unknown output format: %s", output.format)
-	}
-
-	if output.target == "stdout" {
-		fmt.Print(content)
-	} else {
-		if err := os.WriteFile(output.target, []byte(content), 0644); err != nil {
-			return fmt.Errorf("failed to write %s output to %s: %w", output.format, output.target, err)
-		}
-	}
-	return nil
-}
 
 func applyConfigToPlan(cmd *cobra.Command) {
 	cfg := config.Get()
