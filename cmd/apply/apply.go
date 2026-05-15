@@ -271,7 +271,8 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 // RunApply executes the apply command logic. Exported for testing.
 func RunApply(cmd *cobra.Command, args []string) error {
 	cfg := config.Get()
-	if cfg != nil && cfg.Schemas != nil && cfg.Schemas.Query != "" && !cmd.Flags().Changed("schema") {
+	if cfg != nil && cfg.Schemas != nil && cfg.Schemas.Query != "" &&
+		!cmd.Flags().Changed("schema") && !cmd.Flags().Changed("plan") {
 		return runApplyMultiSchema(cmd, cfg)
 	}
 
