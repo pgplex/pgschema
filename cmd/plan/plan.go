@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/pgplex/pgschema/cmd/config"
 	"github.com/pgplex/pgschema/cmd/util"
@@ -348,6 +350,53 @@ func GenerateSchemaPlan(config *PlanConfig, provider postgres.DesiredStateProvid
 	// because that's where objects were created. We need to replace these with the target
 	// schema name (e.g., "public") so that generated DDL references the correct schema.
 	// Without this normalization, DDL would reference non-existent temporary schemas and fail.
+	if schemaToInspect != config.Schema {
+		normalizeSchemaNames(desiredStateIR, schemaToInspect, config.Schema)
+	}
+
+	// Generate diff (current -> desired) using IR directly
+	diffs := diff.GenerateMigration(currentStateIR, desiredStateIR, config.Schema)
+
+	// Create schema plan from diffs with fingerprint
+	schemaPlan := plan.NewSchemaPlanWithFingerprint(diffs, sourceFingerprint)
+
+	return schemaPlan, nil
+}
+
+// generateSchemaPlanWithCurrentState generates a migration plan using pre-fetched current state.
+// This variant is used by runPlanMultiSchema where current state IR and fingerprints are fetched
+// concurrently for all schemas, then desired state operations run sequentially through the shared provider.
+func generateSchemaPlanWithCurrentState(config *PlanConfig, provider postgres.DesiredStateProvider, desiredState string, ignoreConfig *ir.IgnoreConfig, currentStateIR *ir.IR, sourceFingerprint *fingerprint.SchemaFingerprint) (*plan.SchemaPlan, error) {
+	ctx := context.Background()
+
+	// Apply desired state SQL to the provider (embedded postgres or external database)
+	if err := provider.ApplySchema(ctx, config.Schema, desiredState); err != nil {
+		return nil, fmt.Errorf("failed to apply desired state: %w", err)
+	}
+
+	// Inspect the provider database to get desired state IR
+	providerHost, providerPort, providerDB, providerUsername, providerPassword := provider.GetConnectionDetails()
+
+	schemaToInspect := provider.GetSchemaName()
+	if schemaToInspect == "" {
+		schemaToInspect = config.Schema
+	}
+
+	// For embedded postgres, always use "disable" since it starts without SSL configured.
+	// For external plan databases, use the configured PlanDBSSLMode (defaulting to "prefer").
+	providerSSLMode := "disable"
+	if config.PlanDBHost != "" {
+		providerSSLMode = config.PlanDBSSLMode
+		if providerSSLMode == "" {
+			providerSSLMode = "prefer"
+		}
+	}
+	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get desired state: %w", err)
+	}
+
+	// Normalize schema names in the IR from temporary schema to target schema.
 	if schemaToInspect != config.Schema {
 		normalizeSchemaNames(desiredStateIR, schemaToInspect, config.Schema)
 	}
@@ -773,11 +822,101 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		return err
 	}
 
-	multiPlan := plan.NewPlan()
+	plan := plan.NewPlan()
 	var hasErrors bool
 
-	for _, schemaName := range schemas {
-		fmt.Fprintf(os.Stderr, "\n── Schema: %s ──────────────────────\n", schemaName)
+	// Create the desired state provider once and reuse it across all schemas.
+	// ApplySchema already resets state (drops/recreates temporary schema) between calls,
+	// so a single embedded postgres instance or external DB connection suffices.
+	sharedConfig := &PlanConfig{
+		Host:            planHost,
+		Port:            planPort,
+		DB:              planDB,
+		User:            planUser,
+		Password:        finalPassword,
+		File:            planFile,
+		ApplicationName: "pgschema",
+		SSLMode:         finalSSLMode,
+		PlanDBHost:      planDBHost,
+		PlanDBPort:      planDBPort,
+		PlanDBDatabase:  planDBDatabase,
+		PlanDBUser:      planDBUser,
+		PlanDBPassword:  finalPlanPassword,
+		PlanDBSSLMode:   planDBSSLMode,
+	}
+
+	provider, err := CreateDesiredStateProvider(sharedConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create desired state provider: %w", err)
+	}
+	defer provider.Stop()
+
+	// Load ignore configuration once (shared across all schemas).
+	ignoreConfig, err := util.LoadIgnoreFileWithStructure()
+	if err != nil {
+		return fmt.Errorf("failed to load .pgschemaignore: %w", err)
+	}
+
+	// Process desired state file once (shared across all schemas).
+	processor := include.NewProcessor(filepath.Dir(planFile))
+	desiredState, err := processor.ProcessFile(planFile)
+	if err != nil {
+		return fmt.Errorf("failed to process desired state schema file: %w", err)
+	}
+
+	totalSchemas := len(schemas)
+
+	// Phase 1: Fetch current state IR for all schemas concurrently.
+	// Each schema inspects the target database independently, so these can run in parallel.
+	fmt.Fprintf(os.Stderr, "\nInspecting current state for %d schemas...\n", totalSchemas)
+
+	type currentStateResult struct {
+		schemaIR    *ir.IR
+		fingerprint *fingerprint.SchemaFingerprint
+		err         error
+	}
+	currentStates := make([]currentStateResult, totalSchemas)
+
+	var completed atomic.Int32
+	var wg sync.WaitGroup
+	for idx, schemaName := range schemas {
+		wg.Add(1)
+		go func(i int, schema string) {
+			defer wg.Done()
+			schemaIR, fetchErr := util.GetIRFromDatabase(planHost, planPort, planDB, planUser, finalPassword, finalSSLMode, schema, "pgschema", ignoreConfig)
+			if fetchErr != nil {
+				currentStates[i] = currentStateResult{err: fmt.Errorf("failed to get current state from database: %w", fetchErr)}
+				n := completed.Add(1)
+				fmt.Fprintf(os.Stderr, "  [%d/%d] %s (error)\n", n, totalSchemas, schema)
+				return
+			}
+			fp, fpErr := fingerprint.ComputeFingerprint(schemaIR, schema)
+			if fpErr != nil {
+				currentStates[i] = currentStateResult{err: fmt.Errorf("failed to compute source fingerprint: %w", fpErr)}
+				n := completed.Add(1)
+				fmt.Fprintf(os.Stderr, "  [%d/%d] %s (error)\n", n, totalSchemas, schema)
+				return
+			}
+			currentStates[i] = currentStateResult{schemaIR: schemaIR, fingerprint: fp}
+			n := completed.Add(1)
+			fmt.Fprintf(os.Stderr, "  [%d/%d] %s\n", n, totalSchemas, schema)
+		}(idx, schemaName)
+	}
+	wg.Wait()
+
+	// Phase 2: For each schema, apply desired state (sequential — provider is stateful),
+	// inspect desired state, generate diff using pre-fetched current state.
+	fmt.Fprintf(os.Stderr, "\nGenerating migration plans...\n")
+	for idx, schemaName := range schemas {
+		fmt.Fprintf(os.Stderr, "\n── Schema: %s [%d/%d] ──────────────────────\n", schemaName, idx+1, totalSchemas)
+
+		// Check if current state fetch failed.
+		cs := currentStates[idx]
+		if cs.err != nil {
+			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, cs.err)
+			hasErrors = true
+			continue
+		}
 
 		perSchemaConfig := &PlanConfig{
 			Host:            planHost,
@@ -797,15 +936,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 			PlanDBSSLMode:   planDBSSLMode,
 		}
 
-		provider, err := CreateDesiredStateProvider(perSchemaConfig)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)
-			hasErrors = true
-			continue
-		}
-
-		migrationPlan, err := GenerateSchemaPlan(perSchemaConfig, provider)
-		provider.Stop()
+		migrationPlan, err := generateSchemaPlanWithCurrentState(perSchemaConfig, provider, desiredState, ignoreConfig, cs.schemaIR, cs.fingerprint)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error for schema %s: %v\n", schemaName, err)
 			hasErrors = true
@@ -816,7 +947,7 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		// visibility even when only file outputs are configured.
 		fmt.Fprintln(os.Stderr, migrationPlan.HumanColored(!planNoColor))
 
-		multiPlan.AddSchema(schemaName, migrationPlan)
+		plan.AddSchema(schemaName, migrationPlan)
 	}
 
 	// Check if debug flag is set
@@ -824,12 +955,12 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 
 	// Write combined output for all schemas
 	for _, output := range outputs {
-		if err := processOutput(multiPlan, output, debug); err != nil {
+		if err := processOutput(plan, output, debug); err != nil {
 			return err
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "\n"+multiPlan.SummaryString())
+	fmt.Fprintln(os.Stderr, "\n"+plan.SummaryString())
 
 	if hasErrors {
 		return fmt.Errorf("one or more schemas had errors")
