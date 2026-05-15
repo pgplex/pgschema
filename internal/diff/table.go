@@ -111,6 +111,50 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 	}
 }
 
+// detectColumnRenames finds column pairs that were renamed (same position + properties, different name).
+// Returns the detected renames and the remaining added/dropped columns that are not renames.
+func detectColumnRenames(added, dropped []*ir.Column, targetSchema string) (
+	renames []*ColumnRename,
+	remainingAdded []*ir.Column,
+	remainingDropped []*ir.Column,
+) {
+	// Build a map of dropped columns keyed by position
+	droppedByPosition := make(map[int]*ir.Column)
+	for _, col := range dropped {
+		droppedByPosition[col.Position] = col
+	}
+
+	matchedDropped := make(map[string]bool)
+	matchedAdded := make(map[string]bool)
+
+	for _, addedCol := range added {
+		if droppedCol, exists := droppedByPosition[addedCol.Position]; exists {
+			if !matchedDropped[droppedCol.Name] && columnsMatchForRename(droppedCol, addedCol, targetSchema) {
+				renames = append(renames, &ColumnRename{
+					Old: droppedCol,
+					New: addedCol,
+				})
+				matchedDropped[droppedCol.Name] = true
+				matchedAdded[addedCol.Name] = true
+			}
+		}
+	}
+
+	// Build remaining lists
+	for _, col := range added {
+		if !matchedAdded[col.Name] {
+			remainingAdded = append(remainingAdded, col)
+		}
+	}
+	for _, col := range dropped {
+		if !matchedDropped[col.Name] {
+			remainingDropped = append(remainingDropped, col)
+		}
+	}
+
+	return renames, remainingAdded, remainingDropped
+}
+
 // diffTables compares two tables and returns the differences
 // targetSchema is used to normalize type names before comparison
 func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
@@ -159,6 +203,14 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		if _, exists := newColumns[name]; !exists {
 			diff.DroppedColumns = append(diff.DroppedColumns, column)
 		}
+	}
+
+	// Detect column renames from added/dropped pairs
+	renames, remainingAdded, remainingDropped := detectColumnRenames(diff.AddedColumns, diff.DroppedColumns, targetSchema)
+	if len(renames) > 0 {
+		diff.RenamedColumns = renames
+		diff.AddedColumns = remainingAdded
+		diff.DroppedColumns = remainingDropped
 	}
 
 	// Find modified columns

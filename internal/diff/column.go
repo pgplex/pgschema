@@ -138,6 +138,72 @@ func needsUsingClause(oldType, newType string) bool {
 	return false
 }
 
+// columnsMatchForRename checks if two columns are the same column with a different name.
+// Both position AND all properties (except name and comment) must match for a rename to be detected.
+func columnsMatchForRename(old, new *ir.Column, targetSchema string) bool {
+	// Names must differ (otherwise it's not a rename)
+	if old.Name == new.Name {
+		return false
+	}
+
+	// Position must match
+	if old.Position != new.Position {
+		return false
+	}
+
+	// Data type must match (normalize schema prefix)
+	oldType := stripSchemaPrefix(old.DataType, targetSchema)
+	newType := stripSchemaPrefix(new.DataType, targetSchema)
+	if oldType != newType {
+		return false
+	}
+
+	// Nullability must match
+	if old.IsNullable != new.IsNullable {
+		return false
+	}
+
+	// Default values must match
+	if (old.DefaultValue == nil) != (new.DefaultValue == nil) {
+		return false
+	}
+	if old.DefaultValue != nil && new.DefaultValue != nil && *old.DefaultValue != *new.DefaultValue {
+		return false
+	}
+
+	// Max length must match
+	if (old.MaxLength == nil) != (new.MaxLength == nil) {
+		return false
+	}
+	if old.MaxLength != nil && new.MaxLength != nil && *old.MaxLength != *new.MaxLength {
+		return false
+	}
+
+	// Identity must match
+	if (old.Identity == nil) != (new.Identity == nil) {
+		return false
+	}
+	if old.Identity != nil && new.Identity != nil {
+		if old.Identity.Generation != new.Identity.Generation {
+			return false
+		}
+	}
+
+	// Generated column must match
+	if old.IsGenerated != new.IsGenerated {
+		return false
+	}
+	if (old.GeneratedExpr == nil) != (new.GeneratedExpr == nil) {
+		return false
+	}
+	if old.GeneratedExpr != nil && new.GeneratedExpr != nil && *old.GeneratedExpr != *new.GeneratedExpr {
+		return false
+	}
+
+	// Comment changes are OK — rename still applies, comment change emitted separately
+	return true
+}
+
 // columnsEqual compares two columns for equality
 // targetSchema is used to normalize type names before comparison
 func columnsEqual(old, new *ir.Column, targetSchema string) bool {
