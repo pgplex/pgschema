@@ -282,7 +282,7 @@ func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.Postgr
 	return embeddedPG, nil
 }
 
-// GeneratePlan generates a migration plan from configuration.
+// GenerateSchemaPlan generates a migration plan from configuration.
 // The caller must provide a non-nil provider instance for validating the desired state schema.
 // The caller is responsible for managing the provider lifecycle (creation and cleanup).
 func GenerateSchemaPlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*plan.SchemaPlan, error) {
