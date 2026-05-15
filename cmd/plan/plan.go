@@ -808,6 +808,10 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 			continue
 		}
 
+		// Print per-schema human-readable preview to stderr so users get
+		// visibility even when only file outputs are configured.
+		fmt.Fprintln(os.Stderr, migrationPlan.HumanColored(!planNoColor))
+
 		multiPlan.AddSchema(schemaName, migrationPlan)
 	}
 
@@ -828,7 +832,6 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 	}
 	return nil
 }
-
 
 func applyConfigToPlan(cmd *cobra.Command) {
 	cfg := config.Get()
