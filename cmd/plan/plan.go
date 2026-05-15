@@ -400,6 +400,18 @@ func determineOutputs() ([]outputSpec, error) {
 	return outputs, nil
 }
 
+// deriveSchemaOutputTarget returns a per-schema output target by inserting the schema
+// name before the file extension. For "stdout" targets the value is returned unchanged.
+// Example: "plan.json" + "tenant_1" -> "plan_tenant_1.json"
+func deriveSchemaOutputTarget(target, schemaName string) string {
+	if target == "stdout" {
+		return target
+	}
+	ext := filepath.Ext(target)
+	base := strings.TrimSuffix(target, ext)
+	return fmt.Sprintf("%s_%s%s", base, schemaName, ext)
+}
+
 // processOutput writes the plan in the specified format to the target destination
 func processOutput(migrationPlan *plan.Plan, output outputSpec, cmd *cobra.Command) error {
 	var content string
@@ -815,7 +827,11 @@ func runPlanMultiSchema(cmd *cobra.Command, cfg *config.ResolvedConfig) error {
 		}
 
 		for _, output := range outputs {
-			if err := processOutput(migrationPlan, output, cmd); err != nil {
+			schemaOutput := outputSpec{
+				format: output.format,
+				target: deriveSchemaOutputTarget(output.target, schemaName),
+			}
+			if err := processOutput(migrationPlan, schemaOutput, cmd); err != nil {
 				fmt.Fprintf(os.Stderr, "Error writing output for schema %s: %v\n", schemaName, err)
 				hasErrors = true
 			}
