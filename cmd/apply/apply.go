@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	planCmd "github.com/pgplex/pgschema/cmd/plan"
@@ -264,11 +265,34 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 	return nil
 }
 
+// validateFileExtension checks that --file and --plan flags have the expected file extensions.
+// Returns an actionable error if a likely flag mix-up is detected.
+func validateFileExtension(file, planFile string) error {
+	if file != "" {
+		ext := strings.ToLower(filepath.Ext(file))
+		if ext == ".json" {
+			return fmt.Errorf("--file expects a SQL schema file, but got a JSON file (%s). Did you mean to use --plan instead?", filepath.Base(file))
+		}
+	}
+	if planFile != "" {
+		ext := strings.ToLower(filepath.Ext(planFile))
+		if ext == ".sql" {
+			return fmt.Errorf("--plan expects a JSON plan file, but got a SQL file (%s). Did you mean to use --file instead?", filepath.Base(planFile))
+		}
+	}
+	return nil
+}
+
 // RunApply executes the apply command logic. Exported for testing.
 func RunApply(cmd *cobra.Command, args []string) error {
 	// Validate that either --file or --plan is provided
 	if applyFile == "" && applyPlan == "" {
 		return fmt.Errorf("either --file or --plan must be specified")
+	}
+
+	// Validate file extensions to catch flag mix-ups early
+	if err := validateFileExtension(applyFile, applyPlan); err != nil {
+		return err
 	}
 
 	// Derive final password: use provided password or check environment variable
