@@ -13,9 +13,13 @@ permissions:
   contents: write
 
 jobs:
-  # Test job runs first with all Postgres versions
+  # Test job runs first with all Postgres versions in parallel
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres-version: [14, 15, 16, 17, 18]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -27,30 +31,10 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Run tests (PostgreSQL 18)
+      - name: Run tests (PostgreSQL ${{ matrix.postgres-version }})
         run: |
-          echo "Testing with PostgreSQL 18"
-          PGSCHEMA_POSTGRES_VERSION=18 go test -v ./...
-
-      - name: Run tests (PostgreSQL 17)
-        run: |
-          echo "Testing with PostgreSQL 17"
-          PGSCHEMA_POSTGRES_VERSION=17 go test -v ./...
-
-      - name: Run tests (PostgreSQL 16)
-        run: |
-          echo "Testing with PostgreSQL 16"
-          PGSCHEMA_POSTGRES_VERSION=16 go test -v ./...
-
-      - name: Run tests (PostgreSQL 15)
-        run: |
-          echo "Testing with PostgreSQL 15"
-          PGSCHEMA_POSTGRES_VERSION=15 go test -v ./...
-
-      - name: Run tests (PostgreSQL 14)
-        run: |
-          echo "Testing with PostgreSQL 14"
-          PGSCHEMA_POSTGRES_VERSION=14 go test -v ./...
+          echo "Testing with PostgreSQL ${{ matrix.postgres-version }}"
+          PGSCHEMA_POSTGRES_VERSION=${{ matrix.postgres-version }} go test -v ./...
 
   # Build binaries using native Go cross-compilation
   build-binaries:
@@ -216,8 +200,8 @@ jobs:
       contents: read
       packages: write
     env:
-      REGISTRY: docker.io
-      IMAGE_NAME: pgplex/pgschema
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -230,12 +214,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Read version
         id: version
@@ -268,26 +252,3 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ steps.build_info.outputs.GIT_COMMIT }}
             BUILD_DATE=${{ steps.build_info.outputs.BUILD_DATE }}
-
-  homebrew:
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Read version
-        id: version
-        run: echo "version=$(cat internal/version/VERSION)" >> $GITHUB_OUTPUT
-
-      - name: Update Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v4
-        with:
-          formula-name: pgschema
-          formula-path: Formula/pgschema.rb
-          homebrew-tap: pgplex/homebrew-pgschema
-          download-url: https://github.com/pgplex/pgschema/releases/download/v${{ steps.version.outputs.version }}/pgschema-${{ steps.version.outputs.version }}-darwin-arm64
-          commit-message: |
-            pgschema ${{ steps.version.outputs.version }}
-        env:
-          COMMITTER_TOKEN: ${{ secrets.BREW_COMMITTER_TOKEN }}
