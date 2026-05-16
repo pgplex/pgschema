@@ -11,6 +11,18 @@
         {
           "steps": [
             {
+              "sql": "CREATE EXTENSION IF NOT EXISTS citext;",
+              "type": "extension",
+              "operation": "create",
+              "path": "citext"
+            },
+            {
+              "sql": "CREATE EXTENSION IF NOT EXISTS hstore;",
+              "type": "extension",
+              "operation": "create",
+              "path": "hstore"
+            },
+            {
               "sql": "ALTER TABLE users ADD COLUMN fqdn citext NOT NULL;",
               "type": "table.column",
               "operation": "create",

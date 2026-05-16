@@ -1,3 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 ALTER TABLE categories
 ADD COLUMN code text CONSTRAINT categories_pkey PRIMARY KEY;
 

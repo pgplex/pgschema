@@ -78,6 +78,7 @@ type TypeSummary struct {
 type Type string
 
 const (
+	TypeExtension               Type = "extensions"
 	TypeSchema                  Type = "schemas"
 	TypeType                    Type = "types"
 	TypeFunction                Type = "functions"
@@ -110,6 +111,7 @@ const (
 // getObjectOrder returns the dependency order for database objects
 func getObjectOrder() []Type {
 	return []Type{
+		TypeExtension,
 		TypeSchema,
 		TypeDefaultPrivilege,
 		TypeType,

@@ -11,6 +11,12 @@
         {
           "steps": [
             {
+              "sql": "CREATE EXTENSION IF NOT EXISTS btree_gist;",
+              "type": "extension",
+              "operation": "create",
+              "path": "btree_gist"
+            },
+            {
               "sql": "ALTER TABLE categories\nADD COLUMN code text CONSTRAINT categories_pkey PRIMARY KEY;",
               "type": "table.column",
               "operation": "create",

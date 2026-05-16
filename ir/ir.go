@@ -8,9 +8,10 @@ import (
 
 // IR represents the complete database schema intermediate representation
 type IR struct {
-	Metadata Metadata           `json:"metadata"`
-	Schemas  map[string]*Schema `json:"schemas"` // schema_name -> Schema
-	mu       sync.RWMutex       // Protects concurrent access to Schemas
+	Metadata   Metadata           `json:"metadata"`
+	Schemas    map[string]*Schema `json:"schemas"`              // schema_name -> Schema
+	Extensions []string           `json:"extensions,omitempty"` // Required extensions
+	mu         sync.RWMutex       // Protects concurrent access to Schemas
 }
 
 // Metadata contains information about the schema dump
@@ -23,18 +24,18 @@ type Schema struct {
 	Name  string `json:"name"`
 	Owner string `json:"owner"` // Schema owner
 	// Note: Indexes, Triggers, and RLS Policies are stored at table level (Table.Indexes, Table.Triggers, Table.Policies)
-	Tables                   map[string]*Table        `json:"tables"`                            // table_name -> Table
-	Views                    map[string]*View         `json:"views"`                             // view_name -> View
-	Functions                map[string]*Function     `json:"functions"`                         // function_name -> Function
-	Procedures               map[string]*Procedure    `json:"procedures"`                        // procedure_name -> Procedure
-	Aggregates               map[string]*Aggregate    `json:"aggregates"`                        // aggregate_name -> Aggregate
-	Sequences                map[string]*Sequence     `json:"sequences"`                         // sequence_name -> Sequence
-	Types                    map[string]*Type         `json:"types"`                             // type_name -> Type
-	DefaultPrivileges        []*DefaultPrivilege        `json:"default_privileges,omitempty"`        // Default privileges for future objects
-	Privileges               []*Privilege               `json:"privileges,omitempty"`                // Explicit privilege grants on objects
-	ColumnPrivileges         []*ColumnPrivilege         `json:"column_privileges,omitempty"`         // Column-level privilege grants
+	Tables                   map[string]*Table          `json:"tables"`                               // table_name -> Table
+	Views                    map[string]*View           `json:"views"`                                // view_name -> View
+	Functions                map[string]*Function       `json:"functions"`                            // function_name -> Function
+	Procedures               map[string]*Procedure      `json:"procedures"`                           // procedure_name -> Procedure
+	Aggregates               map[string]*Aggregate      `json:"aggregates"`                           // aggregate_name -> Aggregate
+	Sequences                map[string]*Sequence       `json:"sequences"`                            // sequence_name -> Sequence
+	Types                    map[string]*Type           `json:"types"`                                // type_name -> Type
+	DefaultPrivileges        []*DefaultPrivilege        `json:"default_privileges,omitempty"`         // Default privileges for future objects
+	Privileges               []*Privilege               `json:"privileges,omitempty"`                 // Explicit privilege grants on objects
+	ColumnPrivileges         []*ColumnPrivilege         `json:"column_privileges,omitempty"`          // Column-level privilege grants
 	RevokedDefaultPrivileges []*RevokedDefaultPrivilege `json:"revoked_default_privileges,omitempty"` // Explicit revokes of default PUBLIC privileges
-	mu                       sync.RWMutex             // Protects concurrent access to all maps
+	mu                       sync.RWMutex               // Protects concurrent access to all maps
 }
 
 // LikeClause represents a LIKE clause in CREATE TABLE statement
@@ -48,7 +49,7 @@ type LikeClause struct {
 type Table struct {
 	Schema            string                 `json:"schema"`
 	Name              string                 `json:"name"`
-	Type              TableType              `json:"type"` // BASE_TABLE, VIEW, etc.
+	Type              TableType              `json:"type"`                  // BASE_TABLE, VIEW, etc.
 	IsExternal        bool                   `json:"is_external,omitempty"` // True if table is externally managed (e.g., in ignored schemas)
 	Columns           []*Column              `json:"columns"`
 	Constraints       map[string]*Constraint `json:"constraints"` // constraint_name -> Constraint
@@ -68,18 +69,18 @@ type Table struct {
 
 // Column represents a table column
 type Column struct {
-	Name           string    `json:"name"`
-	Position       int       `json:"position"` // ordinal_position
-	DataType       string    `json:"data_type"`
-	IsNullable     bool      `json:"is_nullable"`
-	DefaultValue   *string   `json:"default_value,omitempty"`
-	MaxLength      *int      `json:"max_length,omitempty"`
-	Precision      *int      `json:"precision,omitempty"`
-	Scale          *int      `json:"scale,omitempty"`
-	Comment        string    `json:"comment,omitempty"`
-	Identity       *Identity `json:"identity,omitempty"`
-	GeneratedExpr  *string   `json:"generated_expr,omitempty"`  // Expression for generated columns
-	IsGenerated    bool      `json:"is_generated,omitempty"`    // True if this is a generated column
+	Name          string    `json:"name"`
+	Position      int       `json:"position"` // ordinal_position
+	DataType      string    `json:"data_type"`
+	IsNullable    bool      `json:"is_nullable"`
+	DefaultValue  *string   `json:"default_value,omitempty"`
+	MaxLength     *int      `json:"max_length,omitempty"`
+	Precision     *int      `json:"precision,omitempty"`
+	Scale         *int      `json:"scale,omitempty"`
+	Comment       string    `json:"comment,omitempty"`
+	Identity      *Identity `json:"identity,omitempty"`
+	GeneratedExpr *string   `json:"generated_expr,omitempty"` // Expression for generated columns
+	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
 }
 
 // Identity represents PostgreSQL identity column configuration
@@ -123,12 +124,12 @@ type View struct {
 	Schema       string              `json:"schema"`
 	Name         string              `json:"name"`
 	Definition   string              `json:"definition"`
-	Columns      []string            `json:"columns,omitempty"`   // Ordered list of output column names
-	Options      []string            `json:"options,omitempty"`   // View options (e.g., "security_invoker=true", "security_barrier=true")
+	Columns      []string            `json:"columns,omitempty"` // Ordered list of output column names
+	Options      []string            `json:"options,omitempty"` // View options (e.g., "security_invoker=true", "security_barrier=true")
 	Comment      string              `json:"comment,omitempty"`
 	Materialized bool                `json:"materialized,omitempty"`
-	Indexes      map[string]*Index   `json:"indexes,omitempty"`   // For materialized views only
-	Triggers     map[string]*Trigger `json:"triggers,omitempty"`  // For INSTEAD OF triggers on views
+	Indexes      map[string]*Index   `json:"indexes,omitempty"`  // For materialized views only
+	Triggers     map[string]*Trigger `json:"triggers,omitempty"` // For INSTEAD OF triggers on views
 }
 
 // Function represents a database function
@@ -248,18 +249,18 @@ const (
 
 // Index represents a database index
 type Index struct {
-	Schema       string         `json:"schema"`
-	Table        string         `json:"table"`
-	Name         string         `json:"name"`
-	Type         IndexType      `json:"type"`
-	Method       string         `json:"method"` // btree, hash, gin, gist, etc.
-	Columns      []*IndexColumn `json:"columns"`
-	IncludeColumns   []string `json:"include_columns,omitempty"`     // INCLUDE columns (non-key)
-	IsPartial        bool     `json:"is_partial"`                   // has a WHERE clause
-	IsExpression     bool     `json:"is_expression"`                // functional/expression index
-	Where            string   `json:"where,omitempty"`              // partial index condition
-	NullsNotDistinct bool     `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
-	Comment          string   `json:"comment,omitempty"`
+	Schema           string         `json:"schema"`
+	Table            string         `json:"table"`
+	Name             string         `json:"name"`
+	Type             IndexType      `json:"type"`
+	Method           string         `json:"method"` // btree, hash, gin, gist, etc.
+	Columns          []*IndexColumn `json:"columns"`
+	IncludeColumns   []string       `json:"include_columns,omitempty"`    // INCLUDE columns (non-key)
+	IsPartial        bool           `json:"is_partial"`                   // has a WHERE clause
+	IsExpression     bool           `json:"is_expression"`                // functional/expression index
+	Where            string         `json:"where,omitempty"`              // partial index condition
+	NullsNotDistinct bool           `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
+	Comment          string         `json:"comment,omitempty"`
 }
 
 // IndexColumn represents a column within an index
@@ -284,18 +285,18 @@ type Trigger struct {
 	Schema            string         `json:"schema"`
 	Table             string         `json:"table"`
 	Name              string         `json:"name"`
-	Timing            TriggerTiming  `json:"timing"` // BEFORE, AFTER, INSTEAD OF
-	Events            []TriggerEvent `json:"events"`                        // INSERT, UPDATE, DELETE
-	UpdateColumns     []string       `json:"update_columns,omitempty"`      // Column names for UPDATE OF
-	Level             TriggerLevel   `json:"level"`                         // ROW, STATEMENT
+	Timing            TriggerTiming  `json:"timing"`                   // BEFORE, AFTER, INSTEAD OF
+	Events            []TriggerEvent `json:"events"`                   // INSERT, UPDATE, DELETE
+	UpdateColumns     []string       `json:"update_columns,omitempty"` // Column names for UPDATE OF
+	Level             TriggerLevel   `json:"level"`                    // ROW, STATEMENT
 	Function          string         `json:"function"`
 	Condition         string         `json:"condition,omitempty"` // WHEN condition
 	Comment           string         `json:"comment,omitempty"`
-	IsConstraint      bool           `json:"is_constraint,omitempty"`       // Whether this is a constraint trigger
-	Deferrable        bool           `json:"deferrable,omitempty"`          // Can be deferred until end of transaction
-	InitiallyDeferred bool           `json:"initially_deferred,omitempty"`  // Whether deferred by default
-	OldTable          string         `json:"old_table,omitempty"`           // REFERENCING OLD TABLE AS name
-	NewTable          string         `json:"new_table,omitempty"`           // REFERENCING NEW TABLE AS name
+	IsConstraint      bool           `json:"is_constraint,omitempty"`      // Whether this is a constraint trigger
+	Deferrable        bool           `json:"deferrable,omitempty"`         // Can be deferred until end of transaction
+	InitiallyDeferred bool           `json:"initially_deferred,omitempty"` // Whether deferred by default
+	OldTable          string         `json:"old_table,omitempty"`          // REFERENCING OLD TABLE AS name
+	NewTable          string         `json:"new_table,omitempty"`          // REFERENCING NEW TABLE AS name
 }
 
 // TriggerTiming represents the timing of trigger execution
@@ -324,7 +325,6 @@ const (
 	TriggerLevelRow       TriggerLevel = "ROW"
 	TriggerLevelStatement TriggerLevel = "STATEMENT"
 )
-
 
 // RLSPolicy represents a Row Level Security policy
 type RLSPolicy struct {
@@ -697,6 +697,11 @@ func (s *Schema) SetType(name string, typ *Type) {
 	s.Types[name] = typ
 }
 
+// Extension represents a required PostgreSQL extension
+type Extension struct {
+	Name string `json:"name"`
+}
+
 // GetObjectName implementations for DiffSource interface
 func (t *Table) GetObjectName() string      { return t.Name }
 func (c *Column) GetObjectName() string     { return c.Name }
@@ -709,4 +714,4 @@ func (p *Procedure) GetObjectName() string  { return p.Name }
 func (v *View) GetObjectName() string       { return v.Name }
 func (s *Sequence) GetObjectName() string   { return s.Name }
 func (t *Type) GetObjectName() string       { return t.Name }
-
+func (e *Extension) GetObjectName() string  { return e.Name }

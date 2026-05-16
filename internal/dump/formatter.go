@@ -116,7 +116,7 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	}
 
 	// Create files in dependency order
-	orderedDirs := []string{"types", "domains", "sequences", "functions", "procedures", "tables", "views", "materialized_views", "default_privileges", "privileges"}
+	orderedDirs := []string{"extensions", "types", "domains", "sequences", "functions", "procedures", "tables", "views", "materialized_views", "default_privileges", "privileges"}
 
 	for _, dir := range orderedDirs {
 		if objects, exists := filesByType[dir]; exists {
@@ -235,6 +235,8 @@ func (f *DumpFormatter) writeObjectFile(filePath string, diffs []diff.Diff) erro
 // getObjectDirectory returns the directory name for an object type
 func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 	switch objectType {
+	case "extension":
+		return "extensions"
 	case "type":
 		return "types"
 	case "domain":
