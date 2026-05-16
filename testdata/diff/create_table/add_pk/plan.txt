@@ -1,7 +1,11 @@
-Plan: 7 to modify.
+Plan: 1 to add, 7 to modify.
 
 Summary by type:
+  extensions: 1 to add
   tables: 7 to modify
+
+Extensions:
+  + btree_gist
 
 Tables:
   ~ categories
@@ -21,6 +25,8 @@ Tables:
 
 DDL to be executed:
 --------------------------------------------------
+
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 ALTER TABLE categories
 ADD COLUMN code text CONSTRAINT categories_pkey PRIMARY KEY;

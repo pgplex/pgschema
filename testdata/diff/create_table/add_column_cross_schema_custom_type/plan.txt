@@ -1,7 +1,12 @@
-Plan: 1 to modify.
+Plan: 2 to add, 1 to modify.
 
 Summary by type:
+  extensions: 2 to add
   tables: 1 to modify
+
+Extensions:
+  + citext
+  + hstore
 
 Tables:
   ~ users
@@ -12,6 +17,10 @@ Tables:
 
 DDL to be executed:
 --------------------------------------------------
+
+CREATE EXTENSION IF NOT EXISTS citext;
+
+CREATE EXTENSION IF NOT EXISTS hstore;
 
 ALTER TABLE users ADD COLUMN fqdn citext NOT NULL;
 
