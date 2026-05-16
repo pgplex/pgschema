@@ -9,56 +9,52 @@
     {
       "steps": [
         {
-          "steps": [
-            {
-              "sql": "CREATE EXTENSION IF NOT EXISTS btree_gist;",
-              "type": "extension",
-              "operation": "create",
-              "path": "btree_gist"
-            },
-            {
-              "sql": "ALTER TABLE categories\nADD COLUMN code text CONSTRAINT categories_pkey PRIMARY KEY;",
-              "type": "table.column",
-              "operation": "create",
-              "path": "public.categories.code"
-            },
-            {
-              "sql": "ALTER TABLE orders\nADD COLUMN id serial CONSTRAINT orders_pkey PRIMARY KEY;",
-              "type": "table.column",
-              "operation": "create",
-              "path": "public.orders.id"
-            },
-            {
-              "sql": "ALTER TABLE products\nADD COLUMN id integer GENERATED ALWAYS AS IDENTITY CONSTRAINT products_pkey PRIMARY KEY;",
-              "type": "table.column",
-              "operation": "create",
-              "path": "public.products.id"
-            },
-            {
-              "sql": "ALTER TABLE reservations\nADD CONSTRAINT reservations_pkey PRIMARY KEY (id, valid_period WITHOUT OVERLAPS);",
-              "type": "table.constraint",
-              "operation": "create",
-              "path": "public.reservations.reservations_pkey"
-            },
-            {
-              "sql": "ALTER TABLE sessions\nADD COLUMN id uuid CONSTRAINT sessions_pkey PRIMARY KEY;",
-              "type": "table.column",
-              "operation": "create",
-              "path": "public.sessions.id"
-            },
-            {
-              "sql": "ALTER TABLE user_permissions\nADD CONSTRAINT user_permissions_pkey PRIMARY KEY (user_id, resource_id, permission_type);",
-              "type": "table.constraint",
-              "operation": "create",
-              "path": "public.user_permissions.user_permissions_pkey"
-            },
-            {
-              "sql": "ALTER TABLE users\nADD COLUMN id integer CONSTRAINT users_pkey PRIMARY KEY;",
-              "type": "table.column",
-              "operation": "create",
-              "path": "public.users.id"
-            }
-          ]
+          "sql": "CREATE EXTENSION IF NOT EXISTS btree_gist;",
+          "type": "extension",
+          "operation": "create",
+          "path": "btree_gist"
+        },
+        {
+          "sql": "ALTER TABLE categories\nADD COLUMN code text CONSTRAINT categories_pkey PRIMARY KEY;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.categories.code"
+        },
+        {
+          "sql": "ALTER TABLE orders\nADD COLUMN id serial CONSTRAINT orders_pkey PRIMARY KEY;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.orders.id"
+        },
+        {
+          "sql": "ALTER TABLE products\nADD COLUMN id integer GENERATED ALWAYS AS IDENTITY CONSTRAINT products_pkey PRIMARY KEY;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.products.id"
+        },
+        {
+          "sql": "ALTER TABLE reservations\nADD CONSTRAINT reservations_pkey PRIMARY KEY (id, valid_period WITHOUT OVERLAPS);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.reservations.reservations_pkey"
+        },
+        {
+          "sql": "ALTER TABLE sessions\nADD COLUMN id uuid CONSTRAINT sessions_pkey PRIMARY KEY;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.sessions.id"
+        },
+        {
+          "sql": "ALTER TABLE user_permissions\nADD CONSTRAINT user_permissions_pkey PRIMARY KEY (user_id, resource_id, permission_type);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.user_permissions.user_permissions_pkey"
+        },
+        {
+          "sql": "ALTER TABLE users\nADD COLUMN id integer CONSTRAINT users_pkey PRIMARY KEY;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.users.id"
         }
       ]
     }
