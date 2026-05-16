@@ -65,6 +65,10 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, fmt.Errorf("failed to build schemas: %w", err)
 	}
 
+	if err := i.buildExtensions(ctx, schema, targetSchema); err != nil {
+		return nil, fmt.Errorf("failed to build extensions: %w", err)
+	}
+
 	if err := i.buildTables(ctx, schema, targetSchema); err != nil {
 		return nil, fmt.Errorf("failed to build tables: %w", err)
 	}
@@ -205,6 +209,64 @@ func (i *Inspector) buildMetadata(ctx context.Context, schema *IR) error {
 	}
 
 	return nil
+}
+
+func (i *Inspector) buildExtensions(ctx context.Context, schema *IR, targetSchema string) error {
+	query := `
+SELECT DISTINCT e.extname
+FROM pg_catalog.pg_depend d
+JOIN pg_catalog.pg_depend ed ON ed.objid = d.refobjid
+    AND ed.deptype = 'e'
+    AND ed.refclassid = 'pg_catalog.pg_extension'::regclass
+JOIN pg_catalog.pg_extension e ON e.oid = ed.refobjid
+WHERE d.deptype = 'n'
+  AND e.extname NOT IN ('plpgsql')
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_depend x
+    WHERE x.objid = d.objid AND x.deptype = 'e'
+  )
+  AND (
+    (d.classid = 'pg_catalog.pg_constraint'::regclass AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_constraint c
+      JOIN pg_catalog.pg_namespace n ON c.connamespace = n.oid
+      WHERE c.oid = d.objid AND n.nspname = $1
+    ))
+    OR
+    (d.classid = 'pg_catalog.pg_class'::regclass AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+      WHERE c.oid = d.objid AND n.nspname = $1
+    ))
+    OR
+    (d.classid = 'pg_catalog.pg_type'::regclass AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_type t
+      JOIN pg_catalog.pg_namespace n ON t.typnamespace = n.oid
+      WHERE t.oid = d.objid AND n.nspname = $1
+    ))
+    OR
+    (d.classid = 'pg_catalog.pg_proc'::regclass AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_namespace n ON p.pronamespace = n.oid
+      WHERE p.oid = d.objid AND n.nspname = $1
+    ))
+  )
+ORDER BY e.extname`
+
+	rows, err := i.db.QueryContext(ctx, query, targetSchema)
+	if err != nil {
+		return fmt.Errorf("failed to query extensions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var extname string
+		if err := rows.Scan(&extname); err != nil {
+			return fmt.Errorf("failed to scan extension: %w", err)
+		}
+		schema.Extensions = append(schema.Extensions, extname)
+	}
+
+	return rows.Err()
 }
 
 func (i *Inspector) buildSchemas(ctx context.Context, schema *IR, targetSchema string) error {

@@ -42,6 +42,7 @@ const (
 	DiffTypePrivilege
 	DiffTypeRevokedDefaultPrivilege
 	DiffTypeColumnPrivilege
+	DiffTypeExtension
 )
 
 // String returns the string representation of DiffType
@@ -103,6 +104,8 @@ func (d DiffType) String() string {
 		return "revoked_default_privilege"
 	case DiffTypeColumnPrivilege:
 		return "column_privilege"
+	case DiffTypeExtension:
+		return "extension"
 	default:
 		return "unknown"
 	}
@@ -177,6 +180,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeRevokedDefaultPrivilege
 	case "column_privilege":
 		*d = DiffTypeColumnPrivilege
+	case "extension":
+		*d = DiffTypeExtension
 	default:
 		return fmt.Errorf("unknown diff type: %s", s)
 	}
@@ -296,6 +301,9 @@ type ddlDiff struct {
 	addedColumnPrivileges    []*ir.ColumnPrivilege
 	droppedColumnPrivileges  []*ir.ColumnPrivilege
 	modifiedColumnPrivileges []*columnPrivilegeDiff
+	// Extensions
+	addedExtensions   []string
+	droppedExtensions []string
 }
 
 // schemaDiff represents changes to a schema
@@ -460,6 +468,26 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 		addedColumnPrivileges:      []*ir.ColumnPrivilege{},
 		droppedColumnPrivileges:    []*ir.ColumnPrivilege{},
 		modifiedColumnPrivileges:   []*columnPrivilegeDiff{},
+	}
+
+	// Compare extensions
+	oldExtSet := make(map[string]bool)
+	for _, ext := range oldIR.Extensions {
+		oldExtSet[ext] = true
+	}
+	for _, ext := range newIR.Extensions {
+		if !oldExtSet[ext] {
+			diff.addedExtensions = append(diff.addedExtensions, ext)
+		}
+	}
+	newExtSet := make(map[string]bool)
+	for _, ext := range newIR.Extensions {
+		newExtSet[ext] = true
+	}
+	for _, ext := range oldIR.Extensions {
+		if !newExtSet[ext] {
+			diff.droppedExtensions = append(diff.droppedExtensions, ext)
+		}
 	}
 
 	// Compare schemas first in deterministic order
@@ -1497,6 +1525,17 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 
 // generateCreateSQL generates CREATE statements in dependency order
 func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollector) {
+	for _, ext := range d.addedExtensions {
+		context := &diffContext{
+			Type:                DiffTypeExtension,
+			Operation:           DiffOperationCreate,
+			Path:                ext,
+			Source:              &ir.Extension{Name: ext},
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s;", ir.QuoteIdentifier(ext)))
+	}
+
 	// Note: Schema creation is out of scope for schema-level comparisons
 
 	// Build function lookup early - needed for both domain and table dependency checks
