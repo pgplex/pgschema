@@ -1135,9 +1135,15 @@ func normalizePostgreSQLType(input string) string {
 	// Handle direct type names
 	typeName := input
 
+	// Decompose into base name and optional modifier+suffix (e.g., "bpchar(10)[]" -> "bpchar" + "(10)[]").
+	// When there's no modifier, rest is empty and this is equivalent to a plain exact-match lookup.
+	baseName, rest := typeName, ""
+	if idx := strings.Index(typeName, "("); idx != -1 {
+		baseName, rest = typeName[:idx], typeName[idx:]
+	}
 	// Check if we have a direct mapping
-	if normalized, exists := postgresTypeNormalization[typeName]; exists {
-		return normalized
+	if normalized, exists := postgresTypeNormalization[baseName]; exists {
+		return normalized + rest
 	}
 
 	// Remove pg_catalog prefix for unmapped types
@@ -1480,4 +1486,3 @@ func findArrayClose(expr string, startIdx int) int {
 
 	return -1 // Not found
 }
-
