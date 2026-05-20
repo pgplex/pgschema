@@ -17,6 +17,11 @@ import (
 	"github.com/pgplex/pgschema/cmd/util"
 )
 
+// binariesPath is the path that contains the Postgres binaries.
+// This is meant to be injected via ldflags (for example, to use the nix
+// postgres versions when building with nix).
+var binariesPath string
+
 // PostgresVersion is an alias for the embedded-postgres version type.
 type PostgresVersion = embeddedpostgres.PostgresVersion
 
@@ -91,14 +96,16 @@ func StartEmbeddedPostgres(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, e
 		Password(config.Password).
 		Port(uint32(port)).
 		RuntimePath(runtimePath).
+		BinariesPath(binariesPath).
 		DataPath(filepath.Join(runtimePath, "data")).
 		Logger(io.Discard). // Suppress embedded-postgres startup logs
 		StartParameters(map[string]string{
-			"logging_collector":          "off",    // Disable log collector
-			"log_destination":            "stderr", // Send logs to stderr (which we discard)
-			"log_min_messages":           "PANIC",  // Only log PANIC level messages
-			"log_statement":              "none",   // Don't log SQL statements
-			"log_min_duration_statement": "-1",     // Don't log slow queries
+			"logging_collector":          "off",       // Disable log collector
+			"log_destination":            "stderr",    // Send logs to stderr (which we discard)
+			"log_min_messages":           "PANIC",     // Only log PANIC level messages
+			"log_statement":              "none",      // Don't log SQL statements
+			"log_min_duration_statement": "-1",        // Don't log slow queries
+			"unix_socket_directories":    runtimePath, // Use a directory that is guaranteed to exist
 		})
 
 	// Create and start PostgreSQL instance
