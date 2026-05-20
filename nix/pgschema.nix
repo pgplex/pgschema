@@ -1,8 +1,9 @@
-{ pkgs ? import <nixpkgs> {}, rev ? "unknown", buildDate ? "unknown" }:
+{ pkgs ? import <nixpkgs> {}, rev ? "unknown", buildDate ? "unknown", postgresql ? null }:
 
 let
   lib = pkgs.lib;
   version = lib.strings.removeSuffix "\n" (builtins.readFile ../internal/version/VERSION);
+  postgres = if postgresql == null then pkgs.postgresql else postgresql;
 in
 pkgs.buildGoModule {
   pname = "pgschema";
@@ -31,6 +32,8 @@ pkgs.buildGoModule {
     "github.com/pgplex/pgschema/cmd.GitCommit=${rev}"
     "-X"
     "github.com/pgplex/pgschema/cmd.BuildDate=${buildDate}"
+    "-X"
+    "github.com/pgplex/pgschema/internal/postgres.binariesPath=${postgres}"
   ];
 
   meta = with lib; {
