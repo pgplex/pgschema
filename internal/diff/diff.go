@@ -359,7 +359,7 @@ type viewDiff struct {
 	CommentChanged   bool
 	OldComment       string
 	NewComment       string
-	OptionsChanged   bool // View options (reloptions) changed
+	OptionsChanged   bool           // View options (reloptions) changed
 	AddedIndexes     []*ir.Index    // For materialized views
 	DroppedIndexes   []*ir.Index    // For materialized views
 	ModifiedIndexes  []*IndexDiff   // For materialized views

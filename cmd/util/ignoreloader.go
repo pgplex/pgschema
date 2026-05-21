@@ -37,6 +37,7 @@ type TomlConfig struct {
 	Privileges        PrivilegeIgnoreConfig        `toml:"privileges,omitempty"`
 	DefaultPrivileges DefaultPrivilegeIgnoreConfig `toml:"default_privileges,omitempty"`
 	Constraints       ConstraintIgnoreConfig       `toml:"constraints,omitempty"`
+	ConstraintsFK     ConstraintFKIgnoreConfig     `toml:"constraints_fk,omitempty"`
 }
 
 // TableIgnoreConfig represents table-specific ignore configuration
@@ -87,6 +88,12 @@ type ConstraintIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
 
+// ConstraintFKIgnoreConfig represents foreign key constraint-specific ignore configuration
+// Patterns match constraint names, including optionally qualified names
+type ConstraintFKIgnoreConfig struct {
+	Patterns []string `toml:"patterns,omitempty"`
+}
+
 // LoadIgnoreFileWithStructure loads the .pgschemaignore file using the structured TOML format
 // and converts it to the simple IgnoreConfig structure
 func LoadIgnoreFileWithStructure() (*ir.IgnoreConfig, error) {
@@ -121,6 +128,7 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 		Privileges:        tomlConfig.Privileges.Patterns,
 		DefaultPrivileges: tomlConfig.DefaultPrivileges.Patterns,
 		Constraints:       tomlConfig.Constraints.Patterns,
+		ConstraintsFK:     tomlConfig.ConstraintsFK.Patterns,
 	}
 
 	return config, nil
