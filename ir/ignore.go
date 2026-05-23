@@ -22,6 +22,7 @@ type IgnoreConfig struct {
 	Procedures        []string `toml:"procedures,omitempty"`
 	Types             []string `toml:"types,omitempty"`
 	Sequences         []string `toml:"sequences,omitempty"`
+	Indexes           []string `toml:"indexes,omitempty"`
 	Privileges        []string `toml:"privileges,omitempty"`
 	DefaultPrivileges []string `toml:"default_privileges,omitempty"`
 }
@@ -72,6 +73,14 @@ func (c *IgnoreConfig) ShouldIgnoreSequence(sequenceName string) bool {
 		return false
 	}
 	return c.shouldIgnore(sequenceName, c.Sequences)
+}
+
+// ShouldIgnoreIndex checks if an index should be ignored based on the patterns
+func (c *IgnoreConfig) ShouldIgnoreIndex(indexName string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(indexName, c.Indexes)
 }
 
 // ShouldIgnorePrivilegeByObjectType checks if a privilege should be ignored based on the object name

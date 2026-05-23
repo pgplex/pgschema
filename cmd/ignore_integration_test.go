@@ -1334,6 +1334,117 @@ GRANT SELECT ON users TO app_user;
 	}
 }
 
+// TestIgnoreIndexes tests that indexes matching .pgschemaignore [indexes] patterns
+// are excluded from dump and plan output.
+// Reproduces https://github.com/pgplex/pgschema/issues/406
+func TestIgnoreIndexes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	// Create a table with a managed index plus a manually-added index that
+	// is not part of the declared schema (simulates a perf hotfix index
+	// added directly to a production database).
+	setupSQL := `
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT
+);
+
+CREATE INDEX products_name_idx ON products(name);
+CREATE INDEX manual_perf_idx ON products(category);
+`
+	_, err := conn.Exec(setupSQL)
+	if err != nil {
+		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Ignore any index whose name starts with "manual_"
+	ignoreContent := `[indexes]
+patterns = ["manual_*"]
+`
+	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	}
+
+	t.Run("dump", func(t *testing.T) {
+		output := executeIgnoreDumpCommand(t, containerInfo)
+
+		if !strings.Contains(output, "products_name_idx") {
+			t.Error("Dump should include products_name_idx (not ignored)")
+		}
+
+		if strings.Contains(output, "manual_perf_idx") {
+			t.Error("Dump should not include manual_perf_idx (ignored by [indexes] patterns)")
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		// Desired schema declares products_name_idx but not manual_perf_idx.
+		// Without the ignore the plan would emit DROP INDEX manual_perf_idx;
+		// with the ignore the plan should not reference manual_perf_idx at all.
+		schemaSQL := `
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT
+);
+
+CREATE INDEX products_name_idx ON products(name);
+`
+		schemaFile := "schema.sql"
+		err := os.WriteFile(schemaFile, []byte(schemaSQL), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create schema file: %v", err)
+		}
+		defer os.Remove(schemaFile)
+
+		output := executeIgnorePlanCommand(t, containerInfo, schemaFile)
+
+		if strings.Contains(output, "manual_perf_idx") {
+			t.Errorf("Plan should not reference manual_perf_idx (ignored); got: %s", output)
+		}
+	})
+}
+
 // verifyPlanOutput checks that plan output excludes ignored objects
 func verifyPlanOutput(t *testing.T, output string) {
 	// Changes that should appear in plan (regular objects)

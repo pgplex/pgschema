@@ -34,6 +34,7 @@ type TomlConfig struct {
 	Procedures        ProcedureIgnoreConfig        `toml:"procedures,omitempty"`
 	Types             TypeIgnoreConfig             `toml:"types,omitempty"`
 	Sequences         SequenceIgnoreConfig         `toml:"sequences,omitempty"`
+	Indexes           IndexIgnoreConfig            `toml:"indexes,omitempty"`
 	Privileges        PrivilegeIgnoreConfig        `toml:"privileges,omitempty"`
 	DefaultPrivileges DefaultPrivilegeIgnoreConfig `toml:"default_privileges,omitempty"`
 }
@@ -65,6 +66,11 @@ type TypeIgnoreConfig struct {
 
 // SequenceIgnoreConfig represents sequence-specific ignore configuration
 type SequenceIgnoreConfig struct {
+	Patterns []string `toml:"patterns,omitempty"`
+}
+
+// IndexIgnoreConfig represents index-specific ignore configuration
+type IndexIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
 
@@ -111,6 +117,7 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 		Procedures:        tomlConfig.Procedures.Patterns,
 		Types:             tomlConfig.Types.Patterns,
 		Sequences:         tomlConfig.Sequences.Patterns,
+		Indexes:           tomlConfig.Indexes.Patterns,
 		Privileges:        tomlConfig.Privileges.Patterns,
 		DefaultPrivileges: tomlConfig.DefaultPrivileges.Patterns,
 	}
