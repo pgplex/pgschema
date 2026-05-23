@@ -1,6 +1,7 @@
 package dump
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -9,6 +10,12 @@ import (
 	"github.com/pgplex/pgschema/internal/dump"
 	"github.com/pgplex/pgschema/ir"
 	"github.com/spf13/cobra"
+)
+
+// Output format constants for the --format flag.
+const (
+	FormatSQL  = "sql"
+	FormatJSON = "json"
 )
 
 var (
@@ -22,6 +29,7 @@ var (
 	file       string
 	noComments bool
 	sslmode    string
+	format     string
 )
 
 // DumpConfig holds configuration for dump execution
@@ -36,6 +44,7 @@ type DumpConfig struct {
 	File       string
 	NoComments bool
 	SSLMode    string
+	Format     string // "sql" (default) or "json"
 }
 
 var DumpCmd = &cobra.Command{
@@ -58,6 +67,7 @@ func init() {
 	DumpCmd.Flags().StringVar(&file, "file", "", "Output file path (required when --multi-file is used)")
 	DumpCmd.Flags().BoolVar(&noComments, "no-comments", false, "Do not output object comment headers")
 	DumpCmd.Flags().StringVar(&sslmode, "sslmode", "prefer", "SSL mode for database connection (disable, allow, prefer, require, verify-ca, verify-full) (env: PGSSLMODE)")
+	DumpCmd.Flags().StringVar(&format, "format", FormatSQL, "Output format: sql (default, schema dump as SQL) or json (IR as JSON for downstream tooling)")
 }
 
 // ExecuteDump executes the dump operation with the given configuration
@@ -67,6 +77,16 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 		// When --multi-file is used but no --file specified, emit warning and use single-file mode
 		fmt.Fprintf(os.Stderr, "Warning: --multi-file flag requires --file to be specified. Fallback to single-file mode.\n")
 		config.MultiFile = false
+	}
+
+	switch config.Format {
+	case "", FormatSQL, FormatJSON:
+	default:
+		return "", fmt.Errorf("unsupported --format %q (expected %q or %q)", config.Format, FormatSQL, FormatJSON)
+	}
+
+	if config.Format == FormatJSON && config.MultiFile {
+		return "", fmt.Errorf("--format=json is incompatible with --multi-file (the IR is a single document)")
 	}
 
 	// Load ignore configuration
@@ -79,6 +99,14 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	schemaIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, "pgschema", ignoreConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to get database schema: %w", err)
+	}
+
+	if config.Format == FormatJSON {
+		out, err := json.MarshalIndent(schemaIR, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal IR to JSON: %w", err)
+		}
+		return string(out) + "\n", nil
 	}
 
 	// Create an empty schema for comparison to generate a dump diff
@@ -138,6 +166,7 @@ func runDump(cmd *cobra.Command, args []string) error {
 		File:       file,
 		NoComments: noComments,
 		SSLMode:    finalSSLMode,
+		Format:     format,
 	}
 
 	// Execute dump

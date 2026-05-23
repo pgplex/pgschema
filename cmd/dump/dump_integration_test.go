@@ -9,6 +9,7 @@ package dump
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -609,4 +610,94 @@ func compareSchemaOutputs(t *testing.T, actualOutput, expectedOutput string, tes
 				len(actualLines), len(expectedLines))
 		}
 	}
+}
+
+// TestDumpCommand_FormatJSON exercises `dump --format=json` end-to-end:
+// schema goes into a real database, the dump command serializes the IR
+// to JSON, and that JSON is unmarshaled and asserted against the source.
+func TestDumpCommand_FormatJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	setupSQL := `
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX users_email_lower_idx ON users (lower(email));
+`
+	if _, err := conn.ExecContext(context.Background(), setupSQL); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	config := &DumpConfig{
+		Host:     host,
+		Port:     port,
+		DB:       dbname,
+		User:     user,
+		Password: password,
+		Schema:   "public",
+		Format:   FormatJSON,
+	}
+
+	output, err := ExecuteDump(config)
+	if err != nil {
+		t.Fatalf("ExecuteDump(json) failed: %v", err)
+	}
+
+	trimmed := strings.TrimLeft(output, " \t\n")
+	if !strings.HasPrefix(trimmed, "{") {
+		preview := output
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		t.Fatalf("expected JSON object, got: %s", preview)
+	}
+
+	var parsed ir.IR
+	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, output)
+	}
+
+	publicSchema, ok := parsed.Schemas["public"]
+	if !ok {
+		t.Fatalf("public schema missing from JSON output; got schemas: %v", keysOf(parsed.Schemas))
+	}
+	usersTable, ok := publicSchema.Tables["users"]
+	if !ok {
+		t.Fatalf("users table missing from JSON output; got tables: %v", keysOf(publicSchema.Tables))
+	}
+	if len(usersTable.Columns) != 3 {
+		t.Errorf("expected 3 columns on users, got %d: %+v", len(usersTable.Columns), usersTable.Columns)
+	}
+	if _, exists := usersTable.Indexes["users_email_lower_idx"]; !exists {
+		t.Errorf("expected expression index users_email_lower_idx in JSON output, got indexes: %v", keysOf(usersTable.Indexes))
+	}
+
+	// Round-trip: re-marshal the parsed IR and verify the second pass matches the first.
+	second, err := json.MarshalIndent(&parsed, "", "  ")
+	if err != nil {
+		t.Fatalf("re-marshal failed: %v", err)
+	}
+	if strings.TrimRight(output, "\n") != strings.TrimRight(string(second), "\n") {
+		t.Error("JSON output is not stable under round-trip marshal/unmarshal")
+	}
+}
+
+// keysOf returns the keys of a string-keyed map for diagnostic output.
+func keysOf[V any](m map[string]V) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
 }

@@ -1,6 +1,7 @@
 package dump
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +12,82 @@ import (
 	"github.com/pgplex/pgschema/ir"
 	"github.com/spf13/cobra"
 )
+
+// TestIRJSONRoundTrip verifies that an in-memory IR survives a JSON
+// marshal → unmarshal → marshal cycle byte-for-byte. This is the contract
+// downstream consumers of `dump --format=json` depend on.
+func TestIRJSONRoundTrip(t *testing.T) {
+	src := ir.NewIR()
+	src.Metadata.DatabaseVersion = "17.4"
+
+	public := src.CreateSchema("public")
+	public.Owner = "postgres"
+	public.Tables["users"] = &ir.Table{
+		Schema: "public",
+		Name:   "users",
+		Type:   ir.TableTypeBase,
+		Columns: []*ir.Column{
+			{Name: "id", Position: 1, DataType: "integer", IsNullable: false},
+			{Name: "email", Position: 2, DataType: "text", IsNullable: false},
+		},
+		Constraints: map[string]*ir.Constraint{},
+		Indexes:     map[string]*ir.Index{},
+		Triggers:    map[string]*ir.Trigger{},
+		Policies:    map[string]*ir.RLSPolicy{},
+	}
+
+	firstPass, err := json.MarshalIndent(src, "", "  ")
+	if err != nil {
+		t.Fatalf("first marshal failed: %v", err)
+	}
+
+	var rehydrated ir.IR
+	if err := json.Unmarshal(firstPass, &rehydrated); err != nil {
+		t.Fatalf("unmarshal failed: %v\nbytes:\n%s", err, firstPass)
+	}
+
+	secondPass, err := json.MarshalIndent(&rehydrated, "", "  ")
+	if err != nil {
+		t.Fatalf("second marshal failed: %v", err)
+	}
+
+	if string(firstPass) != string(secondPass) {
+		t.Errorf("round-trip not stable.\nfirst:\n%s\n\nsecond:\n%s", firstPass, secondPass)
+	}
+}
+
+// TestExecuteDump_FormatValidation verifies the new --format flag's input checks.
+func TestExecuteDump_FormatValidation(t *testing.T) {
+	t.Run("unknown format rejected", func(t *testing.T) {
+		_, err := ExecuteDump(&DumpConfig{
+			Host:   "localhost",
+			Port:   5432,
+			DB:     "irrelevant",
+			User:   "irrelevant",
+			Schema: "public",
+			Format: "yaml",
+		})
+		if err == nil || !strings.Contains(err.Error(), "unsupported --format") {
+			t.Errorf("expected unsupported-format error, got: %v", err)
+		}
+	})
+
+	t.Run("json + multi-file rejected", func(t *testing.T) {
+		_, err := ExecuteDump(&DumpConfig{
+			Host:      "localhost",
+			Port:      5432,
+			DB:        "irrelevant",
+			User:      "irrelevant",
+			Schema:    "public",
+			Format:    FormatJSON,
+			MultiFile: true,
+			File:      "out.sql",
+		})
+		if err == nil || !strings.Contains(err.Error(), "--multi-file") {
+			t.Errorf("expected json+multi-file incompatibility error, got: %v", err)
+		}
+	})
+}
 
 func TestDumpCommand(t *testing.T) {
 	// Test that the command is properly configured
