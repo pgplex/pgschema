@@ -228,6 +228,14 @@ func runPlanAndApplyTest(t *testing.T, ctx context.Context, container *struct {
 		t.Fatalf("Failed to create test database %s: %v", dbName, err)
 	}
 
+	// Extensions are cluster-level and persist across tests on the shared
+	// embedded postgres instance. Register the teardown unconditionally —
+	// extensions can come from setup.sql, old.sql, or new.sql (the new.sql
+	// path matters for the create_extension fixture, which has no setup.sql).
+	t.Cleanup(func() {
+		cleanupSharedClusterExtensions(t)
+	})
+
 	// STEP 0: Execute optional setup.sql (for cross-schema setup, extension types, etc.)
 	if _, err := os.Stat(tc.setupFile); err == nil {
 		setupContent, err := os.ReadFile(tc.setupFile)
@@ -247,14 +255,6 @@ func runPlanAndApplyTest(t *testing.T, ctx context.Context, container *struct {
 			if _, err := embeddedConn.ExecContext(ctx, string(setupContent)); err != nil {
 				t.Fatalf("Failed to execute setup.sql to embedded postgres: %v", err)
 			}
-
-			// Extensions are cluster-level and persist across tests on the shared
-			// embedded postgres instance. Reset any non-default extensions when
-			// this test case finishes so the next case (or the next top-level test)
-			// inherits a clean cluster.
-			t.Cleanup(func() {
-				cleanupSharedClusterExtensions(t)
-			})
 		}
 	}
 

@@ -36,7 +36,7 @@ func generateDropExtensionsSQL(extensions []*ir.Extension, collector *diffCollec
 			Source:              ext,
 			CanRunInTransaction: true,
 		}
-		collector.collect(context, fmt.Sprintf("DROP EXTENSION IF EXISTS %s;", ext.Name))
+		collector.collect(context, fmt.Sprintf("DROP EXTENSION IF EXISTS %s;", ir.QuoteIdentifier(ext.Name)))
 	}
 }
 
@@ -56,5 +56,5 @@ func extensionPath(ext *ir.Extension) string {
 // is given) or filtering out transient schemas. Preserving the user-declared
 // install schema is tracked as a follow-up to #436.
 func generateExtensionSQL(ext *ir.Extension) string {
-	return fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s;", ext.Name)
+	return fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s;", ir.QuoteIdentifier(ext.Name))
 }
