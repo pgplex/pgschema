@@ -1396,6 +1396,57 @@ func (q *Queries) GetEnumValuesForSchema(ctx context.Context, dollar_1 sql.NullS
 	return items, nil
 }
 
+const getExtensions = `-- name: GetExtensions :many
+SELECT
+    e.extname::text AS extension_name,
+    e.extversion::text AS extension_version,
+    n.nspname::text AS extension_schema,
+    COALESCE(d.description, '') AS extension_comment
+FROM pg_extension e
+JOIN pg_namespace n ON e.extnamespace = n.oid
+LEFT JOIN pg_description d ON d.objoid = e.oid AND d.classoid = 'pg_extension'::regclass
+WHERE e.extname != 'plpgsql'
+ORDER BY e.extname
+`
+
+type GetExtensionsRow struct {
+	ExtensionName    sql.NullString `db:"extension_name" json:"extension_name"`
+	ExtensionVersion string         `db:"extension_version" json:"extension_version"`
+	ExtensionSchema  sql.NullString `db:"extension_schema" json:"extension_schema"`
+	ExtensionComment sql.NullString `db:"extension_comment" json:"extension_comment"`
+}
+
+// GetExtensions retrieves all installed extensions except the always-present
+// `plpgsql` built-in. Used to render `CREATE EXTENSION` statements in the dump
+// so dumps remain replayable on a fresh database.
+func (q *Queries) GetExtensions(ctx context.Context) ([]GetExtensionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getExtensions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetExtensionsRow
+	for rows.Next() {
+		var i GetExtensionsRow
+		if err := rows.Scan(
+			&i.ExtensionName,
+			&i.ExtensionVersion,
+			&i.ExtensionSchema,
+			&i.ExtensionComment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFunctionDependencies = `-- name: GetFunctionDependencies :many
 SELECT
     dependent_ns.nspname AS dependent_schema,

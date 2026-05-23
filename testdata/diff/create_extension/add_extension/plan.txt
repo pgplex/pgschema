@@ -1,0 +1,8 @@
+Plan: 1 to add.
+
+Summary by type:
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE EXTENSION IF NOT EXISTS btree_gist;

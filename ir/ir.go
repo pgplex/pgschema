@@ -8,9 +8,20 @@ import (
 
 // IR represents the complete database schema intermediate representation
 type IR struct {
-	Metadata Metadata           `json:"metadata"`
-	Schemas  map[string]*Schema `json:"schemas"` // schema_name -> Schema
-	mu       sync.RWMutex       // Protects concurrent access to Schemas
+	Metadata   Metadata              `json:"metadata"`
+	Extensions map[string]*Extension `json:"extensions,omitempty"` // extension_name -> Extension (cluster-level, not per-schema)
+	Schemas    map[string]*Schema    `json:"schemas"`              // schema_name -> Schema
+	mu         sync.RWMutex          // Protects concurrent access to Schemas and Extensions
+}
+
+// Extension represents a PostgreSQL extension installed in the database.
+// Extensions are cluster-level (installed once per database), so they live at
+// the IR root rather than under a Schema.
+type Extension struct {
+	Name    string `json:"name"`              // e.g., "btree_gist"
+	Version string `json:"version,omitempty"` // e.g., "1.7"
+	Schema  string `json:"schema,omitempty"`  // Namespace where the extension's default objects are installed
+	Comment string `json:"comment,omitempty"`
 }
 
 // Metadata contains information about the schema dump
@@ -542,8 +553,27 @@ func (cp *ColumnPrivilege) GetObjectName() string {
 // NewIR creates a new empty catalog IR
 func NewIR() *IR {
 	return &IR{
-		Schemas: make(map[string]*Schema),
+		Schemas:    make(map[string]*Schema),
+		Extensions: make(map[string]*Extension),
 	}
+}
+
+// SetExtension records an extension on the IR with thread safety.
+func (c *IR) SetExtension(ext *Extension) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Extensions == nil {
+		c.Extensions = make(map[string]*Extension)
+	}
+	c.Extensions[ext.Name] = ext
+}
+
+// GetExtension retrieves an extension by name with thread safety.
+func (c *IR) GetExtension(name string) (*Extension, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ext, ok := c.Extensions[name]
+	return ext, ok
 }
 
 // GetSchema retrieves a schema by name with thread safety.
@@ -709,4 +739,5 @@ func (p *Procedure) GetObjectName() string  { return p.Name }
 func (v *View) GetObjectName() string       { return v.Name }
 func (s *Sequence) GetObjectName() string   { return s.Name }
 func (t *Type) GetObjectName() string       { return t.Name }
+func (e *Extension) GetObjectName() string  { return e.Name }
 

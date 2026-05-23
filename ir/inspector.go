@@ -57,6 +57,10 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, fmt.Errorf("failed to build metadata: %w", err)
 	}
 
+	if err := i.buildExtensions(ctx, schema); err != nil {
+		return nil, fmt.Errorf("failed to build extensions: %w", err)
+	}
+
 	if err := i.validateSchemaExists(ctx, targetSchema); err != nil {
 		return nil, err
 	}
@@ -204,6 +208,27 @@ func (i *Inspector) buildMetadata(ctx context.Context, schema *IR) error {
 		DatabaseVersion: dbVersion,
 	}
 
+	return nil
+}
+
+// buildExtensions records every installed extension (except plpgsql) on the IR.
+// Extensions are cluster-level — they are not scoped by targetSchema.
+func (i *Inspector) buildExtensions(ctx context.Context, schema *IR) error {
+	rows, err := i.queries.GetExtensions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if !row.ExtensionName.Valid {
+			continue
+		}
+		schema.SetExtension(&Extension{
+			Name:    row.ExtensionName.String,
+			Version: row.ExtensionVersion,
+			Schema:  row.ExtensionSchema.String,
+			Comment: row.ExtensionComment.String,
+		})
+	}
 	return nil
 }
 

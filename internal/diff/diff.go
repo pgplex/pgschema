@@ -42,6 +42,7 @@ const (
 	DiffTypePrivilege
 	DiffTypeRevokedDefaultPrivilege
 	DiffTypeColumnPrivilege
+	DiffTypeExtension
 )
 
 // String returns the string representation of DiffType
@@ -103,6 +104,8 @@ func (d DiffType) String() string {
 		return "revoked_default_privilege"
 	case DiffTypeColumnPrivilege:
 		return "column_privilege"
+	case DiffTypeExtension:
+		return "extension"
 	default:
 		return "unknown"
 	}
@@ -177,6 +180,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeRevokedDefaultPrivilege
 	case "column_privilege":
 		*d = DiffTypeColumnPrivilege
+	case "extension":
+		*d = DiffTypeExtension
 	default:
 		return fmt.Errorf("unknown diff type: %s", s)
 	}
@@ -296,6 +301,9 @@ type ddlDiff struct {
 	addedColumnPrivileges    []*ir.ColumnPrivilege
 	droppedColumnPrivileges  []*ir.ColumnPrivilege
 	modifiedColumnPrivileges []*columnPrivilegeDiff
+	// Cluster-level extensions
+	addedExtensions   []*ir.Extension
+	droppedExtensions []*ir.Extension
 }
 
 // schemaDiff represents changes to a schema
@@ -460,6 +468,27 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 		addedColumnPrivileges:      []*ir.ColumnPrivilege{},
 		droppedColumnPrivileges:    []*ir.ColumnPrivilege{},
 		modifiedColumnPrivileges:   []*columnPrivilegeDiff{},
+		addedExtensions:            []*ir.Extension{},
+		droppedExtensions:          []*ir.Extension{},
+	}
+
+	// Compute extension diffs (cluster-level, so no schema filtering).
+	// Modifications (version bumps) are out of scope for this initial PR; only
+	// added/dropped are tracked. See #436 for the broader extension story.
+	{
+		extNames := sortedKeys(newIR.Extensions)
+		for _, name := range extNames {
+			newExt := newIR.Extensions[name]
+			if _, exists := oldIR.Extensions[name]; !exists {
+				diff.addedExtensions = append(diff.addedExtensions, newExt)
+			}
+		}
+		oldExtNames := sortedKeys(oldIR.Extensions)
+		for _, name := range oldExtNames {
+			if _, exists := newIR.Extensions[name]; !exists {
+				diff.droppedExtensions = append(diff.droppedExtensions, oldIR.Extensions[name])
+			}
+		}
 	}
 
 	// Compare schemas first in deterministic order
@@ -1499,6 +1528,10 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollector) {
 	// Note: Schema creation is out of scope for schema-level comparisons
 
+	// Extensions first: they provide operator classes, types, and functions that
+	// downstream schema objects (e.g., a GIST index on UUID via btree_gist) depend on.
+	generateCreateExtensionsSQL(d.addedExtensions, collector)
+
 	// Build function lookup early - needed for both domain and table dependency checks
 	newFunctionLookup := buildFunctionLookup(d.addedFunctions)
 
@@ -1720,6 +1753,10 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 
 	// Drop types
 	generateDropTypesSQL(d.droppedTypes, targetSchema, collector)
+
+	// Drop extensions last: any schema object that depended on the extension
+	// must already be gone before we try to drop the extension itself.
+	generateDropExtensionsSQL(d.droppedExtensions, collector)
 
 	// Drop schemas
 	// Note: Schema deletion is out of scope for schema-level comparisons

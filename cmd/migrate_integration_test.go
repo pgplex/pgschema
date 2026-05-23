@@ -247,6 +247,14 @@ func runPlanAndApplyTest(t *testing.T, ctx context.Context, container *struct {
 			if _, err := embeddedConn.ExecContext(ctx, string(setupContent)); err != nil {
 				t.Fatalf("Failed to execute setup.sql to embedded postgres: %v", err)
 			}
+
+			// Extensions are cluster-level and persist across tests on the shared
+			// embedded postgres instance. Reset any non-default extensions when
+			// this test case finishes so the next case (or the next top-level test)
+			// inherits a clean cluster.
+			t.Cleanup(func() {
+				cleanupSharedClusterExtensions(t)
+			})
 		}
 	}
 
@@ -575,4 +583,41 @@ func matchesFilter(relPath, filter string) bool {
 
 	// Fallback: check if filter is a substring of the path
 	return strings.Contains(relPath, filter)
+}
+
+// cleanupSharedClusterExtensions drops any extensions on the shared embedded
+// postgres instance other than the built-in `plpgsql`. Extensions are
+// cluster-level state and survive per-database resets, so without this teardown
+// a setup.sql that installs (say) btree_gist or hstore would leak into every
+// subsequent test that inspects the cluster.
+func cleanupSharedClusterExtensions(t *testing.T) {
+	t.Helper()
+	if sharedEmbeddedPG == nil {
+		return
+	}
+	conn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedEmbeddedPG)
+	defer conn.Close()
+
+	ctx := context.Background()
+	rows, err := conn.QueryContext(ctx, "SELECT extname FROM pg_extension WHERE extname <> 'plpgsql'")
+	if err != nil {
+		t.Logf("extension cleanup: query failed (continuing): %v", err)
+		return
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Logf("extension cleanup: scan failed (continuing): %v", err)
+			continue
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+
+	for _, name := range names {
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP EXTENSION IF EXISTS %q CASCADE", name)); err != nil {
+			t.Logf("extension cleanup: failed to drop %s (continuing): %v", name, err)
+		}
+	}
 }

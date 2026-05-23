@@ -1447,3 +1447,18 @@ WHERE d.classid = 'pg_proc'::regclass
   AND d.refclassid = 'pg_proc'::regclass
   AND d.deptype = 'n'
   AND dependent_ns.nspname = $1;
+
+-- GetExtensions retrieves all installed extensions except the always-present
+-- `plpgsql` built-in. Used to render `CREATE EXTENSION` statements in the dump
+-- so dumps remain replayable on a fresh database.
+-- name: GetExtensions :many
+SELECT
+    e.extname::text AS extension_name,
+    e.extversion::text AS extension_version,
+    n.nspname::text AS extension_schema,
+    COALESCE(d.description, '') AS extension_comment
+FROM pg_extension e
+JOIN pg_namespace n ON e.extnamespace = n.oid
+LEFT JOIN pg_description d ON d.objoid = e.oid AND d.classoid = 'pg_extension'::regclass
+WHERE e.extname != 'plpgsql'
+ORDER BY e.extname;
