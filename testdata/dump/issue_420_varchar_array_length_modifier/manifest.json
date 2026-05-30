@@ -1,0 +1,10 @@
+{
+  "name": "issue_420_varchar_array_length_modifier",
+  "description": "pgschema dump silently drops the length modifier from varchar(n)[] array columns, emitting varchar[] instead of varchar(128)[]",
+  "source": "https://github.com/pgplex/pgschema/issues/420",
+  "notes": [
+    "The SQL query for array types used et.typname || '[]' which discards the atttypmod",
+    "The fix uses format_type(a.atttypid, a.atttypmod) to extract the modifier (e.g., (128))",
+    "Also covers character(n)[] which had the same bug (bpchar typname)"
+  ]
+}
