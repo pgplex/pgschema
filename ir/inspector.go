@@ -741,6 +741,11 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		tableName := indexRow.Tablename
 		indexName := indexRow.Indexname
 
+		// Check if index should be ignored
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreIndex(indexName) {
+			continue
+		}
+
 		dbSchema := schema.getOrCreateSchema(schemaName)
 
 		// Extract values with null safety
