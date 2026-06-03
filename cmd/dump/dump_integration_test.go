@@ -151,6 +151,13 @@ func TestDumpCommand_Issue191FunctionProcedureOverload(t *testing.T) {
 	runExactMatchTest(t, "issue_191_function_procedure_overload")
 }
 
+func TestDumpCommand_Issue420VarcharArrayLengthModifier(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_420_varchar_array_length_modifier")
+}
+
 // Reproduces a bug where a column declared as `name` is dumped as `char[]`.
 // The inspector classifies any base type with pg_type.typelem <> 0 as an array,
 // but the `name` type has typelem = 18 (the OID of "char") despite not being an array.

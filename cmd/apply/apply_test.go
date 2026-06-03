@@ -498,6 +498,166 @@ func TestApplyCommandFileError(t *testing.T) {
 	}
 }
 
+func TestApplyFileExtensionValidation(t *testing.T) {
+	// Save original values
+	origDB := applyDB
+	origUser := applyUser
+	origFile := applyFile
+	origPlan := applyPlan
+	defer func() {
+		applyDB = origDB
+		applyUser = origUser
+		applyFile = origFile
+		applyPlan = origPlan
+	}()
+
+	t.Run("file with json extension suggests plan", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = "plan.json"
+		applyPlan = ""
+
+		err := RunApply(nil, []string{})
+		if err == nil {
+			t.Fatal("Expected error when --file has .json extension")
+		}
+		if !strings.Contains(err.Error(), "--file expects a SQL schema file") {
+			t.Errorf("Expected SQL schema file error, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "--plan instead") {
+			t.Errorf("Expected suggestion to use --plan, got: %v", err)
+		}
+	})
+
+	t.Run("file with JSON extension case insensitive", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = "plan.JSON"
+		applyPlan = ""
+
+		err := RunApply(nil, []string{})
+		if err == nil {
+			t.Fatal("Expected error when --file has .JSON extension")
+		}
+		if !strings.Contains(err.Error(), "--file expects a SQL schema file") {
+			t.Errorf("Expected SQL schema file error, got: %v", err)
+		}
+	})
+
+	t.Run("plan with sql extension suggests file", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = "schema.sql"
+
+		err := RunApply(nil, []string{})
+		if err == nil {
+			t.Fatal("Expected error when --plan has .sql extension")
+		}
+		if !strings.Contains(err.Error(), "--plan expects a JSON plan file") {
+			t.Errorf("Expected JSON plan file error, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "--file instead") {
+			t.Errorf("Expected suggestion to use --file, got: %v", err)
+		}
+	})
+
+	t.Run("plan with SQL extension case insensitive", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = "schema.SQL"
+
+		err := RunApply(nil, []string{})
+		if err == nil {
+			t.Fatal("Expected error when --plan has .SQL extension")
+		}
+		if !strings.Contains(err.Error(), "--plan expects a JSON plan file") {
+			t.Errorf("Expected JSON plan file error, got: %v", err)
+		}
+	})
+
+	t.Run("file with sql extension no error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.sql")
+		if err := os.WriteFile(schemaPath, []byte("CREATE TABLE test (id INT);"), 0644); err != nil {
+			t.Fatalf("Failed to write schema file: %v", err)
+		}
+
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = schemaPath
+		applyPlan = ""
+
+		err := RunApply(nil, []string{})
+		// Should fail on something other than extension validation
+		if err != nil && strings.Contains(err.Error(), "expects a") {
+			t.Errorf("Should not get extension validation error for .sql file: %v", err)
+		}
+	})
+
+	t.Run("plan with json extension no error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		planPath := filepath.Join(tmpDir, "plan.json")
+		planJSON := fmt.Sprintf(`{"version":"1.0.0","pgschema_version":"%s","created_at":"2024-01-01T00:00:00Z","transaction":true,"summary":{"total":0,"add":0,"change":0,"destroy":0,"by_type":{}},"diffs":[]}`, version.App())
+		if err := os.WriteFile(planPath, []byte(planJSON), 0644); err != nil {
+			t.Fatalf("Failed to write plan file: %v", err)
+		}
+
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+
+		err := RunApply(nil, []string{})
+		// Should not get extension validation error
+		if err != nil && strings.Contains(err.Error(), "expects a") {
+			t.Errorf("Should not get extension validation error for .json plan: %v", err)
+		}
+	})
+}
+
+func TestValidateFileExtension(t *testing.T) {
+	tests := []struct {
+		name     string
+		file     string
+		plan     string
+		wantErr  bool
+		errMsg   string
+	}{
+		{"file with json", "plan.json", "", true, "--file expects a SQL schema file"},
+		{"file with JSON uppercase", "plan.JSON", "", true, "--file expects a SQL schema file"},
+		{"file with Json mixed case", "plan.Json", "", true, "--file expects a SQL schema file"},
+		{"plan with sql", "", "schema.sql", true, "--plan expects a JSON plan file"},
+		{"plan with SQL uppercase", "", "schema.SQL", true, "--plan expects a JSON plan file"},
+		{"file with sql is ok", "schema.sql", "", false, ""},
+		{"plan with json is ok", "", "plan.json", false, ""},
+		{"both empty is ok", "", "", false, ""},
+		{"file with no extension is ok", "schema", "", false, ""},
+		{"plan with no extension is ok", "", "plan", false, ""},
+		{"file with path and json", "/tmp/plans/plan.json", "", true, "--file expects a SQL schema file"},
+		{"plan with path and sql", "", "/tmp/schemas/schema.sql", true, "--plan expects a JSON plan file"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFileExtension(tt.file, tt.plan)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("Expected error but got nil")
+				}
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got: %v", tt.errMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestApplyCommand_PlanDatabaseFlags(t *testing.T) {
 	flags := ApplyCmd.Flags()
 

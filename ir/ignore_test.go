@@ -107,6 +107,7 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		Procedures: []string{"sp_*"},
 		Types:      []string{"type_*"},
 		Sequences:  []string{"seq_*"},
+		Indexes:    []string{"idx_*"},
 	}
 
 	// Test each object type
@@ -127,6 +128,8 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		{config.ShouldIgnoreType, "user_status", false},
 		{config.ShouldIgnoreSequence, "seq_temp", true},
 		{config.ShouldIgnoreSequence, "user_id_seq", false},
+		{config.ShouldIgnoreIndex, "idx_temp", true},
+		{config.ShouldIgnoreIndex, "users_pkey", false},
 	}
 
 	for _, tt := range tests {
@@ -158,6 +161,9 @@ func TestIgnoreConfig_NilConfig(t *testing.T) {
 	}
 	if config.ShouldIgnoreSequence("any_sequence") {
 		t.Error("nil config should not ignore any sequence")
+	}
+	if config.ShouldIgnoreIndex("any_index") {
+		t.Error("nil config should not ignore any index")
 	}
 }
 
