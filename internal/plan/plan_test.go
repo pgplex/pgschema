@@ -321,3 +321,41 @@ func TestPlanDebugJSONRoundTrip(t *testing.T) {
 		t.Errorf("Group count mismatch: got %d, want %d", len(loaded2.Groups), len(loaded.Groups))
 	}
 }
+
+// TestPartitionedParentIndexRewrite verifies that index rewrites on partitioned
+// parents fall back to the canonical synchronous DDL instead of emitting
+// CREATE INDEX CONCURRENTLY, which PostgreSQL rejects with SQLSTATE 0A000 (#418).
+func TestPartitionedParentIndexRewrite(t *testing.T) {
+	regular := &ir.Index{Schema: "public", Table: "events", Name: "events_idx",
+		Type: ir.IndexTypeRegular, Columns: []*ir.IndexColumn{{Name: "occurred"}}}
+	partitioned := *regular
+	partitioned.IsPartitioned = true
+
+	// CREATE path
+	if steps := generateIndexRewrite(&partitioned); steps != nil {
+		t.Errorf("generateIndexRewrite on partitioned parent: got %d steps, want nil (synchronous fallback)", len(steps))
+	}
+	if steps := generateIndexRewrite(regular); len(steps) == 0 {
+		t.Error("generateIndexRewrite on regular table: want concurrent rewrite steps, got nil")
+	} else if !strings.Contains(steps[0].SQL, "CONCURRENTLY") {
+		t.Errorf("generateIndexRewrite on regular table: expected CONCURRENTLY, got %q", steps[0].SQL)
+	}
+
+	// ALTER/replacement path (source is new index)
+	if steps := generateIndexChangeRewriteFromIndex(&partitioned); steps != nil {
+		t.Errorf("generateIndexChangeRewriteFromIndex on partitioned parent: got %d steps, want nil", len(steps))
+	}
+	if steps := generateIndexChangeRewriteFromIndex(regular); len(steps) == 0 {
+		t.Error("generateIndexChangeRewriteFromIndex on regular table: want rewrite steps, got nil")
+	}
+
+	// ALTER/replacement path (source is IndexDiff)
+	partDiff := &diff.IndexDiff{Old: &partitioned, New: &partitioned}
+	if steps := generateIndexChangeRewrite(partDiff); steps != nil {
+		t.Errorf("generateIndexChangeRewrite on partitioned parent: got %d steps, want nil", len(steps))
+	}
+	regDiff := &diff.IndexDiff{Old: regular, New: regular}
+	if steps := generateIndexChangeRewrite(regDiff); len(steps) == 0 {
+		t.Error("generateIndexChangeRewrite on regular table: want rewrite steps, got nil")
+	}
+}

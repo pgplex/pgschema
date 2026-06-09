@@ -259,6 +259,7 @@ type Index struct {
 	IsExpression     bool     `json:"is_expression"`                // functional/expression index
 	Where            string   `json:"where,omitempty"`              // partial index condition
 	NullsNotDistinct bool     `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
+	IsPartitioned    bool     `json:"is_partitioned,omitempty"`     // index target is a partitioned parent (relkind 'p')
 	Comment          string   `json:"comment,omitempty"`
 }
 

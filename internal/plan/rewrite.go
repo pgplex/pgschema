@@ -108,6 +108,13 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 
 // generateIndexRewrite generates rewrite steps for CREATE INDEX operations
 func generateIndexRewrite(index *ir.Index) []RewriteStep {
+	// PostgreSQL rejects CREATE INDEX CONCURRENTLY on partitioned parents
+	// (SQLSTATE 0A000). Fall back to the canonical synchronous CREATE INDEX
+	// (returning nil here makes the plan emit the non-concurrent statement).
+	if index.IsPartitioned {
+		return nil
+	}
+
 	// Generate concurrent SQL
 	concurrentSQL := generateIndexSQL(index, true) // With CONCURRENTLY
 	waitSQL := generateIndexWaitQueryWithName(index.Name)
@@ -130,6 +137,13 @@ func generateIndexRewrite(index *ir.Index) []RewriteStep {
 
 // generateIndexChangeRewriteFromIndex generates rewrite steps for index replacement when source is new index
 func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
+	// PostgreSQL rejects CREATE INDEX CONCURRENTLY on partitioned parents
+	// (SQLSTATE 0A000). Fall back to the canonical synchronous DROP/CREATE
+	// (returning nil here makes the plan emit the non-concurrent statements).
+	if index.IsPartitioned {
+		return nil
+	}
+
 	// For index replacements, we need to create new index, wait, drop old, rename
 	tempIndexName := index.Name + "_pgschema_new"
 
@@ -169,6 +183,13 @@ func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
 
 // generateIndexChangeRewrite generates rewrite steps for index modifications
 func generateIndexChangeRewrite(indexDiff *diff.IndexDiff) []RewriteStep {
+	// PostgreSQL rejects CREATE INDEX CONCURRENTLY on partitioned parents
+	// (SQLSTATE 0A000). Fall back to the canonical synchronous DROP/CREATE
+	// (returning nil here makes the plan emit the non-concurrent statements).
+	if indexDiff.New.IsPartitioned {
+		return nil
+	}
+
 	// For index changes, we need to create new index, wait, drop old, rename
 	tempIndexName := indexDiff.New.Name + "_pgschema_new"
 
