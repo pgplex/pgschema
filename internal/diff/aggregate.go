@@ -193,8 +193,8 @@ func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 		add("DESERIALFUNC = %s", aggregate.DeserialFunction)
 	}
 
-	if aggregate.InitialCondition != "" {
-		add("INITCOND = %s", quoteString(aggregate.InitialCondition))
+	if aggregate.InitialCondition != nil {
+		add("INITCOND = %s", quoteString(*aggregate.InitialCondition))
 	}
 
 	// Moving-aggregate group (gated on a moving transition function).
@@ -219,8 +219,8 @@ func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 	if kw := finalFuncModifyKeyword(aggregate.MFinalFuncModify); kw != "" {
 		add("MFINALFUNC_MODIFY = %s", kw)
 	}
-	if aggregate.MInitialCondition != "" {
-		add("MINITCOND = %s", quoteString(aggregate.MInitialCondition))
+	if aggregate.MInitialCondition != nil {
+		add("MINITCOND = %s", quoteString(*aggregate.MInitialCondition))
 	}
 
 	// SORTOP is only emitted for normal aggregates.
@@ -282,7 +282,7 @@ func aggregatesEqualExceptComment(old, new *ir.Aggregate) bool {
 		old.TransitionFunction == new.TransitionFunction &&
 		old.StateType == new.StateType &&
 		old.StateSpace == new.StateSpace &&
-		old.InitialCondition == new.InitialCondition &&
+		stringPtrEqual(old.InitialCondition, new.InitialCondition) &&
 		old.FinalFunction == new.FinalFunction &&
 		old.FinalFuncExtra == new.FinalFuncExtra &&
 		old.FinalFuncModify == new.FinalFuncModify &&
@@ -296,6 +296,15 @@ func aggregatesEqualExceptComment(old, new *ir.Aggregate) bool {
 		old.MFinalFunction == new.MFinalFunction &&
 		old.MFinalFuncExtra == new.MFinalFuncExtra &&
 		old.MFinalFuncModify == new.MFinalFuncModify &&
-		old.MInitialCondition == new.MInitialCondition &&
+		stringPtrEqual(old.MInitialCondition, new.MInitialCondition) &&
 		old.SortOperator == new.SortOperator
+}
+
+// stringPtrEqual compares two optional strings, distinguishing nil (NULL) from a
+// pointer to the empty string.
+func stringPtrEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

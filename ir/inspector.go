@@ -1347,6 +1347,19 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 		// Identity args (types only) drive the DROP/COMMENT signature and the overload key.
 		identityArgs := i.safeInterfaceToString(agg.AggregateIdentityArgs)
 
+		// agginitval/aggminitval are nullable: preserve NULL (nil) vs explicit '' so an
+		// INITCOND/MINITCOND of empty string is not silently dropped.
+		var initialCondition *string
+		if agg.InitialCondition.Valid {
+			v := agg.InitialCondition.String
+			initialCondition = &v
+		}
+		var minitialCondition *string
+		if agg.MinitialCondition.Valid {
+			v := agg.MinitialCondition.String
+			minitialCondition = &v
+		}
+
 		dbSchema := schema.getOrCreateSchema(schemaName)
 
 		aggregate := &Aggregate{
@@ -1361,7 +1374,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 			TransitionFunction: i.safeInterfaceToString(agg.TransitionFunction),
 			StateType:          i.safeInterfaceToString(agg.StateType),
 			StateSpace:         int(agg.StateSpace),
-			InitialCondition:   i.safeInterfaceToString(agg.InitialCondition),
+			InitialCondition:   initialCondition,
 
 			FinalFunction:   i.safeInterfaceToString(agg.FinalFunction),
 			FinalFuncExtra:  agg.FinalFuncExtra,
@@ -1378,7 +1391,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 			MFinalFunction:         i.safeInterfaceToString(agg.MfinalFunction),
 			MFinalFuncExtra:        agg.MfinalFuncExtra,
 			MFinalFuncModify:       i.safeInterfaceToString(agg.MfinalFuncModify),
-			MInitialCondition:      i.safeInterfaceToString(agg.MinitialCondition),
+			MInitialCondition:      minitialCondition,
 
 			SortOperator: i.safeInterfaceToString(agg.SortOperator),
 

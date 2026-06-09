@@ -610,7 +610,10 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			agg.ReturnType = replaceString(agg.ReturnType)
 			agg.TransitionFunction = replaceString(agg.TransitionFunction)
 			agg.StateType = replaceString(agg.StateType)
-			agg.InitialCondition = replaceString(agg.InitialCondition)
+			if agg.InitialCondition != nil {
+				v := replaceString(*agg.InitialCondition)
+				agg.InitialCondition = &v
+			}
 			agg.FinalFunction = replaceString(agg.FinalFunction)
 			agg.CombineFunction = replaceString(agg.CombineFunction)
 			agg.SerialFunction = replaceString(agg.SerialFunction)
@@ -619,7 +622,10 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			agg.MInvTransitionFunction = replaceString(agg.MInvTransitionFunction)
 			agg.MStateType = replaceString(agg.MStateType)
 			agg.MFinalFunction = replaceString(agg.MFinalFunction)
-			agg.MInitialCondition = replaceString(agg.MInitialCondition)
+			if agg.MInitialCondition != nil {
+				v := replaceString(*agg.MInitialCondition)
+				agg.MInitialCondition = &v
+			}
 			agg.SortOperator = replaceString(agg.SortOperator)
 		}
 	}

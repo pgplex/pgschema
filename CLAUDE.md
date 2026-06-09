@@ -273,7 +273,7 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 
 Tests are organized by object type (150+ test cases):
 
-- `comment/` (12), `create_aggregate/` (3), `create_domain/` (5), `create_function/` (8), `create_index/` (2)
+- `comment/` (12), `create_aggregate/` (4), `create_domain/` (5), `create_function/` (8), `create_index/` (2)
 - `create_materialized_view/` (3), `create_policy/` (10), `create_procedure/` (3), `create_sequence/` (3)
 - `create_table/` (37), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
 - `default_privilege/` (9), `privilege/` (13)
