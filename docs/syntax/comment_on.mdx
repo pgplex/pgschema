@@ -8,16 +8,18 @@ title: "COMMENT ON"
 comment_on ::= COMMENT ON object_type object_name IS 'comment_text'
              | COMMENT ON object_type object_name IS NULL
 
-object_type ::= COLUMN | FUNCTION | INDEX | MATERIALIZED VIEW | PROCEDURE | TABLE | VIEW
+object_type ::= AGGREGATE | COLUMN | FUNCTION | INDEX | MATERIALIZED VIEW | PROCEDURE | TABLE | VIEW
 
 object_name ::= [schema.]name
               | [schema.]table_name.column_name                -- for columns
               | [schema.]function_name(argument_types)         -- for functions
               | [schema.]procedure_name(argument_types)        -- for procedures
+              | [schema.]aggregate_name(argument_types)        -- for aggregates
 ```
 
 `COMMENT ON` is supported for the following objects:
 
+- Aggregate
 - Column
 - Function
 - Index

@@ -83,6 +83,7 @@ pgschema covers all the schema objects developers use in real-world Postgres app
 | **Materialized Views** | WITH [NO] DATA, indexes on materialized views |
 | **Functions** | IN/OUT/INOUT parameters with defaults, SETOF/TABLE return types, SECURITY DEFINER, IMMUTABLE/STABLE/VOLATILE, STRICT |
 | **Procedures** | IN/OUT/INOUT parameters with defaults, all procedural languages |
+| **Aggregates** | SFUNC/STYPE/FINALFUNC/INITCOND, COMBINEFUNC and SERIALFUNC/DESERIALFUNC, moving-aggregate support, SORTOP, PARALLEL, ordered-set/hypothetical-set |
 | **Triggers** | BEFORE/AFTER/INSTEAD OF, INSERT/UPDATE/DELETE/TRUNCATE, ROW/STATEMENT level, WHEN conditions, constraint triggers, REFERENCING OLD/NEW TABLE |
 | **Sequences** | START WITH, INCREMENT BY, MINVALUE/MAXVALUE, CYCLE, CACHE, OWNED BY |
 | **Types** | ENUM (add values in-place), composite types |
@@ -90,7 +91,7 @@ pgschema covers all the schema objects developers use in real-world Postgres app
 | **Policies** | Row-level security (RLS), PERMISSIVE/RESTRICTIVE, ALL/SELECT/INSERT/UPDATE/DELETE commands, USING/WITH CHECK expressions, ENABLE/DISABLE/FORCE ROW LEVEL SECURITY |
 | **Privileges** | GRANT/REVOKE for tables (including column-level), sequences, functions, procedures, types/domains; WITH GRANT OPTION |
 | **Default Privileges** | ALTER DEFAULT PRIVILEGES for tables, sequences, functions, types |
-| **Comments** | COMMENT ON for tables, columns, views, materialized views, functions, procedures, indexes |
+| **Comments** | COMMENT ON for tables, columns, views, materialized views, functions, procedures, aggregates, indexes |
 
 See [Unsupported](https://www.pgschema.com/syntax/unsupported) for objects that are explicitly out of scope.
 

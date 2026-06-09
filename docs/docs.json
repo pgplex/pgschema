@@ -55,6 +55,7 @@
           "syntax/unsupported",
           "syntax/alter_default_privileges",
           "syntax/comment_on",
+          "syntax/create_aggregate",
           "syntax/create_domain",
           "syntax/create_function",
           "syntax/create_index",

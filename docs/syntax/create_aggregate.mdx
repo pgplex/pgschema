@@ -1,0 +1,71 @@
+---
+title: "CREATE AGGREGATE"
+---
+
+## Syntax
+
+```sql
+create_aggregate ::= CREATE AGGREGATE aggregate_name ( aggregate_signature ) (
+                        SFUNC = sfunc,
+                        STYPE = state_type
+                        [ , option [, ...] ]
+                     )
+
+aggregate_name ::= [schema.]name
+
+aggregate_signature ::= * | arg_type [, ...] | [ arg_type [, ...] ] ORDER BY arg_type [, ...]
+
+option ::= SSPACE = state_space
+         | FINALFUNC = ffunc
+         | FINALFUNC_EXTRA
+         | FINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE }
+         | COMBINEFUNC = combinefunc
+         | SERIALFUNC = serialfunc
+         | DESERIALFUNC = deserialfunc
+         | INITCOND = initial_condition
+         | MSFUNC = msfunc
+         | MINVFUNC = minvfunc
+         | MSTYPE = mstate_type
+         | MSSPACE = mstate_space
+         | MFINALFUNC = mffunc
+         | MFINALFUNC_EXTRA
+         | MFINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE }
+         | MINITCOND = minitial_condition
+         | SORTOP = sort_operator
+         | PARALLEL = { SAFE | RESTRICTED | UNSAFE }
+         | HYPOTHETICAL
+```
+
+pgschema understands the following `CREATE AGGREGATE` features:
+
+- **Schema-qualified names**: Aggregates can be defined in specific schemas, and overloaded aggregates (same name, different argument types) are tracked independently.
+- **Transition and final functions**: `SFUNC`/`STYPE` (required), `FINALFUNC`, `FINALFUNC_EXTRA`, and `FINALFUNC_MODIFY`.
+- **Initial condition**: `INITCOND`.
+- **Parallel aggregation**: `COMBINEFUNC`, `SERIALFUNC`, `DESERIALFUNC`, and `PARALLEL = SAFE | RESTRICTED`.
+- **Moving-aggregate support** (for window frames): `MSFUNC`, `MINVFUNC`, `MSTYPE`, `MSSPACE`, `MFINALFUNC`, `MFINALFUNC_EXTRA`, `MFINALFUNC_MODIFY`, and `MINITCOND`.
+- **State space hints**: `SSPACE` and `MSSPACE`.
+- **Sort operator**: `SORTOP` (for normal aggregates, e.g. `MIN`/`MAX`-style aggregates).
+- **Ordered-set and hypothetical-set aggregates**: the `... ORDER BY ...` signature is preserved, and `HYPOTHETICAL` is emitted for hypothetical-set aggregates.
+- **Comments**: `COMMENT ON AGGREGATE`.
+
+Support-function references (`SFUNC`, `FINALFUNC`, `COMBINEFUNC`, ...) are schema-qualified only when they live in a different schema than the aggregate itself.
+
+## Canonical Format
+
+When generating migration SQL, pgschema produces aggregates in the following canonical format:
+
+```sql
+CREATE AGGREGATE [schema.]aggregate_name(aggregate_signature) (
+    SFUNC = sfunc,
+    STYPE = state_type[,
+    ...additional options in pg_dump order...]
+);
+```
+
+**Key characteristics of the canonical format:**
+
+- `SFUNC` and `STYPE` are always emitted; every other option is emitted only when it differs from its PostgreSQL default, in the same order pg_dump uses.
+- A zero-argument aggregate renders its signature as `(*)`.
+- PostgreSQL has no `ALTER AGGREGATE` for the defining properties, so any change to an aggregate's definition is expressed as `DROP AGGREGATE` + `CREATE AGGREGATE`. A comment-only change emits just `COMMENT ON AGGREGATE`.
+- For DROP operations: `DROP AGGREGATE IF EXISTS aggregate_name(argument_types);` — the signature contains only the argument types (the identity signature).
+- Aggregates are created after their support functions and all tables, and before views that reference them; they are dropped before their support functions.
