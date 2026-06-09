@@ -2375,21 +2375,43 @@ func (q *Queries) GetProceduresForSchema(ctx context.Context, dollar_1 sql.NullS
 }
 
 const getRLSPolicies = `-- name: GetRLSPolicies :many
-SELECT 
-    schemaname,
-    tablename,
-    policyname,
-    permissive,
-    roles,
-    cmd,
-    qual,
-    with_check
-FROM pg_policies
-WHERE 
-    schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND schemaname NOT LIKE 'pg_temp_%'
-    AND schemaname NOT LIKE 'pg_toast_temp_%'
-ORDER BY schemaname, tablename, policyname
+SELECT
+    n.nspname AS schemaname,
+    c.relname AS tablename,
+    pol.polname AS policyname,
+    CASE WHEN pol.polpermissive THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END AS permissive,
+    CASE
+        WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['public']
+        ELSE ARRAY(
+            SELECT r.rolname
+            FROM pg_catalog.pg_roles r
+            WHERE r.oid = ANY (pol.polroles)
+            ORDER BY r.rolname
+        )
+    END AS roles,
+    CASE pol.polcmd
+        WHEN 'r' THEN 'SELECT'
+        WHEN 'a' THEN 'INSERT'
+        WHEN 'w' THEN 'UPDATE'
+        WHEN 'd' THEN 'DELETE'
+        WHEN '*' THEN 'ALL'
+    END AS cmd,
+    e.qual,
+    e.with_check
+FROM pg_catalog.pg_policy pol
+JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN LATERAL (
+    SELECT
+        set_config('search_path', 'pg_catalog', true) AS dummy,
+        pg_get_expr(pol.polqual, pol.polrelid) AS qual,
+        pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
+) e ON true
+WHERE
+    n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+    AND n.nspname NOT LIKE 'pg_temp_%'
+    AND n.nspname NOT LIKE 'pg_toast_temp_%'
+ORDER BY n.nspname, c.relname, pol.polname
 `
 
 type GetRLSPoliciesRow struct {
@@ -2437,19 +2459,41 @@ func (q *Queries) GetRLSPolicies(ctx context.Context) ([]GetRLSPoliciesRow, erro
 }
 
 const getRLSPoliciesForSchema = `-- name: GetRLSPoliciesForSchema :many
-SELECT 
-    schemaname,
-    tablename,
-    policyname,
-    permissive,
-    roles,
-    cmd,
-    qual,
-    with_check
-FROM pg_policies
-WHERE 
-    schemaname = $1
-ORDER BY schemaname, tablename, policyname
+SELECT
+    n.nspname AS schemaname,
+    c.relname AS tablename,
+    pol.polname AS policyname,
+    CASE WHEN pol.polpermissive THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END AS permissive,
+    CASE
+        WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['public']
+        ELSE ARRAY(
+            SELECT r.rolname
+            FROM pg_catalog.pg_roles r
+            WHERE r.oid = ANY (pol.polroles)
+            ORDER BY r.rolname
+        )
+    END AS roles,
+    CASE pol.polcmd
+        WHEN 'r' THEN 'SELECT'
+        WHEN 'a' THEN 'INSERT'
+        WHEN 'w' THEN 'UPDATE'
+        WHEN 'd' THEN 'DELETE'
+        WHEN '*' THEN 'ALL'
+    END AS cmd,
+    e.qual,
+    e.with_check
+FROM pg_catalog.pg_policy pol
+JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN LATERAL (
+    SELECT
+        set_config('search_path', 'pg_catalog', true) AS dummy,
+        pg_get_expr(pol.polqual, pol.polrelid) AS qual,
+        pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
+) e ON true
+WHERE
+    n.nspname = $1
+ORDER BY n.nspname, c.relname, pol.polname
 `
 
 type GetRLSPoliciesForSchemaRow struct {

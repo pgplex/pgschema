@@ -286,6 +286,67 @@ func TestDumpCommand_Issue318CrossSchemaComment(t *testing.T) {
 	}
 }
 
+func TestDumpCommand_Issue427PolicyQualifiedFunction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Setup PostgreSQL
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+
+	// Connect to database
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	// Read and execute the setup SQL that creates a helper schema (auth) referenced
+	// from RLS policies in a managed schema (app).
+	setupPath := "../../testdata/dump/issue_427_policy_qualified_function/setup.sql"
+	setupContent, err := os.ReadFile(setupPath)
+	if err != nil {
+		t.Fatalf("Failed to read %s: %v", setupPath, err)
+	}
+
+	if _, err := conn.ExecContext(context.Background(), string(setupContent)); err != nil {
+		t.Fatalf("Failed to execute setup.sql: %v", err)
+	}
+
+	// Put the helper schema on the search_path for subsequent connections, mirroring
+	// the Supabase environment where auth is on the search_path. The dump command opens
+	// its own connection, so set this at the database level. Without the fix, this is
+	// exactly what makes pg_get_expr strip the auth. qualifier from the policy
+	// expressions and emit bare uid()/role().
+	alter := fmt.Sprintf(`ALTER DATABASE %s SET search_path TO "$user", public, auth`, ir.QuoteIdentifier(dbname))
+	if _, err := conn.ExecContext(context.Background(), alter); err != nil {
+		t.Fatalf("Failed to set database search_path: %v", err)
+	}
+
+	config := &DumpConfig{
+		Host:      host,
+		Port:      port,
+		DB:        dbname,
+		User:      user,
+		Password:  password,
+		Schema:    "app",
+		MultiFile: false,
+		File:      "",
+	}
+
+	output, err := ExecuteDump(config)
+	if err != nil {
+		t.Fatalf("Dump command failed: %v", err)
+	}
+
+	// The cross-schema function references must remain schema-qualified, otherwise
+	// apply would fail with "function uid() does not exist".
+	if !strings.Contains(output, "auth.uid()") {
+		t.Errorf("expected policy expression to preserve qualified auth.uid(), output:\n%s", output)
+	}
+	if !strings.Contains(output, "auth.role()") {
+		t.Errorf("expected policy expression to preserve qualified auth.role(), output:\n%s", output)
+	}
+}
+
 func TestDumpCommand_Issue307MultiFileViewDependencyOrder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
