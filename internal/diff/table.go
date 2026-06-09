@@ -802,13 +802,13 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if len(constraint.Columns) == 1 && constraint.Columns[0].Name == column.Name {
 				switch constraint.Type {
 				case ir.ConstraintTypePrimaryKey:
-					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s PRIMARY KEY", ir.QuoteIdentifier(constraint.Name))
+					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s PRIMARY KEY%s", ir.QuoteIdentifier(constraint.Name), deferrableClause(constraint))
 				case ir.ConstraintTypeUnique:
 					modifier := ""
 					if constraint.NullsNotDistinct {
 						modifier = " NULLS NOT DISTINCT"
 					}
-					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s UNIQUE%s", ir.QuoteIdentifier(constraint.Name), modifier)
+					inlineConstraint = fmt.Sprintf(" CONSTRAINT %s UNIQUE%s%s", ir.QuoteIdentifier(constraint.Name), modifier, deferrableClause(constraint))
 				case ir.ConstraintTypeForeignKey:
 					// For FK, use the generateForeignKeyClause with inline=true
 					fkClause := generateForeignKeyClause(constraint, targetSchema, true)

@@ -9,6 +9,12 @@
     {
       "steps": [
         {
+          "sql": "ALTER TABLE user_sessions\nADD COLUMN api_key text NOT NULL CONSTRAINT user_sessions_api_key_key UNIQUE DEFERRABLE INITIALLY DEFERRED;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.user_sessions.api_key"
+        },
+        {
           "sql": "ALTER TABLE user_sessions\nADD CONSTRAINT user_sessions_token_device_key UNIQUE (session_token, device_fingerprint) DEFERRABLE INITIALLY DEFERRED;",
           "type": "table.constraint",
           "operation": "create",
