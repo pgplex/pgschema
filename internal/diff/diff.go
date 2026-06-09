@@ -1676,10 +1676,6 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create procedures (procedures may depend on tables and domains)
 	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
 
-	// Create aggregates after their transition/final functions exist, and before
-	// views (which may reference the aggregates in their definitions).
-	generateCreateAggregatesSQL(d.addedAggregates, targetSchema, collector)
-
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
 	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy)
 
@@ -1687,6 +1683,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
 	allDeferredConstraints := append(deferredConstraints1, deferredConstraints2...)
 	generateDeferredConstraintsSQL(allDeferredConstraints, targetSchema, collector)
+
+	// Create aggregates after their transition/final functions AND all tables exist
+	// (an aggregate may use a new table's row type as an argument or state type), and
+	// before views, which may reference the aggregates in their definitions.
+	generateCreateAggregatesSQL(d.addedAggregates, targetSchema, collector)
 
 	// Merge deferred policies from both batches
 	allDeferredPolicies := append(deferredPolicies1, deferredPolicies2...)

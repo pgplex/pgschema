@@ -1343,41 +1343,56 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 	for _, agg := range aggregates {
 		schemaName := agg.AggregateSchema
 		aggregateName := agg.AggregateName
-		comment := ""
-		if agg.AggregateComment.Valid {
-			comment = agg.AggregateComment.String
-		}
-		arguments := ""
-		if agg.AggregateArguments.Valid {
-			arguments = agg.AggregateArguments.String
-		}
-		returnType := i.safeInterfaceToString(agg.AggregateReturnType)
-		transitionFunction := i.safeInterfaceToString(agg.TransitionFunction)
-		transitionFunctionSchema := i.safeInterfaceToString(agg.TransitionFunctionSchema)
-		stateType := i.safeInterfaceToString(agg.StateType)
-		initialCondition := i.safeInterfaceToString(agg.InitialCondition)
-		finalFunction := i.safeInterfaceToString(agg.FinalFunction)
-		finalFunctionSchema := i.safeInterfaceToString(agg.FinalFunctionSchema)
+
+		// Identity args (types only) drive the DROP/COMMENT signature and the overload key.
+		identityArgs := i.safeInterfaceToString(agg.AggregateIdentityArgs)
 
 		dbSchema := schema.getOrCreateSchema(schemaName)
 
 		aggregate := &Aggregate{
-			Schema:                   schemaName,
-			Name:                     aggregateName,
-			Arguments:                arguments,
-			ReturnType:               returnType,
-			TransitionFunction:       transitionFunction,
-			TransitionFunctionSchema: transitionFunctionSchema,
-			StateType:                stateType,
-			InitialCondition:         initialCondition,
-			FinalFunction:            finalFunction,
-			FinalFunctionSchema:      finalFunctionSchema,
-			Comment:                  comment,
+			Schema:     schemaName,
+			Name:       aggregateName,
+			Arguments:  identityArgs,
+			Signature:  i.safeInterfaceToString(agg.AggregateSignature),
+			Kind:       i.safeInterfaceToString(agg.AggregateKind),
+			ReturnType: i.safeInterfaceToString(agg.AggregateReturnType),
+			Parallel:   i.safeInterfaceToString(agg.Parallel),
+
+			TransitionFunction: i.safeInterfaceToString(agg.TransitionFunction),
+			StateType:          i.safeInterfaceToString(agg.StateType),
+			StateSpace:         int(agg.StateSpace),
+			InitialCondition:   i.safeInterfaceToString(agg.InitialCondition),
+
+			FinalFunction:   i.safeInterfaceToString(agg.FinalFunction),
+			FinalFuncExtra:  agg.FinalFuncExtra,
+			FinalFuncModify: i.safeInterfaceToString(agg.FinalFuncModify),
+
+			CombineFunction:  i.safeInterfaceToString(agg.CombineFunction),
+			SerialFunction:   i.safeInterfaceToString(agg.SerialFunction),
+			DeserialFunction: i.safeInterfaceToString(agg.DeserialFunction),
+
+			MTransitionFunction:    i.safeInterfaceToString(agg.MtransitionFunction),
+			MInvTransitionFunction: i.safeInterfaceToString(agg.MinvTransitionFunction),
+			MStateType:             i.safeInterfaceToString(agg.MstateType),
+			MStateSpace:            int(agg.MstateSpace),
+			MFinalFunction:         i.safeInterfaceToString(agg.MfinalFunction),
+			MFinalFuncExtra:        agg.MfinalFuncExtra,
+			MFinalFuncModify:       i.safeInterfaceToString(agg.MfinalFuncModify),
+			MInitialCondition:      i.safeInterfaceToString(agg.MinitialCondition),
+
+			SortOperator: i.safeInterfaceToString(agg.SortOperator),
+
+			Comment: i.safeInterfaceToString(agg.AggregateComment),
+		}
+
+		// Check if aggregate should be ignored
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreAggregate(aggregateName) {
+			continue
 		}
 
 		// Use name(arguments) as key to support aggregate overloading,
 		// mirroring how functions and procedures are keyed.
-		aggregateKey := aggregateName + "(" + arguments + ")"
+		aggregateKey := aggregateName + "(" + identityArgs + ")"
 		dbSchema.SetAggregate(aggregateKey, aggregate)
 	}
 

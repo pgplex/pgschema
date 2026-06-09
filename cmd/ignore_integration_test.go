@@ -1726,3 +1726,112 @@ func verifyPlanOutput(t *testing.T, output string) {
 		}
 	}
 }
+
+func TestIgnoreAggregates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	// Two aggregates share one transition function: a managed aggregate plus a
+	// debug aggregate that is managed out-of-band and should be filtered.
+	setupSQL := `
+CREATE FUNCTION _concat_step(text, text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT CASE WHEN $1 IS NULL THEN $2 WHEN $2 IS NULL THEN $1 ELSE $1 || ',' || $2 END $$;
+
+CREATE AGGREGATE group_concat(text) (
+    SFUNC = _concat_step,
+    STYPE = text
+);
+
+CREATE AGGREGATE agg_debug_concat(text) (
+    SFUNC = _concat_step,
+    STYPE = text
+);
+`
+	if _, err := conn.Exec(setupSQL); err != nil {
+		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Ignore any aggregate whose name starts with "agg_debug_"
+	ignoreContent := `[aggregates]
+patterns = ["agg_debug_*"]
+`
+	if err := os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644); err != nil {
+		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	}
+
+	t.Run("dump", func(t *testing.T) {
+		output := executeIgnoreDumpCommand(t, containerInfo)
+
+		if !strings.Contains(output, "CREATE AGGREGATE group_concat") {
+			t.Error("Dump should include group_concat (not ignored)")
+		}
+		if strings.Contains(output, "agg_debug_concat") {
+			t.Error("Dump should not include agg_debug_concat (ignored by [aggregates] patterns)")
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		// Desired schema declares only the managed aggregate and its function.
+		// Without the ignore, the plan would emit DROP AGGREGATE agg_debug_concat;
+		// with the ignore it should not reference it.
+		schemaSQL := `
+CREATE FUNCTION _concat_step(text, text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT CASE WHEN $1 IS NULL THEN $2 WHEN $2 IS NULL THEN $1 ELSE $1 || ',' || $2 END $$;
+
+CREATE AGGREGATE group_concat(text) (
+    SFUNC = _concat_step,
+    STYPE = text
+);
+`
+		schemaFile := "schema.sql"
+		if err := os.WriteFile(schemaFile, []byte(schemaSQL), 0644); err != nil {
+			t.Fatalf("Failed to create schema file: %v", err)
+		}
+		defer os.Remove(schemaFile)
+
+		output := executeIgnorePlanCommand(t, containerInfo, schemaFile)
+
+		if strings.Contains(output, "agg_debug_concat") {
+			t.Errorf("Plan should not reference agg_debug_concat (ignored); got: %s", output)
+		}
+	})
+}

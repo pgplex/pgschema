@@ -8,14 +8,47 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
-// aggregateArgsClause returns the argument list used inside the parentheses of
-// CREATE/DROP/COMMENT AGGREGATE statements. Zero-argument aggregates (e.g. a
-// custom count(*)) use "*".
-func aggregateArgsClause(aggregate *ir.Aggregate) string {
-	if aggregate.Arguments == "" {
+// aggregateSortKey produces a fully-qualified, overload-aware key so that aggregates
+// sharing a name (overloads, or the same name across schemas) order deterministically.
+func aggregateSortKey(a *ir.Aggregate) string {
+	return a.Schema + "." + a.Name + "(" + a.Arguments + ")"
+}
+
+// aggregateArgs returns the argument list used inside the parentheses of a
+// CREATE/DROP/COMMENT AGGREGATE statement. A zero-argument aggregate (e.g. a
+// custom count(*)) has an empty list and is rendered as "*". Ordered-set and
+// hypothetical-set aggregates already carry their "... ORDER BY ..." form.
+func aggregateArgs(args string) string {
+	if args == "" {
 		return "*"
 	}
-	return aggregate.Arguments
+	return args
+}
+
+// finalFuncModifyKeyword maps the catalog code ('r'/'s'/'w') to the CREATE
+// AGGREGATE keyword. READ_ONLY ('r') is the default and is never emitted.
+func finalFuncModifyKeyword(code string) string {
+	switch code {
+	case "s":
+		return "SHAREABLE"
+	case "w":
+		return "READ_WRITE"
+	default:
+		return ""
+	}
+}
+
+// parallelKeyword maps pg_proc.proparallel ('s'/'r'/'u') to the CREATE AGGREGATE
+// keyword. UNSAFE ('u') is the default and is never emitted.
+func parallelKeyword(code string) string {
+	switch code {
+	case "s":
+		return "SAFE"
+	case "r":
+		return "RESTRICTED"
+	default:
+		return ""
+	}
 }
 
 // generateCreateAggregatesSQL generates CREATE AGGREGATE statements
@@ -24,7 +57,7 @@ func generateCreateAggregatesSQL(aggregates []*ir.Aggregate, targetSchema string
 	sortedAggregates := make([]*ir.Aggregate, len(aggregates))
 	copy(sortedAggregates, aggregates)
 	sort.Slice(sortedAggregates, func(i, j int) bool {
-		return sortedAggregates[i].Name < sortedAggregates[j].Name
+		return aggregateSortKey(sortedAggregates[i]) < aggregateSortKey(sortedAggregates[j])
 	})
 
 	for _, aggregate := range sortedAggregates {
@@ -92,7 +125,7 @@ func generateDropAggregatesSQL(aggregates []*ir.Aggregate, targetSchema string, 
 	sortedAggregates := make([]*ir.Aggregate, len(aggregates))
 	copy(sortedAggregates, aggregates)
 	sort.Slice(sortedAggregates, func(i, j int) bool {
-		return sortedAggregates[i].Name < sortedAggregates[j].Name
+		return aggregateSortKey(sortedAggregates[i]) < aggregateSortKey(sortedAggregates[j])
 	})
 
 	for _, aggregate := range sortedAggregates {
@@ -113,34 +146,95 @@ func generateDropAggregatesSQL(aggregates []*ir.Aggregate, targetSchema string, 
 // generateAggregateDropSQL builds a DROP AGGREGATE statement
 func generateAggregateDropSQL(aggregate *ir.Aggregate, targetSchema string) string {
 	aggregateName := qualifyEntityName(aggregate.Schema, aggregate.Name, targetSchema)
-	return fmt.Sprintf("DROP AGGREGATE IF EXISTS %s(%s);", aggregateName, aggregateArgsClause(aggregate))
+	return fmt.Sprintf("DROP AGGREGATE IF EXISTS %s(%s);", aggregateName, aggregateArgs(aggregate.Arguments))
 }
 
-// generateAggregateSQL generates a CREATE AGGREGATE statement
+// generateAggregateSQL generates a CREATE AGGREGATE statement, emitting options in the
+// same order as pg_dump and only when they differ from their defaults. Support-function
+// references are stored pre-qualified relative to the aggregate's schema, so they are
+// emitted verbatim.
 func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 	var stmt strings.Builder
 
 	aggregateName := qualifyEntityName(aggregate.Schema, aggregate.Name, targetSchema)
-	stmt.WriteString(fmt.Sprintf("CREATE AGGREGATE %s(%s) (\n", aggregateName, aggregateArgsClause(aggregate)))
+	stmt.WriteString(fmt.Sprintf("CREATE AGGREGATE %s(%s) (\n", aggregateName, aggregateArgs(aggregate.Signature)))
 
 	var parts []string
-
-	// SFUNC - the state transition function (qualified relative to the target schema)
-	sfunc := qualifyEntityName(aggregate.TransitionFunctionSchema, aggregate.TransitionFunction, targetSchema)
-	parts = append(parts, fmt.Sprintf("    SFUNC = %s", sfunc))
-
-	// STYPE - the state value type
-	parts = append(parts, fmt.Sprintf("    STYPE = %s", stripSchemaPrefix(aggregate.StateType, targetSchema)))
-
-	// FINALFUNC - the optional final function
-	if aggregate.FinalFunction != "" {
-		ffunc := qualifyEntityName(aggregate.FinalFunctionSchema, aggregate.FinalFunction, targetSchema)
-		parts = append(parts, fmt.Sprintf("    FINALFUNC = %s", ffunc))
+	add := func(format string, args ...interface{}) {
+		parts = append(parts, "    "+fmt.Sprintf(format, args...))
 	}
 
-	// INITCOND - the optional initial condition
+	// SFUNC / STYPE are always present.
+	add("SFUNC = %s", aggregate.TransitionFunction)
+	add("STYPE = %s", stripSchemaPrefix(aggregate.StateType, targetSchema))
+	if aggregate.StateSpace != 0 {
+		add("SSPACE = %d", aggregate.StateSpace)
+	}
+
+	// Final function group.
+	if aggregate.FinalFunction != "" {
+		add("FINALFUNC = %s", aggregate.FinalFunction)
+	}
+	if aggregate.FinalFuncExtra {
+		add("FINALFUNC_EXTRA")
+	}
+	if kw := finalFuncModifyKeyword(aggregate.FinalFuncModify); kw != "" {
+		add("FINALFUNC_MODIFY = %s", kw)
+	}
+
+	// Parallel-aggregation support functions.
+	if aggregate.CombineFunction != "" {
+		add("COMBINEFUNC = %s", aggregate.CombineFunction)
+	}
+	if aggregate.SerialFunction != "" {
+		add("SERIALFUNC = %s", aggregate.SerialFunction)
+	}
+	if aggregate.DeserialFunction != "" {
+		add("DESERIALFUNC = %s", aggregate.DeserialFunction)
+	}
+
 	if aggregate.InitialCondition != "" {
-		parts = append(parts, fmt.Sprintf("    INITCOND = %s", quoteString(aggregate.InitialCondition)))
+		add("INITCOND = %s", quoteString(aggregate.InitialCondition))
+	}
+
+	// Moving-aggregate group (gated on a moving transition function).
+	if aggregate.MTransitionFunction != "" {
+		add("MSFUNC = %s", aggregate.MTransitionFunction)
+		if aggregate.MInvTransitionFunction != "" {
+			add("MINVFUNC = %s", aggregate.MInvTransitionFunction)
+		}
+		if aggregate.MStateType != "" {
+			add("MSTYPE = %s", stripSchemaPrefix(aggregate.MStateType, targetSchema))
+		}
+		if aggregate.MStateSpace != 0 {
+			add("MSSPACE = %d", aggregate.MStateSpace)
+		}
+	}
+	if aggregate.MFinalFunction != "" {
+		add("MFINALFUNC = %s", aggregate.MFinalFunction)
+	}
+	if aggregate.MFinalFuncExtra {
+		add("MFINALFUNC_EXTRA")
+	}
+	if kw := finalFuncModifyKeyword(aggregate.MFinalFuncModify); kw != "" {
+		add("MFINALFUNC_MODIFY = %s", kw)
+	}
+	if aggregate.MInitialCondition != "" {
+		add("MINITCOND = %s", quoteString(aggregate.MInitialCondition))
+	}
+
+	// SORTOP is only emitted for normal aggregates.
+	if aggregate.SortOperator != "" && aggregate.Kind == "n" {
+		add("SORTOP = %s", aggregate.SortOperator)
+	}
+
+	if kw := parallelKeyword(aggregate.Parallel); kw != "" {
+		add("PARALLEL = %s", kw)
+	}
+
+	// HYPOTHETICAL flag for hypothetical-set aggregates.
+	if aggregate.Kind == "h" {
+		add("HYPOTHETICAL")
 	}
 
 	stmt.WriteString(strings.Join(parts, ",\n"))
@@ -152,7 +246,7 @@ func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 // generateAggregateComment generates a COMMENT ON AGGREGATE statement
 func generateAggregateComment(aggregate *ir.Aggregate, targetSchema string, operation DiffOperation, collector *diffCollector) {
 	aggregateName := qualifyEntityName(aggregate.Schema, aggregate.Name, targetSchema)
-	argsClause := aggregateArgsClause(aggregate)
+	argsClause := aggregateArgs(aggregate.Arguments)
 
 	var sql string
 	if aggregate.Comment == "" {
@@ -181,11 +275,27 @@ func aggregatesEqualExceptComment(old, new *ir.Aggregate) bool {
 	return old.Schema == new.Schema &&
 		old.Name == new.Name &&
 		old.Arguments == new.Arguments &&
+		old.Signature == new.Signature &&
+		old.Kind == new.Kind &&
 		old.ReturnType == new.ReturnType &&
+		old.Parallel == new.Parallel &&
 		old.TransitionFunction == new.TransitionFunction &&
-		old.TransitionFunctionSchema == new.TransitionFunctionSchema &&
 		old.StateType == new.StateType &&
+		old.StateSpace == new.StateSpace &&
 		old.InitialCondition == new.InitialCondition &&
 		old.FinalFunction == new.FinalFunction &&
-		old.FinalFunctionSchema == new.FinalFunctionSchema
+		old.FinalFuncExtra == new.FinalFuncExtra &&
+		old.FinalFuncModify == new.FinalFuncModify &&
+		old.CombineFunction == new.CombineFunction &&
+		old.SerialFunction == new.SerialFunction &&
+		old.DeserialFunction == new.DeserialFunction &&
+		old.MTransitionFunction == new.MTransitionFunction &&
+		old.MInvTransitionFunction == new.MInvTransitionFunction &&
+		old.MStateType == new.MStateType &&
+		old.MStateSpace == new.MStateSpace &&
+		old.MFinalFunction == new.MFinalFunction &&
+		old.MFinalFuncExtra == new.MFinalFuncExtra &&
+		old.MFinalFuncModify == new.MFinalFuncModify &&
+		old.MInitialCondition == new.MInitialCondition &&
+		old.SortOperator == new.SortOperator
 }

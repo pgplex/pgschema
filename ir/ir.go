@@ -387,19 +387,51 @@ type Type struct {
 	Constraints []*DomainConstraint `json:"constraints,omitempty"` // For DOMAIN types
 }
 
-// Aggregate represents a database aggregate function
+// Aggregate represents a database aggregate function.
+//
+// Support-function references (TransitionFunction, FinalFunction, ...) are stored
+// pre-quoted and schema-qualified only when they live in a different schema than the
+// aggregate itself (see GetAggregatesForSchema). They are therefore emitted verbatim in
+// the generated DDL and need no schema normalization.
 type Aggregate struct {
-	Schema                   string `json:"schema"`
-	Name                     string `json:"name"`
-	Arguments                string `json:"arguments,omitempty"` // input argument types, e.g. "text" or "geometry"
-	ReturnType               string `json:"return_type"`
-	TransitionFunction       string `json:"transition_function"`
-	TransitionFunctionSchema string `json:"transition_function_schema,omitempty"`
-	StateType                string `json:"state_type"`
-	InitialCondition         string `json:"initial_condition,omitempty"`
-	FinalFunction            string `json:"final_function,omitempty"`
-	FinalFunctionSchema      string `json:"final_function_schema,omitempty"`
-	Comment                  string `json:"comment,omitempty"`
+	Schema     string `json:"schema"`
+	Name       string `json:"name"`
+	Arguments  string `json:"arguments,omitempty"` // identity arg types (for DROP/COMMENT and the overload key)
+	Signature  string `json:"signature,omitempty"` // full arg list incl. ORDER BY for ordered-set (for CREATE)
+	Kind       string `json:"kind,omitempty"`      // 'n' normal, 'o' ordered-set, 'h' hypothetical-set
+	ReturnType string `json:"return_type"`
+	Parallel   string `json:"parallel,omitempty"` // 's' safe, 'r' restricted, 'u' unsafe (default)
+
+	// Transition (state) function and state value
+	TransitionFunction string `json:"transition_function"`
+	StateType          string `json:"state_type"`
+	StateSpace         int    `json:"state_space,omitempty"`
+	InitialCondition   string `json:"initial_condition,omitempty"`
+
+	// Final function
+	FinalFunction   string `json:"final_function,omitempty"`
+	FinalFuncExtra  bool   `json:"final_func_extra,omitempty"`
+	FinalFuncModify string `json:"final_func_modify,omitempty"` // 'r' read_only (default), 's' shareable, 'w' read_write
+
+	// Parallel-aggregation support functions
+	CombineFunction  string `json:"combine_function,omitempty"`
+	SerialFunction   string `json:"serial_function,omitempty"`
+	DeserialFunction string `json:"deserial_function,omitempty"`
+
+	// Moving-aggregate support functions and state
+	MTransitionFunction    string `json:"mtransition_function,omitempty"`
+	MInvTransitionFunction string `json:"minv_transition_function,omitempty"`
+	MStateType             string `json:"mstate_type,omitempty"`
+	MStateSpace            int    `json:"mstate_space,omitempty"`
+	MFinalFunction         string `json:"mfinal_function,omitempty"`
+	MFinalFuncExtra        bool   `json:"mfinal_func_extra,omitempty"`
+	MFinalFuncModify       string `json:"mfinal_func_modify,omitempty"`
+	MInitialCondition      string `json:"minitial_condition,omitempty"`
+
+	// Sort operator (preformatted as OPERATOR(...); only meaningful for normal aggregates)
+	SortOperator string `json:"sort_operator,omitempty"`
+
+	Comment string `json:"comment,omitempty"`
 }
 
 // Procedure represents a database procedure

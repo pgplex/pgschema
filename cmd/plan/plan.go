@@ -599,21 +599,28 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			seq.OwnedByTable = replaceString(seq.OwnedByTable)
 		}
 
-		// Aggregates
+		// Aggregates. Support-function references are stored unqualified when they share
+		// the aggregate's schema, so they carry no temporary-schema prefix; applying
+		// replaceString is still safe (the distinctive temp name simply won't match) and
+		// keeps cross-schema type/argument references correct.
 		for _, agg := range schema.Aggregates {
 			agg.Schema = toSchema
 			agg.Arguments = replaceString(agg.Arguments)
+			agg.Signature = replaceString(agg.Signature)
 			agg.ReturnType = replaceString(agg.ReturnType)
 			agg.TransitionFunction = replaceString(agg.TransitionFunction)
-			if agg.TransitionFunctionSchema == fromSchema {
-				agg.TransitionFunctionSchema = toSchema
-			}
 			agg.StateType = replaceString(agg.StateType)
 			agg.InitialCondition = replaceString(agg.InitialCondition)
 			agg.FinalFunction = replaceString(agg.FinalFunction)
-			if agg.FinalFunctionSchema == fromSchema {
-				agg.FinalFunctionSchema = toSchema
-			}
+			agg.CombineFunction = replaceString(agg.CombineFunction)
+			agg.SerialFunction = replaceString(agg.SerialFunction)
+			agg.DeserialFunction = replaceString(agg.DeserialFunction)
+			agg.MTransitionFunction = replaceString(agg.MTransitionFunction)
+			agg.MInvTransitionFunction = replaceString(agg.MInvTransitionFunction)
+			agg.MStateType = replaceString(agg.MStateType)
+			agg.MFinalFunction = replaceString(agg.MFinalFunction)
+			agg.MInitialCondition = replaceString(agg.MInitialCondition)
+			agg.SortOperator = replaceString(agg.SortOperator)
 		}
 	}
 }

@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION num_add(\n    numeric,\n    numeric\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nPARALLEL SAFE\nAS $_$ SELECT $1 + $2\n$_$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.num_add"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION num_sub(\n    numeric,\n    numeric\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nPARALLEL SAFE\nAS $_$ SELECT $1 - $2\n$_$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.num_sub"
+        },
+        {
+          "sql": "CREATE AGGREGATE my_sum(numeric) (\n    SFUNC = num_add,\n    STYPE = numeric,\n    COMBINEFUNC = num_add,\n    INITCOND = '0',\n    MSFUNC = num_add,\n    MINVFUNC = num_sub,\n    MSTYPE = numeric,\n    MINITCOND = '0',\n    PARALLEL = SAFE\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.my_sum"
+        }
+      ]
+    }
+  ]
+}
