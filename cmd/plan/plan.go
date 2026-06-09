@@ -628,6 +628,19 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			}
 			agg.SortOperator = replaceString(agg.SortOperator)
 		}
+
+		// The Aggregates map is keyed by "name(arguments)". Because Arguments was just
+		// normalized, rebuild the map so the keys stay consistent with the fields (and
+		// therefore match the current-state IR during diffing). In practice the identity
+		// argument types are unqualified for same-schema types, so this is usually a no-op,
+		// but re-keying makes the invariant robust to cross-schema argument types.
+		if len(schema.Aggregates) > 0 {
+			rekeyed := make(map[string]*ir.Aggregate, len(schema.Aggregates))
+			for _, agg := range schema.Aggregates {
+				rekeyed[agg.Name+"("+agg.Arguments+")"] = agg
+			}
+			schema.Aggregates = rekeyed
+		}
 	}
 }
 

@@ -27,7 +27,7 @@ type Schema struct {
 	Views                    map[string]*View           `json:"views"`                                // view_name -> View
 	Functions                map[string]*Function       `json:"functions"`                            // function_name -> Function
 	Procedures               map[string]*Procedure      `json:"procedures"`                           // procedure_name -> Procedure
-	Aggregates               map[string]*Aggregate      `json:"aggregates"`                           // aggregate_name -> Aggregate
+	Aggregates               map[string]*Aggregate      `json:"aggregates"`                           // "name(arguments)" -> Aggregate (keyed by signature for overloading)
 	Sequences                map[string]*Sequence       `json:"sequences"`                            // sequence_name -> Sequence
 	Types                    map[string]*Type           `json:"types"`                                // type_name -> Type
 	DefaultPrivileges        []*DefaultPrivilege        `json:"default_privileges,omitempty"`         // Default privileges for future objects
