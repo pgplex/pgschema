@@ -1445,6 +1445,125 @@ CREATE INDEX products_name_idx ON products(name);
 	})
 }
 
+// TestIgnoreConstraints tests that constraints matching .pgschemaignore [constraints]
+// patterns are excluded from dump and plan output.
+// Addresses https://github.com/pgplex/pgschema/issues/447 and https://github.com/pgplex/pgschema/issues/429
+func TestIgnoreConstraints(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	// Create tables with a managed primary key plus a manually-added foreign key
+	// that is not part of the declared schema (simulates a constraint re-added
+	// out-of-band, e.g. after a DMS migration that disabled constraints).
+	setupSQL := `
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    category_id INTEGER
+);
+
+ALTER TABLE products
+    ADD CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories(id);
+`
+	_, err := conn.Exec(setupSQL)
+	if err != nil {
+		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Ignore any constraint whose name starts with "fk_"
+	ignoreContent := `[constraints]
+patterns = ["fk_*"]
+`
+	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	}
+
+	t.Run("dump", func(t *testing.T) {
+		output := executeIgnoreDumpCommand(t, containerInfo)
+
+		if !strings.Contains(output, "products_pkey") {
+			t.Error("Dump should include products_pkey (not ignored)")
+		}
+
+		if strings.Contains(output, "fk_products_category") {
+			t.Error("Dump should not include fk_products_category (ignored by [constraints] patterns)")
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		// Desired schema declares the tables but not the foreign key.
+		// Without the ignore the plan would emit ALTER TABLE ... DROP CONSTRAINT
+		// fk_products_category; with the ignore the plan should not reference it.
+		schemaSQL := `
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    category_id INTEGER
+);
+`
+		schemaFile := "schema.sql"
+		err := os.WriteFile(schemaFile, []byte(schemaSQL), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create schema file: %v", err)
+		}
+		defer os.Remove(schemaFile)
+
+		output := executeIgnorePlanCommand(t, containerInfo, schemaFile)
+
+		if strings.Contains(output, "fk_products_category") {
+			t.Errorf("Plan should not reference fk_products_category (ignored); got: %s", output)
+		}
+	})
+}
+
 // verifyPlanOutput checks that plan output excludes ignored objects
 func verifyPlanOutput(t *testing.T, output string) {
 	// Changes that should appear in plan (regular objects)

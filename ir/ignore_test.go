@@ -101,13 +101,14 @@ func TestIgnoreConfig_ShouldIgnoreTable(t *testing.T) {
 
 func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 	config := &IgnoreConfig{
-		Tables:     []string{"table_*"},
-		Views:      []string{"view_*"},
-		Functions:  []string{"fn_*"},
-		Procedures: []string{"sp_*"},
-		Types:      []string{"type_*"},
-		Sequences:  []string{"seq_*"},
-		Indexes:    []string{"idx_*"},
+		Tables:      []string{"table_*"},
+		Views:       []string{"view_*"},
+		Functions:   []string{"fn_*"},
+		Procedures:  []string{"sp_*"},
+		Types:       []string{"type_*"},
+		Sequences:   []string{"seq_*"},
+		Indexes:     []string{"idx_*"},
+		Constraints: []string{"fk_*"},
 	}
 
 	// Test each object type
@@ -130,6 +131,8 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		{config.ShouldIgnoreSequence, "user_id_seq", false},
 		{config.ShouldIgnoreIndex, "idx_temp", true},
 		{config.ShouldIgnoreIndex, "users_pkey", false},
+		{config.ShouldIgnoreConstraint, "fk_orders_product", true},
+		{config.ShouldIgnoreConstraint, "users_pkey", false},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +167,9 @@ func TestIgnoreConfig_NilConfig(t *testing.T) {
 	}
 	if config.ShouldIgnoreIndex("any_index") {
 		t.Error("nil config should not ignore any index")
+	}
+	if config.ShouldIgnoreConstraint("any_constraint") {
+		t.Error("nil config should not ignore any constraint")
 	}
 }
 

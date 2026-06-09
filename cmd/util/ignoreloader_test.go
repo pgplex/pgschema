@@ -44,6 +44,9 @@ patterns = ["seq_temp_*"]
 
 [indexes]
 patterns = ["idx_temp_*"]
+
+[constraints]
+patterns = ["fk_temp_*"]
 `
 
 	err := os.WriteFile(testFile, []byte(tomlContent), 0644)
@@ -85,6 +88,10 @@ patterns = ["idx_temp_*"]
 
 	if len(config.Indexes) != 1 || config.Indexes[0] != "idx_temp_*" {
 		t.Errorf("Expected indexes patterns [\"idx_temp_*\"], got %v", config.Indexes)
+	}
+
+	if len(config.Constraints) != 1 || config.Constraints[0] != "fk_temp_*" {
+		t.Errorf("Expected constraints patterns [\"fk_temp_*\"], got %v", config.Constraints)
 	}
 }
 

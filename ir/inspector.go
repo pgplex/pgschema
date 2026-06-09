@@ -442,6 +442,13 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 		schemaName := constraint.TableSchema
 		tableName := constraint.TableName
 		constraintName := constraint.ConstraintName
+
+		// Skip ignored constraints early to avoid the per-column position
+		// queries below for constraints that would be discarded anyway.
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraint(constraintName) {
+			continue
+		}
+
 		constraintType := ""
 		if constraint.ConstraintType.Valid {
 			constraintType = constraint.ConstraintType.String
