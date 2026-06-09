@@ -17,3 +17,5 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS item_summary AS
  SELECT id,
     title
    FROM item_extended;
+
+CREATE INDEX IF NOT EXISTS item_summary_id_idx ON item_summary (id);

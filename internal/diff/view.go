@@ -480,6 +480,16 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			}
 			collector.collect(commentContext, commentSQL)
 		}
+
+		// Dropping a materialized view also drops its indexes, so recreate them
+		// for materialized dependents (issue #415).
+		if depView.Materialized && depView.Indexes != nil {
+			indexList := make([]*ir.Index, 0, len(depView.Indexes))
+			for _, index := range depView.Indexes {
+				indexList = append(indexList, index)
+			}
+			generateCreateIndexesSQLWithType(indexList, targetSchema, collector, DiffTypeMaterializedViewIndex, DiffTypeMaterializedViewIndexComment)
+		}
 	}
 }
 

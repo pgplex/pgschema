@@ -19,3 +19,5 @@ JOIN category c ON c.id = i.id;
 -- DROP MATERIALIZED VIEW, not DROP VIEW.
 CREATE MATERIALIZED VIEW item_summary AS
 SELECT id, title FROM item_extended;
+
+CREATE INDEX item_summary_id_idx ON item_summary (id);
