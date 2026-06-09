@@ -104,3 +104,12 @@ CREATE TABLE books (
 ALTER TABLE ONLY books
     ADD CONSTRAINT fk_book_author_deferred
     FOREIGN KEY (author_id) REFERENCES authors(id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Case 5: Named UNIQUE constraint with DEFERRABLE option (issue #404)
+-- Tests that DEFERRABLE INITIALLY DEFERRED is preserved on non-FK constraints,
+-- not just foreign keys
+--
+ALTER TABLE ONLY authors
+    ADD CONSTRAINT authors_name_key UNIQUE (name) DEFERRABLE INITIALLY DEFERRED;

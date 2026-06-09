@@ -504,6 +504,14 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				NullsNotDistinct: constraint.NullsNotDistinct.Bool, // PG15+ UNIQUE NULLS NOT DISTINCT
 			}
 
+			// Handle deferrable attributes. PRIMARY KEY, UNIQUE, FOREIGN KEY, and
+			// EXCLUDE constraints can all be DEFERRABLE; CHECK constraints cannot
+			// (condeferrable is always false for them). EXCLUDE carries the clause
+			// in its full pg_get_constraintdef() text, but we still record the
+			// fields so constraint comparison stays uniform across types.
+			c.Deferrable = constraint.Deferrable
+			c.InitiallyDeferred = constraint.InitiallyDeferred
+
 			// Handle foreign key references
 			if cType == ConstraintTypeForeignKey {
 				if refSchema := i.safeInterfaceToString(constraint.ForeignTableSchema); refSchema != "" && refSchema != "<nil>" {
@@ -518,9 +526,6 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				if updateRule := i.safeInterfaceToString(constraint.UpdateRule); updateRule != "" && updateRule != "<nil>" {
 					c.UpdateRule = updateRule
 				}
-				// Handle deferrable attributes for foreign key constraints
-				c.Deferrable = constraint.Deferrable
-				c.InitiallyDeferred = constraint.InitiallyDeferred
 			}
 
 			// Handle check constraints

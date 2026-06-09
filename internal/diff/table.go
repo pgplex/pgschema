@@ -914,8 +914,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.NullsNotDistinct {
 				modifier = " NULLS NOT DISTINCT"
 			}
-			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s);",
-				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "))
+			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s)%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "), deferrableClause(constraint))
 
 			context := &diffContext{
 				Type:                DiffTypeTableConstraint,
@@ -983,8 +983,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
-			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s);",
-				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
+			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s)%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "), deferrableClause(constraint))
 
 			context := &diffContext{
 				Type:                DiffTypeTableConstraint,
@@ -1046,8 +1046,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.NullsNotDistinct {
 				modifier = " NULLS NOT DISTINCT"
 			}
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s);",
-				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "))
+			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s)%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "), deferrableClause(constraint))
 
 		case ir.ConstraintTypeCheck:
 			// Add CHECK constraint with ensured outer parentheses
@@ -1084,8 +1084,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.IsTemporal && len(columnNames) > 0 {
 				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s);",
-				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "))
+			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s)%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "), deferrableClause(constraint))
 
 		case ir.ConstraintTypeExclusion:
 			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s;",

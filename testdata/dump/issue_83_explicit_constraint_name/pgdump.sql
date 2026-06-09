@@ -306,6 +306,14 @@ ALTER TABLE ONLY public.authors
 
 
 --
+-- Name: authors authors_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.authors
+    ADD CONSTRAINT authors_name_key UNIQUE (name) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
 -- Name: books books_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
