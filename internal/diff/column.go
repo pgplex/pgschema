@@ -12,9 +12,15 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	var statements []string
 	qualifiedTableName := getTableNameWithSchema(tableSchema, tableName, targetSchema)
 
-	// Handle data type changes - normalize types by stripping target schema prefix
-	oldType := stripSchemaPrefix(cd.Old.DataType, targetSchema)
-	newType := stripSchemaPrefix(cd.New.DataType, targetSchema)
+	// Handle data type changes - normalize types by stripping target schema prefix.
+	// Base type names (without modifiers) drive cast-compatibility decisions,
+	// while the full type strings (with numeric precision/scale, varchar length)
+	// drive change detection and the emitted TYPE clause - otherwise a
+	// numeric(18,6) -> numeric(20,6) change would be invisible here.
+	oldBaseType := stripSchemaPrefix(cd.Old.DataType, targetSchema)
+	newBaseType := stripSchemaPrefix(cd.New.DataType, targetSchema)
+	oldType := stripSchemaPrefix(comparableColumnType(cd.Old), targetSchema)
+	newType := stripSchemaPrefix(comparableColumnType(cd.New), targetSchema)
 
 	// Check if there's a type change AND the column has a default value
 	// When a USING clause is needed, we must: DROP DEFAULT -> ALTER TYPE -> SET DEFAULT
@@ -23,7 +29,7 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	oldDefault := cd.Old.DefaultValue
 	newDefault := cd.New.DefaultValue
 	hasOldDefault := oldDefault != nil && *oldDefault != ""
-	needsUsing := hasTypeChange && needsUsingClause(oldType, newType)
+	needsUsing := hasTypeChange && needsUsingClause(oldBaseType, newBaseType)
 
 	// If type is changing with USING clause and there's an existing default, drop the default first
 	if needsUsing && hasOldDefault {
@@ -138,15 +144,31 @@ func needsUsingClause(oldType, newType string) bool {
 	return false
 }
 
+// comparableColumnType returns the column's data type including any
+// precision/scale/length modifiers, for use in type-change detection and
+// the emitted ALTER ... TYPE clause. Unlike formatColumnDataType it does
+// not expand SERIAL: serial is integer + sequence-default sugar, and
+// serial<->integer/identity transitions are handled by the sequence and
+// identity machinery rather than a TYPE change.
+func comparableColumnType(column *ir.Column) string {
+	if isSerialColumn(column) {
+		return column.DataType
+	}
+	return formatColumnDataType(column)
+}
+
 // columnsEqual compares two columns for equality
 // targetSchema is used to normalize type names before comparison
 func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	// Normalize types by stripping target schema prefix before comparison
-	oldType := stripSchemaPrefix(old.DataType, targetSchema)
-	newType := stripSchemaPrefix(new.DataType, targetSchema)
+	// Normalize types by stripping target schema prefix before comparison.
+	// Use comparableColumnType so type modifiers (numeric precision/scale,
+	// varchar length) are included - DataType alone is just "numeric" for
+	// both numeric(18,6) and numeric(20,6).
+	oldType := stripSchemaPrefix(comparableColumnType(old), targetSchema)
+	newType := stripSchemaPrefix(comparableColumnType(new), targetSchema)
 	if oldType != newType {
 		return false
 	}

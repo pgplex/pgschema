@@ -3,7 +3,7 @@
   "pgschema_version": "1.10.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "3af9d137d24bdf3ddf4b191cf2393ada9a71adb61e7fa88d779e2e751933a409"
+    "hash": "614655f95d349ec321da570d4e232db71f8bfb57404998153f9fd53720cd2acb"
   },
   "groups": [
     {
@@ -61,6 +61,12 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.tags"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN amount TYPE numeric(20,6);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.amount"
         }
       ]
     }
