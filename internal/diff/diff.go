@@ -34,6 +34,7 @@ const (
 	DiffTypeMaterializedViewIndexComment
 	DiffTypeFunction
 	DiffTypeProcedure
+	DiffTypeAggregate
 	DiffTypeSequence
 	DiffTypeType
 	DiffTypeDomain
@@ -87,6 +88,8 @@ func (d DiffType) String() string {
 		return "function"
 	case DiffTypeProcedure:
 		return "procedure"
+	case DiffTypeAggregate:
+		return "aggregate"
 	case DiffTypeSequence:
 		return "sequence"
 	case DiffTypeType:
@@ -161,6 +164,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeFunction
 	case "procedure":
 		*d = DiffTypeProcedure
+	case "aggregate":
+		*d = DiffTypeAggregate
 	case "sequence":
 		*d = DiffTypeSequence
 	case "type":
@@ -276,6 +281,9 @@ type ddlDiff struct {
 	addedProcedures           []*ir.Procedure
 	droppedProcedures         []*ir.Procedure
 	modifiedProcedures        []*procedureDiff
+	addedAggregates           []*ir.Aggregate
+	droppedAggregates         []*ir.Aggregate
+	modifiedAggregates        []*aggregateDiff
 	addedTypes                []*ir.Type
 	droppedTypes              []*ir.Type
 	modifiedTypes             []*typeDiff
@@ -319,6 +327,12 @@ type functionDiff struct {
 type procedureDiff struct {
 	Old *ir.Procedure
 	New *ir.Procedure
+}
+
+// aggregateDiff represents changes to an aggregate
+type aggregateDiff struct {
+	Old *ir.Aggregate
+	New *ir.Aggregate
 }
 
 // typeDiff represents changes to a type
@@ -448,6 +462,9 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 		addedProcedures:            []*ir.Procedure{},
 		droppedProcedures:          []*ir.Procedure{},
 		modifiedProcedures:         []*procedureDiff{},
+		addedAggregates:            []*ir.Aggregate{},
+		droppedAggregates:          []*ir.Aggregate{},
+		modifiedAggregates:         []*aggregateDiff{},
 		addedTypes:                 []*ir.Type{},
 		droppedTypes:               []*ir.Type{},
 		modifiedTypes:              []*typeDiff{},
@@ -685,6 +702,63 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 				diff.modifiedProcedures = append(diff.modifiedProcedures, &procedureDiff{
 					Old: oldProcedure,
 					New: newProcedure,
+				})
+			}
+		}
+	}
+
+	// Compare aggregates across all schemas
+	oldAggregates := make(map[string]*ir.Aggregate)
+	newAggregates := make(map[string]*ir.Aggregate)
+
+	// Extract aggregates from all schemas in oldIR in deterministic order
+	for _, dbSchema := range oldIR.Schemas {
+		aggNames := sortedKeys(dbSchema.Aggregates)
+		for _, aggName := range aggNames {
+			aggregate := dbSchema.Aggregates[aggName]
+			// aggName already contains signature as name(arguments) from inspector
+			key := aggregate.Schema + "." + aggName
+			oldAggregates[key] = aggregate
+		}
+	}
+
+	// Extract aggregates from all schemas in newIR in deterministic order
+	for _, dbSchema := range newIR.Schemas {
+		aggNames := sortedKeys(dbSchema.Aggregates)
+		for _, aggName := range aggNames {
+			aggregate := dbSchema.Aggregates[aggName]
+			// aggName already contains signature as name(arguments) from inspector
+			key := aggregate.Schema + "." + aggName
+			newAggregates[key] = aggregate
+		}
+	}
+
+	// Find added aggregates in deterministic order
+	aggregateKeys := sortedKeys(newAggregates)
+	for _, key := range aggregateKeys {
+		aggregate := newAggregates[key]
+		if _, exists := oldAggregates[key]; !exists {
+			diff.addedAggregates = append(diff.addedAggregates, aggregate)
+		}
+	}
+
+	// Find dropped aggregates in deterministic order
+	oldAggregateKeys := sortedKeys(oldAggregates)
+	for _, key := range oldAggregateKeys {
+		aggregate := oldAggregates[key]
+		if _, exists := newAggregates[key]; !exists {
+			diff.droppedAggregates = append(diff.droppedAggregates, aggregate)
+		}
+	}
+
+	// Find modified aggregates in deterministic order
+	for _, key := range aggregateKeys {
+		newAggregate := newAggregates[key]
+		if oldAggregate, exists := oldAggregates[key]; exists {
+			if !aggregatesEqual(oldAggregate, newAggregate) {
+				diff.modifiedAggregates = append(diff.modifiedAggregates, &aggregateDiff{
+					Old: oldAggregate,
+					New: newAggregate,
 				})
 			}
 		}
@@ -1610,6 +1684,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	allDeferredConstraints := append(deferredConstraints1, deferredConstraints2...)
 	generateDeferredConstraintsSQL(allDeferredConstraints, targetSchema, collector)
 
+	// Create aggregates after their transition/final functions AND all tables exist
+	// (an aggregate may use a new table's row type as an argument or state type), and
+	// before views, which may reference the aggregates in their definitions.
+	generateCreateAggregatesSQL(d.addedAggregates, targetSchema, collector)
+
 	// Merge deferred policies from both batches
 	allDeferredPolicies := append(deferredPolicies1, deferredPolicies2...)
 
@@ -1742,6 +1821,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Modify procedures
 	generateModifyProceduresSQL(d.modifiedProcedures, targetSchema, collector)
 
+	// Modify aggregates (DROP + CREATE for definitional changes)
+	generateModifyAggregatesSQL(d.modifiedAggregates, targetSchema, collector)
+
 	// Modify default privileges
 	generateModifyDefaultPrivilegesSQL(d.modifiedDefaultPrivileges, targetSchema, collector)
 
@@ -1769,6 +1851,10 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Drop triggers from modified tables and views first (triggers depend on functions)
 	generateDropTriggersFromModifiedTables(d.modifiedTables, targetSchema, collector)
 	generateDropTriggersFromModifiedViews(d.modifiedViews, targetSchema, collector)
+
+	// Drop aggregates before functions, since an aggregate depends on its
+	// transition/final functions (issue #416).
+	generateDropAggregatesSQL(d.droppedAggregates, targetSchema, collector)
 
 	// Drop functions
 	generateDropFunctionsSQL(d.droppedFunctions, targetSchema, collector)
@@ -2228,6 +2314,7 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 func (d *schemaDiff) GetObjectName() string     { return d.New.Name }
 func (d *functionDiff) GetObjectName() string   { return d.New.Name }
 func (d *procedureDiff) GetObjectName() string  { return d.New.Name }
+func (d *aggregateDiff) GetObjectName() string  { return d.New.Name }
 func (d *typeDiff) GetObjectName() string       { return d.New.Name }
 func (d *sequenceDiff) GetObjectName() string   { return d.New.Name }
 func (d *triggerDiff) GetObjectName() string    { return d.New.Name }

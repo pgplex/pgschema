@@ -1,0 +1,33 @@
+CREATE OR REPLACE FUNCTION num_add(
+    numeric,
+    numeric
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $_$ SELECT $1 + $2
+$_$;
+
+CREATE OR REPLACE FUNCTION num_sub(
+    numeric,
+    numeric
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $_$ SELECT $1 - $2
+$_$;
+
+CREATE AGGREGATE my_sum(numeric) (
+    SFUNC = num_add,
+    STYPE = numeric,
+    COMBINEFUNC = num_add,
+    INITCOND = '0',
+    MSFUNC = num_add,
+    MINVFUNC = num_sub,
+    MSTYPE = numeric,
+    MINITCOND = '0',
+    PARALLEL = SAFE
+);

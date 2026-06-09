@@ -1,0 +1,18 @@
+Plan: 2 to drop.
+
+Summary by type:
+  functions: 1 to drop
+  aggregates: 1 to drop
+
+Functions:
+  - _group_concat
+
+Aggregates:
+  - group_concat
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP AGGREGATE IF EXISTS group_concat(text);
+
+DROP FUNCTION IF EXISTS _group_concat(text, text);

@@ -1,0 +1,12 @@
+Plan: 1 to modify.
+
+Summary by type:
+  aggregates: 1 to modify
+
+Aggregates:
+  ~ group_concat
+
+DDL to be executed:
+--------------------------------------------------
+
+COMMENT ON AGGREGATE group_concat(text) IS 'Concatenates text values with commas';

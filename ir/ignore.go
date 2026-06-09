@@ -20,6 +20,7 @@ type IgnoreConfig struct {
 	Views             []string `toml:"views,omitempty"`
 	Functions         []string `toml:"functions,omitempty"`
 	Procedures        []string `toml:"procedures,omitempty"`
+	Aggregates        []string `toml:"aggregates,omitempty"`
 	Types             []string `toml:"types,omitempty"`
 	Sequences         []string `toml:"sequences,omitempty"`
 	Indexes           []string `toml:"indexes,omitempty"`
@@ -59,6 +60,14 @@ func (c *IgnoreConfig) ShouldIgnoreProcedure(procedureName string) bool {
 		return false
 	}
 	return c.shouldIgnore(procedureName, c.Procedures)
+}
+
+// ShouldIgnoreAggregate checks if an aggregate should be ignored based on the patterns
+func (c *IgnoreConfig) ShouldIgnoreAggregate(aggregateName string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(aggregateName, c.Aggregates)
 }
 
 // ShouldIgnoreType checks if a type should be ignored based on the patterns

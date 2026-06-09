@@ -105,6 +105,7 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		Views:       []string{"view_*"},
 		Functions:   []string{"fn_*"},
 		Procedures:  []string{"sp_*"},
+		Aggregates:  []string{"agg_*"},
 		Types:       []string{"type_*"},
 		Sequences:   []string{"seq_*"},
 		Indexes:     []string{"idx_*"},
@@ -126,6 +127,8 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		{config.ShouldIgnoreFunction, "get_user", false},
 		{config.ShouldIgnoreProcedure, "sp_temp", true},
 		{config.ShouldIgnoreProcedure, "process_data", false},
+		{config.ShouldIgnoreAggregate, "agg_temp", true},
+		{config.ShouldIgnoreAggregate, "group_concat", false},
 		{config.ShouldIgnoreType, "type_temp", true},
 		{config.ShouldIgnoreType, "user_status", false},
 		{config.ShouldIgnoreSequence, "seq_temp", true},
@@ -161,6 +164,9 @@ func TestIgnoreConfig_NilConfig(t *testing.T) {
 	}
 	if config.ShouldIgnoreProcedure("any_procedure") {
 		t.Error("nil config should not ignore any procedure")
+	}
+	if config.ShouldIgnoreAggregate("any_aggregate") {
+		t.Error("nil config should not ignore any aggregate")
 	}
 	if config.ShouldIgnoreType("any_type") {
 		t.Error("nil config should not ignore any type")

@@ -443,10 +443,7 @@ func processOutput(migrationPlan *plan.Plan, output outputSpec, cmd *cobra.Comma
 // - Constraints (including foreign key referenced schemas)
 // - Indexes, triggers, policies
 // - Dependencies, cross-references, and LIKE clauses
-// - Aggregate function schemas (TransitionFunctionSchema, FinalFunctionSchema)
-//
-// Note: Aggregates are normalized for future-proofing even though the diff package
-// does not currently support aggregate migrations.
+// - Aggregate support-function references (SFUNC/FINALFUNC/...) and signature/type strings
 //
 // Without this normalization, generated DDL would reference non-existent temporary schemas
 // and fail when applied to the target database.
@@ -602,20 +599,47 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			seq.OwnedByTable = replaceString(seq.OwnedByTable)
 		}
 
-		// Aggregates
+		// Aggregates. Support-function references are stored unqualified when they share
+		// the aggregate's schema, so they carry no temporary-schema prefix; applying
+		// replaceString is still safe (the distinctive temp name simply won't match) and
+		// keeps cross-schema type/argument references correct.
 		for _, agg := range schema.Aggregates {
 			agg.Schema = toSchema
+			agg.Arguments = replaceString(agg.Arguments)
+			agg.Signature = replaceString(agg.Signature)
 			agg.ReturnType = replaceString(agg.ReturnType)
 			agg.TransitionFunction = replaceString(agg.TransitionFunction)
-			if agg.TransitionFunctionSchema == fromSchema {
-				agg.TransitionFunctionSchema = toSchema
-			}
 			agg.StateType = replaceString(agg.StateType)
-			agg.InitialCondition = replaceString(agg.InitialCondition)
-			agg.FinalFunction = replaceString(agg.FinalFunction)
-			if agg.FinalFunctionSchema == fromSchema {
-				agg.FinalFunctionSchema = toSchema
+			if agg.InitialCondition != nil {
+				v := replaceString(*agg.InitialCondition)
+				agg.InitialCondition = &v
 			}
+			agg.FinalFunction = replaceString(agg.FinalFunction)
+			agg.CombineFunction = replaceString(agg.CombineFunction)
+			agg.SerialFunction = replaceString(agg.SerialFunction)
+			agg.DeserialFunction = replaceString(agg.DeserialFunction)
+			agg.MTransitionFunction = replaceString(agg.MTransitionFunction)
+			agg.MInvTransitionFunction = replaceString(agg.MInvTransitionFunction)
+			agg.MStateType = replaceString(agg.MStateType)
+			agg.MFinalFunction = replaceString(agg.MFinalFunction)
+			if agg.MInitialCondition != nil {
+				v := replaceString(*agg.MInitialCondition)
+				agg.MInitialCondition = &v
+			}
+			agg.SortOperator = replaceString(agg.SortOperator)
+		}
+
+		// The Aggregates map is keyed by "name(arguments)". Because Arguments was just
+		// normalized, rebuild the map so the keys stay consistent with the fields (and
+		// therefore match the current-state IR during diffing). In practice the identity
+		// argument types are unqualified for same-schema types, so this is usually a no-op,
+		// but re-keying makes the invariant robust to cross-schema argument types.
+		if len(schema.Aggregates) > 0 {
+			rekeyed := make(map[string]*ir.Aggregate, len(schema.Aggregates))
+			for _, agg := range schema.Aggregates {
+				rekeyed[agg.Name+"("+agg.Arguments+")"] = agg
+			}
+			schema.Aggregates = rekeyed
 		}
 	}
 }

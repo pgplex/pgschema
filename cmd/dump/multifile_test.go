@@ -63,6 +63,21 @@ func TestCreateMultiFileOutput(t *testing.T) {
 		{
 			Statements: []diff.SQLStatement{
 				{
+					SQL:                 "CREATE AGGREGATE group_concat(text) (\n    SFUNC = _group_concat,\n    STYPE = text\n);",
+					CanRunInTransaction: true,
+				},
+			},
+			Type:      diff.DiffTypeAggregate,
+			Operation: diff.DiffOperationCreate,
+			Path:      "public.group_concat",
+			Source: &ir.Aggregate{
+				Name:      "group_concat",
+				Arguments: "text",
+			},
+		},
+		{
+			Statements: []diff.SQLStatement{
+				{
 					SQL:                 "CREATE VIEW active_users AS SELECT * FROM users WHERE status = 'active';",
 					CanRunInTransaction: true,
 				},
@@ -89,7 +104,7 @@ func TestCreateMultiFileOutput(t *testing.T) {
 	}
 
 	// Check that subdirectories were created
-	expectedDirs := []string{"types", "functions", "tables", "views"}
+	expectedDirs := []string{"types", "functions", "aggregates", "tables", "views"}
 	for _, dir := range expectedDirs {
 		dirPath := filepath.Join(tmpDir, dir)
 		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
@@ -101,6 +116,7 @@ func TestCreateMultiFileOutput(t *testing.T) {
 	expectedFiles := []string{
 		"types/user_status.sql",
 		"functions/get_user_count.sql",
+		"aggregates/group_concat.sql",
 		"tables/users.sql",
 		"views/active_users.sql",
 	}
@@ -121,6 +137,7 @@ func TestCreateMultiFileOutput(t *testing.T) {
 	expectedIncludes := []string{
 		"\\i types/user_status.sql",
 		"\\i functions/get_user_count.sql",
+		"\\i aggregates/group_concat.sql",
 		"\\i tables/users.sql",
 		"\\i views/active_users.sql",
 	}
@@ -149,6 +166,21 @@ func TestCreateMultiFileOutput(t *testing.T) {
 	}
 	if !strings.Contains(typeStr, "-- Name: user_status; Type: TYPE; Schema: -; Owner: -") {
 		t.Errorf("Type file should contain comment header")
+	}
+
+	// Check aggregate file content and that its header carries the argument signature
+	aggregateFile := filepath.Join(tmpDir, "aggregates", "group_concat.sql")
+	aggregateContent, err := os.ReadFile(aggregateFile)
+	if err != nil {
+		t.Fatalf("Failed to read aggregate file: %v", err)
+	}
+
+	aggregateStr := string(aggregateContent)
+	if !strings.Contains(aggregateStr, "CREATE AGGREGATE group_concat(text)") {
+		t.Errorf("Aggregate file should contain the CREATE AGGREGATE statement")
+	}
+	if !strings.Contains(aggregateStr, "-- Name: group_concat(text); Type: AGGREGATE; Schema: -; Owner: -") {
+		t.Errorf("Aggregate file should contain comment header with argument signature")
 	}
 }
 

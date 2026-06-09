@@ -34,6 +34,7 @@ type TomlConfig struct {
 	Views             ViewIgnoreConfig             `toml:"views,omitempty"`
 	Functions         FunctionIgnoreConfig         `toml:"functions,omitempty"`
 	Procedures        ProcedureIgnoreConfig        `toml:"procedures,omitempty"`
+	Aggregates        AggregateIgnoreConfig        `toml:"aggregates,omitempty"`
 	Types             TypeIgnoreConfig             `toml:"types,omitempty"`
 	Sequences         SequenceIgnoreConfig         `toml:"sequences,omitempty"`
 	Indexes           IndexIgnoreConfig            `toml:"indexes,omitempty"`
@@ -60,6 +61,11 @@ type FunctionIgnoreConfig struct {
 
 // ProcedureIgnoreConfig represents procedure-specific ignore configuration
 type ProcedureIgnoreConfig struct {
+	Patterns []string `toml:"patterns,omitempty"`
+}
+
+// AggregateIgnoreConfig represents aggregate-specific ignore configuration
+type AggregateIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
 
@@ -142,6 +148,7 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 		Views:             tomlConfig.Views.Patterns,
 		Functions:         tomlConfig.Functions.Patterns,
 		Procedures:        tomlConfig.Procedures.Patterns,
+		Aggregates:        tomlConfig.Aggregates.Patterns,
 		Types:             tomlConfig.Types.Patterns,
 		Sequences:         tomlConfig.Sequences.Patterns,
 		Indexes:           tomlConfig.Indexes.Patterns,

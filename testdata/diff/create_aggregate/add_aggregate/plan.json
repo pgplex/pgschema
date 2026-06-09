@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION numeric_accum(\n    numeric[],\n    numeric\n)\nRETURNS numeric[]\nLANGUAGE sql\nIMMUTABLE\nAS $_$ SELECT array_append($1, $2)\n$_$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.numeric_accum"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION numeric_first(\n    numeric[]\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nAS $_$ SELECT $1[1]\n$_$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.numeric_first"
+        },
+        {
+          "sql": "CREATE AGGREGATE my_agg(numeric) (\n    SFUNC = numeric_accum,\n    STYPE = numeric[],\n    FINALFUNC = numeric_first,\n    INITCOND = '{}'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.my_agg"
+        }
+      ]
+    }
+  ]
+}

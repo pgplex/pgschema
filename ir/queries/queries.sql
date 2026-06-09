@@ -1060,25 +1060,60 @@ WHERE r.routine_schema = $1
     AND d.objid IS NULL  -- Exclude procedures that are extension members
 ORDER BY r.routine_schema, r.routine_name;
 
--- GetAggregatesForSchema retrieves all user-defined aggregates for a specific schema
+-- GetAggregatesForSchema retrieves all user-defined aggregates for a specific schema.
+-- Support-function references (SFUNC, FINALFUNC, COMBINEFUNC, ...) are pre-quoted and
+-- schema-qualified only when they live in a different schema than the aggregate, so the
+-- desired/current IR keys line up and the plan normalizer never has to rewrite them.
 -- name: GetAggregatesForSchema :many
-SELECT 
+SELECT
     n.nspname AS aggregate_schema,
     p.proname AS aggregate_name,
-    pg_get_function_arguments(p.oid) AS aggregate_signature,
-    oidvectortypes(p.proargtypes) AS aggregate_arguments,
+    a.aggkind AS aggregate_kind,                                  -- 'n' normal, 'o' ordered-set, 'h' hypothetical-set
+    pg_get_function_arguments(p.oid) AS aggregate_signature,      -- aggregate-aware: emits ORDER BY for ordered/hypothetical
+    pg_get_function_identity_arguments(p.oid) AS aggregate_identity_args,
     format_type(p.prorettype, NULL) AS aggregate_return_type,
-    -- Get transition function
-    COALESCE(tf.proname, '') AS transition_function,
-    COALESCE(tfn.nspname, '') AS transition_function_schema,
-    -- Get state type
+    p.proparallel AS parallel,                                    -- 's' safe, 'r' restricted, 'u' unsafe (default)
+    -- Transition function and state
+    CASE WHEN tfn.nspname = n.nspname THEN quote_ident(tf.proname)
+         ELSE quote_ident(tfn.nspname) || '.' || quote_ident(tf.proname) END AS transition_function,
     format_type(a.aggtranstype, NULL) AS state_type,
-    -- Get initial condition
+    a.aggtransspace AS state_space,
     a.agginitval AS initial_condition,
-    -- Get final function if exists
-    COALESCE(ff.proname, '') AS final_function,
-    COALESCE(ffn.nspname, '') AS final_function_schema,
-    -- Comment
+    -- Final function
+    CASE WHEN a.aggfinalfn = 0 THEN ''
+         WHEN ffn.nspname = n.nspname THEN quote_ident(ff.proname)
+         ELSE quote_ident(ffn.nspname) || '.' || quote_ident(ff.proname) END AS final_function,
+    a.aggfinalextra AS final_func_extra,
+    a.aggfinalmodify AS final_func_modify,                        -- 'r' read_only (default), 's' shareable, 'w' read_write
+    -- Parallel-aggregation support functions
+    CASE WHEN a.aggcombinefn = 0 THEN ''
+         WHEN cfn.nspname = n.nspname THEN quote_ident(cf.proname)
+         ELSE quote_ident(cfn.nspname) || '.' || quote_ident(cf.proname) END AS combine_function,
+    CASE WHEN a.aggserialfn = 0 THEN ''
+         WHEN sfn.nspname = n.nspname THEN quote_ident(sf.proname)
+         ELSE quote_ident(sfn.nspname) || '.' || quote_ident(sf.proname) END AS serial_function,
+    CASE WHEN a.aggdeserialfn = 0 THEN ''
+         WHEN dfn.nspname = n.nspname THEN quote_ident(df.proname)
+         ELSE quote_ident(dfn.nspname) || '.' || quote_ident(df.proname) END AS deserial_function,
+    -- Moving-aggregate support functions and state
+    CASE WHEN a.aggmtransfn = 0 THEN ''
+         WHEN mtfn.nspname = n.nspname THEN quote_ident(mtf.proname)
+         ELSE quote_ident(mtfn.nspname) || '.' || quote_ident(mtf.proname) END AS mtransition_function,
+    CASE WHEN a.aggminvtransfn = 0 THEN ''
+         WHEN mitfn.nspname = n.nspname THEN quote_ident(mitf.proname)
+         ELSE quote_ident(mitfn.nspname) || '.' || quote_ident(mitf.proname) END AS minv_transition_function,
+    CASE WHEN a.aggmtransfn = 0 THEN '' ELSE format_type(a.aggmtranstype, NULL) END AS mstate_type,
+    a.aggmtransspace AS mstate_space,
+    CASE WHEN a.aggmfinalfn = 0 THEN ''
+         WHEN mffn.nspname = n.nspname THEN quote_ident(mff.proname)
+         ELSE quote_ident(mffn.nspname) || '.' || quote_ident(mff.proname) END AS mfinal_function,
+    a.aggmfinalextra AS mfinal_func_extra,
+    a.aggmfinalmodify AS mfinal_func_modify,
+    a.aggminitval AS minitial_condition,
+    -- Sort operator (only meaningful for normal aggregates)
+    CASE WHEN a.aggsortop = 0 THEN ''
+         WHEN opn.nspname = n.nspname THEN format('OPERATOR(%s)', op.oprname)
+         ELSE format('OPERATOR(%s.%s)', quote_ident(opn.nspname), op.oprname) END AS sort_operator,
     COALESCE(d.description, '') AS aggregate_comment
 FROM pg_proc p
 JOIN pg_namespace n ON p.pronamespace = n.oid
@@ -1087,11 +1122,25 @@ LEFT JOIN pg_proc tf ON a.aggtransfn = tf.oid
 LEFT JOIN pg_namespace tfn ON tf.pronamespace = tfn.oid
 LEFT JOIN pg_proc ff ON a.aggfinalfn = ff.oid
 LEFT JOIN pg_namespace ffn ON ff.pronamespace = ffn.oid
-LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_proc'::regclass
+LEFT JOIN pg_proc cf ON a.aggcombinefn = cf.oid
+LEFT JOIN pg_namespace cfn ON cf.pronamespace = cfn.oid
+LEFT JOIN pg_proc sf ON a.aggserialfn = sf.oid
+LEFT JOIN pg_namespace sfn ON sf.pronamespace = sfn.oid
+LEFT JOIN pg_proc df ON a.aggdeserialfn = df.oid
+LEFT JOIN pg_namespace dfn ON df.pronamespace = dfn.oid
+LEFT JOIN pg_proc mtf ON a.aggmtransfn = mtf.oid
+LEFT JOIN pg_namespace mtfn ON mtf.pronamespace = mtfn.oid
+LEFT JOIN pg_proc mitf ON a.aggminvtransfn = mitf.oid
+LEFT JOIN pg_namespace mitfn ON mitf.pronamespace = mitfn.oid
+LEFT JOIN pg_proc mff ON a.aggmfinalfn = mff.oid
+LEFT JOIN pg_namespace mffn ON mff.pronamespace = mffn.oid
+LEFT JOIN pg_operator op ON op.oid = a.aggsortop
+LEFT JOIN pg_namespace opn ON op.oprnamespace = opn.oid
+LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_proc'::regclass AND d.objsubid = 0
 WHERE p.prokind = 'a'  -- Only aggregates
     AND n.nspname = $1
     AND NOT EXISTS (
-        SELECT 1 FROM pg_depend dep 
+        SELECT 1 FROM pg_depend dep
         WHERE dep.objid = p.oid AND dep.deptype = 'e'
     )  -- Exclude extension members
 ORDER BY n.nspname, p.proname;

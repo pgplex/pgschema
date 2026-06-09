@@ -116,7 +116,9 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	}
 
 	// Create files in dependency order
-	orderedDirs := []string{"types", "domains", "sequences", "functions", "procedures", "tables", "views", "materialized_views", "default_privileges", "privileges"}
+	// Aggregates come after tables (an aggregate may reference a table's row type) and
+	// before views (which may reference the aggregate), matching the diff create order.
+	orderedDirs := []string{"types", "domains", "sequences", "functions", "procedures", "tables", "aggregates", "views", "materialized_views", "default_privileges", "privileges"}
 
 	for _, dir := range orderedDirs {
 		if objects, exists := filesByType[dir]; exists {
@@ -245,6 +247,8 @@ func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 		return "functions"
 	case "procedure":
 		return "procedures"
+	case "aggregate":
+		return "aggregates"
 	case "table":
 		return "tables"
 	case "view":
@@ -477,6 +481,12 @@ func (f *DumpFormatter) formatObjectCommentHeader(step diff.Diff) string {
 		objectName = obj.Name + "(" + obj.GetArguments() + ")"
 	case *ir.Procedure:
 		objectName = obj.Name + "(" + obj.GetArguments() + ")"
+	case *ir.Aggregate:
+		argsClause := obj.Arguments
+		if argsClause == "" {
+			argsClause = "*"
+		}
+		objectName = obj.Name + "(" + argsClause + ")"
 	default:
 		// Use the GetObjectName interface method for all other types
 		objectName = step.Source.GetObjectName()
