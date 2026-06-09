@@ -47,6 +47,9 @@ patterns = ["idx_temp_*", "manual_*"]
 [constraints]
 patterns = ["fk_legacy_*"]
 
+[triggers]
+patterns = ["_vectorizer_src_trg_*"]
+
 [privileges]
 patterns = ["deploy_bot", "admin_*"]
 
@@ -126,6 +129,21 @@ This is useful when:
 
 <Warning>
 Patterns match the constraint name only, which is not necessarily unique across tables. Be careful with broad patterns like `*`, as ignoring a primary key or unique constraint can leave a table without the keys it needs.
+</Warning>
+
+## Triggers
+
+The `[triggers]` section matches triggers by **trigger name**. When a trigger is ignored, pgschema neither creates, drops, nor reports drift on it — it is left entirely to be managed out-of-band.
+
+```toml
+[triggers]
+patterns = ["_vectorizer_src_trg_*"]
+```
+
+This is useful when an extension automatically creates triggers on tables you manage. For example, the [pgai](https://github.com/timescale/pgai) vectorizer adds `_vectorizer_src_trg_*` triggers to source tables; ignoring them keeps `pgschema plan` from flagging them for drop while you continue to manage the rest of the table.
+
+<Warning>
+Patterns match the trigger name only, which is not necessarily unique across tables. Be careful with broad patterns like `*`.
 </Warning>
 
 ## Triggers on Ignored Tables

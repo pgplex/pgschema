@@ -47,6 +47,9 @@ patterns = ["idx_temp_*"]
 
 [constraints]
 patterns = ["fk_temp_*"]
+
+[triggers]
+patterns = ["trg_temp_*"]
 `
 
 	err := os.WriteFile(testFile, []byte(tomlContent), 0644)
@@ -92,6 +95,10 @@ patterns = ["fk_temp_*"]
 
 	if len(config.Constraints) != 1 || config.Constraints[0] != "fk_temp_*" {
 		t.Errorf("Expected constraints patterns [\"fk_temp_*\"], got %v", config.Constraints)
+	}
+
+	if len(config.Triggers) != 1 || config.Triggers[0] != "trg_temp_*" {
+		t.Errorf("Expected triggers patterns [\"trg_temp_*\"], got %v", config.Triggers)
 	}
 }
 

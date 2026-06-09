@@ -109,6 +109,7 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		Sequences:   []string{"seq_*"},
 		Indexes:     []string{"idx_*"},
 		Constraints: []string{"fk_*"},
+		Triggers:    []string{"trg_*"},
 	}
 
 	// Test each object type
@@ -133,6 +134,8 @@ func TestIgnoreConfig_AllObjectTypes(t *testing.T) {
 		{config.ShouldIgnoreIndex, "users_pkey", false},
 		{config.ShouldIgnoreConstraint, "fk_orders_product", true},
 		{config.ShouldIgnoreConstraint, "users_pkey", false},
+		{config.ShouldIgnoreTrigger, "trg_audit", true},
+		{config.ShouldIgnoreTrigger, "set_updated_at", false},
 	}
 
 	for _, tt := range tests {
@@ -170,6 +173,9 @@ func TestIgnoreConfig_NilConfig(t *testing.T) {
 	}
 	if config.ShouldIgnoreConstraint("any_constraint") {
 		t.Error("nil config should not ignore any constraint")
+	}
+	if config.ShouldIgnoreTrigger("any_trigger") {
+		t.Error("nil config should not ignore any trigger")
 	}
 }
 

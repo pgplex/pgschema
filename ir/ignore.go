@@ -24,6 +24,7 @@ type IgnoreConfig struct {
 	Sequences         []string `toml:"sequences,omitempty"`
 	Indexes           []string `toml:"indexes,omitempty"`
 	Constraints       []string `toml:"constraints,omitempty"`
+	Triggers          []string `toml:"triggers,omitempty"`
 	Privileges        []string `toml:"privileges,omitempty"`
 	DefaultPrivileges []string `toml:"default_privileges,omitempty"`
 }
@@ -92,6 +93,16 @@ func (c *IgnoreConfig) ShouldIgnoreConstraint(constraintName string) bool {
 		return false
 	}
 	return c.shouldIgnore(constraintName, c.Constraints)
+}
+
+// ShouldIgnoreTrigger checks if a trigger should be ignored based on the patterns.
+// Patterns match on the trigger name, letting users exclude triggers created
+// out-of-band (e.g. triggers an extension automatically adds to tracked tables).
+func (c *IgnoreConfig) ShouldIgnoreTrigger(triggerName string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(triggerName, c.Triggers)
 }
 
 // ShouldIgnorePrivilegeByObjectType checks if a privilege should be ignored based on the object name

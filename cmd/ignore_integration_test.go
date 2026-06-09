@@ -1564,6 +1564,145 @@ CREATE TABLE products (
 	})
 }
 
+// TestIgnoreTriggers tests that triggers matching .pgschemaignore [triggers]
+// patterns are excluded from dump and plan output.
+// Addresses https://github.com/pgplex/pgschema/issues/407
+func TestIgnoreTriggers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	// Create a table with a managed trigger plus an extension-style trigger that
+	// is not part of the declared schema (simulates a trigger an extension adds
+	// automatically, e.g. the pgai vectorizer's _vectorizer_src_trg_* triggers).
+	setupSQL := `
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    updated_at TIMESTAMPTZ
+);
+
+CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION vectorizer_noop() RETURNS trigger AS $$
+BEGIN
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER products_set_updated_at
+    BEFORE UPDATE ON products
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER _vectorizer_src_trg_products
+    AFTER INSERT OR UPDATE ON products
+    FOR EACH ROW EXECUTE FUNCTION vectorizer_noop();
+`
+	_, err := conn.Exec(setupSQL)
+	if err != nil {
+		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Ignore any trigger whose name starts with "_vectorizer_src_trg_"
+	ignoreContent := `[triggers]
+patterns = ["_vectorizer_src_trg_*"]
+`
+	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	}
+
+	t.Run("dump", func(t *testing.T) {
+		output := executeIgnoreDumpCommand(t, containerInfo)
+
+		if !strings.Contains(output, "products_set_updated_at") {
+			t.Error("Dump should include products_set_updated_at (not ignored)")
+		}
+
+		if strings.Contains(output, "_vectorizer_src_trg_products") {
+			t.Error("Dump should not include _vectorizer_src_trg_products (ignored by [triggers] patterns)")
+		}
+	})
+
+	t.Run("plan", func(t *testing.T) {
+		// Desired schema declares the table, the function, and the managed trigger
+		// but not the extension trigger. Without the ignore the plan would emit
+		// DROP TRIGGER _vectorizer_src_trg_products; with the ignore it should not
+		// reference it.
+		schemaSQL := `
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    updated_at TIMESTAMPTZ
+);
+
+CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER products_set_updated_at
+    BEFORE UPDATE ON products
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+`
+		schemaFile := "schema.sql"
+		err := os.WriteFile(schemaFile, []byte(schemaSQL), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create schema file: %v", err)
+		}
+		defer os.Remove(schemaFile)
+
+		output := executeIgnorePlanCommand(t, containerInfo, schemaFile)
+
+		if strings.Contains(output, "_vectorizer_src_trg_products") {
+			t.Errorf("Plan should not reference _vectorizer_src_trg_products (ignored); got: %s", output)
+		}
+	})
+}
+
 // verifyPlanOutput checks that plan output excludes ignored objects
 func verifyPlanOutput(t *testing.T, output string) {
 	// Changes that should appear in plan (regular objects)
