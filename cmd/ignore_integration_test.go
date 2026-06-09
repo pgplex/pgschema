@@ -1594,8 +1594,10 @@ func TestIgnoreTriggers(t *testing.T) {
 	}
 
 	// Create a table with a managed trigger plus an extension-style trigger that
-	// is not part of the declared schema (simulates a trigger an extension adds
-	// automatically, e.g. the pgai vectorizer's _vectorizer_src_trg_* triggers).
+	// is not part of the declared schema (simulates a trigger that an extension
+	// adds automatically, e.g. the pgai vectorizer's _vectorizer_src_trg_*
+	// triggers). Both triggers reuse the same function so the only unmanaged
+	// object is the ignored trigger itself — no stray DROP FUNCTION noise.
 	setupSQL := `
 CREATE TABLE products (
     id SERIAL PRIMARY KEY,
@@ -1610,19 +1612,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE FUNCTION vectorizer_noop() RETURNS trigger AS $$
-BEGIN
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
 CREATE TRIGGER products_set_updated_at
     BEFORE UPDATE ON products
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER _vectorizer_src_trg_products
-    AFTER INSERT OR UPDATE ON products
-    FOR EACH ROW EXECUTE FUNCTION vectorizer_noop();
+    BEFORE INSERT ON products
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 `
 	_, err := conn.Exec(setupSQL)
 	if err != nil {

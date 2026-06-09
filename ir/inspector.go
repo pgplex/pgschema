@@ -1592,7 +1592,7 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 		schemaName := triggerRow.TriggerSchema
 		triggerName := triggerRow.TriggerName
 
-		// Check if the trigger should be ignored (e.g. triggers an extension
+		// Check if the trigger should be ignored (e.g. triggers that an extension
 		// automatically creates on tracked tables). Ignored triggers are excluded
 		// from dump, plan generation, and drift detection alike.
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreTrigger(triggerName) {

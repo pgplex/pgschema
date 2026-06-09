@@ -97,7 +97,7 @@ func (c *IgnoreConfig) ShouldIgnoreConstraint(constraintName string) bool {
 
 // ShouldIgnoreTrigger checks if a trigger should be ignored based on the patterns.
 // Patterns match on the trigger name, letting users exclude triggers created
-// out-of-band (e.g. triggers an extension automatically adds to tracked tables).
+// out-of-band (e.g. triggers that an extension automatically adds to tracked tables).
 func (c *IgnoreConfig) ShouldIgnoreTrigger(triggerName string) bool {
 	if c == nil {
 		return false
