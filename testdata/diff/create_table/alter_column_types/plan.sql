@@ -19,3 +19,5 @@ ALTER TABLE user_pending_permissions ALTER COLUMN status TYPE action_type USING 
 ALTER TABLE user_pending_permissions ALTER COLUMN status SET DEFAULT 'pending'::action_type;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN tags TYPE action_type[] USING tags::action_type[];
+
+ALTER TABLE user_pending_permissions ALTER COLUMN amount TYPE numeric(20,6);
