@@ -1,0 +1,10 @@
+{
+  "name": "issue_409_partitioned_fk",
+  "description": "pgschema dump emits internal per-partition FK constraints when a foreign key references a partitioned table",
+  "source": "https://github.com/pgplex/pgschema/issues/409",
+  "notes": [
+    "A FK referencing a partitioned table causes PostgreSQL to create one extra pg_constraint row per partition with conparentid != 0; pg_dump omits these and only emits the top-level FK (conparentid = 0).",
+    "The constraint queries in ir/queries now filter FK rows with (c.contype <> 'f' OR c.conparentid = 0) to match pg_dump.",
+    "Without the fix, dump produced bogus event_..._fkey1 / event_..._fkey2 constraints referencing individual partitions, which also left dangling REFERENCES when those partitions were excluded via .pgschemaignore."
+  ]
+}

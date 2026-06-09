@@ -358,6 +358,10 @@ LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey
 WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     AND n.nspname NOT LIKE 'pg_temp_%'
     AND n.nspname NOT LIKE 'pg_toast_temp_%'
+    -- Skip internal per-partition FK rows (conparentid != 0) that PostgreSQL
+    -- creates when a FK references a partitioned table. pg_dump omits these;
+    -- only the top-level FK (conparentid = 0) is a real, dumpable constraint.
+    AND (c.contype <> 'f' OR c.conparentid = 0)
 ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum;
 
 -- GetIndexes retrieves all indexes including regular and unique indexes created with CREATE INDEX
@@ -947,6 +951,10 @@ LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
 LEFT JOIN pg_index i ON i.indexrelid = c.conindid
 WHERE n.nspname = $1
+    -- Skip internal per-partition FK rows (conparentid != 0) that PostgreSQL
+    -- creates when a FK references a partitioned table. pg_dump omits these;
+    -- only the top-level FK (conparentid = 0) is a real, dumpable constraint.
+    AND (c.contype <> 'f' OR c.conparentid = 0)
 ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum;
 
 -- GetSequencesForSchema retrieves all sequences for a specific schema
