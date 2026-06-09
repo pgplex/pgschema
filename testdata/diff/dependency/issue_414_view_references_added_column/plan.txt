@@ -1,0 +1,23 @@
+Plan: 1 to add, 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+  views: 1 to add
+
+Tables:
+  ~ foo
+    + run_id (column)
+
+Views:
+  + foo_view
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE foo ADD COLUMN run_id uuid;
+
+CREATE OR REPLACE VIEW foo_view AS
+ SELECT id,
+    run_id
+   FROM foo
+  WHERE run_id IS NOT NULL;

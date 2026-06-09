@@ -296,6 +296,11 @@ type ddlDiff struct {
 	addedColumnPrivileges    []*ir.ColumnPrivilege
 	droppedColumnPrivileges  []*ir.ColumnPrivilege
 	modifiedColumnPrivileges []*columnPrivilegeDiff
+	// Newly-added views that reference newly-added columns on modified tables.
+	// Created in the modify phase, AFTER generateModifyTablesSQL, so the columns
+	// exist when the view body is parsed (issue #414).
+	deferredAddedViews            []*ir.View
+	functionsAwaitingDeferredViews []*ir.Function
 }
 
 // schemaDiff represents changes to a schema
@@ -1615,8 +1620,61 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Note: We need to create triggers for ALL tables, not just the original d.addedTables
 	generateCreateTriggersFromTables(d.addedTables, targetSchema, collector)
 
-	// Create views
-	generateCreateViewsSQL(d.addedViews, targetSchema, collector)
+	// Create views, deferring any whose body references a newly-added column on a
+	// modified table. Those columns are emitted by generateModifyTablesSQL during
+	// the modify phase, so deferred views are created there (issue #414)
+	addedColLookup := buildModifiedTableAddedColumnLookup(d.modifiedTables)
+	viewsToCreateNow := d.addedViews
+	if len(addedColLookup) > 0 {
+		viewsToCreateNow = nil
+		for _, v := range d.addedViews {
+			if viewReferencesAddedColumn(v, addedColLookup) {
+				d.deferredAddedViews = append(d.deferredAddedViews, v)
+			} else {
+				viewsToCreateNow = append(viewsToCreateNow, v)
+			}
+		}
+
+		// Transitive closure: also defer any view whose body references a view
+		// already in deferredAddedViews. Iterate to fixpoint so chains of any
+		// length (V3 -> V2 -> V1 -> added column) move together. Walking
+		// viewsToCreateNow in order preserves topological ordering on each pass.
+		// Each iteration reads d.deferredAddedViews fresh, so a view appended
+		// during this pass is visible to the very next sibling examined — that
+		// is what lets a topo-sorted chain drain in a single pass.
+		for {
+			var stillNow []*ir.View
+			added := false
+			for _, v := range viewsToCreateNow {
+				if viewReferencesAnyDeferredView(v, d.deferredAddedViews) {
+					d.deferredAddedViews = append(d.deferredAddedViews, v)
+					added = true
+				} else {
+					stillNow = append(stillNow, v)
+				}
+			}
+			viewsToCreateNow = stillNow
+			if !added {
+				break
+			}
+		}
+	}
+	generateCreateViewsSQL(viewsToCreateNow, targetSchema, collector)
+
+	// If any views were deferred, also defer functions whose view dependency is
+	// on those deferred views — they must be created after the views exist.
+	if len(d.deferredAddedViews) > 0 {
+		deferredViewLookup := buildViewLookup(d.deferredAddedViews)
+		var keepNow []*ir.Function
+		for _, fn := range functionsWithViewDeps {
+			if functionReferencesNewView(fn, deferredViewLookup) {
+				d.functionsAwaitingDeferredViews = append(d.functionsAwaitingDeferredViews, fn)
+			} else {
+				keepNow = append(keepNow, fn)
+			}
+		}
+		functionsWithViewDeps = keepNow
+	}
 
 	// Create functions WITH view dependencies (now that views exist)
 	// These functions reference views in their return type or parameter types (issue #300)
@@ -1651,6 +1709,16 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Modify tables
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, targetSchema, collector)
+
+	// Create views deferred from generateCreateSQL — their bodies reference
+	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
+	// any functions whose view dependency was on those deferred views.
+	if len(d.deferredAddedViews) > 0 {
+		generateCreateViewsSQL(d.deferredAddedViews, targetSchema, collector)
+	}
+	if len(d.functionsAwaitingDeferredViews) > 0 {
+		generateCreateFunctionsSQL(d.functionsAwaitingDeferredViews, targetSchema, collector)
+	}
 
 	// Find views that depend on views being recreated (issue #268, #308)
 	// Handles both materialized views and regular views with RequiresRecreate

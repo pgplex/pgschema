@@ -769,6 +769,67 @@ func viewDependsOnTable(view *ir.View, tableSchema, tableName string) bool {
 	return false
 }
 
+// buildModifiedTableAddedColumnLookup returns a map of lowercased schema.tableName
+// to a set of lowercased column names being added by ALTER TABLE on that table.
+func buildModifiedTableAddedColumnLookup(modifiedTables []*tableDiff) map[string]map[string]struct{} {
+	lookup := make(map[string]map[string]struct{})
+	for _, td := range modifiedTables {
+		if len(td.AddedColumns) == 0 {
+			continue
+		}
+		key := strings.ToLower(td.Table.Schema + "." + td.Table.Name)
+		cols := make(map[string]struct{}, len(td.AddedColumns))
+		for _, c := range td.AddedColumns {
+			cols[strings.ToLower(c.Name)] = struct{}{}
+		}
+		lookup[key] = cols
+	}
+	return lookup
+}
+
+// viewReferencesAnyDeferredView reports whether the view's body references any
+// of the provided deferred views by name. Used for transitive deferral so that
+// view chains (V2 -> V1 -> added column) move together to the modify phase.
+func viewReferencesAnyDeferredView(view *ir.View, deferred []*ir.View) bool {
+	if view == nil || view.Definition == "" || len(deferred) == 0 {
+		return false
+	}
+	for _, dv := range deferred {
+		if viewDependsOnView(view, dv.Name) {
+			return true
+		}
+		if dv.Schema != "" && viewDependsOnView(view, dv.Schema+"."+dv.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+// viewReferencesAddedColumn reports whether the view's definition references
+// any modified table AND at least one of the columns being added to that table.
+// Both checks are required to avoid deferring views that simply happen to
+// mention a column name being added to an unrelated table.
+func viewReferencesAddedColumn(view *ir.View, addedCols map[string]map[string]struct{}) bool {
+	if view == nil || view.Definition == "" || len(addedCols) == 0 {
+		return false
+	}
+	for tableKey, cols := range addedCols {
+		parts := strings.SplitN(tableKey, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if !viewDependsOnTable(view, parts[0], parts[1]) {
+			continue
+		}
+		for col := range cols {
+			if containsIdentifier(view.Definition, col) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // dependentViewsContext tracks views that depend on views being recreated
 type dependentViewsContext struct {
 	// dependents maps view key (schema.name) to list of dependent views
