@@ -2,8 +2,10 @@ package util
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	"github.com/pgplex/pgschema/internal/logger"
 	"github.com/pgplex/pgschema/ir"
 )
 
@@ -108,9 +110,18 @@ func LoadIgnoreFileWithStructure() (*ir.IgnoreConfig, error) {
 
 // LoadIgnoreFileWithStructureFromPath loads an ignore file using structured format from the specified path
 func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, error) {
+	// Resolve to an absolute path so the diagnostic logs below unambiguously
+	// show where pgschema looked (e.g. when running from the wrong directory).
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		absPath = filePath
+	}
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		// File doesn't exist, return nil config (no filtering)
+		// File doesn't exist, return nil config (no filtering).
+		logger.Get().Info("no ignore file found, no filtering applied",
+			"file", absPath)
 		return nil, nil
 	} else if err != nil {
 		// Other error accessing file
@@ -122,6 +133,8 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 	if _, err := toml.DecodeFile(filePath, &tomlConfig); err != nil {
 		return nil, err
 	}
+
+	logger.Get().Debug("loaded ignore file", "file", absPath)
 
 	// Convert to simple IgnoreConfig structure
 	config := &ir.IgnoreConfig{
