@@ -1,0 +1,10 @@
+{
+  "name": "issue_422_quoted_custom_type",
+  "description": "Test case for quoted mixed-case custom type names being dumped unquoted in column type references (GitHub issue #422)",
+  "source": "https://github.com/pgplex/pgschema/issues/422",
+  "notes": [
+    "Reproduces the bug where a column whose type is a mixed-case user-defined type (e.g. \"MyStatus\") is dumped with the type reference unquoted (status MyStatus), folding to mystatus and breaking round-trip",
+    "Covers enum, composite, and domain user-defined types, plus an array of a mixed-case enum (\"MyStatus\"[])",
+    "The CREATE TYPE/DOMAIN definitions and the ::\"MyStatus\" default cast were already quoted; only the column type reference was missing quoting"
+  ]
+}

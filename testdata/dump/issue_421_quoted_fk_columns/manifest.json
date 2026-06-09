@@ -1,0 +1,11 @@
+{
+  "name": "issue_421_quoted_fk_columns",
+  "description": "Regression test for round-tripping a schema with quoted mixed-case foreign key columns and circular FK dependencies (GitHub issue #421)",
+  "source": "https://github.com/pgplex/pgschema/issues/421",
+  "notes": [
+    "Reproduces a schema with quoted mixed-case columns (\"aId\", \"bId\") and circular foreign keys",
+    "Both the referencing and referenced FK columns must stay double-quoted in the dump output",
+    "Circular FKs force one constraint inline in CREATE TABLE and the other as a deferred ALTER TABLE; both must quote columns",
+    "Reported against 1.9.0; already fixed on current main. This fixture guards against regression."
+  ]
+}
