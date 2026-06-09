@@ -3,6 +3,8 @@ CREATE TABLE public.user_sessions (
     session_token text NOT NULL,
     device_fingerprint text NOT NULL,
     created_at timestamp NOT NULL,
-    CONSTRAINT user_sessions_token_device_key UNIQUE (session_token, device_fingerprint),
-    CONSTRAINT user_sessions_user_device_key UNIQUE (user_id, device_fingerprint)
+    api_key text NOT NULL,
+    CONSTRAINT user_sessions_token_device_key UNIQUE (session_token, device_fingerprint) DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT user_sessions_user_device_key UNIQUE (user_id, device_fingerprint) DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT user_sessions_api_key_key UNIQUE (api_key) DEFERRABLE INITIALLY DEFERRED
 );

@@ -25,7 +25,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 		if constraint.IsTemporal && len(cols) > 0 {
 			cols[len(cols)-1] = cols[len(cols)-1] + " WITHOUT OVERLAPS"
 		}
-		return fmt.Sprintf("CONSTRAINT %s PRIMARY KEY (%s)", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "))
+		return fmt.Sprintf("CONSTRAINT %s PRIMARY KEY (%s)%s", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "), deferrableClause(constraint))
 	case ir.ConstraintTypeUnique:
 		// Always include CONSTRAINT name to be explicit and consistent
 		cols := getColumnNames(constraint.Columns)
@@ -36,7 +36,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 		if constraint.NullsNotDistinct {
 			modifier = " NULLS NOT DISTINCT"
 		}
-		return fmt.Sprintf("CONSTRAINT %s UNIQUE%s (%s)", ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(cols, ", "))
+		return fmt.Sprintf("CONSTRAINT %s UNIQUE%s (%s)%s", ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(cols, ", "), deferrableClause(constraint))
 	case ir.ConstraintTypeForeignKey:
 		// Always include CONSTRAINT name to preserve explicit FK names
 		// Use QualifyEntityNameWithQuotes to add schema qualifier when referencing tables in other schemas
@@ -63,13 +63,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 			stmt += fmt.Sprintf(" ON DELETE %s", constraint.DeleteRule)
 		}
 		// Add deferrable clause
-		if constraint.Deferrable {
-			if constraint.InitiallyDeferred {
-				stmt += " DEFERRABLE INITIALLY DEFERRED"
-			} else {
-				stmt += " DEFERRABLE"
-			}
-		}
+		stmt += deferrableClause(constraint)
 		// Add NOT VALID if needed
 		if !constraint.IsValid {
 			stmt += " NOT VALID"
@@ -93,6 +87,21 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 	default:
 		return ""
 	}
+}
+
+// deferrableClause returns the " DEFERRABLE [INITIALLY DEFERRED]" suffix for a
+// constraint, or "" when it is not deferrable. PRIMARY KEY, UNIQUE, and FOREIGN
+// KEY constraints all support this; EXCLUDE constraints carry the clause inside
+// their full pg_get_constraintdef() text, so callers using ExclusionDefinition
+// must not append this on top of it.
+func deferrableClause(constraint *ir.Constraint) string {
+	if !constraint.Deferrable {
+		return ""
+	}
+	if constraint.InitiallyDeferred {
+		return " DEFERRABLE INITIALLY DEFERRED"
+	}
+	return " DEFERRABLE"
 }
 
 // getInlineConstraintsForTable returns constraints in the correct order: PRIMARY KEY, UNIQUE, FOREIGN KEY

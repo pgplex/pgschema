@@ -13,7 +13,8 @@
 CREATE TABLE IF NOT EXISTS authors (
     id SERIAL,
     name varchar(255) NOT NULL,
-    CONSTRAINT authors_pkey PRIMARY KEY (id)
+    CONSTRAINT authors_pkey PRIMARY KEY (id),
+    CONSTRAINT authors_name_key UNIQUE (name) DEFERRABLE INITIALLY DEFERRED
 );
 
 --
