@@ -26,6 +26,7 @@ var skipListPG14_15 = []string{
 	"create_materialized_view/drop_materialized_view",
 	"dependency/table_to_materialized_view",
 	"dependency/issue_300_function_table_composite_type",
+	"dependency/issue_414_function_returns_deferred_view_chain",
 
 	// Online materialized view index tests - depend on materialized view definitions
 	"online/add_materialized_view_index",
