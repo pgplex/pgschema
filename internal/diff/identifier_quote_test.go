@@ -240,14 +240,17 @@ func TestGenerateTriggerSQLWithMode_WithQuoting(t *testing.T) {
 				"    EXECUTE FUNCTION audit_fn();",
 		},
 		{
-			name: "UPDATE OF mixed-case columns",
+			// UpdateColumns are extracted verbatim from pg_get_triggerdef(), so a
+			// mixed-case column already arrives quoted ("userId") and must be emitted
+			// as-is — re-quoting would produce ""userId"".
+			name: "UPDATE OF columns emitted verbatim (already-quoted from inspector)",
 			trigger: &ir.Trigger{
 				Schema:        "public",
 				Table:         "orders",
 				Name:          "track_changes",
 				Timing:        ir.TriggerTimingAfter,
 				Events:        []ir.TriggerEvent{ir.TriggerEventUpdate},
-				UpdateColumns: []string{"userId", "email"},
+				UpdateColumns: []string{`"userId"`, "email"},
 				Level:         ir.TriggerLevelRow,
 				Function:      "track_fn()",
 			},

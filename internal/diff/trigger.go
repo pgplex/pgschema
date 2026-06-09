@@ -226,11 +226,9 @@ func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string) string
 		for _, triggerEvent := range trigger.Events {
 			if triggerEvent == orderEvent {
 				if triggerEvent == ir.TriggerEventUpdate && len(trigger.UpdateColumns) > 0 {
-					quotedColumns := make([]string, len(trigger.UpdateColumns))
-					for i, col := range trigger.UpdateColumns {
-						quotedColumns[i] = ir.QuoteIdentifier(col)
-					}
-					events = append(events, "UPDATE OF "+strings.Join(quotedColumns, ", "))
+					// UpdateColumns are extracted verbatim from pg_get_triggerdef(),
+					// so mixed-case names already carry their double quotes — emit as-is.
+					events = append(events, "UPDATE OF "+strings.Join(trigger.UpdateColumns, ", "))
 				} else {
 					events = append(events, string(triggerEvent))
 				}
