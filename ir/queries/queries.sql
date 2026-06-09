@@ -74,12 +74,12 @@ WITH column_base AS (
         COALESCE(d.description, '') AS column_comment,
         CASE
             WHEN dt.typtype = 'd' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
+                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
                 END
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
+                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
                 END
             WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
                 -- Array types: apply same schema qualification logic to element type
@@ -88,8 +88,8 @@ WITH column_base AS (
                 -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname
-                    WHEN en.nspname = c.table_schema THEN et.typname
-                    ELSE en.nspname || '.' || et.typname
+                    WHEN en.nspname = c.table_schema THEN quote_ident(et.typname)
+                    ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
                 -- Non-array base types: qualify if not in pg_catalog or table's schema
@@ -193,12 +193,12 @@ WITH column_base AS (
         COALESCE(d.description, '') AS column_comment,
         CASE
             WHEN dt.typtype = 'd' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
+                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
                 END
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN dt.typname
-                     ELSE dn.nspname || '.' || dt.typname
+                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
+                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
                 END
             WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
                 -- Array types: apply same schema qualification logic to element type
@@ -207,8 +207,8 @@ WITH column_base AS (
                 -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname
-                    WHEN en.nspname = c.table_schema THEN et.typname
-                    ELSE en.nspname || '.' || et.typname
+                    WHEN en.nspname = c.table_schema THEN quote_ident(et.typname)
+                    ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
                 -- Non-array base types: qualify if not in pg_catalog or table's schema
