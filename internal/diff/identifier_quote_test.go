@@ -290,6 +290,104 @@ func TestGenerateTriggerSQLWithMode_WithQuoting(t *testing.T) {
 	}
 }
 
+func TestGenerateSequenceSQL_OwnedByQuoting(t *testing.T) {
+	tests := []struct {
+		name         string
+		seq          *ir.Sequence
+		targetSchema string
+		want         string
+	}{
+		{
+			name: "mixed-case table name in OWNED BY (same schema)",
+			seq: &ir.Sequence{
+				Schema:        "domain",
+				Name:          "prompt_history_historyid_seq",
+				StartValue:    1,
+				Increment:     1,
+				OwnedByTable:  "fieldPromptHistory",
+				OwnedByColumn: "historyid",
+			},
+			targetSchema: "domain",
+			want:         `CREATE SEQUENCE IF NOT EXISTS prompt_history_historyid_seq OWNED BY "fieldPromptHistory".historyid;`,
+		},
+		{
+			name: "mixed-case column name in OWNED BY (same schema)",
+			seq: &ir.Sequence{
+				Schema:        "public",
+				Name:          "audit_seq",
+				StartValue:    1,
+				Increment:     1,
+				OwnedByTable:  "audit",
+				OwnedByColumn: "auditId",
+			},
+			targetSchema: "public",
+			want:         `CREATE SEQUENCE IF NOT EXISTS audit_seq OWNED BY audit."auditId";`,
+		},
+		{
+			name: "both table and column mixed-case in OWNED BY (same schema)",
+			seq: &ir.Sequence{
+				Schema:        "public",
+				Name:          "seq",
+				StartValue:    1,
+				Increment:     1,
+				OwnedByTable:  "fieldPromptHistory",
+				OwnedByColumn: "historyId",
+			},
+			targetSchema: "public",
+			want:         `CREATE SEQUENCE IF NOT EXISTS seq OWNED BY "fieldPromptHistory"."historyId";`,
+		},
+		{
+			name: "lowercase table and column (same schema, no quotes needed)",
+			seq: &ir.Sequence{
+				Schema:        "public",
+				Name:          "orders_id_seq",
+				StartValue:    1,
+				Increment:     1,
+				OwnedByTable:  "orders",
+				OwnedByColumn: "id",
+			},
+			targetSchema: "public",
+			want:         `CREATE SEQUENCE IF NOT EXISTS orders_id_seq OWNED BY orders.id;`,
+		},
+		{
+			name: "cross-schema: mixed-case table schema-qualified in OWNED BY",
+			seq: &ir.Sequence{
+				Schema:        "domain",
+				Name:          "prompt_history_historyid_seq",
+				StartValue:    1,
+				Increment:     1,
+				OwnedByTable:  "fieldPromptHistory",
+				OwnedByColumn: "historyid",
+			},
+			targetSchema: "public",
+			// Both sequence name and OWNED BY table are schema-qualified when outside target schema
+			want: `CREATE SEQUENCE IF NOT EXISTS domain.prompt_history_historyid_seq OWNED BY domain."fieldPromptHistory".historyid;`,
+		},
+		{
+			name: "cross-schema: lowercase table schema-qualified in OWNED BY",
+			seq: &ir.Sequence{
+				Schema:        "domain",
+				Name:          "audit_auditid_seq",
+				StartValue:    1,
+				Increment:     1,
+				OwnedByTable:  "audit",
+				OwnedByColumn: "auditid",
+			},
+			targetSchema: "public",
+			want:         `CREATE SEQUENCE IF NOT EXISTS domain.audit_auditid_seq OWNED BY domain.audit.auditid;`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := generateSequenceSQL(tt.seq, tt.targetSchema)
+			if got != tt.want {
+				t.Errorf("generateSequenceSQL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAddColumnIdentifierQuoting(t *testing.T) {
 	tests := []struct {
 		name       string

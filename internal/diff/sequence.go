@@ -115,7 +115,8 @@ func generateSequenceSQL(seq *ir.Sequence, targetSchema string) string {
 
 	// Add sequence owner
 	if seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
-		parts = append(parts, fmt.Sprintf("OWNED BY %s.%s", seq.OwnedByTable, seq.OwnedByColumn))
+		ownerTable := ir.QualifyEntityNameWithQuotes(seq.Schema, seq.OwnedByTable, targetSchema)
+		parts = append(parts, fmt.Sprintf("OWNED BY %s.%s", ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn)))
 	}
 
 	// Join with proper formatting
