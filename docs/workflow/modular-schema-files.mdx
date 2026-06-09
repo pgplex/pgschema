@@ -171,6 +171,37 @@ diff -r schema/ verification/
 rm -rf verification/
 ```
 
+## Ordering Requirements
+
+pgschema applies your schema files in the order of their `\i` directives (and alphabetically within [folder includes](#folder-includes)) to build the desired state. Most objects resolve regardless of order, but some objects depend on others existing **at creation time**. When a dependency is created after the object that references it, you'll see an error such as:
+
+```
+Error: failed to apply desired state: ... type "recipe_user_save" does not exist (SQLSTATE 42704)
+```
+
+The most common dependency that requires ordering is a function whose **return type or arguments reference a table's row type**:
+
+```sql
+CREATE FUNCTION accept_extracted_recipes(recipe_ids uuid[])
+RETURNS SETOF recipe_user_save   -- depends on the recipe_user_save table existing
+LANGUAGE plpgsql AS $$ ... $$;
+```
+
+Here the `recipe_user_save` table must be included **before** the function. Other cases that require the referenced object first include `%ROWTYPE` parameters, table- or composite-typed arguments, and domains used in table columns.
+
+<Note>
+Schema qualification (`public.recipe_user_save`) does **not** affect this — pgschema strips the target-schema prefix internally. Only the include order matters.
+</Note>
+
+The default `dump --multi-file` output already orders directives correctly (types → tables → views → functions → indexes), so this only comes up when you reorganize files yourself. If you use [Custom Organization](#custom-organization), make sure tables (and any other referenced objects) are included before the functions, views, and procedures that depend on them:
+
+```sql
+-- main.sql — referenced objects first
+\i tables/recipe_user_save.sql
+-- ... other tables ...
+\i functions/accept_extracted_recipes.sql
+```
+
 ## File Organization Strategies
 
 ### By Object Type (Default)
