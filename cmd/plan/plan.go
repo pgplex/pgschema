@@ -443,7 +443,7 @@ func processOutput(migrationPlan *plan.Plan, output outputSpec, cmd *cobra.Comma
 // - Constraints (including foreign key referenced schemas)
 // - Indexes, triggers, policies
 // - Dependencies, cross-references, and LIKE clauses
-// - Aggregate function schemas (TransitionFunctionSchema, FinalFunctionSchema)
+// - Aggregate support-function references (SFUNC/FINALFUNC/...) and signature/type strings
 //
 // Without this normalization, generated DDL would reference non-existent temporary schemas
 // and fail when applied to the target database.
