@@ -1590,13 +1590,13 @@ func generateForeignKeyClause(constraint *ir.Constraint, targetSchema string, in
 	if len(constraint.ReferencedColumns) > 0 {
 		if len(constraint.ReferencedColumns) == 1 {
 			// Single column
-			clause += fmt.Sprintf(" (%s)", constraint.ReferencedColumns[0].Name)
+			clause += fmt.Sprintf(" (%s)", ir.QuoteIdentifier(constraint.ReferencedColumns[0].Name))
 		} else {
 			// Multiple columns - sort by position
 			refColumns := sortConstraintColumnsByPosition(constraint.ReferencedColumns)
 			var refColumnNames []string
 			for _, col := range refColumns {
-				refColumnNames = append(refColumnNames, col.Name)
+				refColumnNames = append(refColumnNames, ir.QuoteIdentifier(col.Name))
 			}
 			if constraint.IsTemporal && len(refColumnNames) > 0 {
 				refColumnNames[len(refColumnNames)-1] = "PERIOD " + refColumnNames[len(refColumnNames)-1]
