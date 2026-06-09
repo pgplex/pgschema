@@ -1,8 +1,9 @@
-Plan: 2 to modify.
+Plan: 3 to modify.
 
 Summary by type:
   tables: 1 to modify
   views: 1 to modify
+  materialized views: 1 to modify
 
 Tables:
   ~ item
@@ -11,10 +12,15 @@ Tables:
 Views:
   ~ item_extended
 
+Materialized views:
+  ~ item_summary
+
 DDL to be executed:
 --------------------------------------------------
 
 ALTER TABLE item ADD COLUMN new_col text;
+
+DROP MATERIALIZED VIEW IF EXISTS item_summary RESTRICT;
 
 DROP VIEW IF EXISTS item_extended RESTRICT;
 
@@ -26,3 +32,8 @@ CREATE OR REPLACE VIEW item_extended AS
     c.name AS category_name
    FROM item i
      JOIN category c ON c.id = i.id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS item_summary AS
+ SELECT id,
+    title
+   FROM item_extended;

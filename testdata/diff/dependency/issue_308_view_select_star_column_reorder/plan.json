@@ -3,7 +3,7 @@
   "pgschema_version": "1.11.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "584e78ed59cc9fc48eae0b3f7fb8951623a81775c011bafcb4c27e781ed5f170"
+    "hash": "050bd87923cac97403770169d6e1b9fc6dd6d70d5293fa64e6ba6cf1466db1b7"
   },
   "groups": [
     {
@@ -13,6 +13,12 @@
           "type": "table.column",
           "operation": "create",
           "path": "public.item.new_col"
+        },
+        {
+          "sql": "DROP MATERIALIZED VIEW IF EXISTS item_summary RESTRICT;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.item_summary"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_extended RESTRICT;",
@@ -25,6 +31,12 @@
           "type": "view",
           "operation": "alter",
           "path": "public.item_extended"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS item_summary AS\n SELECT id,\n    title\n   FROM item_extended;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.item_summary"
         }
       ]
     }

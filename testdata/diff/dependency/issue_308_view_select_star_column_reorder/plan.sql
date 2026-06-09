@@ -1,5 +1,7 @@
 ALTER TABLE item ADD COLUMN new_col text;
 
+DROP MATERIALIZED VIEW IF EXISTS item_summary RESTRICT;
+
 DROP VIEW IF EXISTS item_extended RESTRICT;
 
 CREATE OR REPLACE VIEW item_extended AS
@@ -10,3 +12,8 @@ CREATE OR REPLACE VIEW item_extended AS
     c.name AS category_name
    FROM item i
      JOIN category c ON c.id = i.id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS item_summary AS
+ SELECT id,
+    title
+   FROM item_extended;
