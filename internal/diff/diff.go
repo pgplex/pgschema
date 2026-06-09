@@ -299,7 +299,7 @@ type ddlDiff struct {
 	// Newly-added views that reference newly-added columns on modified tables.
 	// Created in the modify phase, AFTER generateModifyTablesSQL, so the columns
 	// exist when the view body is parsed (issue #414).
-	deferredAddedViews            []*ir.View
+	deferredAddedViews             []*ir.View
 	functionsAwaitingDeferredViews []*ir.Function
 }
 
@@ -364,7 +364,7 @@ type viewDiff struct {
 	CommentChanged   bool
 	OldComment       string
 	NewComment       string
-	OptionsChanged   bool // View options (reloptions) changed
+	OptionsChanged   bool           // View options (reloptions) changed
 	AddedIndexes     []*ir.Index    // For materialized views
 	DroppedIndexes   []*ir.Index    // For materialized views
 	ModifiedIndexes  []*IndexDiff   // For materialized views

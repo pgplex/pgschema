@@ -746,23 +746,21 @@ func containsIdentifier(sqlText, identifier string) bool {
 }
 
 // viewDependsOnTable checks if a view depends on a specific table
-// by checking if the table name appears in the view definition
+// by checking if the table name appears in the view definition.
+// Uses whole-word identifier matching (not plain substring) so that a table
+// named "foo" does not falsely match "foobar" or an unrelated alias/CTE.
 func viewDependsOnTable(view *ir.View, tableSchema, tableName string) bool {
 	if view == nil || view.Definition == "" {
 		return false
 	}
 
-	def := strings.ToLower(view.Definition)
-	tableNameLower := strings.ToLower(tableName)
-
 	// Check for unqualified table name
-	if strings.Contains(def, tableNameLower) {
+	if containsIdentifier(view.Definition, tableName) {
 		return true
 	}
 
 	// Check for qualified table name (schema.table)
-	qualifiedName := strings.ToLower(tableSchema + "." + tableName)
-	if strings.Contains(def, qualifiedName) {
+	if containsIdentifier(view.Definition, tableSchema+"."+tableName) {
 		return true
 	}
 
