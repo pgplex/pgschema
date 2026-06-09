@@ -1347,6 +1347,10 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 		if agg.AggregateComment.Valid {
 			comment = agg.AggregateComment.String
 		}
+		arguments := ""
+		if agg.AggregateArguments.Valid {
+			arguments = agg.AggregateArguments.String
+		}
 		returnType := i.safeInterfaceToString(agg.AggregateReturnType)
 		transitionFunction := i.safeInterfaceToString(agg.TransitionFunction)
 		transitionFunctionSchema := i.safeInterfaceToString(agg.TransitionFunctionSchema)
@@ -1360,6 +1364,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 		aggregate := &Aggregate{
 			Schema:                   schemaName,
 			Name:                     aggregateName,
+			Arguments:                arguments,
 			ReturnType:               returnType,
 			TransitionFunction:       transitionFunction,
 			TransitionFunctionSchema: transitionFunctionSchema,
@@ -1370,7 +1375,10 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 			Comment:                  comment,
 		}
 
-		dbSchema.SetAggregate(aggregateName, aggregate)
+		// Use name(arguments) as key to support aggregate overloading,
+		// mirroring how functions and procedures are keyed.
+		aggregateKey := aggregateName + "(" + arguments + ")"
+		dbSchema.SetAggregate(aggregateKey, aggregate)
 	}
 
 	return nil

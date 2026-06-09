@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "7b2eb96c07771d120f4c68b0458da62cb746d8b904863cbf300a5c1428a3fa33"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP AGGREGATE IF EXISTS group_concat(text);",
+          "type": "aggregate",
+          "operation": "drop",
+          "path": "public.group_concat"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS _group_concat(text, text);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public._group_concat"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+-- Empty schema (aggregate and its transition function removed)

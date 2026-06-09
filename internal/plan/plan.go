@@ -91,6 +91,7 @@ const (
 	TypeType                    Type = "types"
 	TypeFunction                Type = "functions"
 	TypeProcedure               Type = "procedures"
+	TypeAggregate               Type = "aggregates"
 	TypeSequence                Type = "sequences"
 	TypeTable                   Type = "tables"
 	TypeView                    Type = "views"
@@ -124,6 +125,7 @@ func getObjectOrder() []Type {
 		TypeType,
 		TypeFunction,
 		TypeProcedure,
+		TypeAggregate,
 		TypeSequence,
 		TypeTable,
 		TypeView,

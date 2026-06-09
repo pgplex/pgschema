@@ -445,9 +445,6 @@ func processOutput(migrationPlan *plan.Plan, output outputSpec, cmd *cobra.Comma
 // - Dependencies, cross-references, and LIKE clauses
 // - Aggregate function schemas (TransitionFunctionSchema, FinalFunctionSchema)
 //
-// Note: Aggregates are normalized for future-proofing even though the diff package
-// does not currently support aggregate migrations.
-//
 // Without this normalization, generated DDL would reference non-existent temporary schemas
 // and fail when applied to the target database.
 func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
@@ -605,6 +602,7 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 		// Aggregates
 		for _, agg := range schema.Aggregates {
 			agg.Schema = toSchema
+			agg.Arguments = replaceString(agg.Arguments)
 			agg.ReturnType = replaceString(agg.ReturnType)
 			agg.TransitionFunction = replaceString(agg.TransitionFunction)
 			if agg.TransitionFunctionSchema == fromSchema {

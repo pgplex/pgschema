@@ -863,6 +863,15 @@ END
 $_$;
 
 --
+-- Name: group_concat(text); Type: AGGREGATE; Schema: -; Owner: -
+--
+
+CREATE AGGREGATE group_concat(text) (
+    SFUNC = _group_concat,
+    STYPE = text
+);
+
+--
 -- Name: film_fulltext_trigger; Type: TRIGGER; Schema: -; Owner: -
 --
 

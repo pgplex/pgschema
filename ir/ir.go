@@ -391,6 +391,7 @@ type Type struct {
 type Aggregate struct {
 	Schema                   string `json:"schema"`
 	Name                     string `json:"name"`
+	Arguments                string `json:"arguments,omitempty"` // input argument types, e.g. "text" or "geometry"
 	ReturnType               string `json:"return_type"`
 	TransitionFunction       string `json:"transition_function"`
 	TransitionFunctionSchema string `json:"transition_function_schema,omitempty"`
@@ -710,4 +711,5 @@ func (p *Procedure) GetObjectName() string  { return p.Name }
 func (v *View) GetObjectName() string       { return v.Name }
 func (s *Sequence) GetObjectName() string   { return s.Name }
 func (t *Type) GetObjectName() string       { return t.Name }
+func (a *Aggregate) GetObjectName() string  { return a.Name }
 

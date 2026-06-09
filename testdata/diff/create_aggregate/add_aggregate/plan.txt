@@ -1,0 +1,41 @@
+Plan: 3 to add.
+
+Summary by type:
+  functions: 2 to add
+  aggregates: 1 to add
+
+Functions:
+  + numeric_accum
+  + numeric_first
+
+Aggregates:
+  + my_agg
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE OR REPLACE FUNCTION numeric_accum(
+    numeric[],
+    numeric
+)
+RETURNS numeric[]
+LANGUAGE sql
+IMMUTABLE
+AS $_$ SELECT array_append($1, $2)
+$_$;
+
+CREATE OR REPLACE FUNCTION numeric_first(
+    numeric[]
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $_$ SELECT $1[1]
+$_$;
+
+CREATE AGGREGATE my_agg(numeric) (
+    SFUNC = numeric_accum,
+    STYPE = numeric[],
+    FINALFUNC = numeric_first,
+    INITCOND = '{}'
+);
