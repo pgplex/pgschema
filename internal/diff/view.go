@@ -385,7 +385,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 		for _, triggerDiff := range diff.ModifiedTriggers {
 			if triggerDiff.New.IsConstraint {
 				viewName := getTableNameWithSchema(diff.New.Schema, diff.New.Name, targetSchema)
-				dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", triggerDiff.Old.Name, viewName)
+				dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(triggerDiff.Old.Name), viewName)
 				dropContext := &diffContext{
 					Type:                DiffTypeViewTrigger,
 					Operation:           DiffOperationDrop,
