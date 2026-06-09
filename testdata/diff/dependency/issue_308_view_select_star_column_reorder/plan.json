@@ -3,7 +3,7 @@
   "pgschema_version": "1.11.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "584e78ed59cc9fc48eae0b3f7fb8951623a81775c011bafcb4c27e781ed5f170"
+    "hash": "49447108ebe654f664db169922b4da0da2bad955df8a351b78df704f3d7cea65"
   },
   "groups": [
     {
@@ -13,6 +13,12 @@
           "type": "table.column",
           "operation": "create",
           "path": "public.item.new_col"
+        },
+        {
+          "sql": "DROP MATERIALIZED VIEW IF EXISTS item_summary RESTRICT;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.item_summary"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_extended RESTRICT;",
@@ -25,6 +31,36 @@
           "type": "view",
           "operation": "alter",
           "path": "public.item_extended"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS item_summary AS\n SELECT id,\n    title\n   FROM item_extended;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.item_summary"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS item_summary_id_idx ON item_summary (id);",
+          "type": "materialized_view.index",
+          "operation": "create",
+          "path": "public.item_summary.item_summary_id_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'item_summary_id_idx';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index item_summary_id_idx"
+          },
+          "type": "materialized_view.index",
+          "operation": "create",
+          "path": "public.item_summary.item_summary_id_idx"
         }
       ]
     }

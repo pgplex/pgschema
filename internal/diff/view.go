@@ -143,10 +143,19 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				droppedDependentViews[depViewKey] = true
 
 				depViewName := qualifyEntityName(depView.Schema, depView.Name, targetSchema)
+
+				// Use the correct DROP variant based on relkind. IF EXISTS does NOT
+				// suppress the error when the object exists with a different relkind,
+				// so dropping a materialized view with DROP VIEW fails (issue #415).
+				depDiffType := DiffTypeView
 				dropDepSQL := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", depViewName)
+				if depView.Materialized {
+					depDiffType = DiffTypeMaterializedView
+					dropDepSQL = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", depViewName)
+				}
 
 				depContext := &diffContext{
-					Type:                DiffTypeView,
+					Type:                depDiffType,
 					Operation:           DiffOperationRecreate,
 					Path:                fmt.Sprintf("%s.%s", depView.Schema, depView.Name),
 					Source:              depView,
@@ -433,8 +442,19 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 
 		createDepSQL := generateViewSQL(depView, targetSchema)
 
+		// Categorize using the correct relkind so materialized dependents are
+		// reported (and commented) as materialized views (issue #415).
+		depDiffType := DiffTypeView
+		depCommentType := DiffTypeViewComment
+		commentKeyword := "VIEW"
+		if depView.Materialized {
+			depDiffType = DiffTypeMaterializedView
+			depCommentType = DiffTypeMaterializedViewComment
+			commentKeyword = "MATERIALIZED VIEW"
+		}
+
 		depContext := &diffContext{
-			Type:                DiffTypeView,
+			Type:                depDiffType,
 			Operation:           DiffOperationRecreate,
 			Path:                fmt.Sprintf("%s.%s", depView.Schema, depView.Name),
 			Source:              depView,
@@ -450,15 +470,25 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 		// Recreate view comment if present
 		if depView.Comment != "" {
 			depViewName := qualifyEntityName(depView.Schema, depView.Name, targetSchema)
-			commentSQL := fmt.Sprintf("COMMENT ON VIEW %s IS %s;", depViewName, quoteString(depView.Comment))
+			commentSQL := fmt.Sprintf("COMMENT ON %s %s IS %s;", commentKeyword, depViewName, quoteString(depView.Comment))
 			commentContext := &diffContext{
-				Type:                DiffTypeViewComment,
+				Type:                depCommentType,
 				Operation:           DiffOperationCreate,
 				Path:                fmt.Sprintf("%s.%s", depView.Schema, depView.Name),
 				Source:              depView,
 				CanRunInTransaction: true,
 			}
 			collector.collect(commentContext, commentSQL)
+		}
+
+		// Dropping a materialized view also drops its indexes, so recreate them
+		// for materialized dependents (issue #415).
+		if depView.Materialized && depView.Indexes != nil {
+			indexList := make([]*ir.Index, 0, len(depView.Indexes))
+			for _, index := range depView.Indexes {
+				indexList = append(indexList, index)
+			}
+			generateCreateIndexesSQLWithType(indexList, targetSchema, collector, DiffTypeMaterializedViewIndex, DiffTypeMaterializedViewIndexComment)
 		}
 	}
 }
