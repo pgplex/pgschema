@@ -226,6 +226,8 @@ func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string) string
 		for _, triggerEvent := range trigger.Events {
 			if triggerEvent == orderEvent {
 				if triggerEvent == ir.TriggerEventUpdate && len(trigger.UpdateColumns) > 0 {
+					// UpdateColumns are extracted verbatim from pg_get_triggerdef(),
+					// so mixed-case names already carry their double quotes — emit as-is.
 					events = append(events, "UPDATE OF "+strings.Join(trigger.UpdateColumns, ", "))
 				} else {
 					events = append(events, string(triggerEvent))
@@ -242,10 +244,10 @@ func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string) string
 	// Build REFERENCING clause if present (for transition tables)
 	var referencingParts []string
 	if trigger.OldTable != "" {
-		referencingParts = append(referencingParts, fmt.Sprintf("OLD TABLE AS %s", trigger.OldTable))
+		referencingParts = append(referencingParts, fmt.Sprintf("OLD TABLE AS %s", ir.QuoteIdentifier(trigger.OldTable)))
 	}
 	if trigger.NewTable != "" {
-		referencingParts = append(referencingParts, fmt.Sprintf("NEW TABLE AS %s", trigger.NewTable))
+		referencingParts = append(referencingParts, fmt.Sprintf("NEW TABLE AS %s", ir.QuoteIdentifier(trigger.NewTable)))
 	}
 	referencingClause := ""
 	if len(referencingParts) > 0 {

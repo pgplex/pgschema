@@ -1205,7 +1205,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 
 			// Step 1: DROP the old trigger
-			dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", triggerDiff.Old.Name, tableName)
+			dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(triggerDiff.Old.Name), tableName)
 			dropContext := &diffContext{
 				Type:                DiffTypeTableTrigger,
 				Operation:           DiffOperationDrop,

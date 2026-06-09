@@ -159,6 +159,137 @@ func TestCheckConstraintQuoting(t *testing.T) {
 	}
 }
 
+func TestGenerateForeignKeyClause_WithQuoting(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint *ir.Constraint
+		want       string
+	}{
+		{
+			name: "single referenced column camelCase",
+			constraint: &ir.Constraint{
+				Name:             "fk_single",
+				Type:             ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public",
+				ReferencedTable:  "users",
+				ReferencedColumns: []*ir.ConstraintColumn{
+					{Name: "userId", Position: 1},
+				},
+			},
+			want: `REFERENCES users ("userId")`,
+		},
+		{
+			name: "multi referenced columns mixed-case and reserved word",
+			constraint: &ir.Constraint{
+				Name:             "fk_multi",
+				Type:             ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public",
+				ReferencedTable:  "accounts",
+				ReferencedColumns: []*ir.ConstraintColumn{
+					{Name: "tenantId", Position: 1},
+					{Name: "user", Position: 2},
+				},
+			},
+			want: `REFERENCES accounts ("tenantId", "user")`,
+		},
+		{
+			name: "single referenced column lowercase (no quotes)",
+			constraint: &ir.Constraint{
+				Name:             "fk_lower",
+				Type:             ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public",
+				ReferencedTable:  "users",
+				ReferencedColumns: []*ir.ConstraintColumn{
+					{Name: "id", Position: 1},
+				},
+			},
+			want: `REFERENCES users (id)`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := generateForeignKeyClause(tt.constraint, "public", false)
+			if got != tt.want {
+				t.Errorf("generateForeignKeyClause() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateTriggerSQLWithMode_WithQuoting(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger *ir.Trigger
+		want    string
+	}{
+		{
+			name: "mixed-case trigger name",
+			trigger: &ir.Trigger{
+				Schema:   "public",
+				Table:    "orders",
+				Name:     "trgAudit",
+				Timing:   ir.TriggerTimingAfter,
+				Events:   []ir.TriggerEvent{ir.TriggerEventInsert},
+				Level:    ir.TriggerLevelRow,
+				Function: "audit_fn()",
+			},
+			want: "CREATE OR REPLACE TRIGGER \"trgAudit\"\n" +
+				"    AFTER INSERT ON orders\n" +
+				"    FOR EACH ROW\n" +
+				"    EXECUTE FUNCTION audit_fn();",
+		},
+		{
+			// UpdateColumns are extracted verbatim from pg_get_triggerdef(), so a
+			// mixed-case column already arrives quoted ("userId") and must be emitted
+			// as-is — re-quoting would produce ""userId"".
+			name: "UPDATE OF columns emitted verbatim (already-quoted from inspector)",
+			trigger: &ir.Trigger{
+				Schema:        "public",
+				Table:         "orders",
+				Name:          "track_changes",
+				Timing:        ir.TriggerTimingAfter,
+				Events:        []ir.TriggerEvent{ir.TriggerEventUpdate},
+				UpdateColumns: []string{`"userId"`, "email"},
+				Level:         ir.TriggerLevelRow,
+				Function:      "track_fn()",
+			},
+			want: "CREATE OR REPLACE TRIGGER track_changes\n" +
+				"    AFTER UPDATE OF \"userId\", email ON orders\n" +
+				"    FOR EACH ROW\n" +
+				"    EXECUTE FUNCTION track_fn();",
+		},
+		{
+			name: "mixed-case transition table aliases",
+			trigger: &ir.Trigger{
+				Schema:   "public",
+				Table:    "orders",
+				Name:     "audit_stmt",
+				Timing:   ir.TriggerTimingAfter,
+				Events:   []ir.TriggerEvent{ir.TriggerEventInsert},
+				Level:    ir.TriggerLevelStatement,
+				OldTable: "OldRows",
+				NewTable: "NewRows",
+				Function: "audit_stmt_fn()",
+			},
+			want: "CREATE OR REPLACE TRIGGER audit_stmt\n" +
+				"    AFTER INSERT ON orders\n" +
+				"    REFERENCING OLD TABLE AS \"OldRows\" NEW TABLE AS \"NewRows\"\n" +
+				"    FOR EACH STATEMENT\n" +
+				"    EXECUTE FUNCTION audit_stmt_fn();",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := generateTriggerSQLWithMode(tt.trigger, "public")
+			if got != tt.want {
+				t.Errorf("generateTriggerSQLWithMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAddColumnIdentifierQuoting(t *testing.T) {
 	tests := []struct {
 		name       string
