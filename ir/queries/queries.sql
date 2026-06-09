@@ -768,10 +768,6 @@ WHERE
 ORDER BY n.nspname, c.relname;
 
 -- GetRLSPolicies retrieves all row level security policies
--- NOTE: the generated Go for this query and GetRLSPoliciesForSchema is hand-maintained
--- with sql.NullString for qual/with_check. Re-running `sqlc generate` mis-infers them as
--- non-null string (it can't see NULL through the LATERAL), which breaks on INSERT-only
--- policies whose qual is NULL. If you regenerate, restore sql.NullString for those columns.
 -- This replicates the pg_policies system view but computes the qual/with_check
 -- expressions with a forced search_path so cross-schema references stay qualified:
 -- 1. set_config sets search_path to only pg_catalog
@@ -802,8 +798,8 @@ SELECT
         WHEN 'd' THEN 'DELETE'
         WHEN '*' THEN 'ALL'
     END AS cmd,
-    e.qual,
-    e.with_check
+    CASE WHEN pol.polqual IS NULL THEN NULL ELSE e.qual END AS qual,
+    CASE WHEN pol.polwithcheck IS NULL THEN NULL ELSE e.with_check END AS with_check
 FROM pg_catalog.pg_policy pol
 JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -859,8 +855,8 @@ SELECT
         WHEN 'd' THEN 'DELETE'
         WHEN '*' THEN 'ALL'
     END AS cmd,
-    e.qual,
-    e.with_check
+    CASE WHEN pol.polqual IS NULL THEN NULL ELSE e.qual END AS qual,
+    CASE WHEN pol.polwithcheck IS NULL THEN NULL ELSE e.with_check END AS with_check
 FROM pg_catalog.pg_policy pol
 JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

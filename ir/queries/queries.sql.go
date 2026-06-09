@@ -2396,8 +2396,8 @@ SELECT
         WHEN 'd' THEN 'DELETE'
         WHEN '*' THEN 'ALL'
     END AS cmd,
-    e.qual,
-    e.with_check
+    CASE WHEN pol.polqual IS NULL THEN NULL ELSE e.qual END AS qual,
+    CASE WHEN pol.polwithcheck IS NULL THEN NULL ELSE e.with_check END AS with_check
 FROM pg_catalog.pg_policy pol
 JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -2415,10 +2415,10 @@ ORDER BY n.nspname, c.relname, pol.polname
 `
 
 type GetRLSPoliciesRow struct {
-	Schemaname sql.NullString `db:"schemaname" json:"schemaname"`
-	Tablename  sql.NullString `db:"tablename" json:"tablename"`
-	Policyname sql.NullString `db:"policyname" json:"policyname"`
-	Permissive sql.NullString `db:"permissive" json:"permissive"`
+	Schemaname string         `db:"schemaname" json:"schemaname"`
+	Tablename  string         `db:"tablename" json:"tablename"`
+	Policyname string         `db:"policyname" json:"policyname"`
+	Permissive string         `db:"permissive" json:"permissive"`
 	Roles      []string       `db:"roles" json:"roles"`
 	Cmd        sql.NullString `db:"cmd" json:"cmd"`
 	Qual       sql.NullString `db:"qual" json:"qual"`
@@ -2426,6 +2426,14 @@ type GetRLSPoliciesRow struct {
 }
 
 // GetRLSPolicies retrieves all row level security policies
+// This replicates the pg_policies system view but computes the qual/with_check
+// expressions with a forced search_path so cross-schema references stay qualified:
+//  1. set_config sets search_path to only pg_catalog
+//  2. pg_get_expr then uses that search_path and includes schema qualifiers for any
+//     function or table reference outside pg_catalog. Same-schema qualifiers are stripped
+//     later by normalizePolicyExpression. Without this, references to objects on the
+//     session search_path (e.g. Supabase's auth.uid()) are emitted unqualified and the
+//     generated CREATE POLICY fails on apply. (Issue #427)
 func (q *Queries) GetRLSPolicies(ctx context.Context) ([]GetRLSPoliciesRow, error) {
 	rows, err := q.db.QueryContext(ctx, getRLSPolicies)
 	if err != nil {
@@ -2480,8 +2488,8 @@ SELECT
         WHEN 'd' THEN 'DELETE'
         WHEN '*' THEN 'ALL'
     END AS cmd,
-    e.qual,
-    e.with_check
+    CASE WHEN pol.polqual IS NULL THEN NULL ELSE e.qual END AS qual,
+    CASE WHEN pol.polwithcheck IS NULL THEN NULL ELSE e.with_check END AS with_check
 FROM pg_catalog.pg_policy pol
 JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -2497,10 +2505,10 @@ ORDER BY n.nspname, c.relname, pol.polname
 `
 
 type GetRLSPoliciesForSchemaRow struct {
-	Schemaname sql.NullString `db:"schemaname" json:"schemaname"`
-	Tablename  sql.NullString `db:"tablename" json:"tablename"`
-	Policyname sql.NullString `db:"policyname" json:"policyname"`
-	Permissive sql.NullString `db:"permissive" json:"permissive"`
+	Schemaname string         `db:"schemaname" json:"schemaname"`
+	Tablename  string         `db:"tablename" json:"tablename"`
+	Policyname string         `db:"policyname" json:"policyname"`
+	Permissive string         `db:"permissive" json:"permissive"`
 	Roles      []string       `db:"roles" json:"roles"`
 	Cmd        sql.NullString `db:"cmd" json:"cmd"`
 	Qual       sql.NullString `db:"qual" json:"qual"`
@@ -2508,8 +2516,10 @@ type GetRLSPoliciesForSchemaRow struct {
 }
 
 // GetRLSPoliciesForSchema retrieves all row level security policies for a specific schema
-func (q *Queries) GetRLSPoliciesForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetRLSPoliciesForSchemaRow, error) {
-	rows, err := q.db.QueryContext(ctx, getRLSPoliciesForSchema, dollar_1)
+// See GetRLSPolicies for why qual/with_check are computed under a forced pg_catalog
+// search_path (Issue #427).
+func (q *Queries) GetRLSPoliciesForSchema(ctx context.Context, nspname string) ([]GetRLSPoliciesForSchemaRow, error) {
+	rows, err := q.db.QueryContext(ctx, getRLSPoliciesForSchema, nspname)
 	if err != nil {
 		return nil, err
 	}
