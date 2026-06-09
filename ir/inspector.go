@@ -612,6 +612,11 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 
 	// Add constraints to tables
 	for key, constraint := range constraintGroups {
+		// Check if constraint should be ignored
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraint(key.name) {
+			continue
+		}
+
 		dbSchema := schema.getOrCreateSchema(key.schema)
 		table, exists := dbSchema.Tables[key.table]
 		if exists {

@@ -41,6 +41,12 @@ patterns = ["type_test_*"]
 [sequences]
 patterns = ["seq_temp_*", "seq_debug_*"]
 
+[indexes]
+patterns = ["idx_temp_*", "manual_*"]
+
+[constraints]
+patterns = ["fk_legacy_*"]
+
 [privileges]
 patterns = ["deploy_bot", "admin_*"]
 
@@ -103,6 +109,24 @@ patterns = ["deploy_bot"]  # Ignore ALTER DEFAULT PRIVILEGES for deploy_bot
 ```
 
 The `[privileges]` section filters explicit grants (`GRANT ... TO role`), including column-level privileges. The `[default_privileges]` section filters `ALTER DEFAULT PRIVILEGES` statements.
+
+## Constraints
+
+The `[constraints]` section matches table constraints by **constraint name** (primary keys, unique, foreign keys, check, and exclusion constraints). When a constraint is ignored, pgschema neither creates, drops, nor reports drift on it — it is left entirely to be managed out-of-band.
+
+```toml
+[constraints]
+patterns = ["fk_*", "!fk_core_*"]
+```
+
+This is useful when:
+
+1. **Out-of-band constraints** - A constraint is added and managed manually (e.g. disabled during an AWS DMS migration and re-added afterward), and you don't want `pgschema plan` to flag it for drop.
+2. **Cross-schema foreign keys** - When modules live in separate schemas with foreign keys between them, ignore the cross-schema foreign keys so each schema can be bootstrapped independently, then drop the ignore to let pgschema manage them once all tables exist.
+
+<Warning>
+Patterns match the constraint name only, which is not necessarily unique across tables. Be careful with broad patterns like `*`, as ignoring a primary key or unique constraint can leave a table without the keys it needs.
+</Warning>
 
 ## Triggers on Ignored Tables
 
