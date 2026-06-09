@@ -108,6 +108,13 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 
 // generateIndexRewrite generates rewrite steps for CREATE INDEX operations
 func generateIndexRewrite(index *ir.Index) []RewriteStep {
+	// PostgreSQL rejects CREATE INDEX CONCURRENTLY on partitioned parents
+	// (SQLSTATE 0A000). Fall back to the canonical synchronous CREATE INDEX
+	// (returning nil here makes the plan emit the non-concurrent statement).
+	if index.IsPartitioned {
+		return nil
+	}
+
 	// Generate concurrent SQL
 	concurrentSQL := generateIndexSQL(index, true) // With CONCURRENTLY
 	waitSQL := generateIndexWaitQueryWithName(index.Name)

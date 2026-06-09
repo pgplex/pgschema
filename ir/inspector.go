@@ -835,6 +835,10 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 
 		// Add index to table or materialized view
 		if table, exists := dbSchema.Tables[tableName]; exists {
+			// Track whether the index targets a partitioned parent. PostgreSQL does
+			// not allow CREATE INDEX CONCURRENTLY on partitioned parents, so the
+			// online rewrite must emit a synchronous CREATE INDEX for these.
+			index.IsPartitioned = table.IsPartitioned
 			table.Indexes[indexName] = index
 		} else if view, exists := dbSchema.Views[tableName]; exists && view.Materialized {
 			// Initialize Indexes map if nil

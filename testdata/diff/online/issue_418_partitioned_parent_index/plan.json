@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.10.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "78af5157bfb48369c44c1028df6929fa7b3966b23a288d78ab8cd45a3953dd7d"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS events_payload_idx ON events USING gin (payload);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.events.events_payload_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS events_2026_04_payload_idx ON events_2026_04 USING gin (payload);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.events_2026_04.events_2026_04_payload_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'events_2026_04_payload_idx';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index events_2026_04_payload_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.events_2026_04.events_2026_04_payload_idx"
+        }
+      ]
+    }
+  ]
+}
