@@ -82,9 +82,9 @@ func normalizeTable(table *Table) {
 		normalizeColumn(column, table.Schema)
 	}
 
-	// Normalize policies (pass table schema for context - Issue #220)
+	// Normalize policies
 	for _, policy := range table.Policies {
-		normalizePolicy(policy, table.Schema)
+		normalizePolicy(policy)
 	}
 
 	// Normalize triggers
@@ -204,8 +204,7 @@ func normalizeDefaultValue(value string, tableSchema string) string {
 }
 
 // normalizePolicy normalizes RLS policy representation
-// tableSchema is used to strip same-schema qualifiers from function calls (Issue #220)
-func normalizePolicy(policy *RLSPolicy, tableSchema string) {
+func normalizePolicy(policy *RLSPolicy) {
 	if policy == nil {
 		return
 	}
@@ -215,8 +214,8 @@ func normalizePolicy(policy *RLSPolicy, tableSchema string) {
 
 	// Normalize expressions by removing extra whitespace
 	// For policy expressions, we want to preserve parentheses as they are part of the expected format
-	policy.Using = normalizePolicyExpression(policy.Using, tableSchema)
-	policy.WithCheck = normalizePolicyExpression(policy.WithCheck, tableSchema)
+	policy.Using = normalizePolicyExpression(policy.Using)
+	policy.WithCheck = normalizePolicyExpression(policy.WithCheck)
 }
 
 // normalizePolicyRoles normalizes policy roles for consistent comparison
@@ -243,8 +242,14 @@ func normalizePolicyRoles(roles []string) []string {
 
 // normalizePolicyExpression normalizes policy expressions (USING/WITH CHECK clauses)
 // It preserves parentheses as they are part of the expected format for policies
-// tableSchema is used to strip same-schema qualifiers from function calls and table references (Issue #220, #224)
-func normalizePolicyExpression(expr string, tableSchema string) string {
+//
+// Same-schema qualifiers no longer need stripping here: GetRLSPoliciesForSchema renders
+// expressions with search_path set to the table's own schema, so same-schema references
+// (Issue #220, #224) come out unqualified on both the current and desired side, while
+// cross-schema references (Issue #427) stay qualified. Regex-stripping was also unsafe:
+// when the schema name equals a table name, it mangled table-qualified column
+// references like profiles.id (Issue #449).
+func normalizePolicyExpression(expr string) string {
 	if expr == "" {
 		return expr
 	}
@@ -252,22 +257,6 @@ func normalizePolicyExpression(expr string, tableSchema string) string {
 	// Remove extra whitespace and normalize
 	expr = strings.TrimSpace(expr)
 	expr = regexp.MustCompile(`\s+`).ReplaceAllString(expr, " ")
-
-	// Strip same-schema qualifiers from function calls (Issue #220)
-	// This matches PostgreSQL's behavior where same-schema qualifiers are stripped
-	// Example: tenant1.auth_uid() -> auth_uid() (when tableSchema is "tenant1")
-	//          util.get_status() -> util.get_status() (preserved, different schema)
-	if tableSchema != "" && strings.Contains(expr, tableSchema+".") {
-		prefix := tableSchema + "."
-		pattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)\(`)
-		expr = pattern.ReplaceAllString(expr, `${1}(`)
-
-		// Strip same-schema qualifiers from table references (Issue #224)
-		// Matches schema.identifier followed by whitespace, comma, closing paren, or end of string
-		// Example: public.users -> users (when tableSchema is "public")
-		tablePattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)(\s|,|\)|$)`)
-		expr = tablePattern.ReplaceAllString(expr, `${1}${2}`)
-	}
 
 	// Handle all parentheses normalization (adding required ones, removing unnecessary ones)
 	expr = normalizeExpressionParentheses(expr)

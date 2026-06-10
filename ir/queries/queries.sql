@@ -325,8 +325,8 @@ SELECT
     COALESCE(fcl.relname, '') AS foreign_table_name,
     COALESCE(fa.attname, '') AS foreign_column_name,
     COALESCE(fa.attnum, 0) AS foreign_ordinal_position,
-    CASE WHEN c.contype = 'c' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS check_clause,
-    CASE WHEN c.contype = 'x' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS exclusion_definition,
+    cd.check_clause,
+    cd.exclusion_definition,
     CASE c.confdeltype
         WHEN 'a' THEN 'NO ACTION'
         WHEN 'r' THEN 'RESTRICT'
@@ -355,6 +355,16 @@ LEFT JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
 LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
+LEFT JOIN LATERAL (
+    SELECT
+        -- Render with search_path set to the table's own schema so same-schema
+        -- type/function references come out unqualified while cross-schema
+        -- references stay qualified. This matches how the desired state renders
+        -- in its temporary schema, keeping both sides comparable (issue #449).
+        set_config('search_path', quote_ident(n.nspname), true) AS dummy,
+        CASE WHEN c.contype = 'c' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS check_clause,
+        CASE WHEN c.contype = 'x' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS exclusion_definition
+) cd ON true
 WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     AND n.nspname NOT LIKE 'pg_temp_%'
     AND n.nspname NOT LIKE 'pg_toast_temp_%'
@@ -769,13 +779,12 @@ ORDER BY n.nspname, c.relname;
 
 -- GetRLSPolicies retrieves all row level security policies
 -- This replicates the pg_policies system view but computes the qual/with_check
--- expressions with a forced search_path so cross-schema references stay qualified:
--- 1. set_config sets search_path to only pg_catalog
--- 2. pg_get_expr then uses that search_path and includes schema qualifiers for any
---    function or table reference outside pg_catalog. Same-schema qualifiers are stripped
---    later by normalizePolicyExpression. Without this, references to objects on the
---    session search_path (e.g. Supabase's auth.uid()) are emitted unqualified and the
---    generated CREATE POLICY fails on apply. (Issue #427)
+-- expressions with a forced search_path so qualification is deterministic:
+-- 1. set_config sets search_path to only the table's own schema
+-- 2. pg_get_expr then renders same-schema references unqualified while cross-schema
+--    references (e.g. Supabase's auth.uid(), issue #427) stay qualified. Without this,
+--    rendering depends on the session search_path and the current/desired states
+--    compare differently (issue #449).
 -- name: GetRLSPolicies :many
 SELECT
     n.nspname AS schemaname,
@@ -805,7 +814,7 @@ JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN LATERAL (
     SELECT
-        set_config('search_path', 'pg_catalog', true) AS dummy,
+        set_config('search_path', quote_ident(n.nspname), true) AS dummy,
         pg_get_expr(pol.polqual, pol.polrelid) AS qual,
         pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
 ) e ON true
@@ -862,7 +871,12 @@ JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN LATERAL (
     SELECT
-        set_config('search_path', 'pg_catalog', true) AS dummy,
+        -- Render with search_path set to the table's own schema so same-schema
+        -- references come out unqualified while cross-schema references (e.g.
+        -- Supabase's auth.uid(), issue #427) stay qualified. This matches how the
+        -- desired state renders in its temporary schema, so both sides compare
+        -- equal without regex-stripping qualifiers afterwards (issue #449).
+        set_config('search_path', quote_ident(n.nspname), true) AS dummy,
         pg_get_expr(pol.polqual, pol.polrelid) AS qual,
         pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
 ) e ON true
@@ -970,8 +984,8 @@ SELECT
     COALESCE(fcl.relname, '') AS foreign_table_name,
     COALESCE(fa.attname, '') AS foreign_column_name,
     COALESCE(fa.attnum, 0) AS foreign_ordinal_position,
-    CASE WHEN c.contype = 'c' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS check_clause,
-    CASE WHEN c.contype = 'x' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS exclusion_definition,
+    cd.check_clause,
+    cd.exclusion_definition,
     CASE c.confdeltype
         WHEN 'a' THEN 'NO ACTION'
         WHEN 'r' THEN 'RESTRICT'
@@ -1004,6 +1018,16 @@ LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
 LEFT JOIN pg_index i ON i.indexrelid = c.conindid
+LEFT JOIN LATERAL (
+    SELECT
+        -- Render with search_path set to the table's own schema so same-schema
+        -- type/function references come out unqualified while cross-schema
+        -- references stay qualified. This matches how the desired state renders
+        -- in its temporary schema, keeping both sides comparable (issue #449).
+        set_config('search_path', quote_ident(n.nspname), true) AS dummy,
+        CASE WHEN c.contype = 'c' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS check_clause,
+        CASE WHEN c.contype = 'x' THEN pg_get_constraintdef(c.oid, true) ELSE NULL END AS exclusion_definition
+) cd ON true
 WHERE n.nspname = $1
     -- Skip internal per-partition FK rows (conparentid != 0) that PostgreSQL
     -- creates when a FK references a partitioned table. pg_dump omits these;
