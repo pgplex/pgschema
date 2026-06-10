@@ -561,6 +561,136 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, targ
 	}
 }
 
+// findFKsDependingOnReplacedConstraints returns desired-state foreign keys that
+// are bound to a unique/primary-key constraint this migration drops or recreates.
+// Postgres ties a foreign key to the specific unique constraint it was created
+// against, so the constraint cannot be dropped while the FK exists (SQLSTATE
+// 2BP01). FKs that are otherwise unchanged must be dropped before the table
+// modifications and recreated after the replacement constraint exists. Changed
+// or dropped FKs are already handled by their own table diff. (#439)
+func findFKsDependingOnReplacedConstraints(modifiedTables []*tableDiff, oldTables, newTables map[string]*ir.Table) []*ir.Constraint {
+	// Unique/PK constraints removed by this migration, keyed by their table
+	replaced := make(map[string][]*ir.Constraint)
+	for _, td := range modifiedTables {
+		key := td.Table.Schema + "." + td.Table.Name
+		for _, c := range td.DroppedConstraints {
+			if c.Type == ir.ConstraintTypeUnique || c.Type == ir.ConstraintTypePrimaryKey {
+				replaced[key] = append(replaced[key], c)
+			}
+		}
+		// Modified unique/PK constraints are recreated via DROP + ADD
+		for _, cd := range td.ModifiedConstraints {
+			if cd.Old.Type == ir.ConstraintTypeUnique || cd.Old.Type == ir.ConstraintTypePrimaryKey {
+				replaced[key] = append(replaced[key], cd.Old)
+			}
+		}
+	}
+	if len(replaced) == 0 {
+		return nil
+	}
+
+	var fks []*ir.Constraint
+	for _, tableKey := range sortedKeys(oldTables) {
+		oldTable := oldTables[tableKey]
+		newTable := newTables[tableKey]
+		if newTable == nil {
+			continue // table is dropped; its FKs go away with it
+		}
+		for _, name := range sortedKeys(oldTable.Constraints) {
+			fk := oldTable.Constraints[name]
+			if fk.Type != ir.ConstraintTypeForeignKey {
+				continue
+			}
+			refSchema := fk.ReferencedSchema
+			if refSchema == "" {
+				refSchema = fk.Schema
+			}
+			if !fkReferencesAnyConstraint(fk, replaced[refSchema+"."+fk.ReferencedTable]) {
+				continue
+			}
+			newFK := newTable.Constraints[name]
+			if newFK == nil || !constraintsEqual(fk, newFK) {
+				continue
+			}
+			fks = append(fks, newFK)
+		}
+	}
+	return fks
+}
+
+// fkReferencesAnyConstraint reports whether the FK's referenced columns match
+// the column set of any of the given unique/PK constraints.
+func fkReferencesAnyConstraint(fk *ir.Constraint, candidates []*ir.Constraint) bool {
+	refCols := make(map[string]bool, len(fk.ReferencedColumns))
+	for _, col := range fk.ReferencedColumns {
+		refCols[col.Name] = true
+	}
+	for _, c := range candidates {
+		if len(c.Columns) != len(refCols) {
+			continue
+		}
+		matched := true
+		for _, col := range c.Columns {
+			if !refCols[col.Name] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// generateDropRecreatedFKsSQL drops foreign keys bound to unique/PK constraints
+// being replaced. Must run before the table modifications. (#439)
+func generateDropRecreatedFKsSQL(fks []*ir.Constraint, targetSchema string, collector *diffCollector) {
+	for _, fk := range fks {
+		tableName := getTableNameWithSchema(fk.Schema, fk.Table, targetSchema)
+		sql := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", tableName, ir.QuoteIdentifier(fk.Name))
+
+		context := &diffContext{
+			Type:                DiffTypeTableConstraint,
+			Operation:           DiffOperationDrop,
+			Path:                fmt.Sprintf("%s.%s.%s", fk.Schema, fk.Table, fk.Name),
+			Source:              fk,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+}
+
+// generateAddRecreatedFKsSQL recreates the foreign keys dropped by
+// generateDropRecreatedFKsSQL, after the replacement constraints exist. (#439)
+func generateAddRecreatedFKsSQL(fks []*ir.Constraint, targetSchema string, collector *diffCollector) {
+	for _, fk := range fks {
+		columns := sortConstraintColumnsByPosition(fk.Columns)
+		var columnNames []string
+		for _, col := range columns {
+			columnNames = append(columnNames, ir.QuoteIdentifier(col.Name))
+		}
+		if fk.IsTemporal && len(columnNames) > 0 {
+			columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
+		}
+
+		tableName := getTableNameWithSchema(fk.Schema, fk.Table, targetSchema)
+		sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
+			tableName, ir.QuoteIdentifier(fk.Name),
+			strings.Join(columnNames, ", "),
+			generateForeignKeyClause(fk, targetSchema, false))
+
+		context := &diffContext{
+			Type:                DiffTypeTableConstraint,
+			Operation:           DiffOperationCreate,
+			Path:                fmt.Sprintf("%s.%s.%s", fk.Schema, fk.Table, fk.Name),
+			Source:              fk,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+}
+
 // generateDropTablesSQL generates DROP TABLE statements
 // Tables are assumed to be pre-sorted in reverse topological order for dependency-aware dropping
 func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *diffCollector) {

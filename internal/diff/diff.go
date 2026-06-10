@@ -309,6 +309,10 @@ type ddlDiff struct {
 	// exist when the view body is parsed (issue #414).
 	deferredAddedViews             []*ir.View
 	functionsAwaitingDeferredViews []*ir.Function
+	// Unchanged foreign keys that depend on a unique/PK constraint being dropped
+	// or recreated by this migration. Dropped before the table modifications and
+	// recreated afterwards (issue #439).
+	recreatedFKConstraints []*ir.Constraint
 }
 
 // schemaDiff represents changes to a schema
@@ -1459,6 +1463,10 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 	// Sort individual table objects (indexes, triggers, policies, constraints) within each table
 	sortTableObjects(diff.modifiedTables)
 
+	// Detect unchanged foreign keys bound to unique/PK constraints being replaced;
+	// they must be dropped before and recreated after the replacement (issue #439)
+	diff.recreatedFKConstraints = findFKsDependingOnReplacedConstraints(diff.modifiedTables, oldTables, newTables)
+
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
 	diff.collectMigrationSQL(targetSchema, collector)
@@ -1912,8 +1920,15 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Modify sequences
 	generateModifySequencesSQL(d.modifiedSequences, targetSchema, collector)
 
+	// Drop foreign keys bound to unique/PK constraints being replaced, so the
+	// constraint drops below succeed; they are recreated right after (issue #439)
+	generateDropRecreatedFKsSQL(d.recreatedFKConstraints, targetSchema, collector)
+
 	// Modify tables
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, targetSchema, collector)
+
+	// Recreate the dropped foreign keys now that the replacement constraints exist
+	generateAddRecreatedFKsSQL(d.recreatedFKConstraints, targetSchema, collector)
 
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
