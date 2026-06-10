@@ -316,7 +316,7 @@ type ddlDiff struct {
 	// old constraint are kept out of CREATE TABLE (suppressedInlineFKs) and
 	// created via fkPostAdds instead (issue #439).
 	fkPreDrops          []*ir.Constraint
-	fkPostAdds          []*ir.Constraint
+	fkPostAdds          []*deferredConstraint
 	suppressedInlineFKs map[string]bool
 }
 
@@ -1930,10 +1930,10 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	generateDropRecreatedFKsSQL(d.fkPreDrops, targetSchema, collector)
 
 	// Modify tables
-	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, targetSchema, collector)
+	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, targetSchema, collector)
 
 	// (Re)create the dependent foreign keys now that the replacement constraints exist
-	generateAddRecreatedFKsSQL(d.fkPostAdds, targetSchema, collector)
+	generateDeferredConstraintsSQL(d.fkPostAdds, targetSchema, collector)
 
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
