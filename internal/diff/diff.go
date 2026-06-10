@@ -1503,6 +1503,12 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 		return preDropped
 	}
 
+	// Pre-drop regular views that require recreation and depend on tables with
+	// destructive changes (dropped tables or dropped columns). The ALTER TABLE
+	// DROP COLUMN / DROP TABLE runs before the modify-views phase, so the live
+	// view would block it with SQLSTATE 2BP01 (issue #444).
+	d.generatePreDropRecreatedRegularViewsSQL(targetSchema, collector, preDropped)
+
 	// Check modifiedViews with RequiresRecreate for dependencies on affected tables
 	for _, viewDiff := range d.modifiedViews {
 		if !viewDiff.RequiresRecreate || !viewDiff.New.Materialized {
@@ -1572,6 +1578,126 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 	}
 
 	return preDropped
+}
+
+// generatePreDropRecreatedRegularViewsSQL pre-drops regular (non-materialized)
+// views that require recreation and whose old definition depends on a table
+// being dropped or losing columns. Without this, the ALTER TABLE DROP COLUMN /
+// DROP TABLE emitted earlier in the plan fails because the live view still
+// depends on the column or table (issue #444). Transitive dependent views are
+// dropped first so the RESTRICT drops succeed; they are recreated later by the
+// modify-views phase. Pre-dropped views are recorded in preDropped so the
+// modify-views phase skips their DROP and only emits the CREATE.
+func (d *ddlDiff) generatePreDropRecreatedRegularViewsSQL(targetSchema string, collector *diffCollector, preDropped map[string]bool) {
+	// Build the set of tables with destructive changes
+	destructiveTables := []*ir.Table{}
+	destructiveTables = append(destructiveTables, d.droppedTables...)
+	for _, tableDiff := range d.modifiedTables {
+		if len(tableDiff.DroppedColumns) > 0 {
+			destructiveTables = append(destructiveTables, tableDiff.Table)
+		}
+	}
+	if len(destructiveTables) == 0 {
+		return
+	}
+
+	// Collect old views to pre-drop
+	var viewsToPreDrop []*ir.View
+	for _, viewDiff := range d.modifiedViews {
+		if !viewDiff.RequiresRecreate || viewDiff.New.Materialized {
+			continue
+		}
+		for _, table := range destructiveTables {
+			if viewDependsOnTable(viewDiff.Old, table.Schema, table.Name) {
+				viewsToPreDrop = append(viewsToPreDrop, viewDiff.Old)
+				break
+			}
+		}
+	}
+	if len(viewsToPreDrop) == 0 {
+		return
+	}
+
+	// Dependent views must be dropped before the views they reference. They
+	// are recreated later by the modify-views phase.
+	dependentViewsCtx := findDependentViewsForRecreatedViews(d.allNewViews, d.modifiedViews, d.addedViews)
+
+	toDrop := make(map[string]*ir.View)
+	var insertionOrder []string
+	addView := func(view *ir.View) {
+		key := view.Schema + "." + view.Name
+		if _, exists := toDrop[key]; !exists {
+			toDrop[key] = view
+			insertionOrder = append(insertionOrder, key)
+		}
+	}
+	for _, view := range viewsToPreDrop {
+		addView(view)
+		for _, depView := range dependentViewsCtx.GetDependents(view.Schema + "." + view.Name) {
+			addView(depView)
+		}
+	}
+
+	// Views dropped by this migration are not in allNewViews, so the dependent
+	// context above cannot see them. If such a view depends on a view being
+	// pre-dropped, hoist its DROP here too — otherwise the RESTRICT pre-drop
+	// fails because the normal drop phase runs only after pre-drop. The drop
+	// phase skips them via filterPreDroppedViews.
+	hoistedDroppedViews := make(map[string]bool)
+	for changed := true; changed; {
+		changed = false
+		for _, droppedView := range d.droppedViews {
+			key := droppedView.Schema + "." + droppedView.Name
+			if _, exists := toDrop[key]; exists {
+				continue
+			}
+			for _, target := range toDrop {
+				if viewDependsOnView(droppedView, target.Name) ||
+					viewDependsOnView(droppedView, target.Schema+"."+target.Name) {
+					addView(droppedView)
+					hoistedDroppedViews[key] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	// Drop dependents before the views they reference
+	views := make([]*ir.View, 0, len(toDrop))
+	for _, key := range insertionOrder {
+		views = append(views, toDrop[key])
+	}
+	views = reverseSlice(topologicallySortViews(views))
+
+	for _, view := range views {
+		viewKey := view.Schema + "." + view.Name
+		if preDropped[viewKey] {
+			continue
+		}
+
+		viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
+		diffType := DiffTypeView
+		sql := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
+		if view.Materialized {
+			diffType = DiffTypeMaterializedView
+			sql = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", viewName)
+		}
+		operation := DiffOperationRecreate
+		if hoistedDroppedViews[viewKey] {
+			operation = DiffOperationDrop
+		}
+
+		context := &diffContext{
+			Type:                diffType,
+			Operation:           operation,
+			Path:                fmt.Sprintf("%s.%s", view.Schema, view.Name),
+			Source:              view,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+		preDropped[viewKey] = true
+	}
 }
 
 // generateCreateSQL generates CREATE statements in dependency order
@@ -1843,14 +1969,39 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) {
 
 	// REVOKE privileges BEFORE dropping objects (objects must exist for REVOKE to succeed)
+	// Skip REVOKEs on relations already dropped in the pre-drop phase: REVOKE has
+	// no IF EXISTS and would fail, and dropping the relation removed its privileges.
+	// Relations share a namespace, so matching the bare name is unambiguous.
+	preDroppedNames := make(map[string]bool, len(preDroppedViews))
+	for key := range preDroppedViews {
+		if idx := strings.LastIndex(key, "."); idx >= 0 {
+			preDroppedNames[key[idx+1:]] = true
+		}
+	}
+	droppedColumnPrivileges := d.droppedColumnPrivileges
+	droppedPrivileges := d.droppedPrivileges
+	if len(preDroppedNames) > 0 {
+		droppedColumnPrivileges = nil
+		for _, cp := range d.droppedColumnPrivileges {
+			if !preDroppedNames[cp.TableName] {
+				droppedColumnPrivileges = append(droppedColumnPrivileges, cp)
+			}
+		}
+		droppedPrivileges = nil
+		for _, p := range d.droppedPrivileges {
+			if !preDroppedNames[p.ObjectName] {
+				droppedPrivileges = append(droppedPrivileges, p)
+			}
+		}
+	}
 	generateRestoreDefaultPrivilegesSQL(d.droppedRevokedDefaultPrivs, targetSchema, collector)
-	generateDropColumnPrivilegesSQL(d.droppedColumnPrivileges, targetSchema, collector)
-	generateDropPrivilegesSQL(d.droppedPrivileges, targetSchema, collector)
+	generateDropColumnPrivilegesSQL(droppedColumnPrivileges, targetSchema, collector)
+	generateDropPrivilegesSQL(droppedPrivileges, targetSchema, collector)
 	generateDropDefaultPrivilegesSQL(d.droppedDefaultPrivileges, targetSchema, collector)
 
 	// Drop triggers from modified tables and views first (triggers depend on functions)
 	generateDropTriggersFromModifiedTables(d.modifiedTables, targetSchema, collector)
-	generateDropTriggersFromModifiedViews(d.modifiedViews, targetSchema, collector)
+	generateDropTriggersFromModifiedViews(d.modifiedViews, targetSchema, collector, preDroppedViews)
 
 	// Drop aggregates before functions, since an aggregate depends on its
 	// transition/final functions (issue #416).

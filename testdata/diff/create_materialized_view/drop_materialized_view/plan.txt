@@ -1,7 +1,13 @@
-Plan: 2 to modify.
+Plan: 5 to modify.
 
 Summary by type:
+  views: 3 to modify
   materialized views: 2 to modify
+
+Views:
+  ~ employee_ids
+  ~ employee_names
+  ~ employee_summary
 
 Materialized views:
   ~ active_employees

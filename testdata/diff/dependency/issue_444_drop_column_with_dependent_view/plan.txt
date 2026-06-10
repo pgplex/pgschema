@@ -1,0 +1,55 @@
+Plan: 4 to modify, 1 to drop.
+
+Summary by type:
+  tables: 1 to modify
+  views: 2 to modify, 1 to drop
+  materialized views: 1 to modify
+
+Tables:
+  ~ foo
+    - drop_me (column)
+
+Views:
+  ~ foo_v
+  ~ foo_v2
+    + trg_keep (trigger)
+  - old_consumer
+
+Materialized views:
+  ~ foo_mv
+    + foo_mv (comment)
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP VIEW IF EXISTS old_consumer RESTRICT;
+
+DROP MATERIALIZED VIEW IF EXISTS foo_mv RESTRICT;
+
+DROP VIEW IF EXISTS foo_v2 RESTRICT;
+
+DROP VIEW IF EXISTS foo_v RESTRICT;
+
+ALTER TABLE foo DROP COLUMN drop_me;
+
+CREATE OR REPLACE VIEW foo_v AS
+ SELECT id,
+    keep_me
+   FROM foo;
+
+CREATE OR REPLACE VIEW foo_v2 AS
+ SELECT id,
+    keep_me
+   FROM foo_v;
+
+CREATE OR REPLACE TRIGGER trg_keep
+    INSTEAD OF INSERT ON foo_v2
+    FOR EACH ROW
+    EXECUTE FUNCTION foo_v2_noop();
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS foo_mv AS
+ SELECT id,
+    keep_me
+   FROM foo_v2;
+
+COMMENT ON MATERIALIZED VIEW foo_mv IS 'snapshot over foo_v2';

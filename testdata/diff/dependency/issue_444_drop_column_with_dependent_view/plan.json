@@ -1,0 +1,74 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "5617e22b30e2903d53ad93d95c3dd6f5e83a1b899b07f7b0ec371a8458d288a4"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP VIEW IF EXISTS old_consumer RESTRICT;",
+          "type": "view",
+          "operation": "drop",
+          "path": "public.old_consumer"
+        },
+        {
+          "sql": "DROP MATERIALIZED VIEW IF EXISTS foo_mv RESTRICT;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.foo_mv"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS foo_v2 RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.foo_v2"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS foo_v RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.foo_v"
+        },
+        {
+          "sql": "ALTER TABLE foo DROP COLUMN drop_me;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.foo.drop_me"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW foo_v AS\n SELECT id,\n    keep_me\n   FROM foo;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.foo_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW foo_v2 AS\n SELECT id,\n    keep_me\n   FROM foo_v;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.foo_v2"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER trg_keep\n    INSTEAD OF INSERT ON foo_v2\n    FOR EACH ROW\n    EXECUTE FUNCTION foo_v2_noop();",
+          "type": "view.trigger",
+          "operation": "create",
+          "path": "public.foo_v2.trg_keep"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS foo_mv AS\n SELECT id,\n    keep_me\n   FROM foo_v2;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.foo_mv"
+        },
+        {
+          "sql": "COMMENT ON MATERIALIZED VIEW foo_mv IS 'snapshot over foo_v2';",
+          "type": "materialized_view.comment",
+          "operation": "create",
+          "path": "public.foo_mv"
+        }
+      ]
+    }
+  ]
+}

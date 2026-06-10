@@ -136,8 +136,9 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				depView := dependentViews[i]
 				depViewKey := depView.Schema + "." + depView.Name
 
-				// Skip if already dropped (view depends on multiple views being recreated)
-				if droppedDependentViews[depViewKey] {
+				// Skip if already dropped (view depends on multiple views being
+				// recreated, or was dropped in the pre-drop phase)
+				if droppedDependentViews[depViewKey] || (preDroppedViews != nil && preDroppedViews[depViewKey]) {
 					continue
 				}
 				droppedDependentViews[depViewKey] = true
@@ -248,12 +249,33 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				generateCreateIndexesSQLWithType(indexList, targetSchema, collector, DiffTypeMaterializedViewIndex, DiffTypeMaterializedViewIndexComment)
 			}
 
+			// Dropping the view also dropped its triggers (e.g., INSTEAD OF
+			// triggers), so recreate the desired-state triggers
+			if len(diff.New.Triggers) > 0 {
+				triggerList := make([]*ir.Trigger, 0, len(diff.New.Triggers))
+				for _, trigger := range diff.New.Triggers {
+					triggerList = append(triggerList, trigger)
+				}
+				generateCreateViewTriggersSQL(triggerList, targetSchema, collector)
+			}
+
 			continue // Skip the normal processing for this view
 		}
 
 		// Skip views that were already recreated as dependencies of a materialized view
 		viewKey := diff.New.Schema + "." + diff.New.Name
 		if recreatedViews != nil && recreatedViews[viewKey] {
+			continue
+		}
+
+		// Skip views that were (or will be) dropped as part of a recreation
+		// chain: the dependent recreation phase below rebuilds them entirely
+		// from the desired-state IR (definition, options, comment, indexes,
+		// triggers). Emitting metadata statements here (e.g., COMMENT ON VIEW)
+		// would target a relation that does not exist at this point in the
+		// plan. Recreate diffs are sorted first, so droppedDependentViews is
+		// fully populated before any non-recreate diff is processed.
+		if droppedDependentViews[viewKey] || (preDroppedViews != nil && preDroppedViews[viewKey]) {
 			continue
 		}
 
@@ -489,6 +511,16 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				indexList = append(indexList, index)
 			}
 			generateCreateIndexesSQLWithType(indexList, targetSchema, collector, DiffTypeMaterializedViewIndex, DiffTypeMaterializedViewIndexComment)
+		}
+
+		// Dropping the view also dropped its triggers (e.g., INSTEAD OF
+		// triggers), so recreate the desired-state triggers
+		if len(depView.Triggers) > 0 {
+			triggerList := make([]*ir.Trigger, 0, len(depView.Triggers))
+			for _, trigger := range depView.Triggers {
+				triggerList = append(triggerList, trigger)
+			}
+			generateCreateViewTriggersSQL(triggerList, targetSchema, collector)
 		}
 	}
 }
@@ -961,11 +993,11 @@ func findTransitiveDependents(initialViews []*ir.View, allViews map[string]*ir.V
 		current := queue[0]
 		queue = queue[1:]
 
-		// Find views that depend on the current view
+		// Find views that depend on the current view. Materialized views are
+		// included: a matview stacked on a dependent regular view blocks that
+		// view's RESTRICT drop just like a regular view would, and the
+		// recreation path already handles materialized dependents (issue #415).
 		for _, view := range allViews {
-			if view.Materialized {
-				continue // Skip materialized views
-			}
 			viewKey := view.Schema + "." + view.Name
 			if visited[viewKey] {
 				continue

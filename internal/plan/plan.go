@@ -411,6 +411,10 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 	// Track views that have sub-resource changes (these should be counted as modified)
 	viewsWithSubResources := make(map[string]bool) // view_path -> true
 
+	// Track views that have "recreate" operations (DROP that will be followed by CREATE)
+	// These should be counted as modifications, not adds
+	viewsRecreating := make(map[string]bool) // view_path -> true
+
 	// Track materialized view operations by path
 	materializedViewOperations := make(map[string]string) // materialized_view_path -> operation
 
@@ -478,6 +482,10 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 			tableOperations[step.Path] = step.Operation
 		} else if stepObjTypeStr == "views" {
 			// For views, track unique view paths and their primary operation
+			// If this is a "recreate" operation, mark it so subsequent "create" is treated as modify
+			if step.Operation == "recreate" {
+				viewsRecreating[step.Path] = true
+			}
 			viewOperations[step.Path] = step.Operation
 		} else if stepObjTypeStr == "materialized_views" {
 			// For materialized views, track unique paths and their primary operation
@@ -560,12 +568,18 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 
 	if len(allAffectedViews) > 0 {
 		stats := summary.ByType["views"]
-		for _, operation := range allAffectedViews {
+		for viewPath, operation := range allAffectedViews {
+			// If this path had a "recreate" operation, treat any subsequent "create" as a modify
+			// because the object existed before and is being recreated due to dependencies
+			if viewsRecreating[viewPath] && operation == "create" {
+				operation = "alter"
+			}
 			switch operation {
 			case "create":
 				stats.Add++
 				summary.Add++
-			case "alter":
+			case "alter", "recreate":
+				// Both "alter" and "recreate" count as modifications
 				stats.Change++
 				summary.Change++
 			case "drop":
@@ -804,6 +818,9 @@ func (p *Plan) writeViewChanges(summary *strings.Builder, c *color.Color) {
 	// Track all seen operations globally to avoid duplicates across groups
 	seenOperations := make(map[string]bool) // "path.operation.subType" -> true
 
+	// Track views that have "recreate" operations
+	viewsRecreating := make(map[string]bool)
+
 	// Use source diffs for summary calculation
 	for _, step := range p.SourceDiffs {
 		// Normalize object type
@@ -814,6 +831,10 @@ func (p *Plan) writeViewChanges(summary *strings.Builder, c *color.Color) {
 
 		if stepObjTypeStr == "views" {
 			// This is a view-level change, record the operation
+			// Track recreate operations so subsequent create is treated as modify
+			if step.Operation.String() == "recreate" {
+				viewsRecreating[step.Path] = true
+			}
 			viewOperations[step.Path] = step.Operation.String()
 		} else if isSubResource(step.Type.String()) && strings.HasPrefix(step.Type.String(), "view.") {
 			// This is a view sub-resource change
@@ -857,11 +878,16 @@ func (p *Plan) writeViewChanges(summary *strings.Builder, c *color.Color) {
 	for _, viewPath := range sortedViews {
 		var symbol string
 		if operation, hasDirectChange := viewOperations[viewPath]; hasDirectChange {
+			// If this path had a "recreate" and now shows "create", treat as modify
+			if viewsRecreating[viewPath] && operation == "create" {
+				operation = "alter"
+			}
 			// View has direct changes, use the operation to determine symbol
 			switch operation {
 			case "create":
 				symbol = c.PlanSymbol("add")
-			case "alter":
+			case "alter", "recreate":
+				// Both "alter" and "recreate" are modifications
 				symbol = c.PlanSymbol("change")
 			case "drop":
 				symbol = c.PlanSymbol("destroy")
