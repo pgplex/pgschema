@@ -1,8 +1,8 @@
-Plan: 1 to add, 2 to modify, 1 to drop.
+Plan: 4 to modify, 1 to drop.
 
 Summary by type:
   tables: 1 to modify
-  views: 1 to add, 1 to drop
+  views: 2 to modify, 1 to drop
   materialized views: 1 to modify
 
 Tables:
@@ -10,7 +10,7 @@ Tables:
     - drop_me (column)
 
 Views:
-  + foo_v
+  ~ foo_v
   ~ foo_v2
     + trg_keep (trigger)
   - old_consumer

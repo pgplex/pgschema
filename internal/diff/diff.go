@@ -1969,9 +1969,34 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) {
 
 	// REVOKE privileges BEFORE dropping objects (objects must exist for REVOKE to succeed)
+	// Skip REVOKEs on relations already dropped in the pre-drop phase: REVOKE has
+	// no IF EXISTS and would fail, and dropping the relation removed its privileges.
+	// Relations share a namespace, so matching the bare name is unambiguous.
+	preDroppedNames := make(map[string]bool, len(preDroppedViews))
+	for key := range preDroppedViews {
+		if idx := strings.LastIndex(key, "."); idx >= 0 {
+			preDroppedNames[key[idx+1:]] = true
+		}
+	}
+	droppedColumnPrivileges := d.droppedColumnPrivileges
+	droppedPrivileges := d.droppedPrivileges
+	if len(preDroppedNames) > 0 {
+		droppedColumnPrivileges = nil
+		for _, cp := range d.droppedColumnPrivileges {
+			if !preDroppedNames[cp.TableName] {
+				droppedColumnPrivileges = append(droppedColumnPrivileges, cp)
+			}
+		}
+		droppedPrivileges = nil
+		for _, p := range d.droppedPrivileges {
+			if !preDroppedNames[p.ObjectName] {
+				droppedPrivileges = append(droppedPrivileges, p)
+			}
+		}
+	}
 	generateRestoreDefaultPrivilegesSQL(d.droppedRevokedDefaultPrivs, targetSchema, collector)
-	generateDropColumnPrivilegesSQL(d.droppedColumnPrivileges, targetSchema, collector)
-	generateDropPrivilegesSQL(d.droppedPrivileges, targetSchema, collector)
+	generateDropColumnPrivilegesSQL(droppedColumnPrivileges, targetSchema, collector)
+	generateDropPrivilegesSQL(droppedPrivileges, targetSchema, collector)
 	generateDropDefaultPrivilegesSQL(d.droppedDefaultPrivileges, targetSchema, collector)
 
 	// Drop triggers from modified tables and views first (triggers depend on functions)

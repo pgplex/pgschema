@@ -12,6 +12,10 @@ CREATE MATERIALIZED VIEW foo_mv AS SELECT id, keep_me FROM foo_v2;
 
 CREATE VIEW old_consumer AS SELECT id FROM foo_v;
 
+GRANT SELECT ON old_consumer TO PUBLIC;
+
+GRANT SELECT ON foo_v TO PUBLIC;
+
 CREATE FUNCTION foo_v2_noop() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RETURN NEW;
