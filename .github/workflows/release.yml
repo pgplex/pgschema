@@ -177,7 +177,7 @@ jobs:
           path: binaries
 
       - name: Create release
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           # go install requires tags to be prefixed with v.
           tag_name: v${{ steps.version.outputs.version }}
