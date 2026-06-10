@@ -582,10 +582,10 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPr
 //     dropped twice.
 //   - postAdds: desired-state FKs to (re)create after the table modifications,
 //     once the replacement constraint exists.
-//   - suppressedInlineFKs: FKs on newly added tables (keyed schema.table.name)
-//     that must be left out of CREATE TABLE — emitted inline they would bind
-//     to the old constraint before the replacement runs. They are recreated
-//     via postAdds instead.
+//   - suppressedInlineFKs: FKs on newly added tables (keyed by
+//     schema.table.constraint) that must be left out of CREATE TABLE — emitted
+//     inline they would bind to the old constraint before the replacement runs.
+//     They are recreated via postAdds instead.
 //
 // Note: Postgres matches an FK's referenced columns to a unique constraint as
 // a column set, not an ordered list — FOREIGN KEY (x, y) REFERENCES t (b, a)
