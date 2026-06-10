@@ -1,0 +1,32 @@
+Plan: 1 to add, 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+  views: 1 to add
+
+Tables:
+  ~ foo
+    - drop_me (column)
+
+Views:
+  + foo_v
+  ~ foo_v2
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP VIEW IF EXISTS foo_v2 RESTRICT;
+
+DROP VIEW IF EXISTS foo_v RESTRICT;
+
+ALTER TABLE foo DROP COLUMN drop_me;
+
+CREATE OR REPLACE VIEW foo_v AS
+ SELECT id,
+    keep_me
+   FROM foo;
+
+CREATE OR REPLACE VIEW foo_v2 AS
+ SELECT id,
+    keep_me
+   FROM foo_v;

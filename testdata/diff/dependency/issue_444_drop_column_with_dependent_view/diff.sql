@@ -1,0 +1,15 @@
+DROP VIEW IF EXISTS foo_v2 RESTRICT;
+
+DROP VIEW IF EXISTS foo_v RESTRICT;
+
+ALTER TABLE foo DROP COLUMN drop_me;
+
+CREATE OR REPLACE VIEW foo_v AS
+ SELECT id,
+    keep_me
+   FROM foo;
+
+CREATE OR REPLACE VIEW foo_v2 AS
+ SELECT id,
+    keep_me
+   FROM foo_v;

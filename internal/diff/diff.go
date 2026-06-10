@@ -1503,6 +1503,12 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 		return preDropped
 	}
 
+	// Pre-drop regular views that require recreation and depend on tables with
+	// destructive changes (dropped tables or dropped columns). The ALTER TABLE
+	// DROP COLUMN / DROP TABLE runs before the modify-views phase, so the live
+	// view would block it with SQLSTATE 2BP01 (issue #444).
+	d.generatePreDropRecreatedRegularViewsSQL(targetSchema, collector, preDropped)
+
 	// Check modifiedViews with RequiresRecreate for dependencies on affected tables
 	for _, viewDiff := range d.modifiedViews {
 		if !viewDiff.RequiresRecreate || !viewDiff.New.Materialized {
@@ -1572,6 +1578,98 @@ func (d *ddlDiff) generatePreDropMaterializedViewsSQL(targetSchema string, colle
 	}
 
 	return preDropped
+}
+
+// generatePreDropRecreatedRegularViewsSQL pre-drops regular (non-materialized)
+// views that require recreation and whose old definition depends on a table
+// being dropped or losing columns. Without this, the ALTER TABLE DROP COLUMN /
+// DROP TABLE emitted earlier in the plan fails because the live view still
+// depends on the column or table (issue #444). Transitive dependent views are
+// dropped first so the RESTRICT drops succeed; they are recreated later by the
+// modify-views phase. Pre-dropped views are recorded in preDropped so the
+// modify-views phase skips their DROP and only emits the CREATE.
+func (d *ddlDiff) generatePreDropRecreatedRegularViewsSQL(targetSchema string, collector *diffCollector, preDropped map[string]bool) {
+	// Build the set of tables with destructive changes
+	destructiveTables := []*ir.Table{}
+	destructiveTables = append(destructiveTables, d.droppedTables...)
+	for _, tableDiff := range d.modifiedTables {
+		if len(tableDiff.DroppedColumns) > 0 {
+			destructiveTables = append(destructiveTables, tableDiff.Table)
+		}
+	}
+	if len(destructiveTables) == 0 {
+		return
+	}
+
+	// Collect old views to pre-drop
+	var viewsToPreDrop []*ir.View
+	for _, viewDiff := range d.modifiedViews {
+		if !viewDiff.RequiresRecreate || viewDiff.New.Materialized {
+			continue
+		}
+		for _, table := range destructiveTables {
+			if viewDependsOnTable(viewDiff.Old, table.Schema, table.Name) {
+				viewsToPreDrop = append(viewsToPreDrop, viewDiff.Old)
+				break
+			}
+		}
+	}
+	if len(viewsToPreDrop) == 0 {
+		return
+	}
+
+	// Dependent views must be dropped before the views they reference
+	dependentViewsCtx := findDependentViewsForRecreatedViews(d.allNewViews, d.modifiedViews, d.addedViews)
+
+	// Drop dependents-first among the pre-dropped views themselves
+	viewsToPreDrop = reverseSlice(topologicallySortViews(viewsToPreDrop))
+
+	for _, view := range viewsToPreDrop {
+		viewKey := view.Schema + "." + view.Name
+		if preDropped[viewKey] {
+			continue
+		}
+
+		// Drop dependent views first (in reverse order to handle nested dependencies)
+		dependentViews := dependentViewsCtx.GetDependents(viewKey)
+		for i := len(dependentViews) - 1; i >= 0; i-- {
+			depView := dependentViews[i]
+			depViewKey := depView.Schema + "." + depView.Name
+			if preDropped[depViewKey] {
+				continue
+			}
+			preDropped[depViewKey] = true
+
+			depViewName := qualifyEntityName(depView.Schema, depView.Name, targetSchema)
+			depDiffType := DiffTypeView
+			dropDepSQL := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", depViewName)
+			if depView.Materialized {
+				depDiffType = DiffTypeMaterializedView
+				dropDepSQL = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", depViewName)
+			}
+
+			depContext := &diffContext{
+				Type:                depDiffType,
+				Operation:           DiffOperationRecreate,
+				Path:                fmt.Sprintf("%s.%s", depView.Schema, depView.Name),
+				Source:              depView,
+				CanRunInTransaction: true,
+			}
+			collector.collect(depContext, dropDepSQL)
+		}
+
+		viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
+		sql := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
+		context := &diffContext{
+			Type:                DiffTypeView,
+			Operation:           DiffOperationRecreate,
+			Path:                fmt.Sprintf("%s.%s", view.Schema, view.Name),
+			Source:              view,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+		preDropped[viewKey] = true
+	}
 }
 
 // generateCreateSQL generates CREATE statements in dependency order

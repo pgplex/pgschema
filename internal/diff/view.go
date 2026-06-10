@@ -136,8 +136,9 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				depView := dependentViews[i]
 				depViewKey := depView.Schema + "." + depView.Name
 
-				// Skip if already dropped (view depends on multiple views being recreated)
-				if droppedDependentViews[depViewKey] {
+				// Skip if already dropped (view depends on multiple views being
+				// recreated, or was dropped in the pre-drop phase)
+				if droppedDependentViews[depViewKey] || (preDroppedViews != nil && preDroppedViews[depViewKey]) {
 					continue
 				}
 				droppedDependentViews[depViewKey] = true
