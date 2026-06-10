@@ -27,3 +27,5 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS foo_mv AS
  SELECT id,
     keep_me
    FROM foo_v2;
+
+COMMENT ON MATERIALIZED VIEW foo_mv IS 'snapshot over foo_v2';

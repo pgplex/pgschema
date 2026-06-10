@@ -16,3 +16,5 @@ END;
 $$;
 
 CREATE TRIGGER trg_keep INSTEAD OF INSERT ON foo_v2 FOR EACH ROW EXECUTE FUNCTION foo_v2_noop();
+
+COMMENT ON MATERIALIZED VIEW foo_mv IS 'snapshot over foo_v2';

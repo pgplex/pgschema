@@ -61,6 +61,12 @@
           "type": "materialized_view",
           "operation": "recreate",
           "path": "public.foo_mv"
+        },
+        {
+          "sql": "COMMENT ON MATERIALIZED VIEW foo_mv IS 'snapshot over foo_v2';",
+          "type": "materialized_view.comment",
+          "operation": "create",
+          "path": "public.foo_mv"
         }
       ]
     }

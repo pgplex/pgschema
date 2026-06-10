@@ -268,6 +268,17 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			continue
 		}
 
+		// Skip views that were (or will be) dropped as part of a recreation
+		// chain: the dependent recreation phase below rebuilds them entirely
+		// from the desired-state IR (definition, options, comment, indexes,
+		// triggers). Emitting metadata statements here (e.g., COMMENT ON VIEW)
+		// would target a relation that does not exist at this point in the
+		// plan. Recreate diffs are sorted first, so droppedDependentViews is
+		// fully populated before any non-recreate diff is processed.
+		if droppedDependentViews[viewKey] || (preDroppedViews != nil && preDroppedViews[viewKey]) {
+			continue
+		}
+
 		// Check if only metadata changed and definition is identical
 		// Both IRs come from pg_get_viewdef() at the same PostgreSQL version, so string comparison is sufficient
 		definitionsEqual := diff.Old.Definition == diff.New.Definition
