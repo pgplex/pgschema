@@ -309,10 +309,15 @@ type ddlDiff struct {
 	// exist when the view body is parsed (issue #414).
 	deferredAddedViews             []*ir.View
 	functionsAwaitingDeferredViews []*ir.Function
-	// Unchanged foreign keys that depend on a unique/PK constraint being dropped
-	// or recreated by this migration. Dropped before the table modifications and
-	// recreated afterwards (issue #439).
-	recreatedFKConstraints []*ir.Constraint
+	// Foreign keys that depend on a unique/PK constraint being dropped or
+	// recreated by this migration: existing ones are dropped before the table
+	// modifications (fkPreDrops) and desired-state ones are (re)created
+	// afterwards (fkPostAdds). FKs on newly added tables that would bind to the
+	// old constraint are kept out of CREATE TABLE (suppressedInlineFKs) and
+	// created via fkPostAdds instead (issue #439).
+	fkPreDrops          []*ir.Constraint
+	fkPostAdds          []*ir.Constraint
+	suppressedInlineFKs map[string]bool
 }
 
 // schemaDiff represents changes to a schema
@@ -1463,9 +1468,9 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 	// Sort individual table objects (indexes, triggers, policies, constraints) within each table
 	sortTableObjects(diff.modifiedTables)
 
-	// Detect unchanged foreign keys bound to unique/PK constraints being replaced;
-	// they must be dropped before and recreated after the replacement (issue #439)
-	diff.recreatedFKConstraints = findFKsDependingOnReplacedConstraints(diff.modifiedTables, oldTables, newTables)
+	// Detect foreign keys bound to unique/PK constraints being replaced; they
+	// must be dropped before and recreated after the replacement (issue #439)
+	diff.fkPreDrops, diff.fkPostAdds, diff.suppressedInlineFKs = planFKRecreationForReplacedConstraints(diff.modifiedTables, diff.addedTables, oldTables, newTables)
 
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
@@ -1780,7 +1785,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
-	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy)
+	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -1811,7 +1816,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
-	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy)
+	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs)
 
 	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
 	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
@@ -1922,13 +1927,13 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Drop foreign keys bound to unique/PK constraints being replaced, so the
 	// constraint drops below succeed; they are recreated right after (issue #439)
-	generateDropRecreatedFKsSQL(d.recreatedFKConstraints, targetSchema, collector)
+	generateDropRecreatedFKsSQL(d.fkPreDrops, targetSchema, collector)
 
 	// Modify tables
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, targetSchema, collector)
 
-	// Recreate the dropped foreign keys now that the replacement constraints exist
-	generateAddRecreatedFKsSQL(d.recreatedFKConstraints, targetSchema, collector)
+	// (Re)create the dependent foreign keys now that the replacement constraints exist
+	generateAddRecreatedFKsSQL(d.fkPostAdds, targetSchema, collector)
 
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
