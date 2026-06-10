@@ -1,0 +1,11 @@
+{
+  "name": "issue_427_policy_qualified_function",
+  "description": "Schema-qualified functions in RLS policy expressions must be preserved when the function lives outside the managed schema (GitHub issue #427)",
+  "source": "https://github.com/pgplex/pgschema/issues/427",
+  "notes": [
+    "Reproduces the Supabase scenario where RLS policies reference auth.uid()",
+    "The helper schema (auth) is on the connection search_path, which made pg_get_expr (via the pg_policies view) strip the schema qualifier, emitting bare uid()",
+    "The fix forces pg_get_expr to run with search_path = pg_catalog so cross-schema references stay fully qualified, then normalizes away only same-schema qualifiers",
+    "Mirrors the cross-schema custom test pattern used by issue_318"
+  ]
+}

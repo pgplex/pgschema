@@ -1814,25 +1814,16 @@ func (i *Inspector) buildRLSPolicies(ctx context.Context, schema *IR, targetSche
 	}
 
 	// Get RLS policies for the target schema
-	policies, err := i.queries.GetRLSPoliciesForSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
+	policies, err := i.queries.GetRLSPoliciesForSchema(ctx, targetSchema)
 	if err != nil {
 		return err
 	}
 
 	// Process policies
 	for _, policyRow := range policies {
-		schemaName := ""
-		if policyRow.Schemaname.Valid {
-			schemaName = policyRow.Schemaname.String
-		}
-		tableName := ""
-		if policyRow.Tablename.Valid {
-			tableName = policyRow.Tablename.String
-		}
-		policyName := ""
-		if policyRow.Policyname.Valid {
-			policyName = policyRow.Policyname.String
-		}
+		schemaName := policyRow.Schemaname
+		tableName := policyRow.Tablename
+		policyName := policyRow.Policyname
 
 		var pCommand PolicyCommand
 		if policyRow.Cmd.Valid {
@@ -1855,10 +1846,7 @@ func (i *Inspector) buildRLSPolicies(ctx context.Context, schema *IR, targetSche
 		}
 
 		// Determine if policy is permissive
-		permissive := true // Default
-		if policyRow.Permissive.Valid {
-			permissive = policyRow.Permissive.String == "PERMISSIVE"
-		}
+		permissive := policyRow.Permissive == "PERMISSIVE"
 
 		policy := &RLSPolicy{
 			Schema:     schemaName,

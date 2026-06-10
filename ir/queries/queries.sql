@@ -768,22 +768,52 @@ WHERE
 ORDER BY n.nspname, c.relname;
 
 -- GetRLSPolicies retrieves all row level security policies
+-- This replicates the pg_policies system view but computes the qual/with_check
+-- expressions with a forced search_path so cross-schema references stay qualified:
+-- 1. set_config sets search_path to only pg_catalog
+-- 2. pg_get_expr then uses that search_path and includes schema qualifiers for any
+--    function or table reference outside pg_catalog. Same-schema qualifiers are stripped
+--    later by normalizePolicyExpression. Without this, references to objects on the
+--    session search_path (e.g. Supabase's auth.uid()) are emitted unqualified and the
+--    generated CREATE POLICY fails on apply. (Issue #427)
 -- name: GetRLSPolicies :many
-SELECT 
-    schemaname,
-    tablename,
-    policyname,
-    permissive,
-    roles,
-    cmd,
-    qual,
-    with_check
-FROM pg_policies
-WHERE 
-    schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND schemaname NOT LIKE 'pg_temp_%'
-    AND schemaname NOT LIKE 'pg_toast_temp_%'
-ORDER BY schemaname, tablename, policyname;
+SELECT
+    n.nspname AS schemaname,
+    c.relname AS tablename,
+    pol.polname AS policyname,
+    CASE WHEN pol.polpermissive THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END AS permissive,
+    CASE
+        WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['public']
+        ELSE ARRAY(
+            SELECT r.rolname
+            FROM pg_catalog.pg_roles r
+            WHERE r.oid = ANY (pol.polroles)
+            ORDER BY r.rolname
+        )
+    END AS roles,
+    CASE pol.polcmd
+        WHEN 'r' THEN 'SELECT'
+        WHEN 'a' THEN 'INSERT'
+        WHEN 'w' THEN 'UPDATE'
+        WHEN 'd' THEN 'DELETE'
+        WHEN '*' THEN 'ALL'
+    END AS cmd,
+    CASE WHEN pol.polqual IS NULL THEN NULL ELSE e.qual END AS qual,
+    CASE WHEN pol.polwithcheck IS NULL THEN NULL ELSE e.with_check END AS with_check
+FROM pg_catalog.pg_policy pol
+JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN LATERAL (
+    SELECT
+        set_config('search_path', 'pg_catalog', true) AS dummy,
+        pg_get_expr(pol.polqual, pol.polrelid) AS qual,
+        pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
+) e ON true
+WHERE
+    n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+    AND n.nspname NOT LIKE 'pg_temp_%'
+    AND n.nspname NOT LIKE 'pg_toast_temp_%'
+ORDER BY n.nspname, c.relname, pol.polname;
 
 -- GetRLSTablesForSchema retrieves tables with row level security enabled for a specific schema
 -- name: GetRLSTablesForSchema :many
@@ -801,20 +831,44 @@ WHERE
 ORDER BY n.nspname, c.relname;
 
 -- GetRLSPoliciesForSchema retrieves all row level security policies for a specific schema
+-- See GetRLSPolicies for why qual/with_check are computed under a forced pg_catalog
+-- search_path (Issue #427).
 -- name: GetRLSPoliciesForSchema :many
-SELECT 
-    schemaname,
-    tablename,
-    policyname,
-    permissive,
-    roles,
-    cmd,
-    qual,
-    with_check
-FROM pg_policies
-WHERE 
-    schemaname = $1
-ORDER BY schemaname, tablename, policyname;
+SELECT
+    n.nspname AS schemaname,
+    c.relname AS tablename,
+    pol.polname AS policyname,
+    CASE WHEN pol.polpermissive THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END AS permissive,
+    CASE
+        WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['public']
+        ELSE ARRAY(
+            SELECT r.rolname
+            FROM pg_catalog.pg_roles r
+            WHERE r.oid = ANY (pol.polroles)
+            ORDER BY r.rolname
+        )
+    END AS roles,
+    CASE pol.polcmd
+        WHEN 'r' THEN 'SELECT'
+        WHEN 'a' THEN 'INSERT'
+        WHEN 'w' THEN 'UPDATE'
+        WHEN 'd' THEN 'DELETE'
+        WHEN '*' THEN 'ALL'
+    END AS cmd,
+    CASE WHEN pol.polqual IS NULL THEN NULL ELSE e.qual END AS qual,
+    CASE WHEN pol.polwithcheck IS NULL THEN NULL ELSE e.with_check END AS with_check
+FROM pg_catalog.pg_policy pol
+JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN LATERAL (
+    SELECT
+        set_config('search_path', 'pg_catalog', true) AS dummy,
+        pg_get_expr(pol.polqual, pol.polrelid) AS qual,
+        pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
+) e ON true
+WHERE
+    n.nspname = $1
+ORDER BY n.nspname, c.relname, pol.polname;
 
 -- GetDomains retrieves all user-defined domains
 -- name: GetDomains :many
