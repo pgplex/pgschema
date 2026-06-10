@@ -361,30 +361,32 @@ func TestNormalizeExpressionParentheses(t *testing.T) {
 
 func TestNormalizePolicyExpression(t *testing.T) {
 	tests := []struct {
-		name        string
-		expr        string
-		tableSchema string
-		expected    string
+		name     string
+		expr     string
+		expected string
 	}{
 		{
-			name:        "nested function call in policy expression",
-			expr:        "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
-			tableSchema: "public",
-			expected:    "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+			name:     "nested function call in policy expression",
+			expr:     "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+			expected: "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
 		},
 		{
-			name:        "schema-qualified nested function call",
-			expr:        "(id IN ( SELECT unnest(public.get_user_assigned_projects()) AS unnest))",
-			tableSchema: "public",
-			expected:    "(id IN ( SELECT unnest(get_user_assigned_projects()) AS unnest))",
+			// Schema qualifiers are preserved as rendered: GetRLSPoliciesForSchema sets
+			// search_path to the table's schema, so qualifiers only appear for
+			// cross-schema references and must survive normalization (issue #427).
+			// Table-qualified column references (profiles.id when the schema is also
+			// named profiles) must survive too (issue #449).
+			name:     "qualified references preserved",
+			expr:     "(id IN ( SELECT profiles.id FROM profiles WHERE (profiles.user_id = auth.uid())))",
+			expected: "(id IN ( SELECT profiles.id FROM profiles WHERE (profiles.user_id = auth.uid())))",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalizePolicyExpression(tt.expr, tt.tableSchema)
+			result := normalizePolicyExpression(tt.expr)
 			if result != tt.expected {
-				t.Errorf("normalizePolicyExpression(%q, %q) = %q, want %q", tt.expr, tt.tableSchema, result, tt.expected)
+				t.Errorf("normalizePolicyExpression(%q) = %q, want %q", tt.expr, result, tt.expected)
 			}
 		})
 	}
