@@ -1058,12 +1058,18 @@ LEFT JOIN pg_class dep_table ON d.refobjid = dep_table.oid
 LEFT JOIN pg_attribute dep_col ON dep_col.attrelid = dep_table.oid AND dep_col.attnum = d.refobjsubid
 -- Method 2: Find sequences used in column defaults (for nextval() patterns)
 LEFT JOIN (
-    SELECT 
+    SELECT
         col.table_name,
         col.column_name,
-        REGEXP_REPLACE(
-            REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
-            '^[^.]*\.', ''
+        REPLACE(
+            REGEXP_REPLACE(
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
+                    '^("([^"]|"")*"\.|[^.]*\.)', ''
+                ),
+                '^"(.*)"$', '\1'
+            ),
+            '""', '"'
         ) AS sequence_name
     FROM information_schema.columns col
     WHERE col.table_schema = $1
