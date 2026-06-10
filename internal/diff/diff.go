@@ -1618,51 +1618,79 @@ func (d *ddlDiff) generatePreDropRecreatedRegularViewsSQL(targetSchema string, c
 		return
 	}
 
-	// Dependent views must be dropped before the views they reference
+	// Dependent views must be dropped before the views they reference. They
+	// are recreated later by the modify-views phase.
 	dependentViewsCtx := findDependentViewsForRecreatedViews(d.allNewViews, d.modifiedViews, d.addedViews)
 
-	// Drop dependents-first among the pre-dropped views themselves
-	viewsToPreDrop = reverseSlice(topologicallySortViews(viewsToPreDrop))
-
+	toDrop := make(map[string]*ir.View)
+	var insertionOrder []string
+	addView := func(view *ir.View) {
+		key := view.Schema + "." + view.Name
+		if _, exists := toDrop[key]; !exists {
+			toDrop[key] = view
+			insertionOrder = append(insertionOrder, key)
+		}
+	}
 	for _, view := range viewsToPreDrop {
+		addView(view)
+		for _, depView := range dependentViewsCtx.GetDependents(view.Schema + "." + view.Name) {
+			addView(depView)
+		}
+	}
+
+	// Views dropped by this migration are not in allNewViews, so the dependent
+	// context above cannot see them. If such a view depends on a view being
+	// pre-dropped, hoist its DROP here too — otherwise the RESTRICT pre-drop
+	// fails because the normal drop phase runs only after pre-drop. The drop
+	// phase skips them via filterPreDroppedViews.
+	hoistedDroppedViews := make(map[string]bool)
+	for changed := true; changed; {
+		changed = false
+		for _, droppedView := range d.droppedViews {
+			key := droppedView.Schema + "." + droppedView.Name
+			if _, exists := toDrop[key]; exists {
+				continue
+			}
+			for _, target := range toDrop {
+				if viewDependsOnView(droppedView, target.Name) ||
+					viewDependsOnView(droppedView, target.Schema+"."+target.Name) {
+					addView(droppedView)
+					hoistedDroppedViews[key] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	// Drop dependents before the views they reference
+	views := make([]*ir.View, 0, len(toDrop))
+	for _, key := range insertionOrder {
+		views = append(views, toDrop[key])
+	}
+	views = reverseSlice(topologicallySortViews(views))
+
+	for _, view := range views {
 		viewKey := view.Schema + "." + view.Name
 		if preDropped[viewKey] {
 			continue
 		}
 
-		// Drop dependent views first (in reverse order to handle nested dependencies)
-		dependentViews := dependentViewsCtx.GetDependents(viewKey)
-		for i := len(dependentViews) - 1; i >= 0; i-- {
-			depView := dependentViews[i]
-			depViewKey := depView.Schema + "." + depView.Name
-			if preDropped[depViewKey] {
-				continue
-			}
-			preDropped[depViewKey] = true
-
-			depViewName := qualifyEntityName(depView.Schema, depView.Name, targetSchema)
-			depDiffType := DiffTypeView
-			dropDepSQL := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", depViewName)
-			if depView.Materialized {
-				depDiffType = DiffTypeMaterializedView
-				dropDepSQL = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", depViewName)
-			}
-
-			depContext := &diffContext{
-				Type:                depDiffType,
-				Operation:           DiffOperationRecreate,
-				Path:                fmt.Sprintf("%s.%s", depView.Schema, depView.Name),
-				Source:              depView,
-				CanRunInTransaction: true,
-			}
-			collector.collect(depContext, dropDepSQL)
+		viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
+		diffType := DiffTypeView
+		sql := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
+		if view.Materialized {
+			diffType = DiffTypeMaterializedView
+			sql = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", viewName)
+		}
+		operation := DiffOperationRecreate
+		if hoistedDroppedViews[viewKey] {
+			operation = DiffOperationDrop
 		}
 
-		viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
-		sql := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
 		context := &diffContext{
-			Type:                DiffTypeView,
-			Operation:           DiffOperationRecreate,
+			Type:                diffType,
+			Operation:           operation,
 			Path:                fmt.Sprintf("%s.%s", view.Schema, view.Name),
 			Source:              view,
 			CanRunInTransaction: true,
@@ -1948,7 +1976,7 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 
 	// Drop triggers from modified tables and views first (triggers depend on functions)
 	generateDropTriggersFromModifiedTables(d.modifiedTables, targetSchema, collector)
-	generateDropTriggersFromModifiedViews(d.modifiedViews, targetSchema, collector)
+	generateDropTriggersFromModifiedViews(d.modifiedViews, targetSchema, collector, preDroppedViews)
 
 	// Drop aggregates before functions, since an aggregate depends on its
 	// transition/final functions (issue #416).

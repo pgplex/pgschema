@@ -186,11 +186,18 @@ func generateDropTriggersFromModifiedTables(tables []*tableDiff, targetSchema st
 
 // generateDropTriggersFromModifiedViews collects and drops all triggers from modified views
 // This ensures view triggers are dropped before their associated functions
-func generateDropTriggersFromModifiedViews(views []*viewDiff, targetSchema string, collector *diffCollector) {
+// preDroppedViews contains views already dropped in the pre-drop phase: their
+// triggers are gone with the view, and DROP TRIGGER ... ON <view> would fail
+// because the relation no longer exists (IF EXISTS only covers the trigger name)
+func generateDropTriggersFromModifiedViews(views []*viewDiff, targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) {
 	var allTriggers []*ir.Trigger
 
 	// Collect all dropped triggers from modified views
 	for _, viewDiff := range views {
+		viewKey := viewDiff.Old.Schema + "." + viewDiff.Old.Name
+		if preDroppedViews != nil && preDroppedViews[viewKey] {
+			continue
+		}
 		for _, trigger := range viewDiff.DroppedTriggers {
 			allTriggers = append(allTriggers, trigger)
 		}

@@ -3,11 +3,23 @@
   "pgschema_version": "1.11.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "56480c160df9c5e293b8414bf7a024d5ea2ab2f098f14b4eca15aa9c704b19ae"
+    "hash": "02fb70dc5c5fbc6205e3480f56b38b23eac80018297995972c49d24cd6a699f5"
   },
   "groups": [
     {
       "steps": [
+        {
+          "sql": "DROP VIEW IF EXISTS old_consumer RESTRICT;",
+          "type": "view",
+          "operation": "drop",
+          "path": "public.old_consumer"
+        },
+        {
+          "sql": "DROP MATERIALIZED VIEW IF EXISTS foo_mv RESTRICT;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.foo_mv"
+        },
         {
           "sql": "DROP VIEW IF EXISTS foo_v2 RESTRICT;",
           "type": "view",
@@ -37,6 +49,18 @@
           "type": "view",
           "operation": "recreate",
           "path": "public.foo_v2"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER trg_keep\n    INSTEAD OF INSERT ON foo_v2\n    FOR EACH ROW\n    EXECUTE FUNCTION foo_v2_noop();",
+          "type": "view.trigger",
+          "operation": "create",
+          "path": "public.foo_v2.trg_keep"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS foo_mv AS\n SELECT id,\n    keep_me\n   FROM foo_v2;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.foo_mv"
         }
       ]
     }

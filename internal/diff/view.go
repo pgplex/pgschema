@@ -249,6 +249,16 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				generateCreateIndexesSQLWithType(indexList, targetSchema, collector, DiffTypeMaterializedViewIndex, DiffTypeMaterializedViewIndexComment)
 			}
 
+			// Dropping the view also dropped its triggers (e.g., INSTEAD OF
+			// triggers), so recreate the desired-state triggers
+			if len(diff.New.Triggers) > 0 {
+				triggerList := make([]*ir.Trigger, 0, len(diff.New.Triggers))
+				for _, trigger := range diff.New.Triggers {
+					triggerList = append(triggerList, trigger)
+				}
+				generateCreateViewTriggersSQL(triggerList, targetSchema, collector)
+			}
+
 			continue // Skip the normal processing for this view
 		}
 
@@ -490,6 +500,16 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				indexList = append(indexList, index)
 			}
 			generateCreateIndexesSQLWithType(indexList, targetSchema, collector, DiffTypeMaterializedViewIndex, DiffTypeMaterializedViewIndexComment)
+		}
+
+		// Dropping the view also dropped its triggers (e.g., INSTEAD OF
+		// triggers), so recreate the desired-state triggers
+		if len(depView.Triggers) > 0 {
+			triggerList := make([]*ir.Trigger, 0, len(depView.Triggers))
+			for _, trigger := range depView.Triggers {
+				triggerList = append(triggerList, trigger)
+			}
+			generateCreateViewTriggersSQL(triggerList, targetSchema, collector)
 		}
 	}
 }
@@ -962,11 +982,11 @@ func findTransitiveDependents(initialViews []*ir.View, allViews map[string]*ir.V
 		current := queue[0]
 		queue = queue[1:]
 
-		// Find views that depend on the current view
+		// Find views that depend on the current view. Materialized views are
+		// included: a matview stacked on a dependent regular view blocks that
+		// view's RESTRICT drop just like a regular view would, and the
+		// recreation path already handles materialized dependents (issue #415).
 		for _, view := range allViews {
-			if view.Materialized {
-				continue // Skip materialized views
-			}
 			viewKey := view.Schema + "." + view.Name
 			if visited[viewKey] {
 				continue
