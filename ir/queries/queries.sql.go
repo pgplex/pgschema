@@ -2735,12 +2735,15 @@ LEFT JOIN (
     SELECT
         col.table_name,
         col.column_name,
-        REGEXP_REPLACE(
+        REPLACE(
             REGEXP_REPLACE(
-                REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
-                '^[^.]*\.', ''
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
+                    '^[^.]*\.', ''
+                ),
+                '^"(.*)"$', '\1'
             ),
-            '^"(.*)"$', '\1'
+            '""', '"'
         ) AS sequence_name
     FROM information_schema.columns col
     WHERE col.table_schema = $1
