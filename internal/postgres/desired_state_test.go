@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -358,6 +359,69 @@ func TestEnhanceApplyError(t *testing.T) {
 		}
 		result := enhanceApplyError(pgErr, sql)
 		if result != pgErr {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
+}
+
+func TestHintExtensionDependency(t *testing.T) {
+	const hint = "this schema may depend on a PostgreSQL extension"
+
+	t.Run("undefined_object gets hint", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: `data type uuid has no default operator class for access method "gist"`,
+			Code:    "42704",
+		}
+		result := hintExtensionDependency(pgErr, hint)
+		if !strings.Contains(result.Error(), "Hint: "+hint) {
+			t.Errorf("expected hint to be appended, got: %s", result.Error())
+		}
+		// Original error must remain unwrappable
+		var unwrapped *pgconn.PgError
+		if !errors.As(result, &unwrapped) {
+			t.Error("expected wrapped error to preserve PgError")
+		}
+	})
+
+	t.Run("undefined_function gets hint", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: "function gen_random_uuid() does not exist",
+			Code:    "42883",
+		}
+		result := hintExtensionDependency(pgErr, hint)
+		if !strings.Contains(result.Error(), "Hint: "+hint) {
+			t.Errorf("expected hint to be appended, got: %s", result.Error())
+		}
+	})
+
+	t.Run("hint applies after enhanceApplyError wrapping", func(t *testing.T) {
+		sql := "CREATE TABLE foo (v citext);"
+		pgErr := &pgconn.PgError{
+			Message:  `type "citext" does not exist`,
+			Code:     "42704",
+			Position: int32(strings.Index(sql, "citext") + 1),
+		}
+		result := hintExtensionDependency(enhanceApplyError(pgErr, sql), hint)
+		if !strings.Contains(result.Error(), "Hint: "+hint) {
+			t.Errorf("expected hint on enhanced error, got: %s", result.Error())
+		}
+	})
+
+	t.Run("other SQLSTATE passes through", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: "syntax error",
+			Code:    "42601",
+		}
+		result := hintExtensionDependency(pgErr, hint)
+		if result != error(pgErr) {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
+
+	t.Run("non-pg error passes through", func(t *testing.T) {
+		origErr := fmt.Errorf("some other error")
+		result := hintExtensionDependency(origErr, hint)
+		if result != origErr {
 			t.Errorf("expected same error instance, got: %s", result.Error())
 		}
 	})

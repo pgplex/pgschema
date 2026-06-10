@@ -158,7 +158,9 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.
 	if _, err := util.ExecContextWithLogging(ctx, conn, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
-		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ed.tempSchema, enhanceApplyError(err, schemaAgnosticSQL))
+		enhanced := enhanceApplyError(err, schemaAgnosticSQL)
+		enhanced = hintExtensionDependency(enhanced, "this schema may depend on a PostgreSQL extension that is not installed in the plan database. Install the extension in the plan database (CREATE EXTENSION) and re-run, see https://www.pgschema.com/cli/plan-db")
+		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ed.tempSchema, enhanced)
 	}
 
 	return nil

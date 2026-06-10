@@ -491,3 +491,24 @@ func enhanceApplyError(err error, sql string) error {
 
 	return fmt.Errorf("%w\n\nError location (line %d, column %d):\n%s", err, line, col, snippet.String())
 }
+
+// hintExtensionDependency appends hint to errors whose SQLSTATE indicates a
+// missing type, function, operator, or operator class — the typical failure
+// when the desired state depends on a PostgreSQL extension (e.g. btree_gist,
+// citext, pgvector) that is not available in the plan database (issue #436).
+// pgschema does not manage extension lifecycle, so the hint guides the user
+// toward a plan database that has the extension installed.
+func hintExtensionDependency(err error, hint string) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	// 42704 undefined_object: "type X does not exist", "data type X has no
+	// default operator class for access method gist"
+	// 42883 undefined_function: "function X does not exist", "operator does not exist"
+	case "42704", "42883":
+		return fmt.Errorf("%w\nHint: %s", err, hint)
+	}
+	return err
+}
