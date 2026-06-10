@@ -1,0 +1,58 @@
+Plan: 1 to add, 4 to modify.
+
+Summary by type:
+  tables: 1 to add, 4 to modify
+
+Tables:
+  ~ case_comments
+    - case_comments_case_id_fkey (constraint)
+    + case_comments_case_id_fkey (constraint)
+  + case_files
+    + case_files_case_id_fkey (constraint)
+  ~ case_notes
+    - case_notes_case_id_fkey (constraint)
+    + case_notes_case_id_fkey (constraint)
+  ~ case_tags
+    - case_tags_case_id_fkey (constraint)
+    + case_tags_case_id_fkey (constraint)
+  ~ cases
+    - cases_id_key (constraint)
+    + cases_pkey (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS case_files (
+    id integer,
+    case_id integer,
+    CONSTRAINT case_files_pkey PRIMARY KEY (id)
+);
+
+ALTER TABLE case_comments DROP CONSTRAINT case_comments_case_id_fkey;
+
+ALTER TABLE case_notes DROP CONSTRAINT case_notes_case_id_fkey;
+
+ALTER TABLE case_tags DROP CONSTRAINT case_tags_case_id_fkey;
+
+ALTER TABLE cases DROP CONSTRAINT cases_id_key;
+
+ALTER TABLE cases
+ADD CONSTRAINT cases_pkey PRIMARY KEY (id);
+
+ALTER TABLE case_comments
+ADD CONSTRAINT case_comments_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE NOT VALID;
+
+ALTER TABLE case_comments VALIDATE CONSTRAINT case_comments_case_id_fkey;
+
+ALTER TABLE case_files
+ADD CONSTRAINT case_files_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id);
+
+ALTER TABLE case_notes
+ADD CONSTRAINT case_notes_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) NOT VALID;
+
+ALTER TABLE case_notes VALIDATE CONSTRAINT case_notes_case_id_fkey;
+
+ALTER TABLE case_tags
+ADD CONSTRAINT case_tags_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE NOT VALID;
+
+ALTER TABLE case_tags VALIDATE CONSTRAINT case_tags_case_id_fkey;

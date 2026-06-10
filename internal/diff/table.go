@@ -400,6 +400,7 @@ func generateCreateTablesSQL(
 	collector *diffCollector,
 	existingTables map[string]bool,
 	shouldDeferPolicy func(*ir.RLSPolicy) bool,
+	suppressedInlineFKs map[string]bool,
 ) ([]*ir.RLSPolicy, []*deferredConstraint) {
 	var deferredPolicies []*ir.RLSPolicy
 	var deferredConstraints []*deferredConstraint
@@ -408,7 +409,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, createdTables, existingTables)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, createdTables, existingTables, suppressedInlineFKs)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -541,11 +542,18 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 }
 
 // generateModifyTablesSQL generates ALTER TABLE statements
-func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, targetSchema string, collector *diffCollector) {
+func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPreDrops []*ir.Constraint, targetSchema string, collector *diffCollector) {
 	// Build a set of tables being dropped (CASCADE will remove their dependent FK constraints)
 	droppedTableSet := make(map[string]bool, len(droppedTables))
 	for _, t := range droppedTables {
 		droppedTableSet[t.Schema+"."+t.Name] = true
+	}
+
+	// Build a set of FKs already dropped in the pre-drop step because they were
+	// bound to a unique/PK constraint being replaced (#439)
+	preDroppedFKSet := make(map[string]bool, len(fkPreDrops))
+	for _, fk := range fkPreDrops {
+		preDroppedFKSet[constraintPathKey(fk)] = true
 	}
 
 	// Diffs are already sorted by the Diff operation
@@ -557,7 +565,163 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, targ
 		}
 
 		// Pass collector to generateAlterTableStatements to collect with proper context
-		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet)
+		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet, preDroppedFKSet)
+	}
+}
+
+// planFKRecreationForReplacedConstraints handles foreign keys that depend on a
+// unique/primary-key constraint this migration drops or recreates. Postgres
+// ties a foreign key to the specific unique constraint it was created against,
+// so the constraint cannot be dropped while the FK exists (SQLSTATE 2BP01),
+// and an FK created while the old constraint still exists binds to it. (#439)
+//
+// It returns:
+//   - preDrops: old-state FKs bound to a replaced constraint, to drop before
+//     the table modifications. The drop/modify entries they cover are skipped
+//     at emission time (see generateAlterTableStatements) so they are not
+//     dropped twice.
+//   - postAdds: desired-state FKs to (re)create after the table modifications,
+//     once the replacement constraint exists.
+//   - suppressedInlineFKs: FKs on newly added tables (keyed by
+//     schema.table.constraint) that must be left out of CREATE TABLE — emitted
+//     inline they would bind to the old constraint before the replacement runs.
+//     They are recreated via postAdds instead.
+//
+// Note: Postgres matches an FK's referenced columns to a unique constraint as
+// a column set, not an ordered list — FOREIGN KEY (x, y) REFERENCES t (b, a)
+// is valid against UNIQUE (a, b) — so matching here is order-insensitive.
+func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTables []*ir.Table, oldTables, newTables map[string]*ir.Table) (preDrops []*ir.Constraint, postAdds []*deferredConstraint, suppressedInlineFKs map[string]bool) {
+	// Unique/PK constraints removed by this migration, keyed by their table
+	replaced := make(map[string][]*ir.Constraint)
+	for _, td := range modifiedTables {
+		key := td.Table.Schema + "." + td.Table.Name
+		for _, c := range td.DroppedConstraints {
+			if c.Type == ir.ConstraintTypeUnique || c.Type == ir.ConstraintTypePrimaryKey {
+				replaced[key] = append(replaced[key], c)
+			}
+		}
+		// Modified unique/PK constraints are recreated via DROP + ADD
+		for _, cd := range td.ModifiedConstraints {
+			if cd.Old.Type == ir.ConstraintTypeUnique || cd.Old.Type == ir.ConstraintTypePrimaryKey {
+				replaced[key] = append(replaced[key], cd.Old)
+			}
+		}
+	}
+	if len(replaced) == 0 {
+		return nil, nil, nil
+	}
+
+	// Existing FKs bound to a replaced constraint
+	for _, tableKey := range sortedKeys(oldTables) {
+		oldTable := oldTables[tableKey]
+		newTable := newTables[tableKey]
+		if newTable == nil {
+			continue // table is dropped before the modify phase; its FKs go with it
+		}
+		for _, name := range sortedKeys(oldTable.Constraints) {
+			fk := oldTable.Constraints[name]
+			if fk.Type != ir.ConstraintTypeForeignKey {
+				continue
+			}
+			newFK := newTable.Constraints[name]
+			oldBound := fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)])
+			// A changed FK whose new definition targets a replaced constraint
+			// must also wait for the replacement, even if its old definition
+			// was bound elsewhere.
+			newBound := newFK != nil && !constraintsEqual(fk, newFK) &&
+				fkReferencesAnyConstraint(newFK, replaced[fkReferencedTableKey(newFK)])
+			if !oldBound && !newBound {
+				continue
+			}
+
+			preDrops = append(preDrops, fk)
+			if newFK != nil {
+				postAdds = append(postAdds, &deferredConstraint{table: newTable, constraint: newFK})
+			}
+		}
+	}
+
+	// FKs on newly added tables that target a replaced constraint: keep them
+	// out of CREATE TABLE (create phase runs before the modify-phase swap) and
+	// add them with the other recreated FKs instead.
+	suppressedInlineFKs = make(map[string]bool)
+	for _, table := range addedTables {
+		for _, name := range sortedKeys(table.Constraints) {
+			fk := table.Constraints[name]
+			if fk.Type != ir.ConstraintTypeForeignKey {
+				continue
+			}
+			if !fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)]) {
+				continue
+			}
+			suppressedInlineFKs[constraintPathKey(fk)] = true
+			postAdds = append(postAdds, &deferredConstraint{table: table, constraint: fk})
+		}
+	}
+
+	sort.Slice(preDrops, func(i, j int) bool {
+		return constraintPathKey(preDrops[i]) < constraintPathKey(preDrops[j])
+	})
+	sort.Slice(postAdds, func(i, j int) bool {
+		return constraintPathKey(postAdds[i].constraint) < constraintPathKey(postAdds[j].constraint)
+	})
+	return preDrops, postAdds, suppressedInlineFKs
+}
+
+// constraintPathKey returns the schema-qualified identity of a constraint.
+func constraintPathKey(c *ir.Constraint) string {
+	return c.Schema + "." + c.Table + "." + c.Name
+}
+
+// fkReferencedTableKey returns the schema-qualified key of the table an FK references.
+func fkReferencedTableKey(fk *ir.Constraint) string {
+	refSchema := fk.ReferencedSchema
+	if refSchema == "" {
+		refSchema = fk.Schema
+	}
+	return refSchema + "." + fk.ReferencedTable
+}
+
+// fkReferencesAnyConstraint reports whether the FK's referenced columns match
+// the column set of any of the given unique/PK constraints.
+func fkReferencesAnyConstraint(fk *ir.Constraint, candidates []*ir.Constraint) bool {
+	refCols := make(map[string]bool, len(fk.ReferencedColumns))
+	for _, col := range fk.ReferencedColumns {
+		refCols[col.Name] = true
+	}
+	for _, c := range candidates {
+		if len(c.Columns) != len(refCols) {
+			continue
+		}
+		matched := true
+		for _, col := range c.Columns {
+			if !refCols[col.Name] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// generateDropRecreatedFKsSQL drops foreign keys bound to unique/PK constraints
+// being replaced. Must run before the table modifications. (#439)
+func generateDropRecreatedFKsSQL(fks []*ir.Constraint, targetSchema string, collector *diffCollector) {
+	for _, fk := range fks {
+		tableName := getTableNameWithSchema(fk.Schema, fk.Table, targetSchema)
+		sql := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", tableName, ir.QuoteIdentifier(fk.Name))
+
+		context := &diffContext{
+			Type:                DiffTypeTableConstraint,
+			Operation:           DiffOperationDrop,
+			Path:                fmt.Sprintf("%s.%s.%s", fk.Schema, fk.Table, fk.Name),
+			Source:              fk,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
 	}
 }
 
@@ -583,7 +747,7 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[string]bool, existingTables map[string]bool) (string, []*deferredConstraint) {
+func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool) (string, []*deferredConstraint) {
 	// Only include table name without schema if it's in the target schema
 	tableName := ir.QualifyEntityNameWithQuotes(table.Schema, table.Name, targetSchema)
 
@@ -618,6 +782,11 @@ func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[st
 	var deferred []*deferredConstraint
 	currentKey := fmt.Sprintf("%s.%s", table.Schema, table.Name)
 	for _, constraint := range inlineConstraints {
+		// FKs bound to a unique/PK constraint being replaced by this migration
+		// are created after the replacement instead (issue #439)
+		if suppressedInlineFKs[constraintPathKey(constraint)] {
+			continue
+		}
 		if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) {
 			deferred = append(deferred, &deferredConstraint{
 				table:      table,
@@ -696,7 +865,10 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 // FK constraints referencing these tables are skipped since CASCADE already removes them.
 // droppedColumnSet contains column names being dropped from this table; constraints that
 // depend on those columns are skipped because DROP COLUMN already removes them. (#384)
-func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool) {
+// preDroppedFKSet contains "schema.table.constraint" keys for FKs already dropped in the
+// pre-drop step because they were bound to a replaced unique/PK constraint; their drop
+// and modify entries are skipped since the pre-drop/post-add steps handle them. (#439)
+func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool, preDroppedFKSet map[string]bool) {
 	// Persistence change (UNLOGGED to LOGGED or vice versa) should emit first
 	// because PostgreSQL rewrites the heap so doing it before column/constraint
 	// changes reduces data movement on subsequent steps
@@ -722,6 +894,11 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	for _, constraint := range td.DroppedConstraints {
 		// Skip constraints already removed by a dropped column. (#384)
 		if constraintDroppedWithColumns(constraint, droppedColumnSet) {
+			continue
+		}
+
+		// Skip FKs already dropped in the pre-drop step. (#439)
+		if preDroppedFKSet[constraintPathKey(constraint)] {
 			continue
 		}
 
@@ -1013,6 +1190,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Handle modified constraints - drop and recreate them as separate operations
 	for _, ConstraintDiff := range td.ModifiedConstraints {
+		// Skip FKs already dropped in the pre-drop step; the post-add step
+		// recreates them from the desired-state definition. (#439)
+		if preDroppedFKSet[constraintPathKey(ConstraintDiff.Old)] {
+			continue
+		}
+
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 		constraint := ConstraintDiff.New
 
