@@ -2739,7 +2739,7 @@ LEFT JOIN (
             REGEXP_REPLACE(
                 REGEXP_REPLACE(
                     REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
-                    '^[^.]*\.', ''
+                    '^("([^"]|"")*"\.|[^.]*\.)', ''
                 ),
                 '^"(.*)"$', '\1'
             ),
