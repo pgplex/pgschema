@@ -1,0 +1,24 @@
+Plan: 2 to modify.
+
+Summary by type:
+  tables: 2 to modify
+
+Tables:
+  ~ a_child_links
+    - a_child_links_parent_variant_fkey (constraint)
+    + a_child_links_parent_variant_fkey (constraint)
+  ~ z_parent_variants
+    + z_parent_variants_parent_entity_id_id_key (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE z_parent_variants
+ADD CONSTRAINT z_parent_variants_parent_entity_id_id_key UNIQUE (parent_entity_id, id);
+
+ALTER TABLE a_child_links DROP CONSTRAINT a_child_links_parent_variant_fkey;
+
+ALTER TABLE a_child_links
+ADD CONSTRAINT a_child_links_parent_variant_fkey FOREIGN KEY (parent_entity_id, parent_variant_id) REFERENCES z_parent_variants (parent_entity_id, id) ON DELETE CASCADE NOT VALID;
+
+ALTER TABLE a_child_links VALIDATE CONSTRAINT a_child_links_parent_variant_fkey;

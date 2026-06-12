@@ -512,9 +512,9 @@ func topologicallySortFunctions(functions []*ir.Function) []*ir.Function {
 	return sortedFunctions
 }
 
-// topologicallySortModifiedTables sorts modified tables based on constraint dependencies
-// Tables with added UNIQUE/PK constraints that are referenced by other tables' added FKs
-// will come before those tables
+// topologicallySortModifiedTables sorts modified tables based on constraint dependencies.
+// Tables with added UNIQUE/PK constraints that are referenced by other tables' added OR
+// modified FKs will come before those tables.
 func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 	if len(tableDiffs) <= 1 {
 		return tableDiffs
@@ -539,12 +539,12 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 		adjList[key] = []string{}
 	}
 
-	// Build edges: if tableA adds a FK to tableB's newly-added UNIQUE/PK, add edge tableB -> tableA
+	// Build edges: if tableA adds or modifies a FK to tableB's newly-added UNIQUE/PK,
+	// add edge tableB -> tableA.
 	for keyA, tdA := range tableDiffMap {
-		// Look at FK constraints being added to tableA
-		for _, fkConstraint := range tdA.AddedConstraints {
-			if fkConstraint.Type != ir.ConstraintTypeForeignKey {
-				continue
+		processFKDependency := func(fkConstraint *ir.Constraint) {
+			if fkConstraint == nil || fkConstraint.Type != ir.ConstraintTypeForeignKey {
+				return
 			}
 
 			// Build referenced table key
@@ -557,7 +557,7 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 			// Check if referenced table exists in our modified tables set
 			tdB, exists := tableDiffMap[keyB]
 			if !exists || keyA == keyB {
-				continue
+				return
 			}
 
 			// Check if tableB is adding a UNIQUE or PK constraint that matches the FK reference
@@ -566,14 +566,20 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 					continue
 				}
 
-				// Check if this constraint matches the FK's referenced columns
 				if constraintMatchesFKReference(constraint, fkConstraint) {
-					// Add edge: tableB (with new UNIQUE/PK) -> tableA (with new FK)
 					adjList[keyB] = append(adjList[keyB], keyA)
 					inDegree[keyA]++
-					break
+					return
 				}
 			}
+		}
+
+		for _, fkConstraint := range tdA.AddedConstraints {
+			processFKDependency(fkConstraint)
+		}
+
+		for _, constraintDiff := range tdA.ModifiedConstraints {
+			processFKDependency(constraintDiff.New)
 		}
 	}
 

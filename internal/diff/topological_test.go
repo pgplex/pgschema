@@ -439,3 +439,40 @@ func TestBuildFunctionBodyDependenciesWithTopologicalSort(t *testing.T) {
 		t.Errorf("expected a_helper before z_wrapper, got order: %v", order)
 	}
 }
+
+func TestTopologicallySortModifiedTables_ModifiedForeignKeyDependsOnAddedUnique(t *testing.T) {
+	referenced := &tableDiff{
+		Table: &ir.Table{Schema: "public", Name: "organization_role"},
+		AddedConstraints: []*ir.Constraint{{
+			Name: "organization_role_organization_id_id_key",
+			Type: ir.ConstraintTypeUnique,
+			Columns: []*ir.ConstraintColumn{
+				{Name: "organization_id", Position: 1},
+				{Name: "id", Position: 2},
+			},
+		}},
+	}
+
+	dependent := &tableDiff{
+		Table: &ir.Table{Schema: "public", Name: "member_role"},
+		ModifiedConstraints: []*ConstraintDiff{{
+			New: &ir.Constraint{
+				Name:            "member_role_organization_id_role_id_fkey",
+				Type:            ir.ConstraintTypeForeignKey,
+				ReferencedTable: "organization_role",
+				ReferencedColumns: []*ir.ConstraintColumn{
+					{Name: "organization_id", Position: 1},
+					{Name: "id", Position: 2},
+				},
+			},
+		}},
+	}
+
+	sorted := topologicallySortModifiedTables([]*tableDiff{dependent, referenced})
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 modified tables, got %d", len(sorted))
+	}
+	if sorted[0].Table.Name != "organization_role" || sorted[1].Table.Name != "member_role" {
+		t.Fatalf("expected referenced table before dependent modified FK table, got [%s %s]", sorted[0].Table.Name, sorted[1].Table.Name)
+	}
+}
