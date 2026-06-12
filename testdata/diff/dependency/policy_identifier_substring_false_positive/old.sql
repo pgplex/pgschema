@@ -1,0 +1,1 @@
+-- Empty schema (no tables)

@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS orders (\n    id integer NOT NULL,\n    user_name text NOT NULL\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.orders"
+        },
+        {
+          "sql": "ALTER TABLE orders ENABLE ROW LEVEL SECURITY;",
+          "type": "table.rls",
+          "operation": "alter",
+          "path": "public.orders"
+        },
+        {
+          "sql": "CREATE POLICY orders_current_user_scope ON orders FOR SELECT TO PUBLIC USING (user_name = CURRENT_USER);",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.orders.orders_current_user_scope"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS \"user\" (\n    id integer NOT NULL\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.user"
+        }
+      ]
+    }
+  ]
+}

@@ -2382,17 +2382,15 @@ func policyReferencesOtherNewTable(policy *ir.RLSPolicy, newTables map[string]st
 		if expr == "" {
 			continue
 		}
-		exprLower := strings.ToLower(expr)
 		for qualifiedName := range newTables {
 			// Skip the policy's own table
 			if qualifiedName == ownQualified {
 				continue
 			}
-			// Extract the unqualified table name for substring matching.
 			// Policy expressions may use unqualified or qualified references.
 			parts := strings.SplitN(qualifiedName, ".", 2)
 			tableName := parts[len(parts)-1]
-			if strings.Contains(exprLower, tableName) {
+			if containsIdentifier(expr, tableName) || containsIdentifier(expr, qualifiedName) {
 				return true
 			}
 		}
