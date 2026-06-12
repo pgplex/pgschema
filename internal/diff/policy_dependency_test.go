@@ -59,3 +59,27 @@ func TestPolicyReferencesNewFunction_BuiltInIgnored(t *testing.T) {
 		t.Fatalf("expected policy referencing only built-in functions to remain inline")
 	}
 }
+
+func TestPolicyReferencesOtherNewTable_IdentifierAware(t *testing.T) {
+	lookup := map[string]struct{}{
+		"public.orders": {},
+		"public.users":  {},
+		"public.user":   {},
+	}
+
+	if !policyReferencesOtherNewTable(&ir.RLSPolicy{
+		Schema: "public",
+		Table:  "orders",
+		Using:  "EXISTS (SELECT 1 FROM users u WHERE u.id = orders.user_id)",
+	}, lookup) {
+		t.Fatalf("expected policy referencing another new table to be deferred")
+	}
+
+	if policyReferencesOtherNewTable(&ir.RLSPolicy{
+		Schema: "public",
+		Table:  "orders",
+		Using:  "orders_archive.user_id = 1",
+	}, lookup) {
+		t.Fatalf("did not expect substring-only matches inside longer identifiers")
+	}
+}
