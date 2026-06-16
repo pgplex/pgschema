@@ -782,17 +782,18 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		}
 
 		index := &Index{
-			Schema:         schemaName,
-			Table:          tableName,
-			Name:           indexName,
-			Type:           indexType,
-			Method:         method,
-			IncludeColumns: indexRow.IncludeColumns,
-			IsPartial:      isPartial,
-			IsExpression:   hasExpressions,
-			Where:          "",
-			Comment:        comment,
-			Columns:        []*IndexColumn{},
+			Schema:            schemaName,
+			Table:             tableName,
+			Name:              indexName,
+			Type:              indexType,
+			Method:            method,
+			IncludeColumns:    indexRow.IncludeColumns,
+			IsPartial:         isPartial,
+			IsExpression:      hasExpressions,
+			Where:             "",
+			StorageParameters: indexRow.Reloptions,
+			Comment:           comment,
+			Columns:           []*IndexColumn{},
 		}
 
 		// Check for NULLS NOT DISTINCT (PostgreSQL 15+)
