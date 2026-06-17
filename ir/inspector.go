@@ -880,6 +880,11 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 			}
 		}
 
+		seqComment := ""
+		if seq.SequenceComment.Valid {
+			seqComment = seq.SequenceComment.String
+		}
+
 		sequence := &Sequence{
 			Schema:      schemaName,
 			Name:        sequenceName,
@@ -887,6 +892,7 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 			StartValue:  seq.StartValue.Int64,
 			Increment:   seq.Increment.Int64,
 			CycleOption: seq.CycleOption.Bool,
+			Comment:     seqComment,
 		}
 
 		// Set default values if not valid
@@ -1724,6 +1730,15 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			comment = triggerRow.TriggerComment.String
 		}
 
+		// Extract enabled state: tgenabled 'D' = disabled, anything else = enabled
+		enabled := true
+		switch v := triggerRow.TriggerEnabled.(type) {
+		case string:
+			enabled = v != "D"
+		case []byte:
+			enabled = string(v) != "D"
+		}
+
 		// Determine if this is a constraint trigger
 		oid, ok := triggerRow.TriggerConstraintOid.(int64)
 		isConstraint := ok && oid != 0
@@ -1747,6 +1762,7 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			Deferrable:        deferrable,
 			InitiallyDeferred: initDeferred,
 			Comment:           comment,
+			Enabled:           enabled,
 		}
 
 		// Add trigger to the appropriate map

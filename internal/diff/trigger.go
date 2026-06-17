@@ -148,6 +148,16 @@ func generateCreateTriggersSQL(triggers []*ir.Trigger, targetSchema string, coll
 		}
 
 		collector.collect(context, sql)
+
+		// Emit COMMENT ON TRIGGER if present
+		if trigger.Comment != "" {
+			generateTriggerComment(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeTableTrigger, collector)
+		}
+
+		// Emit DISABLE TRIGGER if the trigger is disabled
+		if !trigger.Enabled {
+			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, collector)
+		}
 	}
 }
 
@@ -319,7 +329,46 @@ func generateCreateViewTriggersSQL(triggers []*ir.Trigger, targetSchema string, 
 		}
 
 		collector.collect(context, sql)
+
+		if trigger.Comment != "" {
+			generateTriggerComment(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeViewTrigger, collector)
+		}
 	}
 }
 
+// generateTriggerComment emits a COMMENT ON TRIGGER statement
+func generateTriggerComment(trigger *ir.Trigger, schema, table, targetSchema string, diffType DiffType, collector *diffCollector) {
+	tableName := getTableNameWithSchema(schema, table, targetSchema)
+	var sql string
+	if trigger.Comment == "" {
+		sql = fmt.Sprintf("COMMENT ON TRIGGER %s ON %s IS NULL;", ir.QuoteIdentifier(trigger.Name), tableName)
+	} else {
+		sql = fmt.Sprintf("COMMENT ON TRIGGER %s ON %s IS %s;", ir.QuoteIdentifier(trigger.Name), tableName, quoteString(trigger.Comment))
+	}
+	context := &diffContext{
+		Type:                diffType,
+		Operation:           DiffOperationAlter,
+		Path:                fmt.Sprintf("%s.%s.%s", schema, table, trigger.Name),
+		Source:              trigger,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
+}
 
+// generateTriggerEnabledState emits ALTER TABLE DISABLE/ENABLE TRIGGER
+func generateTriggerEnabledState(trigger *ir.Trigger, schema, table, targetSchema string, collector *diffCollector) {
+	tableName := getTableNameWithSchema(schema, table, targetSchema)
+	state := "ENABLE"
+	if !trigger.Enabled {
+		state = "DISABLE"
+	}
+	sql := fmt.Sprintf("ALTER TABLE %s %s TRIGGER %s;", tableName, state, ir.QuoteIdentifier(trigger.Name))
+	context := &diffContext{
+		Type:                DiffTypeTableTrigger,
+		Operation:           DiffOperationAlter,
+		Path:                fmt.Sprintf("%s.%s.%s", schema, table, trigger.Name),
+		Source:              trigger,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
+}

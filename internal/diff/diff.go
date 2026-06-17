@@ -1064,12 +1064,20 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
-			// Skip sequences owned by table columns (created by SERIAL)
-			if (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
-				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "") {
+			// Skip sequences owned by table columns (created by SERIAL) for structural changes,
+			// but allow comment-only changes through so COMMENT ON SEQUENCE can be deployed.
+			isOwned := (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
+				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "")
+			if isOwned {
+				if oldSeq.Comment != newSeq.Comment {
+					diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
+						Old: oldSeq,
+						New: newSeq,
+					})
+				}
 				continue
 			}
-			if !sequencesEqual(oldSeq, newSeq) {
+			if !sequencesEqual(oldSeq, newSeq) || oldSeq.Comment != newSeq.Comment {
 				diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
 					Old: oldSeq,
 					New: newSeq,

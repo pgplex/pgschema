@@ -2889,7 +2889,8 @@ SELECT
     s.cycle AS cycle_option,
     s.cache_size,
     COALESCE(dep_table.relname, col_table.table_name) AS owned_by_table,
-    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column
+    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column,
+    COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = n.oid
@@ -2919,17 +2920,18 @@ ORDER BY s.schemaname, s.sequencename
 `
 
 type GetSequencesForSchemaRow struct {
-	SequenceSchema sql.NullString `db:"sequence_schema" json:"sequence_schema"`
-	SequenceName   sql.NullString `db:"sequence_name" json:"sequence_name"`
-	DataType       interface{}    `db:"data_type" json:"data_type"`
-	StartValue     sql.NullInt64  `db:"start_value" json:"start_value"`
-	MinimumValue   sql.NullInt64  `db:"minimum_value" json:"minimum_value"`
-	MaximumValue   sql.NullInt64  `db:"maximum_value" json:"maximum_value"`
-	Increment      sql.NullInt64  `db:"increment" json:"increment"`
-	CycleOption    sql.NullBool   `db:"cycle_option" json:"cycle_option"`
-	CacheSize      sql.NullInt64  `db:"cache_size" json:"cache_size"`
-	OwnedByTable   sql.NullString `db:"owned_by_table" json:"owned_by_table"`
-	OwnedByColumn  sql.NullString `db:"owned_by_column" json:"owned_by_column"`
+	SequenceSchema  sql.NullString `db:"sequence_schema" json:"sequence_schema"`
+	SequenceName    sql.NullString `db:"sequence_name" json:"sequence_name"`
+	DataType        interface{}    `db:"data_type" json:"data_type"`
+	StartValue      sql.NullInt64  `db:"start_value" json:"start_value"`
+	MinimumValue    sql.NullInt64  `db:"minimum_value" json:"minimum_value"`
+	MaximumValue    sql.NullInt64  `db:"maximum_value" json:"maximum_value"`
+	Increment       sql.NullInt64  `db:"increment" json:"increment"`
+	CycleOption     sql.NullBool   `db:"cycle_option" json:"cycle_option"`
+	CacheSize       sql.NullInt64  `db:"cache_size" json:"cache_size"`
+	OwnedByTable    sql.NullString `db:"owned_by_table" json:"owned_by_table"`
+	OwnedByColumn   sql.NullString `db:"owned_by_column" json:"owned_by_column"`
+	SequenceComment sql.NullString `db:"sequence_comment" json:"sequence_comment"`
 }
 
 // GetSequencesForSchema retrieves all sequences for a specific schema
@@ -2956,6 +2958,7 @@ func (q *Queries) GetSequencesForSchema(ctx context.Context, dollar_1 sql.NullSt
 			&i.CacheSize,
 			&i.OwnedByTable,
 			&i.OwnedByColumn,
+			&i.SequenceComment,
 		); err != nil {
 			return nil, err
 		}

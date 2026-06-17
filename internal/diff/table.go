@@ -98,10 +98,13 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 		}
 	}
 
-	// Find modified triggers
+	// Find modified triggers (structural changes, comment-only, or enabled-state-only)
 	for name, newTrigger := range newTriggers {
 		if oldTrigger, exists := oldTriggers[name]; exists {
-			if !triggersEqual(oldTrigger, newTrigger) {
+			structurallyEqual := triggersEqual(oldTrigger, newTrigger)
+			commentChanged := oldTrigger.Comment != newTrigger.Comment
+			enabledChanged := oldTrigger.Enabled != newTrigger.Enabled
+			if !structurallyEqual || commentChanged || enabledChanged {
 				diff.ModifiedTriggers = append(diff.ModifiedTriggers, &triggerDiff{
 					Old: oldTrigger,
 					New: newTrigger,
@@ -1383,43 +1386,59 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Modify triggers - already sorted by the Diff operation
 	for _, triggerDiff := range td.ModifiedTriggers {
-		// Constraint triggers don't support CREATE OR REPLACE, so we need to DROP and CREATE
-		if triggerDiff.New.IsConstraint {
-			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+		structurallyEqual := triggersEqual(triggerDiff.Old, triggerDiff.New)
+		commentChanged := triggerDiff.Old.Comment != triggerDiff.New.Comment
+		enabledChanged := triggerDiff.Old.Enabled != triggerDiff.New.Enabled
 
-			// Step 1: DROP the old trigger
-			dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(triggerDiff.Old.Name), tableName)
-			dropContext := &diffContext{
-				Type:                DiffTypeTableTrigger,
-				Operation:           DiffOperationDrop,
-				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, triggerDiff.Old.Name),
-				Source:              triggerDiff.Old,
-				CanRunInTransaction: true,
-			}
-			collector.collect(dropContext, dropSQL)
+		if !structurallyEqual {
+			// Constraint triggers don't support CREATE OR REPLACE, so we need to DROP and CREATE
+			if triggerDiff.New.IsConstraint {
+				tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 
-			// Step 2: CREATE the new constraint trigger
-			createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
-			createContext := &diffContext{
-				Type:                DiffTypeTableTrigger,
-				Operation:           DiffOperationCreate,
-				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, triggerDiff.New.Name),
-				Source:              triggerDiff.New,
-				CanRunInTransaction: true,
-			}
-			collector.collect(createContext, createSQL)
-		} else {
-			// Use CREATE OR REPLACE for regular triggers
-			sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+				// Step 1: DROP the old trigger
+				dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(triggerDiff.Old.Name), tableName)
+				dropContext := &diffContext{
+					Type:                DiffTypeTableTrigger,
+					Operation:           DiffOperationDrop,
+					Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, triggerDiff.Old.Name),
+					Source:              triggerDiff.Old,
+					CanRunInTransaction: true,
+				}
+				collector.collect(dropContext, dropSQL)
 
-			context := &diffContext{
-				Type:                DiffTypeTableTrigger,
-				Operation:           DiffOperationAlter,
-				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, triggerDiff.New.Name),
-				Source:              triggerDiff,
-				CanRunInTransaction: true,
+				// Step 2: CREATE the new constraint trigger
+				createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+				createContext := &diffContext{
+					Type:                DiffTypeTableTrigger,
+					Operation:           DiffOperationCreate,
+					Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, triggerDiff.New.Name),
+					Source:              triggerDiff.New,
+					CanRunInTransaction: true,
+				}
+				collector.collect(createContext, createSQL)
+			} else {
+				// Use CREATE OR REPLACE for regular triggers
+				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+
+				context := &diffContext{
+					Type:                DiffTypeTableTrigger,
+					Operation:           DiffOperationAlter,
+					Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, triggerDiff.New.Name),
+					Source:              triggerDiff,
+					CanRunInTransaction: true,
+				}
+				collector.collect(context, sql)
 			}
-			collector.collect(context, sql)
+		}
+
+		// Emit COMMENT ON TRIGGER for comment changes (including after structural recreate)
+		if commentChanged {
+			generateTriggerComment(triggerDiff.New, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
+		}
+
+		// Emit ENABLE/DISABLE TRIGGER for enabled state changes
+		if enabledChanged {
+			generateTriggerEnabledState(triggerDiff.New, td.Table.Schema, td.Table.Name, targetSchema, collector)
 		}
 	}
 
