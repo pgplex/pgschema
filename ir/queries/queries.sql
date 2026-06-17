@@ -459,6 +459,7 @@ WITH index_base AS (
             ELSE false
         END as has_expressions,
         COALESCE(d.description, '') AS index_comment,
+        COALESCE(i.reloptions, '{}') AS reloptions,
         idx.indnkeyatts as num_key_columns,
         idx.indnatts as num_columns,
         ARRAY(
@@ -516,6 +517,7 @@ SELECT
     sp.partial_predicate,
     ib.has_expressions,
     ib.index_comment,
+    ib.reloptions,
     ib.num_key_columns,
     ib.num_columns,
     ib.column_definitions,
