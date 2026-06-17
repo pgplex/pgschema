@@ -1730,13 +1730,13 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			comment = triggerRow.TriggerComment.String
 		}
 
-		// Extract enabled state: tgenabled 'D' = disabled, anything else = enabled
-		enabled := true
+		// Extract disabled state: tgenabled 'D' = disabled, anything else = enabled (Postgres default)
+		disabled := false
 		switch v := triggerRow.TriggerEnabled.(type) {
 		case string:
-			enabled = v != "D"
+			disabled = v == "D"
 		case []byte:
-			enabled = string(v) != "D"
+			disabled = string(v) == "D"
 		}
 
 		// Determine if this is a constraint trigger
@@ -1762,7 +1762,7 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			Deferrable:        deferrable,
 			InitiallyDeferred: initDeferred,
 			Comment:           comment,
-			Enabled:           enabled,
+			Disabled:          disabled,
 		}
 
 		// Add trigger to the appropriate map

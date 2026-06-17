@@ -103,7 +103,7 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 		if oldTrigger, exists := oldTriggers[name]; exists {
 			structurallyEqual := triggersEqual(oldTrigger, newTrigger)
 			commentChanged := oldTrigger.Comment != newTrigger.Comment
-			enabledChanged := oldTrigger.Enabled != newTrigger.Enabled
+			enabledChanged := oldTrigger.Disabled != newTrigger.Disabled
 			if !structurallyEqual || commentChanged || enabledChanged {
 				diff.ModifiedTriggers = append(diff.ModifiedTriggers, &triggerDiff{
 					Old: oldTrigger,
@@ -1388,7 +1388,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	for _, triggerDiff := range td.ModifiedTriggers {
 		structurallyEqual := triggersEqual(triggerDiff.Old, triggerDiff.New)
 		commentChanged := triggerDiff.Old.Comment != triggerDiff.New.Comment
-		enabledChanged := triggerDiff.Old.Enabled != triggerDiff.New.Enabled
+		enabledChanged := triggerDiff.Old.Disabled != triggerDiff.New.Disabled
 
 		if !structurallyEqual {
 			// Constraint triggers don't support CREATE OR REPLACE, so we need to DROP and CREATE

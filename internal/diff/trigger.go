@@ -155,7 +155,7 @@ func generateCreateTriggersSQL(triggers []*ir.Trigger, targetSchema string, coll
 		}
 
 		// Emit DISABLE TRIGGER if the trigger is disabled
-		if !trigger.Enabled {
+		if trigger.Disabled {
 			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, collector)
 		}
 	}
@@ -333,6 +333,10 @@ func generateCreateViewTriggersSQL(triggers []*ir.Trigger, targetSchema string, 
 		if trigger.Comment != "" {
 			generateTriggerComment(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeViewTrigger, collector)
 		}
+
+		if trigger.Disabled {
+			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, collector)
+		}
 	}
 }
 
@@ -359,7 +363,7 @@ func generateTriggerComment(trigger *ir.Trigger, schema, table, targetSchema str
 func generateTriggerEnabledState(trigger *ir.Trigger, schema, table, targetSchema string, collector *diffCollector) {
 	tableName := getTableNameWithSchema(schema, table, targetSchema)
 	state := "ENABLE"
-	if !trigger.Enabled {
+	if trigger.Disabled {
 		state = "DISABLE"
 	}
 	sql := fmt.Sprintf("ALTER TABLE %s %s TRIGGER %s;", tableName, state, ir.QuoteIdentifier(trigger.Name))

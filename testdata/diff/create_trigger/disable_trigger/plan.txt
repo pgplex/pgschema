@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ employees
+    ~ employees_last_modified_trigger (trigger)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE employees DISABLE TRIGGER employees_last_modified_trigger;

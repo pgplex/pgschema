@@ -435,6 +435,12 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 					CanRunInTransaction: true,
 				}
 				collector.collect(createContext, createSQL)
+				if triggerDiff.New.Comment != "" {
+					generateTriggerComment(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, DiffTypeViewTrigger, collector)
+				}
+				if triggerDiff.New.Disabled {
+					generateTriggerEnabledState(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, collector)
+				}
 			} else {
 				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
 				context := &diffContext{
@@ -445,6 +451,12 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 					CanRunInTransaction: true,
 				}
 				collector.collect(context, sql)
+				if triggerDiff.New.Comment != "" {
+					generateTriggerComment(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, DiffTypeViewTrigger, collector)
+				}
+				if triggerDiff.New.Disabled {
+					generateTriggerEnabledState(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, collector)
+				}
 			}
 		}
 	}
