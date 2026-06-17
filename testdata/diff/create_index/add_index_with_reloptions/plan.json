@@ -1,0 +1,58 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "f326069ad80c21a82f56af5ac346c4a0dff85aad6e8998d723b1a19e5a885571"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_status_active ON orders (user_id, created_at) WITH (fillfactor=100, deduplicate_items=true) WHERE (status IS NOT NULL);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.idx_orders_status_active"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_orders_status_active';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index idx_orders_status_active"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.idx_orders_status_active"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_user_id ON orders (user_id) WITH (fillfactor=90);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.idx_orders_user_id"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_orders_user_id';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index idx_orders_user_id"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.idx_orders_user_id"
+        }
+      ]
+    }
+  ]
+}
