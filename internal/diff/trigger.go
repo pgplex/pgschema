@@ -156,7 +156,7 @@ func generateCreateTriggersSQL(triggers []*ir.Trigger, targetSchema string, coll
 
 		// Emit DISABLE TRIGGER if the trigger is disabled
 		if trigger.Disabled {
-			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, collector)
+			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeTableTrigger, collector)
 		}
 	}
 }
@@ -335,7 +335,7 @@ func generateCreateViewTriggersSQL(triggers []*ir.Trigger, targetSchema string, 
 		}
 
 		if trigger.Disabled {
-			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, collector)
+			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeViewTrigger, collector)
 		}
 	}
 }
@@ -360,7 +360,7 @@ func generateTriggerComment(trigger *ir.Trigger, schema, table, targetSchema str
 }
 
 // generateTriggerEnabledState emits ALTER TABLE DISABLE/ENABLE TRIGGER
-func generateTriggerEnabledState(trigger *ir.Trigger, schema, table, targetSchema string, collector *diffCollector) {
+func generateTriggerEnabledState(trigger *ir.Trigger, schema, table, targetSchema string, diffType DiffType, collector *diffCollector) {
 	tableName := getTableNameWithSchema(schema, table, targetSchema)
 	state := "ENABLE"
 	if trigger.Disabled {
@@ -368,7 +368,7 @@ func generateTriggerEnabledState(trigger *ir.Trigger, schema, table, targetSchem
 	}
 	sql := fmt.Sprintf("ALTER TABLE %s %s TRIGGER %s;", tableName, state, ir.QuoteIdentifier(trigger.Name))
 	context := &diffContext{
-		Type:                DiffTypeTableTrigger,
+		Type:                diffType,
 		Operation:           DiffOperationAlter,
 		Path:                fmt.Sprintf("%s.%s.%s", schema, table, trigger.Name),
 		Source:              trigger,

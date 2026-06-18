@@ -1431,14 +1431,16 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			}
 		}
 
-		// Emit COMMENT ON TRIGGER for comment changes (including after structural recreate)
-		if commentChanged {
+		// Emit COMMENT ON TRIGGER when the comment changed, or after structural recreation
+		// so the desired comment is preserved.
+		if commentChanged || (!structurallyEqual && triggerDiff.New.Comment != "") {
 			generateTriggerComment(triggerDiff.New, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
 		}
 
-		// Emit ENABLE/DISABLE TRIGGER for enabled state changes
-		if enabledChanged {
-			generateTriggerEnabledState(triggerDiff.New, td.Table.Schema, td.Table.Name, targetSchema, collector)
+		// Emit ENABLE/DISABLE TRIGGER when the state changed, or after structural recreation
+		// so disabled triggers stay disabled.
+		if enabledChanged || (!structurallyEqual && triggerDiff.New.Disabled) {
+			generateTriggerEnabledState(triggerDiff.New, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
 		}
 	}
 
