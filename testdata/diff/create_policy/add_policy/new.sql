@@ -57,3 +57,10 @@ CREATE POLICY orders_user_access ON orders
     FOR SELECT
     TO PUBLIC
     USING (user_id IN (SELECT id FROM users));
+
+-- Restrictive policy (Issue #477): AS RESTRICTIVE must be preserved
+CREATE POLICY admin_restricted ON users
+    AS RESTRICTIVE
+    FOR ALL
+    TO PUBLIC
+    USING (is_admin());
