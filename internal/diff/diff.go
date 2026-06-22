@@ -310,11 +310,12 @@ type ddlDiff struct {
 	// exist when the view body is parsed (issue #414).
 	deferredAddedViews             []*ir.View
 	functionsAwaitingDeferredViews []*ir.Function
-	// Newly-added functions whose return/parameter type references a view being
-	// recreated (DROP + CREATE) by this migration. Their old definition is dropped
-	// in the drop phase; creating them in the create phase (before the view's DROP)
-	// would re-pin the old view and block its RESTRICT drop. They are created in the
-	// modify phase, AFTER generateModifyViewsSQL recreates the view (issue #480).
+	// Added functions whose return/parameter type references a view being recreated
+	// (DROP + CREATE) by this migration. For a function whose signature changed, its
+	// old definition is dropped in the drop phase; creating the new one in the create
+	// phase (before the view's DROP) would re-pin the old view and block its RESTRICT
+	// drop. They are created in the modify phase, AFTER generateModifyViewsSQL
+	// recreates the view (issue #480).
 	functionsAwaitingRecreatedViews []*ir.Function
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
@@ -1828,9 +1829,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Functions whose return/parameter type references a view being recreated
 	// (DROP + CREATE in the modify phase) must be created AFTER that recreation.
-	// Their old definition was dropped in the drop phase; creating them now (before
-	// the view's DROP) would re-pin the old view and block its RESTRICT drop
-	// (issue #480). Pull them out of both buckets and defer to the modify phase.
+	// For a signature-changed function the old definition was dropped in the drop
+	// phase; creating the new one now (before the view's DROP) would re-pin the old
+	// view and block its RESTRICT drop (issue #480). Pull them out of both buckets
+	// and defer to the modify phase.
 	recreatedViewLookup := buildRecreatedViewLookup(d.modifiedViews)
 	if len(recreatedViewLookup) > 0 {
 		deferRecreated := func(fns []*ir.Function) []*ir.Function {
