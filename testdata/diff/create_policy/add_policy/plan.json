@@ -33,6 +33,12 @@
           "path": "public.users.admin_only"
         },
         {
+          "sql": "CREATE POLICY admin_restricted ON users AS RESTRICTIVE TO PUBLIC USING (is_admin());",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.users.admin_restricted"
+        },
+        {
           "sql": "CREATE POLICY \"my-policy\" ON users FOR INSERT TO PUBLIC WITH CHECK ((role)::text = 'user');",
           "type": "table.policy",
           "operation": "create",
