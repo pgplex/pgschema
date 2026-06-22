@@ -49,6 +49,8 @@ pgschema understands the following `CREATE TRIGGER` features:
   - REFERENCING NEW TABLE AS name - captures inserted/new rows for statement-level triggers
 - **Schema-qualified names**: Tables and functions can be in specific schemas
 - **Function execution**: Triggers execute functions that return TRIGGER type
+- **Enabled/disabled state**: A disabled trigger (`ALTER TABLE ... DISABLE TRIGGER`) is tracked and re-applied; re-enabling emits `ALTER TABLE ... ENABLE TRIGGER`. PostgreSQL does not allow disabling triggers on views.
+- **Comments**: `COMMENT ON TRIGGER` is tracked and applied (see [COMMENT ON](/syntax/comment_on))
 
 ## Canonical Format
 
@@ -72,3 +74,5 @@ CREATE OR REPLACE TRIGGER trigger_name
 - Function names include parentheses even when no arguments
 - Schema qualifiers only included when table is in different schema than target
 - For DROP operations: `DROP TRIGGER IF EXISTS trigger_name ON table_name;`
+- For enabled/disabled state changes: `ALTER TABLE table_name { ENABLE | DISABLE } TRIGGER trigger_name;`
+- For comments: `COMMENT ON TRIGGER trigger_name ON table_name IS 'comment_text';` (or `IS NULL` to remove)

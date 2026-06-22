@@ -8,13 +8,14 @@ title: "COMMENT ON"
 comment_on ::= COMMENT ON object_type object_name IS 'comment_text'
              | COMMENT ON object_type object_name IS NULL
 
-object_type ::= AGGREGATE | COLUMN | FUNCTION | INDEX | MATERIALIZED VIEW | PROCEDURE | TABLE | VIEW
+object_type ::= AGGREGATE | COLUMN | FUNCTION | INDEX | MATERIALIZED VIEW | PROCEDURE | SEQUENCE | TABLE | TRIGGER | VIEW
 
 object_name ::= [schema.]name
               | [schema.]table_name.column_name                -- for columns
               | [schema.]function_name(argument_types)         -- for functions
               | [schema.]procedure_name(argument_types)        -- for procedures
               | [schema.]aggregate_name(argument_types)        -- for aggregates
+              | trigger_name ON [schema.]table_name            -- for triggers
 ```
 
 `COMMENT ON` is supported for the following objects:
@@ -25,5 +26,7 @@ object_name ::= [schema.]name
 - Index
 - Materialized View
 - Procedure
+- Sequence
 - Table
+- Trigger
 - View

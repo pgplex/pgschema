@@ -8,6 +8,7 @@ title: "CREATE INDEX"
 create_index ::= CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ IF NOT EXISTS ] index_name
                  ON table_name [ USING method ]
                  ( index_element [, ...] )
+                 [ WITH ( storage_parameter [= value] [, ...] ) ]
                  [ WHERE condition ]
 
 index_name ::= name
@@ -15,6 +16,8 @@ index_name ::= name
 table_name ::= [schema.]name
 
 method ::= btree | hash | gist | spgist | gin | brin
+
+storage_parameter ::= name
 
 index_element ::= column_name [ direction ] [ operator_class ]
                 | ( expression ) [ direction ] [ operator_class ]
@@ -39,6 +42,7 @@ pgschema understands the following `CREATE INDEX` features:
 - **Sort direction**: ASC (default) or DESC for each column
 - **Operator classes**: Custom operator classes for specialized indexing
 - **Partial indexes**: WHERE clause for indexing subset of rows
+- **Storage parameters**: WITH clause for index storage parameters (reloptions), e.g. `WITH (fillfactor=90, deduplicate_items=true)`
 - **Schema qualification**: Indexes can be created in specific schemas
 
 ## Canonical Format
@@ -50,7 +54,7 @@ CREATE [UNIQUE] INDEX [CONCURRENTLY] IF NOT EXISTS index_name
 ON [schema.]table_name [USING method] (
     column_or_expression[ direction][,
     ...]
-)[ WHERE condition];
+)[ WITH (storage_parameter=value[, ...])][ WHERE condition];
 ```
 
 **Key characteristics of the canonical format:**
@@ -61,6 +65,7 @@ ON [schema.]table_name [USING method] (
 - Only includes `USING method` when not btree (the default)
 - Only includes direction when not ASC (the default)
 - JSON expressions are wrapped in double parentheses: `((data->>'key'))`
+- Storage parameters are included in a `WITH (...)` clause, placed before the `WHERE` clause
 - Partial index WHERE clause is included when present
 - For DROP operations: `DROP INDEX IF EXISTS [schema.]index_name;`
 
