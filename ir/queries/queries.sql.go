@@ -1876,6 +1876,7 @@ WITH index_base AS (
             ELSE false
         END as has_expressions,
         COALESCE(d.description, '') AS index_comment,
+        COALESCE(i.reloptions, '{}') AS reloptions,
         idx.indnkeyatts as num_key_columns,
         idx.indnatts as num_columns,
         ARRAY(
@@ -1933,6 +1934,7 @@ SELECT
     sp.partial_predicate,
     ib.has_expressions,
     ib.index_comment,
+    ib.reloptions,
     ib.num_key_columns,
     ib.num_columns,
     ib.column_definitions,
@@ -1963,6 +1965,7 @@ type GetIndexesForSchemaRow struct {
 	PartialPredicate  sql.NullString `db:"partial_predicate" json:"partial_predicate"`
 	HasExpressions    sql.NullBool   `db:"has_expressions" json:"has_expressions"`
 	IndexComment      sql.NullString `db:"index_comment" json:"index_comment"`
+	Reloptions        []string       `db:"reloptions" json:"reloptions"`
 	NumKeyColumns     int16          `db:"num_key_columns" json:"num_key_columns"`
 	NumColumns        int16          `db:"num_columns" json:"num_columns"`
 	ColumnDefinitions []string       `db:"column_definitions" json:"column_definitions"`
@@ -1996,6 +1999,7 @@ func (q *Queries) GetIndexesForSchema(ctx context.Context, dollar_1 sql.NullStri
 			&i.PartialPredicate,
 			&i.HasExpressions,
 			&i.IndexComment,
+			pq.Array(&i.Reloptions),
 			&i.NumKeyColumns,
 			&i.NumColumns,
 			pq.Array(&i.ColumnDefinitions),

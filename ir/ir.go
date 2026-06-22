@@ -258,9 +258,10 @@ type Index struct {
 	IsPartial        bool           `json:"is_partial"`                   // has a WHERE clause
 	IsExpression     bool           `json:"is_expression"`                // functional/expression index
 	Where            string         `json:"where,omitempty"`              // partial index condition
-	NullsNotDistinct bool           `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
-	IsPartitioned    bool           `json:"is_partitioned,omitempty"`     // index target is a partitioned parent (relkind 'p')
-	Comment          string         `json:"comment,omitempty"`
+	NullsNotDistinct  bool           `json:"nulls_not_distinct,omitempty"`  // NULLS NOT DISTINCT (PG15+)
+	IsPartitioned     bool           `json:"is_partitioned,omitempty"`      // index target is a partitioned parent (relkind 'p')
+	StorageParameters []string       `json:"storage_parameters,omitempty"` // WITH (fillfactor=100, ...)
+	Comment           string         `json:"comment,omitempty"`
 }
 
 // IndexColumn represents a column within an index

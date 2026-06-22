@@ -138,6 +138,13 @@ func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema st
 		builder.WriteString(" NULLS NOT DISTINCT")
 	}
 
+	// Storage parameters
+	if len(index.StorageParameters) > 0 {
+		builder.WriteString(" WITH (")
+		builder.WriteString(strings.Join(index.StorageParameters, ", "))
+		builder.WriteString(")")
+	}
+
 	// WHERE clause for partial indexes
 	if index.IsPartial && index.Where != "" {
 		builder.WriteString(" WHERE ")

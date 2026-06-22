@@ -446,6 +446,12 @@ func generateIndexSQL(index *ir.Index, isConcurrent bool) string {
 		sql.WriteString(" NULLS NOT DISTINCT")
 	}
 
+	if len(index.StorageParameters) > 0 {
+		sql.WriteString(" WITH (")
+		sql.WriteString(strings.Join(index.StorageParameters, ", "))
+		sql.WriteString(")")
+	}
+
 	if index.Where != "" {
 		sql.WriteString(" WHERE ")
 		sql.WriteString(index.Where)

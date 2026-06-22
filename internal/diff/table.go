@@ -1754,6 +1754,22 @@ func indexesStructurallyEqual(oldIndex, newIndex *ir.Index) bool {
 		}
 	}
 
+	// Compare storage parameters (reloptions) — order-insensitive
+	oldParams := make([]string, len(oldIndex.StorageParameters))
+	newParams := make([]string, len(newIndex.StorageParameters))
+	copy(oldParams, oldIndex.StorageParameters)
+	copy(newParams, newIndex.StorageParameters)
+	sort.Strings(oldParams)
+	sort.Strings(newParams)
+	if len(oldParams) != len(newParams) {
+		return false
+	}
+	for i := range oldParams {
+		if oldParams[i] != newParams[i] {
+			return false
+		}
+	}
+
 	return true
 }
 
