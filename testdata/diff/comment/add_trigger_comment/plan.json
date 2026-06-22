@@ -3,7 +3,7 @@
   "pgschema_version": "1.11.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "6aa4d2eb121345da38a1de455a5840b523fc30982164d0c2569cb1518c020033"
+    "hash": "1d98e78c9d27a3514143a85ca1c70dbb812e6e3b1c8c7f0f02b42c06406ada8c"
   },
   "groups": [
     {
@@ -13,6 +13,12 @@
           "type": "table.trigger",
           "operation": "alter",
           "path": "public.employees.employees_last_modified_trigger"
+        },
+        {
+          "sql": "COMMENT ON TRIGGER trg_employee_emails_insert ON employee_emails IS 'Handles inserts into the employee_emails view';",
+          "type": "view.trigger",
+          "operation": "alter",
+          "path": "public.employee_emails.trg_employee_emails_insert"
         }
       ]
     }

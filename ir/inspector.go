@@ -1731,7 +1731,9 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			comment = triggerRow.TriggerComment.String
 		}
 
-		// Extract disabled state: tgenabled 'D' = disabled, anything else = enabled (Postgres default)
+		// Extract disabled state: tgenabled 'D' = disabled, anything else = enabled (Postgres default).
+		// pg_trigger.tgenabled can also be 'R' (replica) or 'A' (always); pgschema's model only
+		// expresses enabled vs disabled, so those session-replication modes are treated as enabled.
 		disabled := false
 		switch v := triggerRow.TriggerEnabled.(type) {
 		case string:
