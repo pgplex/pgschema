@@ -298,6 +298,7 @@ type Trigger struct {
 	InitiallyDeferred bool           `json:"initially_deferred,omitempty"` // Whether deferred by default
 	OldTable          string         `json:"old_table,omitempty"`          // REFERENCING OLD TABLE AS name
 	NewTable          string         `json:"new_table,omitempty"`          // REFERENCING NEW TABLE AS name
+	Disabled          bool           `json:"disabled,omitempty"`           // true = DISABLED (tgenabled='D'); omitted/false = enabled (Postgres default)
 }
 
 // TriggerTiming represents the timing of trigger execution

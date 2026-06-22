@@ -288,6 +288,7 @@ type ddlDiff struct {
 	droppedTypes              []*ir.Type
 	modifiedTypes             []*typeDiff
 	addedSequences            []*ir.Sequence
+	addedSerialSeqComments    []*ir.Sequence // SERIAL-owned sequences skipped from addedSequences but with comments to emit
 	droppedSequences          []*ir.Sequence
 	modifiedSequences         []*sequenceDiff
 	addedDefaultPrivileges    []*ir.DefaultPrivilege
@@ -478,6 +479,7 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 		droppedTypes:               []*ir.Type{},
 		modifiedTypes:              []*typeDiff{},
 		addedSequences:             []*ir.Sequence{},
+		addedSerialSeqComments:     []*ir.Sequence{},
 		droppedSequences:           []*ir.Sequence{},
 		modifiedSequences:          []*sequenceDiff{},
 		addedDefaultPrivileges:     []*ir.DefaultPrivilege{},
@@ -1041,6 +1043,11 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 			// (created by SERIAL in CREATE TABLE). If the column already exists,
 			// we need to create the sequence explicitly for ALTER COLUMN to use.
 			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+				// Sequence is created implicitly by CREATE TABLE (SERIAL). Emit its
+				// comment separately after all tables are created.
+				if seq.Comment != "" {
+					diff.addedSerialSeqComments = append(diff.addedSerialSeqComments, seq)
+				}
 				continue
 			}
 			diff.addedSequences = append(diff.addedSequences, seq)
@@ -1064,12 +1071,20 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
-			// Skip sequences owned by table columns (created by SERIAL)
-			if (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
-				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "") {
+			// Skip sequences owned by table columns (created by SERIAL) for structural changes,
+			// but allow comment-only changes through so COMMENT ON SEQUENCE can be deployed.
+			isOwned := (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
+				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "")
+			if isOwned {
+				if oldSeq.Comment != newSeq.Comment {
+					diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
+						Old: oldSeq,
+						New: newSeq,
+					})
+				}
 				continue
 			}
-			if !sequencesEqual(oldSeq, newSeq) {
+			if !sequencesEqual(oldSeq, newSeq) || oldSeq.Comment != newSeq.Comment {
 				diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
 					Old: oldSeq,
 					New: newSeq,
@@ -1817,6 +1832,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
 	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs)
+
+	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
+	// These were skipped from addedSequences but their comments must still be deployed.
+	for _, seq := range d.addedSerialSeqComments {
+		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
+	}
 
 	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
 	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
