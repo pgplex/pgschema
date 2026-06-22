@@ -248,18 +248,18 @@ const (
 
 // Index represents a database index
 type Index struct {
-	Schema           string         `json:"schema"`
-	Table            string         `json:"table"`
-	Name             string         `json:"name"`
-	Type             IndexType      `json:"type"`
-	Method           string         `json:"method"` // btree, hash, gin, gist, etc.
-	Columns          []*IndexColumn `json:"columns"`
-	IncludeColumns   []string       `json:"include_columns,omitempty"`    // INCLUDE columns (non-key)
-	IsPartial        bool           `json:"is_partial"`                   // has a WHERE clause
-	IsExpression     bool           `json:"is_expression"`                // functional/expression index
-	Where            string         `json:"where,omitempty"`              // partial index condition
-	NullsNotDistinct  bool           `json:"nulls_not_distinct,omitempty"`  // NULLS NOT DISTINCT (PG15+)
-	IsPartitioned     bool           `json:"is_partitioned,omitempty"`      // index target is a partitioned parent (relkind 'p')
+	Schema            string         `json:"schema"`
+	Table             string         `json:"table"`
+	Name              string         `json:"name"`
+	Type              IndexType      `json:"type"`
+	Method            string         `json:"method"` // btree, hash, gin, gist, etc.
+	Columns           []*IndexColumn `json:"columns"`
+	IncludeColumns    []string       `json:"include_columns,omitempty"`    // INCLUDE columns (non-key)
+	IsPartial         bool           `json:"is_partial"`                   // has a WHERE clause
+	IsExpression      bool           `json:"is_expression"`                // functional/expression index
+	Where             string         `json:"where,omitempty"`              // partial index condition
+	NullsNotDistinct  bool           `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
+	IsPartitioned     bool           `json:"is_partitioned,omitempty"`     // index target is a partitioned parent (relkind 'p')
 	StorageParameters []string       `json:"storage_parameters,omitempty"` // WITH (fillfactor=100, ...)
 	Comment           string         `json:"comment,omitempty"`
 }
