@@ -1316,6 +1316,11 @@ LEFT JOIN LATERAL (
 ) def ON true
 WHERE n.nspname = $1
     AND NOT t.tgisinternal  -- Exclude internal triggers
+    -- Skip partition-clone child triggers (tgparentid != 0) that PostgreSQL
+    -- automatically creates on every partition when a FOR EACH ROW trigger is
+    -- defined on a partitioned parent; pg_dump emits only the top-level trigger
+    -- on the parent (tgparentid = 0).
+    AND t.tgparentid = 0
 ORDER BY n.nspname, c.relname, t.tgname;
 
 -- GetTypesForSchema retrieves all user-defined types for a specific schema
