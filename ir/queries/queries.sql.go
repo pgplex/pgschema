@@ -3161,7 +3161,7 @@ SELECT
     t.tgdeferrable AS trigger_deferrable,
     t.tginitdeferred AS trigger_initdeferred,
     t.tgconstraint AS trigger_constraint_oid,
-    COALESCE(pg_catalog.pg_get_triggerdef(t.oid), '') AS trigger_definition,
+    COALESCE(def.trigger_definition, '') AS trigger_definition,
     COALESCE(t.tgoldtable, '') AS old_table,
     COALESCE(t.tgnewtable, '') AS new_table,
     p.proname AS function_name,
@@ -3173,6 +3173,13 @@ JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
 JOIN pg_catalog.pg_proc p ON t.tgfoid = p.oid
 JOIN pg_catalog.pg_namespace pn ON p.pronamespace = pn.oid
 LEFT JOIN pg_description d ON d.objoid = t.oid AND d.classoid = 'pg_trigger'::regclass
+LEFT JOIN LATERAL (
+    SELECT
+        -- Set search_path to the trigger's own schema so same-schema references render
+        -- unqualified; the dummy column forces set_config to execute before pg_get_triggerdef.
+        set_config('search_path', quote_ident(n.nspname), true) AS dummy,
+        pg_catalog.pg_get_triggerdef(t.oid) AS trigger_definition
+) def ON true
 WHERE n.nspname = $1
     AND NOT t.tgisinternal  -- Exclude internal triggers
 ORDER BY n.nspname, c.relname, t.tgname
@@ -3198,6 +3205,16 @@ type GetTriggersForSchemaRow struct {
 // GetTriggersForSchema retrieves all triggers for a specific schema
 // Uses pg_trigger catalog to include all trigger types (including TRUNCATE)
 // which are not visible in information_schema.triggers
+//
+// The trigger definition is rendered with a forced search_path so qualification is
+// deterministic (mirrors GetRLSPoliciesForSchema):
+//  1. set_config sets search_path to only the trigger's own schema
+//  2. pg_get_triggerdef then renders same-schema type casts and function references in
+//     the WHEN clause unqualified (e.g. 'VIDEO'::media_type), while cross-schema
+//     references stay qualified. Without this, qualification depends on the session
+//     search_path: in a non-public schema the current state comes back qualified
+//     ('VIDEO'::content.media_type) while the desired state is unqualified, so a repeat
+//     plan keeps recreating the trigger (issue #481).
 func (q *Queries) GetTriggersForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetTriggersForSchemaRow, error) {
 	rows, err := q.db.QueryContext(ctx, getTriggersForSchema, dollar_1)
 	if err != nil {
