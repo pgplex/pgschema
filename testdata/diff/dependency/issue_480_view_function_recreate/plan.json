@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "c7ede31c4d93f537192a343c3b52ae33b76c573082ad077bfd20a09419482c9d"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP FUNCTION IF EXISTS fn_create_user(text);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.fn_create_user"
+        },
+        {
+          "sql": "ALTER TABLE tb_users ADD COLUMN role text DEFAULT 'member' NOT NULL;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.tb_users.role"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS vw_users RESTRICT;",
+          "type": "view",
+          "operation": "alter",
+          "path": "public.vw_users"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW vw_users AS\n SELECT id,\n    email,\n    role,\n    created_at\n   FROM tb_users\n  WHERE is_deleted = false;",
+          "type": "view",
+          "operation": "alter",
+          "path": "public.vw_users"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION fn_create_user(\n    email text,\n    role text DEFAULT 'member'\n)\nRETURNS vw_users\nLANGUAGE plpgsql\nVOLATILE\nSECURITY DEFINER\nAS $$\nDECLARE\n    v_result vw_users;\n    v_new_id UUID;\nBEGIN\n    INSERT INTO tb_users (email, role) VALUES (email, role) RETURNING id INTO v_new_id;\n    SELECT id, email, role, created_at INTO v_result FROM vw_users WHERE id = v_new_id;\n    RETURN v_result;\nEND;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.fn_create_user"
+        }
+      ]
+    }
+  ]
+}
