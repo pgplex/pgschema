@@ -165,6 +165,13 @@ func TestDumpCommand_Issue409PartitionedFK(t *testing.T) {
 	runExactMatchTest(t, "issue_409_partitioned_fk")
 }
 
+func TestDumpCommand_Issue472PartitionCloneTrigger(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_472_partition_clone_trigger")
+}
+
 func TestDumpCommand_Issue421QuotedFKColumns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
