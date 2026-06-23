@@ -506,3 +506,80 @@ func TestNormalizeCheckClause(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertAnyArrayToIn(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "element-level cast form (round-tripped through catalog)",
+			input:    "(status)::text = ANY (ARRAY[('new'::character varying)::text, ('acknowledged'::character varying)::text])",
+			expected: "(status)::text IN ('new'::character varying, 'acknowledged'::character varying)",
+		},
+		{
+			name:     "array-level cast form (from natural IN-list DDL)",
+			input:    "(status)::text = ANY ((ARRAY['new'::character varying, 'acknowledged'::character varying])::text[])",
+			expected: "(status)::text IN ('new'::character varying, 'acknowledged'::character varying)",
+		},
+		{
+			name:     "non-wrapped array with trailing cast",
+			input:    "col::text = ANY (ARRAY['a'::character varying]::text[])",
+			expected: "col::text IN ('a'::character varying)",
+		},
+		{
+			name:     "enum cast is preserved",
+			input:    "status = ANY (ARRAY['active'::public.status_type])",
+			expected: "status IN ('active'::public.status_type)",
+		},
+		{
+			name:     "integer array unchanged",
+			input:    "n = ANY (ARRAY[1, 2, 3])",
+			expected: "n IN (1, 2, 3)",
+		},
+		{
+			name:     "no ANY marker returns unchanged",
+			input:    "status = 'active'",
+			expected: "status = 'active'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if result := convertAnyArrayToIn(tt.input); result != tt.expected {
+				t.Errorf("convertAnyArrayToIn(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+
+	// The two equivalent catalog forms must canonicalize to the same string,
+	// otherwise plan schedules a perpetual spurious index rebuild (issue #473).
+	arrayLevel := convertAnyArrayToIn("(status)::text = ANY ((ARRAY['new'::character varying])::text[])")
+	elementLevel := convertAnyArrayToIn("(status)::text = ANY (ARRAY[('new'::character varying)::text])")
+	if arrayLevel != elementLevel {
+		t.Errorf("equivalent forms did not converge:\n  array-level:   %q\n  element-level: %q", arrayLevel, elementLevel)
+	}
+}
+
+func TestStripRedundantTextCast(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"('new'::character varying)::text", "'new'::character varying"},
+		{"('new'::varchar)::text", "'new'::varchar"},
+		{"'new'::character varying::text", "'new'::character varying"},
+		{"'new'::character varying", "'new'::character varying"}, // already clean
+		{"'active'::public.status_type", "'active'::public.status_type"}, // custom type untouched
+		{"42", "42"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if result := stripRedundantTextCast(tt.input); result != tt.expected {
+				t.Errorf("stripRedundantTextCast(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

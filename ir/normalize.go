@@ -1382,10 +1382,14 @@ func IsTextLikeType(typeName string) bool {
 // convertAnyArrayToIn converts PostgreSQL's "column = ANY (ARRAY[...])" format
 // to the more readable "column IN (...)" format.
 //
-// Type casts are always preserved to ensure:
+// Semantically-significant type casts are preserved to ensure:
 // - Custom types (enums, domains) are properly qualified (e.g., 'value'::public.my_enum)
 // - Output matches pg_dump's format exactly
 // - Comparison between desired and current states is accurate
+//
+// The redundant "::text" cast PostgreSQL adds to varchar literals on a catalog
+// round-trip is stripped (see stripRedundantTextCast), since it carries no
+// meaning and only differs by how the predicate reached the catalog.
 //
 // Example transformations:
 //   - "status = ANY (ARRAY['active'::public.status_type])" → "status IN ('active'::public.status_type)"
