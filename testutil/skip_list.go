@@ -29,6 +29,7 @@ var skipListPG14_15 = []string{
 	"dependency/issue_414_function_returns_deferred_view_chain",
 	"dependency/issue_308_view_select_star_column_reorder",
 	"dependency/issue_444_drop_column_with_dependent_view",
+	"dependency/issue_480_view_function_recreate",
 
 	// Online materialized view index tests - depend on materialized view definitions
 	"online/add_materialized_view_index",
@@ -37,6 +38,7 @@ var skipListPG14_15 = []string{
 	// Comment tests - fingerprint includes view definitions
 	"comment/add_index_comment",
 	"comment/add_view_comment",
+	"comment/add_trigger_comment",
 
 	// Index tests - fingerprint includes view definitions
 	"create_index/drop_index",
