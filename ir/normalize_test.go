@@ -534,7 +534,7 @@ func TestConvertAnyArrayToIn(t *testing.T) {
 			expected: "status IN ('active'::public.status_type)",
 		},
 		{
-			name:     "integer array unchanged",
+			name:     "integer array converted to IN, values unchanged",
 			input:    "n = ANY (ARRAY[1, 2, 3])",
 			expected: "n IN (1, 2, 3)",
 		},
