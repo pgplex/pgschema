@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
@@ -150,10 +151,13 @@ func ConnectToPostgres(t testing.TB, embeddedPG *postgres.EmbeddedPostgres) (con
 }
 
 // getPostgresVersion returns the PostgreSQL version to use for testing.
-// It reads from the PGSCHEMA_POSTGRES_VERSION environment variable,
-// defaulting to "18" if not set.
+// It reads from the PGSCHEMA_POSTGRES_VERSION environment variable, defaulting
+// to LatestPostgresVersion if not set (so the default run exercises the full suite).
 func getPostgresVersion() postgres.PostgresVersion {
 	versionStr := os.Getenv("PGSCHEMA_POSTGRES_VERSION")
+	if versionStr == "" {
+		versionStr = strconv.Itoa(LatestPostgresVersion)
+	}
 	switch versionStr {
 	case "14":
 		return embeddedpostgres.V14
@@ -163,7 +167,7 @@ func getPostgresVersion() postgres.PostgresVersion {
 		return embeddedpostgres.V16
 	case "17":
 		return embeddedpostgres.V17
-	case "18", "":
+	case "18":
 		return embeddedpostgres.V18
 	default:
 		return embeddedpostgres.V18
