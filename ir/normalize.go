@@ -1382,19 +1382,30 @@ func IsTextLikeType(typeName string) bool {
 // convertAnyArrayToIn converts PostgreSQL's "column = ANY (ARRAY[...])" format
 // to the more readable "column IN (...)" format.
 //
-// Type casts are always preserved to ensure:
+// Semantically-significant type casts are preserved to ensure:
 // - Custom types (enums, domains) are properly qualified (e.g., 'value'::public.my_enum)
 // - Output matches pg_dump's format exactly
 // - Comparison between desired and current states is accurate
+//
+// The redundant "::text" cast PostgreSQL adds to varchar literals on a catalog
+// round-trip is stripped (see stripRedundantTextCast), since it carries no
+// meaning and only differs by how the predicate reached the catalog.
 //
 // Example transformations:
 //   - "status = ANY (ARRAY['active'::public.status_type])" → "status IN ('active'::public.status_type)"
 //   - "gender = ANY (ARRAY['M'::text, 'F'::text])" → "gender IN ('M'::text, 'F'::text)"
 //   - "(col = ANY (ARRAY[...])) AND (other)" → "(col IN (...)) AND (other)"
 //   - "col::text = ANY (ARRAY['a'::varchar]::text[])" → "col::text IN ('a'::varchar)"
+//
+// PostgreSQL stores the same IN-list predicate on a varchar column two equivalent
+// ways depending on how it was written, and these must canonicalize identically
+// to avoid a perpetual spurious diff (issue #473):
+//   - array-level cast: "col::text = ANY ((ARRAY['a'::varchar])::text[])"   (wrapping paren + array cast)
+//   - element-level:    "col::text = ANY (ARRAY[('a'::varchar)::text])"      (cast on each element)
+// Both collapse to "col::text IN ('a'::varchar)".
 func convertAnyArrayToIn(expr string) string {
-	const marker = " = ANY (ARRAY["
-	idx := strings.Index(expr, marker)
+	const anyMarker = " = ANY ("
+	idx := strings.Index(expr, anyMarker)
 	if idx == -1 {
 		return expr
 	}
@@ -1402,8 +1413,25 @@ func convertAnyArrayToIn(expr string) string {
 	// Extract the part before the marker (column name with possible leading content)
 	prefix := expr[:idx]
 
-	// Find the closing "]" for ARRAY[...] starting after the marker
-	startIdx := idx + len(marker)
+	// Position right after " = ANY (".
+	pos := idx + len(anyMarker)
+
+	// The array may be wrapped in an extra paren with a cast applied to the whole
+	// array, e.g. "(ARRAY[...])::text[]". Skip that paren so the wrapped and
+	// element-level forms are handled the same way.
+	arrayWrapped := false
+	if pos < len(expr) && expr[pos] == '(' {
+		arrayWrapped = true
+		pos++
+	}
+
+	const arrayPrefix = "ARRAY["
+	if !strings.HasPrefix(expr[pos:], arrayPrefix) {
+		return expr
+	}
+	startIdx := pos + len(arrayPrefix)
+
+	// Find the closing "]" for ARRAY[...]
 	arrayEnd := findArrayClose(expr, startIdx)
 	if arrayEnd == -1 {
 		return expr
@@ -1412,8 +1440,9 @@ func convertAnyArrayToIn(expr string) string {
 	// Extract array contents
 	arrayContents := expr[startIdx:arrayEnd]
 
-	// Find the closing ")" for ANY(...), which may be after an optional type cast like "::text[]"
-	// Pattern after "]": optional "::type[]" followed by ")"
+	// Find the closing ")" for ANY(...). Any cast applied to the whole array
+	// (e.g. "::text[]") sits between "]" and that ")" and is redundant once the
+	// predicate is rendered as IN (...), so it is dropped.
 	closeParenIdx := arrayEnd + 1
 	for closeParenIdx < len(expr) && expr[closeParenIdx] != ')' {
 		closeParenIdx++
@@ -1421,20 +1450,50 @@ func convertAnyArrayToIn(expr string) string {
 	if closeParenIdx >= len(expr) {
 		return expr // No closing paren found
 	}
+	if arrayWrapped {
+		// The ")" just found closes the wrapping paren, not ANY(...). Skip past
+		// the optional "::type[]" cast to the real closing ")".
+		closeParenIdx++
+		for closeParenIdx < len(expr) && expr[closeParenIdx] != ')' {
+			closeParenIdx++
+		}
+		if closeParenIdx >= len(expr) {
+			return expr
+		}
+	}
 
 	// Everything after the closing ")" is the suffix
 	suffix := expr[closeParenIdx+1:]
 
-	// Split values and preserve them as-is, including all type casts
+	// Split values, stripping the redundant "::text" cast PostgreSQL adds when a
+	// varchar IN-list round-trips through the catalog.
 	values := strings.Split(arrayContents, ", ")
 	var cleanValues []string
 	for _, val := range values {
-		val = strings.TrimSpace(val)
-		cleanValues = append(cleanValues, val)
+		cleanValues = append(cleanValues, stripRedundantTextCast(strings.TrimSpace(val)))
 	}
 
 	// Return converted format: "prefix IN (values)suffix"
 	return fmt.Sprintf("%s IN (%s)%s", prefix, strings.Join(cleanValues, ", "), suffix)
+}
+
+var (
+	// parenTextCastRe matches the parenthesized element form a varchar IN-list
+	// takes after a catalog round-trip: "('x'::character varying)::text".
+	parenTextCastRe = regexp.MustCompile(`^\((.*::(?:character varying|varchar))\)::text$`)
+	// chainedTextCastRe matches the chained form: "'x'::character varying::text".
+	chainedTextCastRe = regexp.MustCompile(`::(character varying|varchar)::text\b`)
+)
+
+// stripRedundantTextCast removes the redundant "::text" cast PostgreSQL adds when
+// a varchar IN-list value is round-tripped through the catalog, so the element
+// form ("('x'::character varying)::text") and the chained form
+// ("'x'::character varying::text") both collapse to "'x'::character varying".
+func stripRedundantTextCast(val string) string {
+	if m := parenTextCastRe.FindStringSubmatch(val); m != nil {
+		return m[1]
+	}
+	return chainedTextCastRe.ReplaceAllString(val, "::$1")
 }
 
 // findArrayClose finds the position of the closing "]" for an ARRAY literal,
