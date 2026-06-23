@@ -2590,7 +2590,7 @@ WHERE
     n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     AND n.nspname NOT LIKE 'pg_temp_%'
     AND n.nspname NOT LIKE 'pg_toast_temp_%'
-    AND c.relkind = 'r'
+    AND c.relkind IN ('r', 'p')  -- ordinary and partitioned tables (issue #471)
     AND c.relrowsecurity = true
 ORDER BY n.nspname, c.relname
 `
@@ -2641,7 +2641,7 @@ FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
 WHERE
     n.nspname = $1
-    AND c.relkind = 'r'
+    AND c.relkind IN ('r', 'p')  -- ordinary and partitioned tables (issue #471)
     AND c.relrowsecurity = true
 ORDER BY n.nspname, c.relname
 `

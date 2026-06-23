@@ -1,0 +1,16 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ events
+    + events_org_isolation (policy)
+    + events (rls)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY events_org_isolation ON events TO PUBLIC USING (org_id = (NULLIF(current_setting('app.current_org_id', true), ''::text))::uuid);
