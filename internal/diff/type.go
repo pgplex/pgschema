@@ -258,15 +258,21 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 		}
 		return fmt.Sprintf("CREATE TYPE %s AS (%s);", typeName, strings.Join(attributes, ", "))
 	case ir.TypeKindDomain:
+		// Keep the base type consistent with composite attribute types: preserve a
+		// cross-schema (or target-schema) prefix under forced qualification, strip the
+		// target-schema prefix otherwise. Note: same-schema user-defined base types are
+		// stored bare by the inspector, so this cannot *add* a prefix to them.
+		baseType := stripSchemaPrefixMode(typeObj.BaseType, targetSchema, qualifySchema)
+
 		// Use multi-line format for better readability if there are constraints
 		hasConstraints := len(typeObj.Constraints) > 0 || typeObj.NotNull || typeObj.Default != ""
 
 		if !hasConstraints {
-			return fmt.Sprintf("CREATE DOMAIN %s AS %s;", typeName, typeObj.BaseType)
+			return fmt.Sprintf("CREATE DOMAIN %s AS %s;", typeName, baseType)
 		}
 
 		// Multi-line format
-		lines := []string{fmt.Sprintf("CREATE DOMAIN %s AS %s", typeName, typeObj.BaseType)}
+		lines := []string{fmt.Sprintf("CREATE DOMAIN %s AS %s", typeName, baseType)}
 
 		if typeObj.Default != "" {
 			lines = append(lines, fmt.Sprintf("  DEFAULT %s", typeObj.Default))
