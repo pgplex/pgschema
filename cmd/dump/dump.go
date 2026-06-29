@@ -59,7 +59,7 @@ func init() {
 	DumpCmd.Flags().BoolVar(&multiFile, "multi-file", false, "Output schema to multiple files organized by object type")
 	DumpCmd.Flags().StringVar(&file, "file", "", "Output file path (required when --multi-file is used)")
 	DumpCmd.Flags().BoolVar(&noComments, "no-comments", false, "Do not output object comment headers")
-	DumpCmd.Flags().BoolVar(&qualifySchema, "qualify-schema", false, "Always schema-qualify object names in the dump (do not omit the target-schema prefix)")
+	DumpCmd.Flags().BoolVar(&qualifySchema, "qualify-schema", false, "Always schema-qualify object identifiers in the dump, even for the target schema (does not affect same-schema type references, which the IR stores without a schema)")
 	DumpCmd.Flags().StringVar(&sslmode, "sslmode", "prefer", "SSL mode for database connection (disable, allow, prefer, require, verify-ca, verify-full) (env: PGSSLMODE)")
 }
 
