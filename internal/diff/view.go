@@ -15,7 +15,7 @@ func generateCreateViewsSQL(views []*ir.View, targetSchema string, collector *di
 	// Process views in the provided order (already topologically sorted)
 	for _, view := range views {
 		// If compare mode, CREATE OR REPLACE, otherwise CREATE
-		sql := generateViewSQL(view, targetSchema)
+		sql := generateViewSQL(view, targetSchema, collector.qualifySchema)
 
 		// Determine the diff type based on whether it's materialized
 		diffType := DiffTypeView
@@ -36,7 +36,7 @@ func generateCreateViewsSQL(views []*ir.View, targetSchema string, collector *di
 
 		// Add view comment
 		if view.Comment != "" {
-			viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
+			viewName := qualifyEntityNameMode(view.Schema, view.Name, targetSchema, collector.qualifySchema)
 			commentType := DiffTypeViewComment
 			if view.Materialized {
 				commentType = DiffTypeMaterializedViewComment
@@ -177,7 +177,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			// Check if already pre-dropped
 			if preDroppedViews != nil && preDroppedViews[viewKey] {
 				// Skip DROP, only CREATE since view was already dropped in pre-drop phase
-				createSQL := generateViewSQL(diff.New, targetSchema)
+				createSQL := generateViewSQL(diff.New, targetSchema, collector.qualifySchema)
 
 				context := &diffContext{
 					Type:                diffType,
@@ -195,7 +195,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				} else {
 					dropSQL = fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
 				}
-				createSQL := generateViewSQL(diff.New, targetSchema)
+				createSQL := generateViewSQL(diff.New, targetSchema, collector.qualifySchema)
 
 				statements := []SQLStatement{
 					{
@@ -352,7 +352,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			}
 		} else {
 			// Create the new view (CREATE OR REPLACE works for regular views, materialized views are handled by drop/create cycle)
-			sql := generateViewSQL(diff.New, targetSchema)
+			sql := generateViewSQL(diff.New, targetSchema, collector.qualifySchema)
 
 			// Determine diff type based on whether it's materialized
 			diffType := DiffTypeView
@@ -426,7 +426,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				}
 				collector.collect(dropContext, dropSQL)
 
-				createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+				createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
 				createContext := &diffContext{
 					Type:                DiffTypeViewTrigger,
 					Operation:           DiffOperationCreate,
@@ -436,7 +436,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				}
 				collector.collect(createContext, createSQL)
 			} else {
-				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
 				context := &diffContext{
 					Type:                DiffTypeViewTrigger,
 					Operation:           DiffOperationAlter,
@@ -462,7 +462,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			continue
 		}
 
-		createDepSQL := generateViewSQL(depView, targetSchema)
+		createDepSQL := generateViewSQL(depView, targetSchema, collector.qualifySchema)
 
 		// Categorize using the correct relkind so materialized dependents are
 		// reported (and commented) as materialized views (issue #415).
@@ -555,12 +555,12 @@ func generateDropViewsSQL(views []*ir.View, targetSchema string, collector *diff
 }
 
 // generateViewSQL generates CREATE [OR REPLACE] [MATERIALIZED] VIEW statement
-func generateViewSQL(view *ir.View, targetSchema string) string {
+func generateViewSQL(view *ir.View, targetSchema string, qualifySchema bool) string {
 	// Determine view name based on context
 	var viewName string
 	if targetSchema != "" {
-		// For diff scenarios, use schema qualification logic
-		viewName = qualifyEntityName(view.Schema, view.Name, targetSchema)
+		// For diff scenarios, use schema qualification logic (forced on when qualifySchema)
+		viewName = qualifyEntityNameMode(view.Schema, view.Name, targetSchema, qualifySchema)
 	} else {
 		// For dump scenarios, always include schema prefix
 		viewName = fmt.Sprintf("%s.%s", view.Schema, view.Name)

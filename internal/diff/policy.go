@@ -44,7 +44,7 @@ func generateCreatePoliciesSQL(policies []*ir.RLSPolicy, targetSchema string, co
 // generateRLSChangesSQL generates RLS enable/disable and force statements
 func generateRLSChangesSQL(changes []*rlsChange, targetSchema string, collector *diffCollector) {
 	for _, change := range changes {
-		tableName := qualifyEntityName(change.Table.Schema, change.Table.Name, targetSchema)
+		tableName := qualifyEntityNameMode(change.Table.Schema, change.Table.Name, targetSchema, collector.qualifySchema)
 
 		// Handle ENABLE/DISABLE changes
 		if change.Enabled != nil {

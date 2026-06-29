@@ -282,7 +282,7 @@ func TestGenerateTriggerSQLWithMode_WithQuoting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := generateTriggerSQLWithMode(tt.trigger, "public")
+			got := generateTriggerSQLWithMode(tt.trigger, "public", false)
 			if got != tt.want {
 				t.Errorf("generateTriggerSQLWithMode() = %q, want %q", got, tt.want)
 			}

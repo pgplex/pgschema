@@ -43,7 +43,7 @@ func generateCreateIndexesSQLWithType(indexes []*ir.Index, targetSchema string, 
 
 		// Add index comment
 		if index.Comment != "" {
-			indexName := qualifyEntityName(index.Schema, index.Name, targetSchema)
+			indexName := qualifyEntityNameMode(index.Schema, index.Name, targetSchema, collector.qualifySchema)
 			sql := fmt.Sprintf("COMMENT ON INDEX %s IS %s;", indexName, quoteString(index.Comment))
 
 			// Create context for this statement
@@ -308,7 +308,7 @@ func generateIndexComment(
 	operation DiffOperation,
 	collector *diffCollector,
 ) {
-	indexName := qualifyEntityName(index.Schema, index.Name, targetSchema)
+	indexName := qualifyEntityNameMode(index.Schema, index.Name, targetSchema, collector.qualifySchema)
 	var sql string
 	if index.Comment == "" {
 		sql = fmt.Sprintf("COMMENT ON INDEX %s IS NULL;", indexName)

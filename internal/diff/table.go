@@ -1365,7 +1365,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Add triggers - already sorted by the Diff operation
 	for _, trigger := range td.AddedTriggers {
-		sql := generateTriggerSQLWithMode(trigger, targetSchema)
+		sql := generateTriggerSQLWithMode(trigger, targetSchema, collector.qualifySchema)
 
 		context := &diffContext{
 			Type:                DiffTypeTableTrigger,
@@ -1409,7 +1409,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			collector.collect(dropContext, dropSQL)
 
 			// Step 2: CREATE the new constraint trigger
-			createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+			createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
 			createContext := &diffContext{
 				Type:                DiffTypeTableTrigger,
 				Operation:           DiffOperationCreate,
@@ -1420,7 +1420,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			collector.collect(createContext, createSQL)
 		} else {
 			// Use CREATE OR REPLACE for regular triggers
-			sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+			sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
 
 			context := &diffContext{
 				Type:                DiffTypeTableTrigger,
