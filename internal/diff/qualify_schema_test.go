@@ -114,3 +114,113 @@ func TestQualifySchema_Sequence(t *testing.T) {
 		t.Errorf("forced qualification should qualify the OWNED BY table: %q", qualified)
 	}
 }
+
+func TestQualifySchema_IndexOnTable(t *testing.T) {
+	idx := &ir.Index{
+		Schema:  "public",
+		Table:   "account",
+		Name:    "idx_account_kind",
+		Type:    ir.IndexTypeRegular,
+		Method:  "btree",
+		Columns: []*ir.IndexColumn{{Name: "kind", Position: 1}},
+	}
+
+	// Default: the CREATE INDEX ... ON reference uses the bare table name.
+	def := generateIndexSQLMode(idx, "public", false, false)
+	if !strings.Contains(def, " ON account ") {
+		t.Errorf("default should use the bare ON-table name: %q", def)
+	}
+	if strings.Contains(def, "public.account") {
+		t.Errorf("default should not qualify the target schema: %q", def)
+	}
+
+	// Forced qualification: the ON-table reference keeps its schema prefix.
+	qualified := generateIndexSQLMode(idx, "public", false, true)
+	if !strings.Contains(qualified, " ON public.account ") {
+		t.Errorf("forced qualification should qualify the ON-table name: %q", qualified)
+	}
+}
+
+func TestQualifySchema_PolicyOnTable(t *testing.T) {
+	policy := &ir.RLSPolicy{
+		Schema:     "public",
+		Table:      "account",
+		Name:       "account_isolation",
+		Command:    ir.PolicyCommandAll,
+		Permissive: true,
+		Using:      "(owner = current_user)",
+	}
+
+	// Default: the CREATE POLICY ... ON reference uses the bare table name.
+	def := generatePolicySQLMode(policy, "public", false)
+	if !strings.Contains(def, " ON account ") {
+		t.Errorf("default should use the bare ON-table name: %q", def)
+	}
+	if strings.Contains(def, "public.account") {
+		t.Errorf("default should not qualify the target schema: %q", def)
+	}
+
+	// Forced qualification: the ON-table reference keeps its schema prefix.
+	qualified := generatePolicySQLMode(policy, "public", true)
+	if !strings.Contains(qualified, " ON public.account ") {
+		t.Errorf("forced qualification should qualify the ON-table name: %q", qualified)
+	}
+}
+
+func TestQualifySchema_Procedure(t *testing.T) {
+	defaultVal := "0"
+	proc := &ir.Procedure{
+		Schema:   "public",
+		Name:     "adjust_balance",
+		Language: "plpgsql",
+		// A parameter whose type lives in the target schema (e.g. a domain).
+		Parameters: []*ir.Parameter{
+			{Name: "amount", DataType: "public.currency", Mode: "IN", Position: 1, DefaultValue: &defaultVal},
+		},
+		Definition: "BEGIN END;",
+	}
+
+	def := generateProcedureSQL(proc, "public", false)
+	if !strings.Contains(def, "CREATE OR REPLACE PROCEDURE adjust_balance") {
+		t.Errorf("default should use the bare procedure name: %q", def)
+	}
+	if strings.Contains(def, "public.adjust_balance") || strings.Contains(def, "public.currency") {
+		t.Errorf("default should not qualify the target schema: %q", def)
+	}
+	if !strings.Contains(def, "amount currency") {
+		t.Errorf("default should strip the target-schema prefix from the param type: %q", def)
+	}
+
+	qualified := generateProcedureSQL(proc, "public", true)
+	if !strings.Contains(qualified, "CREATE OR REPLACE PROCEDURE public.adjust_balance") {
+		t.Errorf("forced qualification should qualify the procedure name: %q", qualified)
+	}
+	if !strings.Contains(qualified, "amount public.currency") {
+		t.Errorf("forced qualification should qualify the param type: %q", qualified)
+	}
+	if !strings.Contains(qualified, "DEFAULT 0") {
+		t.Errorf("forced qualification should preserve the DEFAULT clause: %q", qualified)
+	}
+}
+
+func TestQualifySchema_DeferredForeignKeyClause(t *testing.T) {
+	fk := &ir.Constraint{
+		Name:             "fk_account_owner",
+		Type:             ir.ConstraintTypeForeignKey,
+		ReferencedSchema: "public",
+		ReferencedTable:  "users",
+		ReferencedColumns: []*ir.ConstraintColumn{
+			{Name: "id", Position: 1},
+		},
+		IsValid: true,
+	}
+
+	// Default: the deferred FK REFERENCES uses the bare referenced-table name.
+	if got := generateForeignKeyClauseMode(fk, "public", false, false); !strings.Contains(got, "REFERENCES users (id)") {
+		t.Errorf("default should use the bare referenced table: %q", got)
+	}
+	// Forced qualification: the referenced table keeps its schema prefix.
+	if got := generateForeignKeyClauseMode(fk, "public", false, true); !strings.Contains(got, "REFERENCES public.users (id)") {
+		t.Errorf("forced qualification should qualify the referenced table: %q", got)
+	}
+}

@@ -437,7 +437,7 @@ func generateCreateTablesSQL(
 
 		// Add table comment
 		if table.Comment != "" {
-			tableName := qualifyEntityName(table.Schema, table.Name, targetSchema)
+			tableName := qualifyEntityNameMode(table.Schema, table.Name, targetSchema, collector.qualifySchema)
 			sql := fmt.Sprintf("COMMENT ON TABLE %s IS %s;", tableName, quoteString(table.Comment))
 
 			// Create context for this statement
@@ -455,7 +455,7 @@ func generateCreateTablesSQL(
 		// Add column comments
 		for _, column := range table.Columns {
 			if column.Comment != "" {
-				tableName := qualifyEntityName(table.Schema, table.Name, targetSchema)
+				tableName := qualifyEntityNameMode(table.Schema, table.Name, targetSchema, collector.qualifySchema)
 				sql := fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", tableName, ir.QuoteIdentifier(column.Name), quoteString(column.Comment))
 
 				// Create context for this statement
@@ -534,12 +534,12 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 			columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
 		}
 
-		tableName := getTableNameWithSchema(item.table.Schema, item.table.Name, targetSchema)
+		tableName := getTableNameWithSchemaMode(item.table.Schema, item.table.Name, targetSchema, collector.qualifySchema)
 		sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
 			tableName,
 			ir.QuoteIdentifier(constraint.Name),
 			strings.Join(columnNames, ", "),
-			generateForeignKeyClause(constraint, targetSchema, false),
+			generateForeignKeyClauseMode(constraint, targetSchema, false, collector.qualifySchema),
 		)
 
 		context := &diffContext{
@@ -1808,7 +1808,13 @@ func indexesStructurallyEqual(oldIndex, newIndex *ir.Index) bool {
 // generateForeignKeyClause generates the REFERENCES clause with all foreign key options
 // Works for both inline single-column and multi-column constraint foreign keys
 func generateForeignKeyClause(constraint *ir.Constraint, targetSchema string, inline bool) string {
-	referencedTableName := getTableNameWithSchema(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema)
+	return generateForeignKeyClauseMode(constraint, targetSchema, inline, false)
+}
+
+// generateForeignKeyClauseMode is like generateForeignKeyClause, but when qualifySchema
+// is true the referenced table is always schema-qualified, even within the target schema.
+func generateForeignKeyClauseMode(constraint *ir.Constraint, targetSchema string, inline bool, qualifySchema bool) string {
+	referencedTableName := getTableNameWithSchemaMode(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema, qualifySchema)
 
 	var clause string
 	if inline {

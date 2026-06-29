@@ -41,7 +41,7 @@ func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, c
 
 // generateSequenceComment emits a COMMENT ON SEQUENCE statement
 func generateSequenceComment(seq *ir.Sequence, targetSchema string, operation DiffOperation, collector *diffCollector) {
-	seqName := qualifyEntityName(seq.Schema, seq.Name, targetSchema)
+	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, collector.qualifySchema)
 	var sql string
 	if seq.Comment == "" {
 		sql = fmt.Sprintf("COMMENT ON SEQUENCE %s IS NULL;", seqName)

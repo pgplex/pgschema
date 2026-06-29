@@ -18,7 +18,7 @@ func generateCreateProceduresSQL(procedures []*ir.Procedure, targetSchema string
 	})
 
 	for _, procedure := range sortedProcedures {
-		sql := generateProcedureSQL(procedure, targetSchema)
+		sql := generateProcedureSQL(procedure, targetSchema, collector.qualifySchema)
 
 		// Create context for this statement
 		context := &diffContext{
@@ -66,7 +66,7 @@ func generateModifyProceduresSQL(diffs []*procedureDiff, targetSchema string, co
 		}
 
 		// Create the new procedure
-		createSQL := generateProcedureSQL(newProc, targetSchema)
+		createSQL := generateProcedureSQL(newProc, targetSchema, false)
 
 		// Create a single context with ALTER operation and multiple statements
 		// This represents the modification as a single operation in the summary
@@ -130,7 +130,7 @@ func generateDropProceduresSQL(procedures []*ir.Procedure, targetSchema string, 
 
 // formatParameterString formats a single parameter with mode, name, type, and optional default value
 // includeDefault controls whether DEFAULT clauses are included in the output
-func formatParameterString(param *ir.Parameter, includeDefault bool, targetSchema string) string {
+func formatParameterString(param *ir.Parameter, includeDefault bool, targetSchema string, qualifySchema bool) string {
 	var part string
 	// Always include mode for clarity (IN is default but we make it explicit)
 	if param.Mode != "" {
@@ -140,7 +140,7 @@ func formatParameterString(param *ir.Parameter, includeDefault bool, targetSchem
 	}
 	// Add parameter name and type
 	// Strip schema prefix from data type if it matches the target schema
-	dataType := stripSchemaPrefix(param.DataType, targetSchema)
+	dataType := stripSchemaPrefixMode(param.DataType, targetSchema, qualifySchema)
 	if param.Name != "" {
 		part += param.Name + " " + dataType
 	} else {
@@ -154,18 +154,18 @@ func formatParameterString(param *ir.Parameter, includeDefault bool, targetSchem
 }
 
 // generateProcedureSQL generates CREATE OR REPLACE PROCEDURE SQL for a procedure
-func generateProcedureSQL(procedure *ir.Procedure, targetSchema string) string {
+func generateProcedureSQL(procedure *ir.Procedure, targetSchema string, qualifySchema bool) string {
 	var stmt strings.Builder
 
 	// Build the CREATE OR REPLACE PROCEDURE header with schema qualification
-	procedureName := qualifyEntityName(procedure.Schema, procedure.Name, targetSchema)
+	procedureName := qualifyEntityNameMode(procedure.Schema, procedure.Name, targetSchema, qualifySchema)
 	stmt.WriteString(fmt.Sprintf("CREATE OR REPLACE PROCEDURE %s", procedureName))
 
 	// Add parameters from structured Parameters array
 	// Always include mode explicitly (matching pg_dump behavior)
 	var paramParts []string
 	for _, param := range procedure.Parameters {
-		paramParts = append(paramParts, formatParameterString(param, true, targetSchema))
+		paramParts = append(paramParts, formatParameterString(param, true, targetSchema, qualifySchema))
 	}
 	if len(paramParts) > 0 {
 		stmt.WriteString(fmt.Sprintf("(\n    %s\n)", strings.Join(paramParts, ",\n    ")))
@@ -325,7 +325,7 @@ func formatProcedureParametersForDrop(procedure *ir.Procedure) string {
 	for _, param := range procedure.Parameters {
 		// Use helper function with includeDefault=false for DROP statements
 		// Pass empty targetSchema since DROP statements use full qualified names
-		paramParts = append(paramParts, formatParameterString(param, false, ""))
+		paramParts = append(paramParts, formatParameterString(param, false, "", false))
 	}
 	return strings.Join(paramParts, ", ")
 }
@@ -338,7 +338,7 @@ func generateProcedureComment(
 	operation DiffOperation,
 	collector *diffCollector,
 ) {
-	procedureName := qualifyEntityName(procedure.Schema, procedure.Name, targetSchema)
+	procedureName := qualifyEntityNameMode(procedure.Schema, procedure.Name, targetSchema, collector.qualifySchema)
 	argsList := procedure.GetArguments()
 
 	var sql string

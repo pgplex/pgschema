@@ -28,7 +28,7 @@ func generateCreateIndexesSQLWithType(indexes []*ir.Index, targetSchema string, 
 			continue
 		}
 
-		canonicalSQL := generateIndexSQL(index, targetSchema, false) // Always generate canonical form
+		canonicalSQL := generateIndexSQLMode(index, targetSchema, false, collector.qualifySchema) // Always generate canonical form
 
 		// Create context for this statement
 		context := &diffContext{
@@ -62,11 +62,23 @@ func generateCreateIndexesSQLWithType(indexes []*ir.Index, targetSchema string, 
 
 // generateIndexSQL generates CREATE INDEX statement
 func generateIndexSQL(index *ir.Index, targetSchema string, isConcurrent bool) string {
-	return generateIndexSQLWithName(index, index.Name, targetSchema, isConcurrent)
+	return generateIndexSQLMode(index, targetSchema, isConcurrent, false)
+}
+
+// generateIndexSQLMode is like generateIndexSQL, but when qualifySchema is true the
+// ON-table reference is always schema-qualified, even within the target schema.
+func generateIndexSQLMode(index *ir.Index, targetSchema string, isConcurrent bool, qualifySchema bool) string {
+	return generateIndexSQLWithNameMode(index, index.Name, targetSchema, isConcurrent, qualifySchema)
 }
 
 // generateIndexSQLWithName generates CREATE INDEX statement with custom name
 func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema string, isConcurrent bool) string {
+	return generateIndexSQLWithNameMode(index, indexName, targetSchema, isConcurrent, false)
+}
+
+// generateIndexSQLWithNameMode is like generateIndexSQLWithName, but when qualifySchema
+// is true the ON-table reference is always schema-qualified, even within the target schema.
+func generateIndexSQLWithNameMode(index *ir.Index, indexName string, targetSchema string, isConcurrent bool, qualifySchema bool) string {
 	var builder strings.Builder
 
 	// CREATE [UNIQUE] INDEX [CONCURRENTLY] IF NOT EXISTS
@@ -85,7 +97,7 @@ func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema st
 	builder.WriteString(" ON ")
 
 	// Table name with proper schema qualification
-	tableName := getTableNameWithSchema(index.Schema, index.Table, targetSchema)
+	tableName := getTableNameWithSchemaMode(index.Schema, index.Table, targetSchema, qualifySchema)
 	builder.WriteString(tableName)
 
 	// Index method - only include if not btree (the default)

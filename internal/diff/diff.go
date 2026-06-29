@@ -2139,8 +2139,14 @@ func filterPreDroppedViews(views []*ir.View, preDropped map[string]bool) []*ir.V
 // If the table schema is different from the target schema, it returns "schema.table"
 // If they are the same, it returns just "table"
 func getTableNameWithSchema(tableSchema, tableName, targetSchema string) string {
+	return getTableNameWithSchemaMode(tableSchema, tableName, targetSchema, false)
+}
+
+// getTableNameWithSchemaMode is like getTableNameWithSchema, but when qualifySchema
+// is true the schema qualifier is always emitted — even for tables in the target schema.
+func getTableNameWithSchemaMode(tableSchema, tableName, targetSchema string, qualifySchema bool) string {
 	quotedTable := ir.QuoteIdentifier(tableName)
-	if tableSchema != targetSchema {
+	if qualifySchema || tableSchema != targetSchema {
 		quotedSchema := ir.QuoteIdentifier(tableSchema)
 		return fmt.Sprintf("%s.%s", quotedSchema, quotedTable)
 	}
