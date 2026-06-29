@@ -12,6 +12,15 @@ import (
 // It handles both simple type names (e.g., "schema.typename") and type casts within expressions
 // (e.g., "'value'::schema.typename" -> "'value'::typename").
 func stripSchemaPrefix(typeName, targetSchema string) string {
+	return stripSchemaPrefixMode(typeName, targetSchema, false)
+}
+
+// stripSchemaPrefixMode is like stripSchemaPrefix, but when qualifySchema is true the
+// target-schema prefix is preserved (not stripped) so type names stay fully qualified.
+func stripSchemaPrefixMode(typeName, targetSchema string, qualifySchema bool) string {
+	if qualifySchema {
+		return typeName
+	}
 	if typeName == "" || targetSchema == "" {
 		return typeName
 	}

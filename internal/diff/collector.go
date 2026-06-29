@@ -12,6 +12,11 @@ type diffContext struct {
 // diffCollector collects SQL statements with their context information
 type diffCollector struct {
 	diffs []Diff
+
+	// qualifySchema forces emitted DDL to always schema-qualify entity names, even
+	// for the target schema (set by `dump --qualify-schema`). Default false preserves
+	// the standard "smart qualification" (omit the target-schema prefix).
+	qualifySchema bool
 }
 
 // newDiffCollector creates a new diffCollector

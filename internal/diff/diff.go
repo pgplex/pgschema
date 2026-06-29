@@ -454,7 +454,16 @@ type rlsChange struct {
 }
 
 // GenerateMigration compares two IR schemas and returns the SQL differences
+// GenerateMigration generates the migration diff using standard "smart qualification"
+// (the target-schema prefix is omitted on entity names).
 func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
+	return GenerateMigrationWithOptions(oldIR, newIR, targetSchema, false)
+}
+
+// GenerateMigrationWithOptions is like GenerateMigration, but when qualifySchema is
+// true the emitted DDL always schema-qualifies entity names (used by
+// `dump --qualify-schema`). Default behavior (false) is unchanged for plan/apply.
+func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool) []Diff {
 	diff := &ddlDiff{
 		addedSchemas:               []*ir.Schema{},
 		droppedSchemas:             []*ir.Schema{},
@@ -1474,6 +1483,7 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
+	collector.qualifySchema = qualifySchema
 	diff.collectMigrationSQL(targetSchema, collector)
 	return collector.diffs
 }
@@ -2081,8 +2091,14 @@ func getTableNameWithSchema(tableSchema, tableName, targetSchema string) string 
 // qualifyEntityName returns the properly qualified entity name based on target schema
 // If entity is in target schema, returns just the name, otherwise returns schema.name
 func qualifyEntityName(entitySchema, entityName, targetSchema string) string {
+	return qualifyEntityNameMode(entitySchema, entityName, targetSchema, false)
+}
+
+// qualifyEntityNameMode is like qualifyEntityName, but when qualifySchema is true the
+// schema qualifier is always emitted — even for entities in the target schema.
+func qualifyEntityNameMode(entitySchema, entityName, targetSchema string, qualifySchema bool) string {
 	quotedName := ir.QuoteIdentifier(entityName)
-	if entitySchema == targetSchema {
+	if !qualifySchema && entitySchema == targetSchema {
 		return quotedName
 	}
 	quotedSchema := ir.QuoteIdentifier(entitySchema)
