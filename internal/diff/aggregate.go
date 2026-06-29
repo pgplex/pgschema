@@ -61,7 +61,7 @@ func generateCreateAggregatesSQL(aggregates []*ir.Aggregate, targetSchema string
 	})
 
 	for _, aggregate := range sortedAggregates {
-		sql := generateAggregateSQL(aggregate, targetSchema)
+		sql := generateAggregateSQL(aggregate, targetSchema, collector.qualifySchema)
 
 		context := &diffContext{
 			Type:                DiffTypeAggregate,
@@ -95,7 +95,7 @@ func generateModifyAggregatesSQL(diffs []*aggregateDiff, targetSchema string, co
 		}
 
 		dropSQL := generateAggregateDropSQL(oldAgg, targetSchema)
-		createSQL := generateAggregateSQL(newAgg, targetSchema)
+		createSQL := generateAggregateSQL(newAgg, targetSchema, collector.qualifySchema)
 
 		alterContext := &diffContext{
 			Type:                DiffTypeAggregate,
@@ -153,10 +153,10 @@ func generateAggregateDropSQL(aggregate *ir.Aggregate, targetSchema string) stri
 // same order as pg_dump and only when they differ from their defaults. Support-function
 // references are stored pre-qualified relative to the aggregate's schema, so they are
 // emitted verbatim.
-func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
+func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string, qualifySchema bool) string {
 	var stmt strings.Builder
 
-	aggregateName := qualifyEntityName(aggregate.Schema, aggregate.Name, targetSchema)
+	aggregateName := qualifyEntityNameMode(aggregate.Schema, aggregate.Name, targetSchema, qualifySchema)
 	stmt.WriteString(fmt.Sprintf("CREATE AGGREGATE %s(%s) (\n", aggregateName, aggregateArgs(aggregate.Signature)))
 
 	var parts []string
@@ -166,7 +166,7 @@ func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 
 	// SFUNC / STYPE are always present.
 	add("SFUNC = %s", aggregate.TransitionFunction)
-	add("STYPE = %s", stripSchemaPrefix(aggregate.StateType, targetSchema))
+	add("STYPE = %s", stripSchemaPrefixMode(aggregate.StateType, targetSchema, qualifySchema))
 	if aggregate.StateSpace != 0 {
 		add("SSPACE = %d", aggregate.StateSpace)
 	}
@@ -204,7 +204,7 @@ func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 			add("MINVFUNC = %s", aggregate.MInvTransitionFunction)
 		}
 		if aggregate.MStateType != "" {
-			add("MSTYPE = %s", stripSchemaPrefix(aggregate.MStateType, targetSchema))
+			add("MSTYPE = %s", stripSchemaPrefixMode(aggregate.MStateType, targetSchema, qualifySchema))
 		}
 		if aggregate.MStateSpace != 0 {
 			add("MSSPACE = %d", aggregate.MStateSpace)
@@ -245,7 +245,7 @@ func generateAggregateSQL(aggregate *ir.Aggregate, targetSchema string) string {
 
 // generateAggregateComment generates a COMMENT ON AGGREGATE statement
 func generateAggregateComment(aggregate *ir.Aggregate, targetSchema string, operation DiffOperation, collector *diffCollector) {
-	aggregateName := qualifyEntityName(aggregate.Schema, aggregate.Name, targetSchema)
+	aggregateName := qualifyEntityNameMode(aggregate.Schema, aggregate.Name, targetSchema, collector.qualifySchema)
 	argsClause := aggregateArgs(aggregate.Arguments)
 
 	var sql string

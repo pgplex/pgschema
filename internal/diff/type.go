@@ -14,7 +14,7 @@ func generateCreateTypesSQL(types []*ir.Type, targetSchema string, collector *di
 	sortedTypes := topologicallySortTypes(types)
 
 	for _, typeObj := range sortedTypes {
-		sql := generateTypeSQL(typeObj, targetSchema)
+		sql := generateTypeSQL(typeObj, targetSchema, collector.qualifySchema)
 
 		// Determine DiffType based on type kind
 
@@ -224,9 +224,10 @@ func generateAlterDomainStatements(oldDomain, newDomain *ir.Type, targetSchema s
 }
 
 // generateTypeSQL generates CREATE TYPE statement
-func generateTypeSQL(typeObj *ir.Type, targetSchema string) string {
-	// Only include type name without schema if it's in the target schema
-	typeName := qualifyEntityName(typeObj.Schema, typeObj.Name, targetSchema)
+func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) string {
+	// Only include type name without schema if it's in the target schema (unless
+	// forced qualification is on).
+	typeName := qualifyEntityNameMode(typeObj.Schema, typeObj.Name, targetSchema, qualifySchema)
 
 	switch typeObj.Kind {
 	case ir.TypeKindEnum:
@@ -252,7 +253,7 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string) string {
 		var attributes []string
 		for _, attr := range typeObj.Columns {
 			// Strip schema prefix from data type if it matches the target schema
-			dataType := stripSchemaPrefix(attr.DataType, targetSchema)
+			dataType := stripSchemaPrefixMode(attr.DataType, targetSchema, qualifySchema)
 			attributes = append(attributes, fmt.Sprintf("%s %s", attr.Name, dataType))
 		}
 		return fmt.Sprintf("CREATE TYPE %s AS (%s);", typeName, strings.Join(attributes, ", "))
