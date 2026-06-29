@@ -131,12 +131,12 @@ func runDump(cmd *cobra.Command, args []string) error {
 
 	// Create config from command-line flags
 	config := &DumpConfig{
-		Host:       host,
-		Port:       port,
-		DB:         db,
-		User:       user,
-		Password:   finalPassword,
-		Schema:     schema,
+		Host:          host,
+		Port:          port,
+		DB:            db,
+		User:          user,
+		Password:      finalPassword,
+		Schema:        schema,
 		MultiFile:     multiFile,
 		File:          file,
 		NoComments:    noComments,
