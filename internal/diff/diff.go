@@ -288,6 +288,7 @@ type ddlDiff struct {
 	droppedTypes              []*ir.Type
 	modifiedTypes             []*typeDiff
 	addedSequences            []*ir.Sequence
+	addedSerialSeqComments    []*ir.Sequence // SERIAL-owned sequences skipped from addedSequences but with comments to emit
 	droppedSequences          []*ir.Sequence
 	modifiedSequences         []*sequenceDiff
 	addedDefaultPrivileges    []*ir.DefaultPrivilege
@@ -309,6 +310,13 @@ type ddlDiff struct {
 	// exist when the view body is parsed (issue #414).
 	deferredAddedViews             []*ir.View
 	functionsAwaitingDeferredViews []*ir.Function
+	// Added functions whose return/parameter type references a view being recreated
+	// (DROP + CREATE) by this migration. For a function whose signature changed, its
+	// old definition is dropped in the drop phase; creating the new one in the create
+	// phase (before the view's DROP) would re-pin the old view and block its RESTRICT
+	// drop. They are created in the modify phase, AFTER generateModifyViewsSQL
+	// recreates the view (issue #480).
+	functionsAwaitingRecreatedViews []*ir.Function
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
 	// modifications (fkPreDrops) and desired-state ones are (re)created
@@ -487,6 +495,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		droppedTypes:               []*ir.Type{},
 		modifiedTypes:              []*typeDiff{},
 		addedSequences:             []*ir.Sequence{},
+		addedSerialSeqComments:     []*ir.Sequence{},
 		droppedSequences:           []*ir.Sequence{},
 		modifiedSequences:          []*sequenceDiff{},
 		addedDefaultPrivileges:     []*ir.DefaultPrivilege{},
@@ -1050,6 +1059,11 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 			// (created by SERIAL in CREATE TABLE). If the column already exists,
 			// we need to create the sequence explicitly for ALTER COLUMN to use.
 			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+				// Sequence is created implicitly by CREATE TABLE (SERIAL). Emit its
+				// comment separately after all tables are created.
+				if seq.Comment != "" {
+					diff.addedSerialSeqComments = append(diff.addedSerialSeqComments, seq)
+				}
 				continue
 			}
 			diff.addedSequences = append(diff.addedSequences, seq)
@@ -1073,12 +1087,20 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
-			// Skip sequences owned by table columns (created by SERIAL)
-			if (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
-				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "") {
+			// Skip sequences owned by table columns (created by SERIAL) for structural changes,
+			// but allow comment-only changes through so COMMENT ON SEQUENCE can be deployed.
+			isOwned := (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
+				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "")
+			if isOwned {
+				if oldSeq.Comment != newSeq.Comment {
+					diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
+						Old: oldSeq,
+						New: newSeq,
+					})
+				}
 				continue
 			}
-			if !sequencesEqual(oldSeq, newSeq) {
+			if !sequencesEqual(oldSeq, newSeq) || oldSeq.Comment != newSeq.Comment {
 				diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
 					Old: oldSeq,
 					New: newSeq,
@@ -1815,6 +1837,29 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		}
 	}
 
+	// Functions whose return/parameter type references a view being recreated
+	// (DROP + CREATE in the modify phase) must be created AFTER that recreation.
+	// For a signature-changed function the old definition was dropped in the drop
+	// phase; creating the new one now (before the view's DROP) would re-pin the old
+	// view and block its RESTRICT drop (issue #480). Pull them out of both buckets
+	// and defer to the modify phase.
+	recreatedViewLookup := buildRecreatedViewLookup(d.modifiedViews)
+	if len(recreatedViewLookup) > 0 {
+		deferRecreated := func(fns []*ir.Function) []*ir.Function {
+			var keep []*ir.Function
+			for _, fn := range fns {
+				if functionReferencesNewView(fn, recreatedViewLookup) {
+					d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, fn)
+				} else {
+					keep = append(keep, fn)
+				}
+			}
+			return keep
+		}
+		functionsWithoutViewDeps = deferRecreated(functionsWithoutViewDeps)
+		functionsWithViewDeps = deferRecreated(functionsWithViewDeps)
+	}
+
 	// Create functions WITHOUT view dependencies (functions may depend on tables created above)
 	generateCreateFunctionsSQL(functionsWithoutViewDeps, targetSchema, collector)
 
@@ -1827,6 +1872,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
 	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs)
+
+	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
+	// These were skipped from addedSequences but their comments must still be deployed.
+	for _, seq := range d.addedSerialSeqComments {
+		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
+	}
 
 	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
 	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
@@ -1970,6 +2021,14 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Modify views - pass preDroppedViews to skip DROP for already-dropped views
 	generateModifyViewsSQL(d.modifiedViews, targetSchema, collector, preDroppedViews, dependentViewsCtx, recreatedViews)
+
+	// Create functions deferred from generateCreateSQL because their return/parameter
+	// type references a view just recreated above. Emitting them now (rather than in
+	// the create phase) keeps the recreated view free of dependents during its
+	// RESTRICT drop (issue #480).
+	if len(d.functionsAwaitingRecreatedViews) > 0 {
+		generateCreateFunctionsSQL(d.functionsAwaitingRecreatedViews, targetSchema, collector)
+	}
 
 	// Modify functions
 	generateModifyFunctionsSQL(d.modifiedFunctions, targetSchema, collector)
@@ -2260,6 +2319,19 @@ func buildViewLookup(views []*ir.View) map[string]struct{} {
 	names := make([]struct{ schema, name string }, len(views))
 	for i, v := range views {
 		names[i] = struct{ schema, name string }{v.Schema, v.Name}
+	}
+	return buildSchemaNameLookup(names)
+}
+
+// buildRecreatedViewLookup returns case-insensitive lookup keys for views being
+// recreated (DROP + CREATE) by this migration, i.e. modified views with
+// RequiresRecreate set.
+func buildRecreatedViewLookup(modifiedViews []*viewDiff) map[string]struct{} {
+	var names []struct{ schema, name string }
+	for _, vd := range modifiedViews {
+		if vd.RequiresRecreate {
+			names = append(names, struct{ schema, name string }{vd.New.Schema, vd.New.Name})
+		}
 	}
 	return buildSchemaNameLookup(names)
 }

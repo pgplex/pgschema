@@ -40,6 +40,7 @@ pgschema understands the following `CREATE SEQUENCE` features:
 - **MAXVALUE/NO MAXVALUE**: Maximum value for the sequence (default: 2^63-1 for bigint)
 - **CYCLE/NO CYCLE**: Whether the sequence should wrap around when reaching min/max values
 - **OWNED BY**: Associates the sequence with a table column for automatic cleanup
+- **Comments**: `COMMENT ON SEQUENCE` is tracked and applied (see [COMMENT ON](/syntax/comment_on))
 
 ## Canonical Format
 

@@ -95,6 +95,12 @@ func generatePolicySQL(policy *ir.RLSPolicy, targetSchema string) string {
 
 	policyStmt := fmt.Sprintf("CREATE POLICY %s ON %s", ir.QuoteIdentifier(policy.Name), tableName)
 
+	// Add AS RESTRICTIVE for restrictive policies. PERMISSIVE is the default
+	// and is omitted to match pg_dump output.
+	if !policy.Permissive {
+		policyStmt += " AS RESTRICTIVE"
+	}
+
 	// Add command type if specified
 	if policy.Command != ir.PolicyCommandAll {
 		policyStmt += fmt.Sprintf(" FOR %s", policy.Command)

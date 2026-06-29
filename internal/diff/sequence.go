@@ -31,7 +31,31 @@ func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, c
 		}
 
 		collector.collect(context, sql)
+
+		// Emit COMMENT ON SEQUENCE if present
+		if seq.Comment != "" {
+			generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
+		}
 	}
+}
+
+// generateSequenceComment emits a COMMENT ON SEQUENCE statement
+func generateSequenceComment(seq *ir.Sequence, targetSchema string, operation DiffOperation, collector *diffCollector) {
+	seqName := qualifyEntityName(seq.Schema, seq.Name, targetSchema)
+	var sql string
+	if seq.Comment == "" {
+		sql = fmt.Sprintf("COMMENT ON SEQUENCE %s IS NULL;", seqName)
+	} else {
+		sql = fmt.Sprintf("COMMENT ON SEQUENCE %s IS %s;", seqName, quoteString(seq.Comment))
+	}
+	context := &diffContext{
+		Type:                DiffTypeSequence,
+		Operation:           operation,
+		Path:                fmt.Sprintf("%s.%s", seq.Schema, seq.Name),
+		Source:              seq,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
 }
 
 // generateDropSequencesSQL generates DROP SEQUENCE statements
@@ -70,6 +94,11 @@ func generateModifySequencesSQL(diffs []*sequenceDiff, targetSchema string, coll
 			}
 
 			collector.collect(context, stmt)
+		}
+
+		// Emit COMMENT ON SEQUENCE if comment changed
+		if diff.Old.Comment != diff.New.Comment {
+			generateSequenceComment(diff.New, targetSchema, DiffOperationAlter, collector)
 		}
 	}
 }

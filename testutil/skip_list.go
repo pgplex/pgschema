@@ -6,55 +6,78 @@ import (
 	"testing"
 )
 
-// skipListPG14_15 defines test cases that should be skipped for PostgreSQL 14-15.
+// LatestPostgresVersion is the most recent PostgreSQL major version pgschema
+// targets. It is the single point of indirection for the test strategy:
 //
-// Reason for skipping:
-// PostgreSQL 14-15 use pg_get_viewdef() which returns table-qualified column names (e.g., employees.id),
-// while PostgreSQL 16+ returns simplified column names (e.g., id). This is a non-consequential
-// formatting difference that does not impact correctness, but causes test comparison failures.
-var skipListPG14_15 = []string{
-	// View tests - pg_get_viewdef() formatting differences
-	"create_view/add_view",
-	"create_view/alter_view",
-	"create_view/drop_view",
-	"create_view/issue_350_view_options",
-	"dependency/table_to_view",
+//   - The full test suite runs only against this version.
+//   - Older versions (14 .. LatestPostgresVersion-1) run only the essential
+//     smoke-test subset defined in essentialTests.
+//
+// When a new PostgreSQL major version ships, bump this constant (and add the new
+// version to the CI matrix); the full suite automatically moves to it and the
+// previous latest drops down to the essential subset — a single-line change.
+const LatestPostgresVersion = 18
 
-	// Materialized view tests - same pg_get_viewdef() issue
-	"create_materialized_view/add_materialized_view",
-	"create_materialized_view/alter_materialized_view",
-	"create_materialized_view/drop_materialized_view",
-	"dependency/table_to_materialized_view",
-	"dependency/issue_300_function_table_composite_type",
-	"dependency/issue_414_function_returns_deferred_view_chain",
-	"dependency/issue_308_view_select_star_column_reorder",
-	"dependency/issue_444_drop_column_with_dependent_view",
+// essentialTests is the minimal smoke-test subset run against non-latest
+// PostgreSQL versions (14 .. LatestPostgresVersion-1).
+//
+// Rationale: re-running the entire suite on every supported version mostly
+// re-tests version-agnostic logic and forces a large skip list for cosmetic
+// differences (e.g. pg_get_viewdef() qualifies columns differently before PG 16)
+// and version-gated features (NULLS NOT DISTINCT in PG 15+, temporal constraints
+// in PG 18+). Instead we run one or two representative cases per object type on
+// older versions — enough to catch gross, version-specific breakage such as a
+// catalog query that fails on an older release — and leave exhaustive coverage
+// (including views, materialized views, and dependency ordering, whose golden
+// files drift across versions) to the full suite on LatestPostgresVersion.
+//
+// Every entry here MUST have golden files that are byte-stable across all
+// supported versions: no view definitions (pg_get_viewdef() drift) and no
+// version-gated syntax.
+var essentialTests = []string{
+	// Tables: create, alter, columns, constraints
+	"create_table/add_table",
+	"create_table/add_column_integer",
+	"create_table/add_column_text",
+	"create_table/drop_column",
+	"create_table/remove_not_null",
+	"create_table/add_check",
+	"create_table/add_uk",
+	"create_table/add_unique_constraint",
 
-	// Online materialized view index tests - depend on materialized view definitions
-	"online/add_materialized_view_index",
-	"online/alter_materialized_view_index",
+	// Indexes
+	"create_index/add_index_with_reloptions",
 
-	// Comment tests - fingerprint includes view definitions
-	"comment/add_index_comment",
-	"comment/add_view_comment",
+	// Functions and procedures
+	"create_function/add_function",
+	"create_function/drop_function",
+	"create_procedure/add_procedure",
 
-	// Index tests - fingerprint includes view definitions
-	"create_index/drop_index",
+	// Sequences
+	"create_sequence/add_sequence",
 
-	// Trigger tests - fingerprint includes view definitions
-	"create_trigger/add_trigger",
+	// Types and domains
+	"create_type/add_type",
+	"create_type/add_value",
+	"create_domain/add_domain",
 
-	// Migration tests - include views and materialized views
-	"migrate/v4",
-	"migrate/v5",
+	// Triggers (non-view based)
+	"create_trigger/drop_trigger",
+	"create_trigger/add_trigger_constraint",
 
-	// Dump integration tests - contain views with formatting differences
-	"TestDumpCommand_Employee",
-	"TestDumpCommand_Issue82ViewLogicExpr",
-	"TestDumpCommand_Issue307ViewDependencyOrder",
+	// Policies
+	"create_policy/add_policy",
 
-	// Include integration test - uses materialized views
-	"TestIncludeIntegration",
+	// Aggregates
+	"create_aggregate/add_aggregate",
+
+	// Comments
+	"comment/add_table_comment",
+	"comment/add_column_comments",
+
+	// Privileges
+	"privilege/grant_table_select",
+	"default_privilege/add_table_privilege",
 }
 
 // skipListRequiresExtension defines test cases that require third-party extensions
@@ -65,69 +88,48 @@ var skipListRequiresExtension = []string{
 	"create_table/issue_295_pgvector_typmod",
 }
 
-// skipListPG14 defines test cases that should be skipped for PostgreSQL 14 only.
-//
-// Reason for skipping:
-// These tests use features not available in PostgreSQL 14 (e.g., NULLS NOT DISTINCT is PG15+).
-var skipListPG14 = []string{
-	"create_index/add_index",
-	"create_table/add_unique_constraint_nulls_not_distinct",
-	"TestDumpCommand_Issue412UniqueNullsNotDistinct",
-}
-
-// skipListPG14_17 defines test cases that should be skipped for PostgreSQL 14-17.
-//
-// Reason for skipping:
-// These tests use features not available before PostgreSQL 18
-// (e.g., temporal constraints with WITHOUT OVERLAPS / PERIOD require pg_constraint.conperiod).
-var skipListPG14_17 = []string{
-	"create_table/add_pk",
-	"create_table/add_fk",
-}
-
-// skipListForVersion maps PostgreSQL major versions to their skip lists.
-var skipListForVersion = map[int][]string{
-	14: append(append(append([]string(nil), skipListPG14_17...), skipListPG14_15...), skipListPG14...),
-	15: append(append([]string(nil), skipListPG14_17...), skipListPG14_15...),
-	16: skipListPG14_17,
-	17: skipListPG14_17,
+// matchesAnyPattern reports whether testName matches any of the given patterns.
+// Patterns use a slash before the test name (e.g. "create_view/add_view") while
+// test names from subtests use underscores (e.g. "create_view_add_view"), so we
+// accept both forms.
+func matchesAnyPattern(testName string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if testName == pattern || testName == strings.ReplaceAll(pattern, "/", "_") {
+			return true
+		}
+	}
+	return false
 }
 
 // ShouldSkipTest checks if a test should be skipped for the given PostgreSQL major version.
 // If the test should be skipped, it calls t.Skipf() which stops test execution.
 //
+// Strategy:
+//   - Tests requiring an unavailable extension are skipped on every version.
+//   - The full suite runs only against LatestPostgresVersion.
+//   - Older versions run only the essential smoke-test subset (essentialTests).
+//
 // Test name format examples:
 //   - "create_view_add_view" (from TestDiffFromFiles subtests - underscores separate all parts)
 //   - "create_view/add_view" (skip list patterns - underscores in category, slash before test)
 //   - "TestDumpCommand_Employee" (from dump tests - starts with Test)
-//
-// Matching uses exact string match with flexible slash/underscore handling:
-// Pattern "create_view/add_view" matches test name "create_view_add_view" (underscores)
 func ShouldSkipTest(t *testing.T, testName string, majorVersion int) {
 	t.Helper()
 
-	// Check extension-required skip list (applies to all versions)
-	for _, pattern := range skipListRequiresExtension {
-		patternNormalized := strings.ReplaceAll(pattern, "/", "_")
-		if testName == patternNormalized || testName == pattern {
-			t.Skipf("Skipping test %q: requires third-party extension not available in embedded-postgres", testName)
-		}
+	// Extension-required tests are skipped on every version (the extension isn't
+	// bundled with embedded-postgres).
+	if matchesAnyPattern(testName, skipListRequiresExtension) {
+		t.Skipf("Skipping test %q: requires third-party extension not available in embedded-postgres", testName)
 	}
 
-	// Get skip patterns for this version
-	skipPatterns, exists := skipListForVersion[majorVersion]
-	if !exists {
-		return // No skips defined for this version
+	// The full suite runs only against the latest version.
+	if majorVersion >= LatestPostgresVersion {
+		return
 	}
 
-	// Check if test name matches any skip pattern (exact match)
-	for _, pattern := range skipPatterns {
-		// Convert pattern slashes to underscores to match test name format
-		// e.g., "create_view/add_view" -> "create_view_add_view"
-		patternNormalized := strings.ReplaceAll(pattern, "/", "_")
-
-		if testName == patternNormalized || testName == pattern {
-			t.Skipf("Skipping test %q on PostgreSQL %d (unsupported feature or formatting differences)", testName, majorVersion)
-		}
+	// Older versions run only the essential smoke-test subset.
+	if !matchesAnyPattern(testName, essentialTests) {
+		t.Skipf("Skipping test %q on PostgreSQL %d: only the essential subset runs on non-latest versions (full suite runs on PostgreSQL %d)",
+			testName, majorVersion, LatestPostgresVersion)
 	}
 }

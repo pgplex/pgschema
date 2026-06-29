@@ -782,17 +782,18 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		}
 
 		index := &Index{
-			Schema:         schemaName,
-			Table:          tableName,
-			Name:           indexName,
-			Type:           indexType,
-			Method:         method,
-			IncludeColumns: indexRow.IncludeColumns,
-			IsPartial:      isPartial,
-			IsExpression:   hasExpressions,
-			Where:          "",
-			Comment:        comment,
-			Columns:        []*IndexColumn{},
+			Schema:            schemaName,
+			Table:             tableName,
+			Name:              indexName,
+			Type:              indexType,
+			Method:            method,
+			IncludeColumns:    indexRow.IncludeColumns,
+			IsPartial:         isPartial,
+			IsExpression:      hasExpressions,
+			Where:             "",
+			StorageParameters: indexRow.Reloptions,
+			Comment:           comment,
+			Columns:           []*IndexColumn{},
 		}
 
 		// Check for NULLS NOT DISTINCT (PostgreSQL 15+)
@@ -880,6 +881,11 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 			}
 		}
 
+		seqComment := ""
+		if seq.SequenceComment.Valid {
+			seqComment = seq.SequenceComment.String
+		}
+
 		sequence := &Sequence{
 			Schema:      schemaName,
 			Name:        sequenceName,
@@ -887,6 +893,7 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 			StartValue:  seq.StartValue.Int64,
 			Increment:   seq.Increment.Int64,
 			CycleOption: seq.CycleOption.Bool,
+			Comment:     seqComment,
 		}
 
 		// Set default values if not valid
@@ -1724,6 +1731,17 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			comment = triggerRow.TriggerComment.String
 		}
 
+		// Extract disabled state: tgenabled 'D' = disabled, anything else = enabled (Postgres default).
+		// pg_trigger.tgenabled can also be 'R' (replica) or 'A' (always); pgschema's model only
+		// expresses enabled vs disabled, so those session-replication modes are treated as enabled.
+		disabled := false
+		switch v := triggerRow.TriggerEnabled.(type) {
+		case string:
+			disabled = v == "D"
+		case []byte:
+			disabled = string(v) == "D"
+		}
+
 		// Determine if this is a constraint trigger
 		oid, ok := triggerRow.TriggerConstraintOid.(int64)
 		isConstraint := ok && oid != 0
@@ -1747,6 +1765,7 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			Deferrable:        deferrable,
 			InitiallyDeferred: initDeferred,
 			Comment:           comment,
+			Disabled:          disabled,
 		}
 
 		// Add trigger to the appropriate map

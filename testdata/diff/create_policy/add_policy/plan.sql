@@ -6,6 +6,8 @@ CREATE POLICY "UserPolicy" ON users TO PUBLIC USING (tenant_id = (current_settin
 
 CREATE POLICY admin_only ON users FOR DELETE TO PUBLIC USING (is_admin());
 
+CREATE POLICY admin_restricted ON users AS RESTRICTIVE TO PUBLIC USING (is_admin());
+
 CREATE POLICY "my-policy" ON users FOR INSERT TO PUBLIC WITH CHECK ((role)::text = 'user');
 
 CREATE POLICY "select" ON users FOR SELECT TO PUBLIC USING (true);

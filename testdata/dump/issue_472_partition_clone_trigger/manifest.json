@@ -1,0 +1,11 @@
+{
+  "name": "issue_472_partition_clone_trigger",
+  "description": "pgschema dump emits partition-clone child triggers (tgparentid != 0) that PostgreSQL creates automatically on every partition",
+  "source": "https://github.com/pgplex/pgschema/issues/472",
+  "notes": [
+    "A FOR EACH ROW trigger on a partitioned table causes PostgreSQL to clone the trigger onto every partition child, creating one extra pg_trigger row per partition with tgparentid != 0 (and tgisinternal = false).",
+    "pg_dump never emits these clones; only the top-level trigger on the partitioned parent (tgparentid = 0) is dumpable.",
+    "The trigger query in ir/queries now filters rows with t.tgparentid = 0 to match pg_dump, mirroring the #409/#460 treatment of internal per-partition FK constraints.",
+    "Without the fix, dump produced a bogus CREATE OR REPLACE TRIGGER trg_rollup ... ON ledger_2026_06, which also left a dangling reference when the partition was excluded via .pgschemaignore."
+  ]
+}

@@ -1876,6 +1876,7 @@ WITH index_base AS (
             ELSE false
         END as has_expressions,
         COALESCE(d.description, '') AS index_comment,
+        COALESCE(i.reloptions, '{}') AS reloptions,
         idx.indnkeyatts as num_key_columns,
         idx.indnatts as num_columns,
         ARRAY(
@@ -1933,6 +1934,7 @@ SELECT
     sp.partial_predicate,
     ib.has_expressions,
     ib.index_comment,
+    ib.reloptions,
     ib.num_key_columns,
     ib.num_columns,
     ib.column_definitions,
@@ -1963,6 +1965,7 @@ type GetIndexesForSchemaRow struct {
 	PartialPredicate  sql.NullString `db:"partial_predicate" json:"partial_predicate"`
 	HasExpressions    sql.NullBool   `db:"has_expressions" json:"has_expressions"`
 	IndexComment      sql.NullString `db:"index_comment" json:"index_comment"`
+	Reloptions        []string       `db:"reloptions" json:"reloptions"`
 	NumKeyColumns     int16          `db:"num_key_columns" json:"num_key_columns"`
 	NumColumns        int16          `db:"num_columns" json:"num_columns"`
 	ColumnDefinitions []string       `db:"column_definitions" json:"column_definitions"`
@@ -1996,6 +1999,7 @@ func (q *Queries) GetIndexesForSchema(ctx context.Context, dollar_1 sql.NullStri
 			&i.PartialPredicate,
 			&i.HasExpressions,
 			&i.IndexComment,
+			pq.Array(&i.Reloptions),
 			&i.NumKeyColumns,
 			&i.NumColumns,
 			pq.Array(&i.ColumnDefinitions),
@@ -2586,7 +2590,7 @@ WHERE
     n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     AND n.nspname NOT LIKE 'pg_temp_%'
     AND n.nspname NOT LIKE 'pg_toast_temp_%'
-    AND c.relkind = 'r'
+    AND c.relkind IN ('r', 'p')  -- ordinary and partitioned tables (issue #471)
     AND c.relrowsecurity = true
 ORDER BY n.nspname, c.relname
 `
@@ -2637,7 +2641,7 @@ FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
 WHERE
     n.nspname = $1
-    AND c.relkind = 'r'
+    AND c.relkind IN ('r', 'p')  -- ordinary and partitioned tables (issue #471)
     AND c.relrowsecurity = true
 ORDER BY n.nspname, c.relname
 `
@@ -2889,7 +2893,8 @@ SELECT
     s.cycle AS cycle_option,
     s.cache_size,
     COALESCE(dep_table.relname, col_table.table_name) AS owned_by_table,
-    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column
+    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column,
+    COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = n.oid
@@ -2919,17 +2924,18 @@ ORDER BY s.schemaname, s.sequencename
 `
 
 type GetSequencesForSchemaRow struct {
-	SequenceSchema sql.NullString `db:"sequence_schema" json:"sequence_schema"`
-	SequenceName   sql.NullString `db:"sequence_name" json:"sequence_name"`
-	DataType       interface{}    `db:"data_type" json:"data_type"`
-	StartValue     sql.NullInt64  `db:"start_value" json:"start_value"`
-	MinimumValue   sql.NullInt64  `db:"minimum_value" json:"minimum_value"`
-	MaximumValue   sql.NullInt64  `db:"maximum_value" json:"maximum_value"`
-	Increment      sql.NullInt64  `db:"increment" json:"increment"`
-	CycleOption    sql.NullBool   `db:"cycle_option" json:"cycle_option"`
-	CacheSize      sql.NullInt64  `db:"cache_size" json:"cache_size"`
-	OwnedByTable   sql.NullString `db:"owned_by_table" json:"owned_by_table"`
-	OwnedByColumn  sql.NullString `db:"owned_by_column" json:"owned_by_column"`
+	SequenceSchema  sql.NullString `db:"sequence_schema" json:"sequence_schema"`
+	SequenceName    sql.NullString `db:"sequence_name" json:"sequence_name"`
+	DataType        interface{}    `db:"data_type" json:"data_type"`
+	StartValue      sql.NullInt64  `db:"start_value" json:"start_value"`
+	MinimumValue    sql.NullInt64  `db:"minimum_value" json:"minimum_value"`
+	MaximumValue    sql.NullInt64  `db:"maximum_value" json:"maximum_value"`
+	Increment       sql.NullInt64  `db:"increment" json:"increment"`
+	CycleOption     sql.NullBool   `db:"cycle_option" json:"cycle_option"`
+	CacheSize       sql.NullInt64  `db:"cache_size" json:"cache_size"`
+	OwnedByTable    sql.NullString `db:"owned_by_table" json:"owned_by_table"`
+	OwnedByColumn   sql.NullString `db:"owned_by_column" json:"owned_by_column"`
+	SequenceComment sql.NullString `db:"sequence_comment" json:"sequence_comment"`
 }
 
 // GetSequencesForSchema retrieves all sequences for a specific schema
@@ -2956,6 +2962,7 @@ func (q *Queries) GetSequencesForSchema(ctx context.Context, dollar_1 sql.NullSt
 			&i.CacheSize,
 			&i.OwnedByTable,
 			&i.OwnedByColumn,
+			&i.SequenceComment,
 		); err != nil {
 			return nil, err
 		}
@@ -3154,7 +3161,7 @@ SELECT
     t.tgdeferrable AS trigger_deferrable,
     t.tginitdeferred AS trigger_initdeferred,
     t.tgconstraint AS trigger_constraint_oid,
-    COALESCE(pg_catalog.pg_get_triggerdef(t.oid), '') AS trigger_definition,
+    COALESCE(def.trigger_definition, '') AS trigger_definition,
     COALESCE(t.tgoldtable, '') AS old_table,
     COALESCE(t.tgnewtable, '') AS new_table,
     p.proname AS function_name,
@@ -3166,8 +3173,20 @@ JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
 JOIN pg_catalog.pg_proc p ON t.tgfoid = p.oid
 JOIN pg_catalog.pg_namespace pn ON p.pronamespace = pn.oid
 LEFT JOIN pg_description d ON d.objoid = t.oid AND d.classoid = 'pg_trigger'::regclass
+LEFT JOIN LATERAL (
+    SELECT
+        -- Set search_path to the trigger's own schema so same-schema references render
+        -- unqualified; the dummy column forces set_config to execute before pg_get_triggerdef.
+        set_config('search_path', quote_ident(n.nspname), true) AS dummy,
+        pg_catalog.pg_get_triggerdef(t.oid) AS trigger_definition
+) def ON true
 WHERE n.nspname = $1
     AND NOT t.tgisinternal  -- Exclude internal triggers
+    -- Skip partition-clone child triggers (tgparentid != 0) that PostgreSQL
+    -- automatically creates on every partition when a FOR EACH ROW trigger is
+    -- defined on a partitioned parent; pg_dump emits only the top-level trigger
+    -- on the parent (tgparentid = 0).
+    AND t.tgparentid = 0
 ORDER BY n.nspname, c.relname, t.tgname
 `
 
@@ -3191,6 +3210,16 @@ type GetTriggersForSchemaRow struct {
 // GetTriggersForSchema retrieves all triggers for a specific schema
 // Uses pg_trigger catalog to include all trigger types (including TRUNCATE)
 // which are not visible in information_schema.triggers
+//
+// The trigger definition is rendered with a forced search_path so qualification is
+// deterministic (mirrors GetRLSPoliciesForSchema):
+//  1. set_config sets search_path to only the trigger's own schema
+//  2. pg_get_triggerdef then renders same-schema type casts and function references in
+//     the WHEN clause unqualified (e.g. 'VIDEO'::media_type), while cross-schema
+//     references stay qualified. Without this, qualification depends on the session
+//     search_path: in a non-public schema the current state comes back qualified
+//     ('VIDEO'::content.media_type) while the desired state is unqualified, so a repeat
+//     plan keeps recreating the trigger (issue #481).
 func (q *Queries) GetTriggersForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetTriggersForSchemaRow, error) {
 	rows, err := q.db.QueryContext(ctx, getTriggersForSchema, dollar_1)
 	if err != nil {

@@ -414,37 +414,60 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			generateCreateViewTriggersSQL(diff.AddedTriggers, targetSchema, collector)
 		}
 		for _, triggerDiff := range diff.ModifiedTriggers {
-			if triggerDiff.New.IsConstraint {
-				viewName := getTableNameWithSchema(diff.New.Schema, diff.New.Name, targetSchema)
-				dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(triggerDiff.Old.Name), viewName)
-				dropContext := &diffContext{
-					Type:                DiffTypeViewTrigger,
-					Operation:           DiffOperationDrop,
-					Path:                fmt.Sprintf("%s.%s.%s", diff.New.Schema, diff.New.Name, triggerDiff.Old.Name),
-					Source:              triggerDiff.Old,
-					CanRunInTransaction: true,
-				}
-				collector.collect(dropContext, dropSQL)
+			// Only recreate the trigger when its definition actually changed.
+			// Comment-only or enabled/disabled-only drift is applied via the
+			// dedicated statements below without recreating the trigger
+			// (matching the table-trigger path in table.go).
+			structurallyEqual := triggersEqual(triggerDiff.Old, triggerDiff.New)
+			commentChanged := triggerDiff.Old.Comment != triggerDiff.New.Comment
+			enabledChanged := triggerDiff.Old.Disabled != triggerDiff.New.Disabled
 
-				createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
-				createContext := &diffContext{
-					Type:                DiffTypeViewTrigger,
-					Operation:           DiffOperationCreate,
-					Path:                fmt.Sprintf("%s.%s.%s", diff.New.Schema, diff.New.Name, triggerDiff.New.Name),
-					Source:              triggerDiff.New,
-					CanRunInTransaction: true,
+			if !structurallyEqual {
+				if triggerDiff.New.IsConstraint {
+					// Constraint triggers don't support CREATE OR REPLACE, so DROP and CREATE
+					viewName := getTableNameWithSchema(diff.New.Schema, diff.New.Name, targetSchema)
+					dropSQL := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(triggerDiff.Old.Name), viewName)
+					dropContext := &diffContext{
+						Type:                DiffTypeViewTrigger,
+						Operation:           DiffOperationDrop,
+						Path:                fmt.Sprintf("%s.%s.%s", diff.New.Schema, diff.New.Name, triggerDiff.Old.Name),
+						Source:              triggerDiff.Old,
+						CanRunInTransaction: true,
+					}
+					collector.collect(dropContext, dropSQL)
+
+					createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
+					createContext := &diffContext{
+						Type:                DiffTypeViewTrigger,
+						Operation:           DiffOperationCreate,
+						Path:                fmt.Sprintf("%s.%s.%s", diff.New.Schema, diff.New.Name, triggerDiff.New.Name),
+						Source:              triggerDiff.New,
+						CanRunInTransaction: true,
+					}
+					collector.collect(createContext, createSQL)
+				} else {
+					sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
+					context := &diffContext{
+						Type:                DiffTypeViewTrigger,
+						Operation:           DiffOperationAlter,
+						Path:                fmt.Sprintf("%s.%s.%s", diff.New.Schema, diff.New.Name, triggerDiff.New.Name),
+						Source:              triggerDiff.New,
+						CanRunInTransaction: true,
+					}
+					collector.collect(context, sql)
 				}
-				collector.collect(createContext, createSQL)
-			} else {
-				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
-				context := &diffContext{
-					Type:                DiffTypeViewTrigger,
-					Operation:           DiffOperationAlter,
-					Path:                fmt.Sprintf("%s.%s.%s", diff.New.Schema, diff.New.Name, triggerDiff.New.Name),
-					Source:              triggerDiff.New,
-					CanRunInTransaction: true,
-				}
-				collector.collect(context, sql)
+			}
+
+			// Emit COMMENT ON TRIGGER for comment changes (including after a
+			// constraint-trigger DROP+CREATE, which drops the existing comment).
+			if commentChanged || (!structurallyEqual && triggerDiff.New.Comment != "") {
+				generateTriggerComment(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, DiffTypeViewTrigger, collector)
+			}
+			// Emit ENABLE/DISABLE for enabled-state changes. Note PostgreSQL does
+			// not allow disabling triggers on views, so this is effectively a
+			// no-op for view triggers, but kept symmetric with the table path.
+			if enabledChanged || (!structurallyEqual && triggerDiff.New.Disabled) {
+				generateTriggerEnabledState(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, DiffTypeViewTrigger, collector)
 			}
 		}
 	}
@@ -689,7 +712,13 @@ func diffViewTriggers(oldView, newView *ir.View) ([]*ir.Trigger, []*ir.Trigger, 
 	}
 	for name, newTrigger := range newTriggers {
 		if oldTrigger, exists := oldTriggers[name]; exists {
-			if !triggersEqual(oldTrigger, newTrigger) {
+			// triggersEqual covers structural equality only; comment and
+			// enabled/disabled state are tracked separately so that comment-only
+			// or state-only drift is still reported as a modification (matching
+			// the table-trigger path in table.go).
+			commentChanged := oldTrigger.Comment != newTrigger.Comment
+			enabledChanged := oldTrigger.Disabled != newTrigger.Disabled
+			if !triggersEqual(oldTrigger, newTrigger) || commentChanged || enabledChanged {
 				modified = append(modified, &triggerDiff{
 					Old: oldTrigger,
 					New: newTrigger,

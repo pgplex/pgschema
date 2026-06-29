@@ -7,6 +7,11 @@ description: Fix a bug from a GitHub issue using TDD. Analyzes the issue, create
 
 TDD workflow for fixing bugs from GitHub issues: reproduce first, then fix, then verify.
 
+**Two principles to keep turnaround fast:**
+
+1. **Run only the impacted/relevant tests locally** — never the full suite. CI runs the full suite on the PR; locally you only need to confirm the reproducing test and its immediate neighbors. Narrow `PGSCHEMA_TEST_FILTER` to the specific case (or category) you touched.
+2. **Prefer folding `testdata/diff` cases into existing ones** — each test case is its own embedded-postgres apply cycle, so every new directory adds to total test time. By default, consider adding the scenario to a related existing case. Only create a new case when that's more reasonable or consistent with the existing layout (see Phase 2).
+
 ## Phase 1: Analyze
 
 1. Fetch the issue: `gh issue view <number>`
@@ -37,18 +42,21 @@ Verify it fails: `go test -v ./cmd/dump -run TestDumpCommand_Issue<N>`
 
 ### Diff/Plan Bugs
 
-Create `testdata/diff/<category>/issue_<N>_<description>/` with `old.sql` and `new.sql`.
-
 Categories: `create_table`, `create_index`, `create_trigger`, `create_view`, `create_function`, `create_procedure`, `create_sequence`, `create_type`, `create_domain`, `create_policy`, `create_materialized_view`, `comment`, `privilege`, `default_privilege`, `dependency`, `online`, `migrate`.
 
-Verify it fails:
+**Decide: fold or create new (default: consider folding).** Each case directory is a separate embedded-postgres apply cycle, so folding keeps the suite fast.
+
+- **Fold** when the bug is a natural variation of an existing case (same object type/category) and adding the DDL doesn't obscure that case's intent. Add the reproducing statements to the existing `old.sql`/`new.sql`, then regenerate its expected outputs. Browse the category first (`ls testdata/diff/<category>/`) to find the best home.
+- **Create new** (`testdata/diff/<category>/issue_<N>_<description>/` with `old.sql` and `new.sql`) when the scenario is distinct, or when a standalone `issue_<N>` case is more consistent with how the category is organized.
+
+Verify it fails (use the case name you folded into, or the new `issue_<N>_<description>`):
 ```bash
-PGSCHEMA_TEST_FILTER="<category>/issue_<N>_<description>" go test -v ./internal/diff -run TestDiffFromFiles
+PGSCHEMA_TEST_FILTER="<category>/<case>" go test -v ./internal/diff -run TestDiffFromFiles
 ```
 
 Generate expected outputs once you know correct behavior:
 ```bash
-PGSCHEMA_TEST_FILTER="<category>/issue_<N>_<description>" go test -v ./cmd -run TestPlanAndApply --generate
+PGSCHEMA_TEST_FILTER="<category>/<case>" go test -v ./cmd -run TestPlanAndApply --generate
 ```
 
 ## Phase 3: Fix (Green)
@@ -62,15 +70,17 @@ Make the minimal fix. Use **pg_dump** and **postgres_syntax** skills as needed.
 
 ## Phase 4: Verify
 
-Run targeted tests (not the full suite — that runs in CI):
+Run only the impacted tests (not the full suite — CI runs that on the PR). Keep the filter as narrow as possible:
 ```bash
 # Dump bugs
 go test -v ./cmd/dump -run TestDumpCommand_Issue<N>
 
-# Diff bugs
-PGSCHEMA_TEST_FILTER="<category>/issue_<N>" go test -v ./internal/diff -run TestDiffFromFiles
-PGSCHEMA_TEST_FILTER="<category>/" go test -v ./cmd -run TestPlanAndApply
+# Diff bugs — start with the specific case
+PGSCHEMA_TEST_FILTER="<category>/<case>" go test -v ./internal/diff -run TestDiffFromFiles
+PGSCHEMA_TEST_FILTER="<category>/<case>" go test -v ./cmd -run TestPlanAndApply
 ```
+
+Only widen the filter to the whole category (`PGSCHEMA_TEST_FILTER="<category>/"`) if the fix touched shared diff logic that could affect sibling cases.
 
 ## Phase 5: Create PR
 
@@ -91,9 +101,9 @@ Fixes #<N>
 ## Checklist
 
 - [ ] Bug classified (dump vs diff)
-- [ ] Test case created (`issue_<N>_<description>`)
+- [ ] Test case folded into an existing case, or new `issue_<N>_<description>` created when more reasonable
 - [ ] Test fails before fix (red)
 - [ ] Minimal fix implemented
 - [ ] Test passes after fix (green)
-- [ ] Related tests pass (no regressions)
+- [ ] Impacted tests pass locally (narrow filter — full suite left to CI)
 - [ ] PR created and linked to issue

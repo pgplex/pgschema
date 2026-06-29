@@ -1,0 +1,1 @@
+ALTER TABLE employees DISABLE TRIGGER employees_last_modified_trigger;

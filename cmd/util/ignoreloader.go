@@ -126,7 +126,7 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		// File doesn't exist, return nil config (no filtering).
-		logger.Get().Info("no ignore file found, no filtering applied",
+		logger.Get().Debug("no ignore file found, no filtering applied",
 			"file", absPath)
 		return nil, nil
 	} else if err != nil {
