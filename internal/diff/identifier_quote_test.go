@@ -92,7 +92,7 @@ func TestGenerateConstraintSQL_WithQuoting(t *testing.T) {
 			if tt.name == "FOREIGN KEY with cross-schema reference" {
 				targetSchema = "tenant1"
 			}
-			got := generateConstraintSQL(tt.constraint, targetSchema)
+			got := generateConstraintSQL(tt.constraint, targetSchema, false)
 			if got != tt.want {
 				t.Errorf("generateConstraintSQL() = %q, want %q", got, tt.want)
 			}
@@ -151,7 +151,7 @@ func TestCheckConstraintQuoting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// For CHECK constraints, generateConstraintSQL returns the CheckClause as-is
-			got := generateConstraintSQL(tt.constraint, "public")
+			got := generateConstraintSQL(tt.constraint, "public", false)
 			if got != tt.want {
 				t.Errorf("generateConstraintSQL() for CHECK = %q, want %q", got, tt.want)
 			}
@@ -380,7 +380,7 @@ func TestGenerateSequenceSQL_OwnedByQuoting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := generateSequenceSQL(tt.seq, tt.targetSchema)
+			got := generateSequenceSQL(tt.seq, tt.targetSchema, false)
 			if got != tt.want {
 				t.Errorf("generateSequenceSQL() = %q, want %q", got, tt.want)
 			}

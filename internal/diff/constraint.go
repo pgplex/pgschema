@@ -8,7 +8,7 @@ import (
 )
 
 // generateConstraintSQL generates constraint definition for inline table constraints
-func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) string {
+func generateConstraintSQL(constraint *ir.Constraint, targetSchema string, qualifySchema bool) string {
 	// Helper function to get column names from ConstraintColumn array
 	getColumnNames := func(columns []*ir.ConstraintColumn) []string {
 		var names []string
@@ -50,7 +50,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string) strin
 				refCols[len(refCols)-1] = "PERIOD " + refCols[len(refCols)-1]
 			}
 		}
-		qualifiedRefTable := ir.QualifyEntityNameWithQuotes(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema)
+		qualifiedRefTable := ir.QualifyEntityNameWithQuotesMode(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema, qualifySchema)
 		stmt := fmt.Sprintf("CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
 			ir.QuoteIdentifier(constraint.Name),
 			strings.Join(cols, ", "),

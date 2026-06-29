@@ -804,7 +804,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 			})
 			continue
 		}
-		constraintDef := generateConstraintSQL(constraint, targetSchema)
+		constraintDef := generateConstraintSQL(constraint, targetSchema, qualifySchema)
 		if constraintDef != "" {
 			columnParts = append(columnParts, fmt.Sprintf("    %s", constraintDef))
 		}
