@@ -418,7 +418,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, createdTables, existingTables, suppressedInlineFKs)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -756,9 +756,10 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool) (string, []*deferredConstraint) {
-	// Only include table name without schema if it's in the target schema
-	tableName := ir.QualifyEntityNameWithQuotes(table.Schema, table.Name, targetSchema)
+func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool) (string, []*deferredConstraint) {
+	// Only include table name without schema if it's in the target schema (unless
+	// forced qualification is on).
+	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 
 	var parts []string
 	createPrefix := "CREATE TABLE IF NOT EXISTS"
@@ -772,13 +773,13 @@ func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[st
 	for _, column := range table.Columns {
 		// Build column definition with SERIAL detection
 		var builder strings.Builder
-		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema)
+		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema)
 		columnParts = append(columnParts, fmt.Sprintf("    %s", builder.String()))
 	}
 
 	// Add LIKE clauses
 	for _, likeClause := range table.LikeClauses {
-		likeTableName := ir.QualifyEntityNameWithQuotes(likeClause.SourceSchema, likeClause.SourceTable, targetSchema)
+		likeTableName := ir.QualifyEntityNameWithQuotesMode(likeClause.SourceSchema, likeClause.SourceTable, targetSchema, qualifySchema)
 		likeSQL := fmt.Sprintf("LIKE %s", likeTableName)
 		if likeClause.Options != "" {
 			likeSQL += " " + likeClause.Options
@@ -1565,15 +1566,16 @@ func ensureCheckClauseParens(s string) string {
 
 // writeColumnDefinitionToBuilder builds column definitions with SERIAL detection and proper formatting
 // This is moved from ir/table.go to consolidate SQL generation in the diff module
-func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string) {
+func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string, qualifySchema bool) {
 	builder.WriteString(ir.QuoteIdentifier(column.Name))
 	builder.WriteString(" ")
 
 	// Data type - handle array types and precision/scale for appropriate types
 	dataType := formatColumnDataTypeForCreate(column)
 
-	// Strip schema prefix if it matches the target schema
-	dataType = stripSchemaPrefix(dataType, targetSchema)
+	// Strip schema prefix if it matches the target schema (unless forced qualification
+	// is on, in which case the schema-qualified type name is preserved).
+	dataType = stripSchemaPrefixMode(dataType, targetSchema, qualifySchema)
 
 	builder.WriteString(dataType)
 
