@@ -472,9 +472,9 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 // true the empty-to-target create DDL used by `dump --qualify-schema` forces schema
 // qualification for structural object identifiers where the IR carries schema
 // identity (table/view/index/sequence/type/function/procedure/policy names and
-// ON/REFERENCES/OWNED BY/COMMENT targets). DROP/ALTER-in-place paths keep standard
-// smart qualification and are not threaded for forced qualification — they are not
-// reached by dump (empty->target emits only CREATE/ADD). Same-schema type references
+// ON/REFERENCES/OWNED BY/COMMENT targets). This option is intended for dump's
+// empty-to-target CREATE/ADD output; other diff paths are not part of the contract
+// and may still use standard smart qualification. Same-schema type references
 // stay bare because the IR stores them without schema identity (#493). Default
 // behavior (false) is unchanged for plan/apply.
 func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool) []Diff {
