@@ -9,7 +9,7 @@ The `dump` command extracts a PostgreSQL database schema for a specific schema a
 The dump command provides comprehensive schema extraction with:
 1. Single schema targeting (defaults to 'public')
 1. Dependency-aware object ordering  
-1. Cross-schema reference handling with smart qualification
+1. Cross-schema reference handling with smart qualification (or forced full qualification via `--qualify-schema`)
 1. Developer-friendly SQL output format
 1. Single-file and multi-file organization options
 
@@ -154,6 +154,14 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
   Do not output object comment headers (e.g., `-- Name: users; Type: TABLE; Schema: -; Owner: -`).
 
   The dump header with pgschema version information is retained. This option is useful when you need pure DDL output without per-object commentary.
+</ParamField>
+
+<ParamField path="--qualify-schema" type="boolean" default="false">
+  Force full schema qualification of object identifiers in the dump, even for objects in the dumped schema.
+
+  By default, `pgschema` uses [smart qualification](#schema-qualification) and omits the schema prefix for objects in the dumped schema. With this flag, every object identifier is written as `schema.object` — useful when the dump must be unambiguous regardless of `search_path` (for example when an object name is a reserved word such as `user`) or to simplify static analysis.
+
+  See [Forced Qualification](#forced-qualification) for details and the current limitation around type references.
 </ParamField>
 
 ## Ignoring Objects
@@ -312,3 +320,39 @@ pgschema apply --host localhost --db myapp --user postgres --schema tenant3 --fi
 ```
 
 Because objects within the schema are not qualified, they will be created in whichever schema you specify during the apply command.
+
+### Forced Qualification
+
+Pass `--qualify-schema` to always emit fully qualified `schema.object` identifiers, even for objects in the dumped schema:
+
+```bash
+pgschema dump --host localhost --db myapp --user postgres --schema public --qualify-schema
+```
+
+Every object identifier keeps its schema prefix:
+```sql
+-- Objects in the dumped schema are now fully qualified
+CREATE TABLE public.users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL
+);
+
+CREATE TABLE public.orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES public.users(id),         -- Same schema, now qualified
+    product_id INTEGER REFERENCES catalog.products(id)   -- Different schema, still qualified
+);
+
+CREATE INDEX idx_orders_user_id ON public.orders(user_id);
+```
+
+This is useful when:
+
+- **Reserved or ambiguous identifiers** — an unqualified object whose name is a reserved word (for example a table named `user`) can be misparsed; the schema prefix forces it to be read as an identifier. See [#320](https://github.com/pgplex/pgschema/issues/320).
+- **Static analysis** — keeping complete qualifiers means tools don't have to infer schema context from directory layout (for example to distinguish `app.user` from `api.user`).
+
+Forced qualification covers **object identifiers** — table, view, index, sequence, type, function, procedure, and policy names, plus `ON`, `REFERENCES`, `OWNED BY`, and `COMMENT` targets. Object comment headers also keep the schema name instead of collapsing it to `-`.
+
+<Note>
+  `--qualify-schema` does not currently qualify **type references** to the dumped schema — column types, function/procedure parameter and return types, domain base types, and similar. PostgreSQL reports these without a schema for types in the current schema, and `pgschema` stores them as-is, so they remain unqualified. Cross-schema type references are still fully qualified. Tracking: [#493](https://github.com/pgplex/pgschema/issues/493).
+</Note>
