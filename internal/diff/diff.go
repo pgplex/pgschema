@@ -462,7 +462,22 @@ type rlsChange struct {
 }
 
 // GenerateMigration compares two IR schemas and returns the SQL differences
+// GenerateMigration generates the migration diff using standard "smart qualification"
+// (the target-schema prefix is omitted on entity names).
 func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
+	return GenerateMigrationWithOptions(oldIR, newIR, targetSchema, false)
+}
+
+// GenerateMigrationWithOptions is like GenerateMigration, but when qualifySchema is
+// true the empty-to-target create DDL used by `dump --qualify-schema` forces schema
+// qualification for structural object identifiers where the IR carries schema
+// identity (table/view/index/sequence/type/function/procedure/policy names and
+// ON/REFERENCES/OWNED BY/COMMENT targets). This option is intended for dump's
+// empty-to-target CREATE/ADD output; other diff paths are not part of the contract
+// and may still use standard smart qualification. Same-schema type references
+// stay bare because the IR stores them without schema identity (#493). Default
+// behavior (false) is unchanged for plan/apply.
+func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool) []Diff {
 	diff := &ddlDiff{
 		addedSchemas:               []*ir.Schema{},
 		droppedSchemas:             []*ir.Schema{},
@@ -1496,6 +1511,7 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
+	collector.qualifySchema = qualifySchema
 	diff.collectMigrationSQL(targetSchema, collector)
 	return collector.diffs
 }
@@ -2129,8 +2145,14 @@ func filterPreDroppedViews(views []*ir.View, preDropped map[string]bool) []*ir.V
 // If the table schema is different from the target schema, it returns "schema.table"
 // If they are the same, it returns just "table"
 func getTableNameWithSchema(tableSchema, tableName, targetSchema string) string {
+	return getTableNameWithSchemaMode(tableSchema, tableName, targetSchema, false)
+}
+
+// getTableNameWithSchemaMode is like getTableNameWithSchema, but when qualifySchema
+// is true the schema qualifier is always emitted — even for tables in the target schema.
+func getTableNameWithSchemaMode(tableSchema, tableName, targetSchema string, qualifySchema bool) string {
 	quotedTable := ir.QuoteIdentifier(tableName)
-	if tableSchema != targetSchema {
+	if qualifySchema || tableSchema != targetSchema {
 		quotedSchema := ir.QuoteIdentifier(tableSchema)
 		return fmt.Sprintf("%s.%s", quotedSchema, quotedTable)
 	}
@@ -2140,8 +2162,14 @@ func getTableNameWithSchema(tableSchema, tableName, targetSchema string) string 
 // qualifyEntityName returns the properly qualified entity name based on target schema
 // If entity is in target schema, returns just the name, otherwise returns schema.name
 func qualifyEntityName(entitySchema, entityName, targetSchema string) string {
+	return qualifyEntityNameMode(entitySchema, entityName, targetSchema, false)
+}
+
+// qualifyEntityNameMode is like qualifyEntityName, but when qualifySchema is true the
+// schema qualifier is always emitted — even for entities in the target schema.
+func qualifyEntityNameMode(entitySchema, entityName, targetSchema string, qualifySchema bool) string {
 	quotedName := ir.QuoteIdentifier(entityName)
-	if entitySchema == targetSchema {
+	if !qualifySchema && entitySchema == targetSchema {
 		return quotedName
 	}
 	quotedSchema := ir.QuoteIdentifier(entitySchema)

@@ -92,7 +92,7 @@ func TestCreateMultiFileOutput(t *testing.T) {
 	}
 
 	// Test the FormatMultiFile function
-	formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false)
+	formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false, false)
 	err := formatter.FormatMultiFile(diffs, outputPath)
 	if err != nil {
 		t.Fatalf("FormatMultiFile failed: %v", err)
@@ -233,7 +233,7 @@ func TestMultiFileIncludeOrderDeterministic(t *testing.T) {
 		},
 	}
 
-	formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false)
+	formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false, false)
 
 	// Run multiple times and verify output is always the same
 	var firstOutput string
@@ -289,7 +289,7 @@ func TestMultiFileIncludeOrderDeterministic(t *testing.T) {
 
 func TestDumpFormatterHelpers(t *testing.T) {
 	// Create a formatter instance for testing helper methods
-	formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false)
+	formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false, false)
 
 	// Test getObjectDirectory through the formatter
 	testObjectDirectories := []struct {

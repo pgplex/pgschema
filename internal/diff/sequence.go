@@ -19,7 +19,7 @@ const (
 // generateCreateSequencesSQL generates CREATE SEQUENCE statements
 func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, collector *diffCollector) {
 	for _, seq := range sequences {
-		sql := generateSequenceSQL(seq, targetSchema)
+		sql := generateSequenceSQL(seq, targetSchema, collector.qualifySchema)
 
 		// Create context for this statement
 		context := &diffContext{
@@ -41,7 +41,7 @@ func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, c
 
 // generateSequenceComment emits a COMMENT ON SEQUENCE statement
 func generateSequenceComment(seq *ir.Sequence, targetSchema string, operation DiffOperation, collector *diffCollector) {
-	seqName := qualifyEntityName(seq.Schema, seq.Name, targetSchema)
+	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, collector.qualifySchema)
 	var sql string
 	if seq.Comment == "" {
 		sql = fmt.Sprintf("COMMENT ON SEQUENCE %s IS NULL;", seqName)
@@ -104,10 +104,10 @@ func generateModifySequencesSQL(diffs []*sequenceDiff, targetSchema string, coll
 }
 
 // generateSequenceSQL generates CREATE SEQUENCE statement
-func generateSequenceSQL(seq *ir.Sequence, targetSchema string) string {
+func generateSequenceSQL(seq *ir.Sequence, targetSchema string, qualifySchema bool) string {
 	var parts []string
 
-	seqName := qualifyEntityName(seq.Schema, seq.Name, targetSchema)
+	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, qualifySchema)
 	parts = append(parts, fmt.Sprintf("CREATE SEQUENCE IF NOT EXISTS %s", seqName))
 
 	// Add data type if specified (even if it's bigint, since user explicitly specified it)
@@ -144,7 +144,7 @@ func generateSequenceSQL(seq *ir.Sequence, targetSchema string) string {
 
 	// Add sequence owner
 	if seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
-		ownerTable := ir.QualifyEntityNameWithQuotes(seq.Schema, seq.OwnedByTable, targetSchema)
+		ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, qualifySchema)
 		parts = append(parts, fmt.Sprintf("OWNED BY %s.%s", ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn)))
 	}
 

@@ -12,6 +12,15 @@ import (
 // It handles both simple type names (e.g., "schema.typename") and type casts within expressions
 // (e.g., "'value'::schema.typename" -> "'value'::typename").
 func stripSchemaPrefix(typeName, targetSchema string) string {
+	return stripSchemaPrefixMode(typeName, targetSchema, false)
+}
+
+// stripSchemaPrefixMode is like stripSchemaPrefix, but when qualifySchema is true the
+// target-schema prefix is preserved (not stripped) so type names stay fully qualified.
+func stripSchemaPrefixMode(typeName, targetSchema string, qualifySchema bool) string {
+	if qualifySchema {
+		return typeName
+	}
 	if typeName == "" || targetSchema == "" {
 		return typeName
 	}
@@ -412,7 +421,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, createdTables, existingTables, suppressedInlineFKs)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -428,7 +437,7 @@ func generateCreateTablesSQL(
 
 		// Add table comment
 		if table.Comment != "" {
-			tableName := qualifyEntityName(table.Schema, table.Name, targetSchema)
+			tableName := qualifyEntityNameMode(table.Schema, table.Name, targetSchema, collector.qualifySchema)
 			sql := fmt.Sprintf("COMMENT ON TABLE %s IS %s;", tableName, quoteString(table.Comment))
 
 			// Create context for this statement
@@ -446,7 +455,7 @@ func generateCreateTablesSQL(
 		// Add column comments
 		for _, column := range table.Columns {
 			if column.Comment != "" {
-				tableName := qualifyEntityName(table.Schema, table.Name, targetSchema)
+				tableName := qualifyEntityNameMode(table.Schema, table.Name, targetSchema, collector.qualifySchema)
 				sql := fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", tableName, ir.QuoteIdentifier(column.Name), quoteString(column.Comment))
 
 				// Create context for this statement
@@ -525,12 +534,12 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 			columnNames[len(columnNames)-1] = "PERIOD " + columnNames[len(columnNames)-1]
 		}
 
-		tableName := getTableNameWithSchema(item.table.Schema, item.table.Name, targetSchema)
+		tableName := getTableNameWithSchemaMode(item.table.Schema, item.table.Name, targetSchema, collector.qualifySchema)
 		sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s FOREIGN KEY (%s) %s;",
 			tableName,
 			ir.QuoteIdentifier(constraint.Name),
 			strings.Join(columnNames, ", "),
-			generateForeignKeyClause(constraint, targetSchema, false),
+			generateForeignKeyClauseMode(constraint, targetSchema, false, collector.qualifySchema),
 		)
 
 		context := &diffContext{
@@ -750,9 +759,10 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool) (string, []*deferredConstraint) {
-	// Only include table name without schema if it's in the target schema
-	tableName := ir.QualifyEntityNameWithQuotes(table.Schema, table.Name, targetSchema)
+func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool) (string, []*deferredConstraint) {
+	// Only include table name without schema if it's in the target schema (unless
+	// forced qualification is on).
+	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 
 	var parts []string
 	createPrefix := "CREATE TABLE IF NOT EXISTS"
@@ -766,13 +776,13 @@ func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[st
 	for _, column := range table.Columns {
 		// Build column definition with SERIAL detection
 		var builder strings.Builder
-		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema)
+		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema)
 		columnParts = append(columnParts, fmt.Sprintf("    %s", builder.String()))
 	}
 
 	// Add LIKE clauses
 	for _, likeClause := range table.LikeClauses {
-		likeTableName := ir.QualifyEntityNameWithQuotes(likeClause.SourceSchema, likeClause.SourceTable, targetSchema)
+		likeTableName := ir.QualifyEntityNameWithQuotesMode(likeClause.SourceSchema, likeClause.SourceTable, targetSchema, qualifySchema)
 		likeSQL := fmt.Sprintf("LIKE %s", likeTableName)
 		if likeClause.Options != "" {
 			likeSQL += " " + likeClause.Options
@@ -797,7 +807,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, createdTables map[st
 			})
 			continue
 		}
-		constraintDef := generateConstraintSQL(constraint, targetSchema)
+		constraintDef := generateConstraintSQL(constraint, targetSchema, qualifySchema)
 		if constraintDef != "" {
 			columnParts = append(columnParts, fmt.Sprintf("    %s", constraintDef))
 		}
@@ -1358,7 +1368,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Add triggers - already sorted by the Diff operation
 	for _, trigger := range td.AddedTriggers {
-		sql := generateTriggerSQLWithMode(trigger, targetSchema)
+		sql := generateTriggerSQLWithMode(trigger, targetSchema, collector.qualifySchema)
 
 		context := &diffContext{
 			Type:                DiffTypeTableTrigger,
@@ -1407,7 +1417,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				collector.collect(dropContext, dropSQL)
 
 				// Step 2: CREATE the new constraint trigger
-				createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+				createSQL := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
 				createContext := &diffContext{
 					Type:                DiffTypeTableTrigger,
 					Operation:           DiffOperationCreate,
@@ -1418,7 +1428,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				collector.collect(createContext, createSQL)
 			} else {
 				// Use CREATE OR REPLACE for regular triggers
-				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema)
+				sql := generateTriggerSQLWithMode(triggerDiff.New, targetSchema, collector.qualifySchema)
 
 				context := &diffContext{
 					Type:                DiffTypeTableTrigger,
@@ -1577,15 +1587,16 @@ func ensureCheckClauseParens(s string) string {
 
 // writeColumnDefinitionToBuilder builds column definitions with SERIAL detection and proper formatting
 // This is moved from ir/table.go to consolidate SQL generation in the diff module
-func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string) {
+func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string, qualifySchema bool) {
 	builder.WriteString(ir.QuoteIdentifier(column.Name))
 	builder.WriteString(" ")
 
 	// Data type - handle array types and precision/scale for appropriate types
 	dataType := formatColumnDataTypeForCreate(column)
 
-	// Strip schema prefix if it matches the target schema
-	dataType = stripSchemaPrefix(dataType, targetSchema)
+	// Strip schema prefix if it matches the target schema (unless forced qualification
+	// is on, in which case the schema-qualified type name is preserved).
+	dataType = stripSchemaPrefixMode(dataType, targetSchema, qualifySchema)
 
 	builder.WriteString(dataType)
 
@@ -1797,7 +1808,13 @@ func indexesStructurallyEqual(oldIndex, newIndex *ir.Index) bool {
 // generateForeignKeyClause generates the REFERENCES clause with all foreign key options
 // Works for both inline single-column and multi-column constraint foreign keys
 func generateForeignKeyClause(constraint *ir.Constraint, targetSchema string, inline bool) string {
-	referencedTableName := getTableNameWithSchema(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema)
+	return generateForeignKeyClauseMode(constraint, targetSchema, inline, false)
+}
+
+// generateForeignKeyClauseMode is like generateForeignKeyClause, but when qualifySchema
+// is true the referenced table is always schema-qualified, even within the target schema.
+func generateForeignKeyClauseMode(constraint *ir.Constraint, targetSchema string, inline bool, qualifySchema bool) string {
+	referencedTableName := getTableNameWithSchemaMode(constraint.ReferencedSchema, constraint.ReferencedTable, targetSchema, qualifySchema)
 
 	var clause string
 	if inline {

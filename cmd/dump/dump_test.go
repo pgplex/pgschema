@@ -341,7 +341,7 @@ func TestNoComments_SingleFile(t *testing.T) {
 	}
 
 	t.Run("WithComments", func(t *testing.T) {
-		formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false)
+		formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", false, false)
 		output := formatter.FormatSingleFile(diffs)
 
 		// Should contain dump header
@@ -366,7 +366,7 @@ func TestNoComments_SingleFile(t *testing.T) {
 	})
 
 	t.Run("NoComments", func(t *testing.T) {
-		formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", true)
+		formatter := dump.NewDumpFormatter("PostgreSQL 17.0", "public", true, false)
 		output := formatter.FormatSingleFile(diffs)
 
 		// Should still contain dump header (retained per design)

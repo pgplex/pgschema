@@ -26,7 +26,7 @@ func generateCreatePoliciesSQL(policies []*ir.RLSPolicy, targetSchema string, co
 	})
 
 	for _, policy := range sortedPolicies {
-		sql := generatePolicySQL(policy, targetSchema)
+		sql := generatePolicySQLMode(policy, targetSchema, collector.qualifySchema)
 
 		// Create context for this statement
 		context := &diffContext{
@@ -44,7 +44,7 @@ func generateCreatePoliciesSQL(policies []*ir.RLSPolicy, targetSchema string, co
 // generateRLSChangesSQL generates RLS enable/disable and force statements
 func generateRLSChangesSQL(changes []*rlsChange, targetSchema string, collector *diffCollector) {
 	for _, change := range changes {
-		tableName := qualifyEntityName(change.Table.Schema, change.Table.Name, targetSchema)
+		tableName := qualifyEntityNameMode(change.Table.Schema, change.Table.Name, targetSchema, collector.qualifySchema)
 
 		// Handle ENABLE/DISABLE changes
 		if change.Enabled != nil {
@@ -90,8 +90,14 @@ func generateRLSChangesSQL(changes []*rlsChange, targetSchema string, collector 
 
 // generatePolicySQL generates CREATE POLICY statement
 func generatePolicySQL(policy *ir.RLSPolicy, targetSchema string) string {
+	return generatePolicySQLMode(policy, targetSchema, false)
+}
+
+// generatePolicySQLMode is like generatePolicySQL, but when qualifySchema is true the
+// ON-table reference is always schema-qualified, even within the target schema.
+func generatePolicySQLMode(policy *ir.RLSPolicy, targetSchema string, qualifySchema bool) string {
 	// Only include table name without schema if it's in the target schema
-	tableName := getTableNameWithSchema(policy.Schema, policy.Table, targetSchema)
+	tableName := getTableNameWithSchemaMode(policy.Schema, policy.Table, targetSchema, qualifySchema)
 
 	policyStmt := fmt.Sprintf("CREATE POLICY %s ON %s", ir.QuoteIdentifier(policy.Name), tableName)
 

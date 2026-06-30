@@ -14,17 +14,21 @@ import (
 
 // DumpFormatter handles formatting SQL output for database dumps
 type DumpFormatter struct {
-	dbVersion    string
-	targetSchema string
-	noComments   bool
+	dbVersion     string
+	targetSchema  string
+	noComments    bool
+	qualifySchema bool
 }
 
-// NewDumpFormatter creates a new DumpFormatter
-func NewDumpFormatter(dbVersion string, targetSchema string, noComments bool) *DumpFormatter {
+// NewDumpFormatter creates a new DumpFormatter. When qualifySchema is true, comment
+// headers keep the target schema name (instead of "-") to match the forced
+// schema-qualified DDL emitted by `dump --qualify-schema`.
+func NewDumpFormatter(dbVersion string, targetSchema string, noComments bool, qualifySchema bool) *DumpFormatter {
 	return &DumpFormatter{
-		dbVersion:    dbVersion,
-		targetSchema: targetSchema,
-		noComments:   noComments,
+		dbVersion:     dbVersion,
+		targetSchema:  targetSchema,
+		noComments:    noComments,
+		qualifySchema: qualifySchema,
 	}
 }
 
@@ -521,6 +525,11 @@ func (f *DumpFormatter) getCommentSchemaName(path string) string {
 	if strings.Contains(path, ".") {
 		parts := strings.Split(path, ".")
 		if len(parts) >= 2 && parts[0] == f.targetSchema {
+			// With forced qualification, keep the schema name rather than collapsing
+			// the target schema to "-", so headers match the qualified DDL.
+			if f.qualifySchema {
+				return parts[0]
+			}
 			return "-"
 		} else if len(parts) >= 2 {
 			return parts[0]

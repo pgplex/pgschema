@@ -16,7 +16,7 @@ func generateCreateFunctionsSQL(functions []*ir.Function, targetSchema string, c
 	sortedFunctions := topologicallySortFunctions(functions)
 
 	for _, function := range sortedFunctions {
-		sql := generateFunctionSQL(function, targetSchema)
+		sql := generateFunctionSQL(function, targetSchema, collector.qualifySchema)
 
 		// Create context for this statement
 		context := &diffContext{
@@ -105,7 +105,7 @@ func generateModifyFunctionsSQL(diffs []*functionDiff, targetSchema string, coll
 			// PostgreSQL does not allow CREATE OR REPLACE to change these.
 			// See https://github.com/pgplex/pgschema/issues/326
 			dropSQL := generateDropFunctionSQL(oldFunc, targetSchema)
-			createSQL := generateFunctionSQL(newFunc, targetSchema)
+			createSQL := generateFunctionSQL(newFunc, targetSchema, collector.qualifySchema)
 
 			alterContext := &diffContext{
 				Type:                DiffTypeFunction,
@@ -127,7 +127,7 @@ func generateModifyFunctionsSQL(diffs []*functionDiff, targetSchema string, coll
 			}
 		} else {
 			// Function body or other attributes changed - use CREATE OR REPLACE
-			sql := generateFunctionSQL(newFunc, targetSchema)
+			sql := generateFunctionSQL(newFunc, targetSchema, collector.qualifySchema)
 
 			// Create context for this statement
 			context := &diffContext{
@@ -180,11 +180,11 @@ func generateDropFunctionSQL(function *ir.Function, targetSchema string) string 
 }
 
 // generateFunctionSQL generates CREATE OR REPLACE FUNCTION SQL for a function
-func generateFunctionSQL(function *ir.Function, targetSchema string) string {
+func generateFunctionSQL(function *ir.Function, targetSchema string, qualifySchema bool) string {
 	var stmt strings.Builder
 
 	// Build the CREATE OR REPLACE FUNCTION header with schema qualification
-	functionName := qualifyEntityName(function.Schema, function.Name, targetSchema)
+	functionName := qualifyEntityNameMode(function.Schema, function.Name, targetSchema, qualifySchema)
 	stmt.WriteString(fmt.Sprintf("CREATE OR REPLACE FUNCTION %s", functionName))
 
 	// Add parameters from structured Parameters array
@@ -192,7 +192,7 @@ func generateFunctionSQL(function *ir.Function, targetSchema string) string {
 	var paramParts []string
 	for _, param := range function.Parameters {
 		if param.Mode != "TABLE" {
-			paramParts = append(paramParts, formatFunctionParameter(param, true, targetSchema))
+			paramParts = append(paramParts, formatFunctionParameter(param, true, targetSchema, qualifySchema))
 		}
 	}
 	if len(paramParts) > 0 {
@@ -204,7 +204,7 @@ func generateFunctionSQL(function *ir.Function, targetSchema string) string {
 	// Add return type
 	if function.ReturnType != "" {
 		// Strip schema prefix from return type if it matches the target schema
-		returnType := stripSchemaPrefix(function.ReturnType, targetSchema)
+		returnType := stripSchemaPrefixMode(function.ReturnType, targetSchema, qualifySchema)
 		stmt.WriteString(fmt.Sprintf("\nRETURNS %s", returnType))
 	}
 
@@ -330,7 +330,7 @@ func containsParameterReferences(body string) bool {
 // formatFunctionParameter formats a single function parameter with name, type, and optional default value
 // For functions, mode is typically omitted (unlike procedures) unless it's OUT/INOUT
 // includeDefault controls whether DEFAULT clauses are included in the output
-func formatFunctionParameter(param *ir.Parameter, includeDefault bool, targetSchema string) string {
+func formatFunctionParameter(param *ir.Parameter, includeDefault bool, targetSchema string, qualifySchema bool) string {
 	var part string
 
 	// For functions, only include mode if it's OUT or INOUT (IN is implicit)
@@ -340,7 +340,7 @@ func formatFunctionParameter(param *ir.Parameter, includeDefault bool, targetSch
 
 	// Add parameter name and type
 	// Strip schema prefix from data type if it matches the target schema
-	dataType := stripSchemaPrefix(param.DataType, targetSchema)
+	dataType := stripSchemaPrefixMode(param.DataType, targetSchema, qualifySchema)
 	if param.Name != "" {
 		part += param.Name + " " + dataType
 	} else {
@@ -353,7 +353,7 @@ func formatFunctionParameter(param *ir.Parameter, includeDefault bool, targetSch
 	if includeDefault && param.DefaultValue != nil {
 		defaultVal := *param.DefaultValue
 		// Strip target schema prefix
-		defaultVal = stripSchemaPrefix(defaultVal, targetSchema)
+		defaultVal = stripSchemaPrefixMode(defaultVal, targetSchema, qualifySchema)
 		// Also strip temporary embedded postgres schema prefixes (pgschema_tmp_*)
 		defaultVal = stripTempSchemaPrefix(defaultVal)
 		part += " DEFAULT " + defaultVal
@@ -594,7 +594,7 @@ func generateFunctionComment(
 	operation DiffOperation,
 	collector *diffCollector,
 ) {
-	functionName := qualifyEntityName(function.Schema, function.Name, targetSchema)
+	functionName := qualifyEntityNameMode(function.Schema, function.Name, targetSchema, collector.qualifySchema)
 	argsList := function.GetArguments()
 
 	var sql string

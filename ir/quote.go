@@ -169,11 +169,20 @@ func QuoteIdentifier(identifier string) string {
 	return identifier
 }
 
-// QualifyEntityNameWithQuotes returns the properly qualified and quoted entity name
+// QualifyEntityNameWithQuotes returns the properly qualified and quoted entity name.
+// The schema qualifier is omitted when the entity lives in the target schema ("smart
+// qualification").
 func QualifyEntityNameWithQuotes(entitySchema, entityName, targetSchema string) string {
+	return QualifyEntityNameWithQuotesMode(entitySchema, entityName, targetSchema, false)
+}
+
+// QualifyEntityNameWithQuotesMode is like QualifyEntityNameWithQuotes, but when
+// qualifySchema is true the schema qualifier is always emitted — even for entities in
+// the target schema (used by `dump --qualify-schema`).
+func QualifyEntityNameWithQuotesMode(entitySchema, entityName, targetSchema string, qualifySchema bool) string {
 	quotedName := QuoteIdentifier(entityName)
 
-	if entitySchema == targetSchema {
+	if !qualifySchema && entitySchema == targetSchema {
 		return quotedName
 	}
 

@@ -136,7 +136,7 @@ func generateCreateTriggersSQL(triggers []*ir.Trigger, targetSchema string, coll
 	})
 
 	for _, trigger := range sortedTriggers {
-		sql := generateTriggerSQLWithMode(trigger, targetSchema)
+		sql := generateTriggerSQLWithMode(trigger, targetSchema, collector.qualifySchema)
 
 		// Create context for this statement
 		context := &diffContext{
@@ -235,7 +235,7 @@ func generateDropTriggersFromModifiedViews(views []*viewDiff, targetSchema strin
 }
 
 // generateTriggerSQLWithMode generates CREATE [OR REPLACE] TRIGGER or CREATE CONSTRAINT TRIGGER statement
-func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string) string {
+func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string, qualifySchema bool) string {
 	// Build event list in standard order: INSERT, UPDATE, DELETE, TRUNCATE
 	var events []string
 	eventOrder := []ir.TriggerEvent{ir.TriggerEventInsert, ir.TriggerEventUpdate, ir.TriggerEventDelete, ir.TriggerEventTruncate}
@@ -256,7 +256,7 @@ func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string) string
 	eventList := strings.Join(events, " OR ")
 
 	// Only include table name without schema if it's in the target schema
-	tableName := qualifyEntityName(trigger.Schema, trigger.Table, targetSchema)
+	tableName := qualifyEntityNameMode(trigger.Schema, trigger.Table, targetSchema, qualifySchema)
 
 	// Build REFERENCING clause if present (for transition tables)
 	var referencingParts []string
@@ -318,7 +318,7 @@ func generateCreateViewTriggersSQL(triggers []*ir.Trigger, targetSchema string, 
 	})
 
 	for _, trigger := range sortedTriggers {
-		sql := generateTriggerSQLWithMode(trigger, targetSchema)
+		sql := generateTriggerSQLWithMode(trigger, targetSchema, collector.qualifySchema)
 
 		context := &diffContext{
 			Type:                DiffTypeViewTrigger,

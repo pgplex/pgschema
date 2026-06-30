@@ -12,30 +12,32 @@ import (
 )
 
 var (
-	host       string
-	port       int
-	db         string
-	user       string
-	password   string
-	schema     string
-	multiFile  bool
-	file       string
-	noComments bool
-	sslmode    string
+	host          string
+	port          int
+	db            string
+	user          string
+	password      string
+	schema        string
+	multiFile     bool
+	file          string
+	noComments    bool
+	sslmode       string
+	qualifySchema bool
 )
 
 // DumpConfig holds configuration for dump execution
 type DumpConfig struct {
-	Host       string
-	Port       int
-	DB         string
-	User       string
-	Password   string
-	Schema     string
-	MultiFile  bool
-	File       string
-	NoComments bool
-	SSLMode    string
+	Host          string
+	Port          int
+	DB            string
+	User          string
+	Password      string
+	Schema        string
+	MultiFile     bool
+	File          string
+	NoComments    bool
+	SSLMode       string
+	QualifySchema bool
 }
 
 var DumpCmd = &cobra.Command{
@@ -57,6 +59,7 @@ func init() {
 	DumpCmd.Flags().BoolVar(&multiFile, "multi-file", false, "Output schema to multiple files organized by object type")
 	DumpCmd.Flags().StringVar(&file, "file", "", "Output file path (required when --multi-file is used)")
 	DumpCmd.Flags().BoolVar(&noComments, "no-comments", false, "Do not output object comment headers")
+	DumpCmd.Flags().BoolVar(&qualifySchema, "qualify-schema", false, "Always schema-qualify object identifiers in the dump, even for the target schema (does not affect same-schema type references, which the IR stores without a schema)")
 	DumpCmd.Flags().StringVar(&sslmode, "sslmode", "prefer", "SSL mode for database connection (disable, allow, prefer, require, verify-ca, verify-full) (env: PGSSLMODE)")
 }
 
@@ -85,10 +88,10 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	emptyIR := ir.NewIR()
 
 	// Generate diff between empty schema and target schema (this represents a complete dump)
-	diffs := diff.GenerateMigration(emptyIR, schemaIR, config.Schema)
+	diffs := diff.GenerateMigrationWithOptions(emptyIR, schemaIR, config.Schema, config.QualifySchema)
 
 	// Create dump formatter
-	formatter := dump.NewDumpFormatter(schemaIR.Metadata.DatabaseVersion, config.Schema, config.NoComments)
+	formatter := dump.NewDumpFormatter(schemaIR.Metadata.DatabaseVersion, config.Schema, config.NoComments, config.QualifySchema)
 
 	if config.MultiFile {
 		// Multi-file mode - output to files
@@ -128,16 +131,17 @@ func runDump(cmd *cobra.Command, args []string) error {
 
 	// Create config from command-line flags
 	config := &DumpConfig{
-		Host:       host,
-		Port:       port,
-		DB:         db,
-		User:       user,
-		Password:   finalPassword,
-		Schema:     schema,
-		MultiFile:  multiFile,
-		File:       file,
-		NoComments: noComments,
-		SSLMode:    finalSSLMode,
+		Host:          host,
+		Port:          port,
+		DB:            db,
+		User:          user,
+		Password:      finalPassword,
+		Schema:        schema,
+		MultiFile:     multiFile,
+		File:          file,
+		NoComments:    noComments,
+		SSLMode:       finalSSLMode,
+		QualifySchema: qualifySchema,
 	}
 
 	// Execute dump
