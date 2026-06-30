@@ -65,8 +65,11 @@ func generateModifyProceduresSQL(diffs []*procedureDiff, targetSchema string, co
 			dropSQL = fmt.Sprintf("DROP PROCEDURE IF EXISTS %s();", procedureName)
 		}
 
-		// Create the new procedure
-		createSQL := generateProcedureSQL(newProc, targetSchema, false)
+		// Create the new procedure. Pass collector.qualifySchema for coherence: this is
+		// a CREATE statement and should honor forced qualification like other creates.
+		// (Byte-identical in practice — only dump sets the flag, and dump never reaches
+		// the modify path, which is empty->target create-only.)
+		createSQL := generateProcedureSQL(newProc, targetSchema, collector.qualifySchema)
 
 		// Create a single context with ALTER operation and multiple statements
 		// This represents the modification as a single operation in the summary

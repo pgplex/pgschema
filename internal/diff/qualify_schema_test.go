@@ -46,8 +46,9 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 		Name:   "account",
 		Columns: []*ir.Column{
 			{Name: "id", Position: 1, DataType: "integer", IsNullable: false},
-			// A column whose type lives in the target schema (e.g. a user-defined enum).
-			{Name: "kind", Position: 2, DataType: "public.user_kind", IsNullable: true},
+			// Same-schema user-defined type references arrive from the inspector
+			// without schema identity, so the IR stores them bare (#493).
+			{Name: "kind", Position: 2, DataType: "user_kind", IsNullable: true},
 		},
 	}
 	empty := map[string]bool{}
@@ -64,8 +65,13 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 	if !strings.Contains(qualified, "CREATE TABLE IF NOT EXISTS public.account (") {
 		t.Errorf("forced qualification should qualify the table name: %q", qualified)
 	}
-	if !strings.Contains(qualified, "public.user_kind") {
-		t.Errorf("forced qualification should qualify the column type: %q", qualified)
+	// #493 limitation: forced qualification cannot *add* a schema to a bare
+	// same-schema type reference, so the column type stays bare.
+	if strings.Contains(qualified, "public.user_kind") {
+		t.Errorf("forced qualification must not invent a schema for a bare type ref: %q", qualified)
+	}
+	if !strings.Contains(qualified, "kind user_kind") {
+		t.Errorf("forced qualification should preserve the bare same-schema type ref: %q", qualified)
 	}
 }
 
@@ -173,9 +179,11 @@ func TestQualifySchema_Procedure(t *testing.T) {
 		Schema:   "public",
 		Name:     "adjust_balance",
 		Language: "plpgsql",
-		// A parameter whose type lives in the target schema (e.g. a domain).
+		// Same-schema parameter type references arrive from the inspector
+		// (oidvectortypes / pg_get_function_arguments) without schema identity,
+		// so the IR stores them bare (#493).
 		Parameters: []*ir.Parameter{
-			{Name: "amount", DataType: "public.currency", Mode: "IN", Position: 1, DefaultValue: &defaultVal},
+			{Name: "amount", DataType: "currency", Mode: "IN", Position: 1, DefaultValue: &defaultVal},
 		},
 		Definition: "BEGIN END;",
 	}
@@ -188,15 +196,20 @@ func TestQualifySchema_Procedure(t *testing.T) {
 		t.Errorf("default should not qualify the target schema: %q", def)
 	}
 	if !strings.Contains(def, "amount currency") {
-		t.Errorf("default should strip the target-schema prefix from the param type: %q", def)
+		t.Errorf("default should keep the param type bare: %q", def)
 	}
 
 	qualified := generateProcedureSQL(proc, "public", true)
 	if !strings.Contains(qualified, "CREATE OR REPLACE PROCEDURE public.adjust_balance") {
 		t.Errorf("forced qualification should qualify the procedure name: %q", qualified)
 	}
-	if !strings.Contains(qualified, "amount public.currency") {
-		t.Errorf("forced qualification should qualify the param type: %q", qualified)
+	// #493 limitation: forced qualification cannot *add* a schema to a bare
+	// same-schema param type reference, so it stays bare.
+	if strings.Contains(qualified, "public.currency") {
+		t.Errorf("forced qualification must not invent a schema for a bare param type ref: %q", qualified)
+	}
+	if !strings.Contains(qualified, "amount currency") {
+		t.Errorf("forced qualification should preserve the bare same-schema param type ref: %q", qualified)
 	}
 	if !strings.Contains(qualified, "DEFAULT 0") {
 		t.Errorf("forced qualification should preserve the DEFAULT clause: %q", qualified)
