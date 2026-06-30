@@ -8,9 +8,11 @@ import (
 )
 
 // These tests cover the `dump --qualify-schema` behavior at the SQL-builder level:
-// when qualifySchema is true, structural entity names/types are always schema-qualified,
-// even for the target schema; when false (the default), the standard "smart
-// qualification" omits the target-schema prefix. The false cases double as the
+// when qualifySchema is true, structural entity names are schema-qualified, even for
+// the target schema; when false (the default), the standard "smart qualification"
+// omits the target-schema prefix. Type references that arrive from the inspector
+// without schema identity stay bare (the flag cannot invent a schema for them) until
+// the IR preserves their schema separately (#493). The false cases double as the
 // byte-identical default-output guardrail for each builder.
 
 func TestQualifySchema_ForeignKeyReference(t *testing.T) {
