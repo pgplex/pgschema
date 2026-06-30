@@ -9,7 +9,7 @@ The `dump` command extracts a PostgreSQL database schema for a specific schema a
 The dump command provides comprehensive schema extraction with:
 1. Single schema targeting (defaults to 'public')
 1. Dependency-aware object ordering  
-1. Cross-schema reference handling with smart qualification
+1. Cross-schema reference handling with smart qualification (or forced full qualification via `--qualify-schema`)
 1. Developer-friendly SQL output format
 1. Single-file and multi-file organization options
 
@@ -154,6 +154,12 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
   Do not output object comment headers (e.g., `-- Name: users; Type: TABLE; Schema: -; Owner: -`).
 
   The dump header with pgschema version information is retained. This option is useful when you need pure DDL output without per-object commentary.
+</ParamField>
+
+<ParamField path="--qualify-schema" type="boolean" default="false">
+  Force full schema qualification of object identifiers in the dump, even for objects in the dumped schema.
+
+  By default, `pgschema` uses [smart qualification](#schema-qualification) and omits the schema prefix for objects in the dumped schema. With this flag, object names and references are schema-qualified (`schema.object`) — useful when the dump must resolve unambiguously regardless of `search_path`, or to simplify static analysis. A couple of positions are necessarily excepted (`CREATE INDEX` names, and same-schema type references) — see [Forced Qualification](#forced-qualification) below.
 </ParamField>
 
 ## Ignoring Objects
@@ -312,3 +318,45 @@ pgschema apply --host localhost --db myapp --user postgres --schema tenant3 --fi
 ```
 
 Because objects within the schema are not qualified, they will be created in whichever schema you specify during the apply command.
+
+### Forced Qualification
+
+Pass `--qualify-schema` to force schema qualification on object names and references, even for objects in the dumped schema:
+
+```bash
+pgschema dump --host localhost --db myapp --user postgres --schema public --qualify-schema
+```
+
+Object names and references keep their schema prefix:
+```sql
+-- Objects in the dumped schema are now fully qualified
+CREATE TABLE public.users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL
+);
+
+CREATE TABLE public.orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES public.users(id),         -- Same schema, now qualified
+    product_id INTEGER REFERENCES catalog.products(id)   -- Different schema, still qualified
+);
+
+CREATE INDEX idx_orders_user_id ON public.orders(user_id);
+```
+
+PostgreSQL keeps `CREATE INDEX` names unqualified (an index lives in its table's schema), so only the target table is qualified.
+
+This is useful when:
+
+- **Unambiguous resolution** — a fully qualified `schema.object` resolves the same way regardless of the session `search_path`, avoiding the ambiguity described in [#320](https://github.com/pgplex/pgschema/issues/320). (Reserved-word names are handled separately by quoting, which `pgschema` always applies where needed, e.g. `"user"`.)
+- **Static analysis** — keeping complete qualifiers means tools don't have to infer schema context from directory layout (for example to distinguish `app.user` from `api.user`).
+
+Forced qualification covers object names and structural references where PostgreSQL syntax permits — table, view, sequence, type, function, procedure, and policy names; index targets and comments; and `ON`, `REFERENCES`, `OWNED BY`, and `COMMENT` targets. Object comment headers also keep the schema name instead of collapsing it to `-`.
+
+<Note>
+  `--qualify-schema` does not currently qualify **type references** to the dumped schema — column types, function/procedure parameter and return types, domain base types, and similar. PostgreSQL reports these without a schema for types in the current schema, and `pgschema` stores them as-is, so they remain unqualified. Cross-schema type references are still fully qualified. Tracking: [#493](https://github.com/pgplex/pgschema/issues/493).
+</Note>
+
+<Note>
+  Forced qualification applies to structural identifiers only — it does **not** rewrite free-form SQL text such as view definitions, policy `USING` / `WITH CHECK` expressions, or function and procedure bodies. Identifiers inside those bodies are emitted exactly as PostgreSQL reports them, so a reference like `example.user` inside a function body is not added or changed by this flag.
+</Note>
