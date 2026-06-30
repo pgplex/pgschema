@@ -469,8 +469,9 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 }
 
 // GenerateMigrationWithOptions is like GenerateMigration, but when qualifySchema is
-// true the emitted DDL always schema-qualifies entity names (used by
-// `dump --qualify-schema`). Default behavior (false) is unchanged for plan/apply.
+// true the empty-to-target create DDL used by `dump --qualify-schema` forces
+// schema qualification for structural object identifiers where the IR carries
+// schema identity. Default behavior (false) is unchanged for plan/apply.
 func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool) []Diff {
 	diff := &ddlDiff{
 		addedSchemas:               []*ir.Schema{},
