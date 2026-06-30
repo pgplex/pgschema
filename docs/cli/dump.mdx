@@ -159,9 +159,7 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
 <ParamField path="--qualify-schema" type="boolean" default="false">
   Force full schema qualification of object identifiers in the dump, even for objects in the dumped schema.
 
-  By default, `pgschema` uses [smart qualification](#schema-qualification) and omits the schema prefix for objects in the dumped schema. With this flag, object names and references are schema-qualified (`schema.object`) wherever PostgreSQL syntax permits — useful when the dump must be unambiguous regardless of `search_path` (for example when an object name is a reserved word such as `user`) or to simplify static analysis.
-
-  See [Forced Qualification](#forced-qualification) for details and the current limitation around type references.
+  By default, `pgschema` uses [smart qualification](#schema-qualification) and omits the schema prefix for objects in the dumped schema. With this flag, object names and references are schema-qualified (`schema.object`) — useful when the dump must be unambiguous regardless of `search_path` (for example when an object name is a reserved word such as `user`) or to simplify static analysis. A couple of positions are necessarily excepted (`CREATE INDEX` names, and same-schema type references) — see [Forced Qualification](#forced-qualification) below.
 </ParamField>
 
 ## Ignoring Objects
