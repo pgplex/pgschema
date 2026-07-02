@@ -1,10 +1,7 @@
 > [!NOTE]
-> pgplex: Modern Developer Stack for Postgres - [pgconsole](https://github.com/pgplex/pgconsole) · [pgtui](https://github.com/pgplex/pgtui) · **pgschema** · [pgparser](https://github.com/pgplex/pgparser)
->
 > Brought to you by [Bytebase](https://www.bytebase.com/), open-source database DevSecOps platform.
 
-![light-banner](https://raw.githubusercontent.com/pgplex/pgschema/main/docs/logo/light.png#gh-light-mode-only)
-![dark-banner](https://raw.githubusercontent.com/pgplex/pgschema/main/docs/logo/dark.png#gh-dark-mode-only)
+![](https://raw.githubusercontent.com/pgplex/website/refs/heads/main/public/banner-pgschema.png)
 
 <a href="https://www.star-history.com/?repos=pgplex%2Fpgschema&type=date&legend=top-left">
  <picture>
