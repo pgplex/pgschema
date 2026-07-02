@@ -6,9 +6,9 @@
   },
   "name": "pgschema, Declarative Schema Migration for Postgres",
   "colors": {
-    "primary": "#ff5522",
-    "light": "#FFEAE3",
-    "dark": "#992E11"
+    "primary": "#F4473C",
+    "light": "#FFB1A6",
+    "dark": "#CF2F2A"
   },
   "favicon": "/favicon.ico",
   "navigation": {
