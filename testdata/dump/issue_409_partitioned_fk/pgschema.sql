@@ -30,19 +30,11 @@ CREATE TABLE IF NOT EXISTS event (
 -- Name: session_2026_01; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS session_2026_01 (
-    id bigint,
-    started_at timestamptz,
-    CONSTRAINT session_2026_01_pkey PRIMARY KEY (started_at, id)
-);
+CREATE TABLE IF NOT EXISTS session_2026_01 PARTITION OF session FOR VALUES FROM ('2026-01-01 00:00:00+00') TO ('2026-02-01 00:00:00+00');
 
 --
 -- Name: session_2026_02; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS session_2026_02 (
-    id bigint,
-    started_at timestamptz,
-    CONSTRAINT session_2026_02_pkey PRIMARY KEY (started_at, id)
-);
+CREATE TABLE IF NOT EXISTS session_2026_02 PARTITION OF session FOR VALUES FROM ('2026-02-01 00:00:00+00') TO ('2026-03-01 00:00:00+00');
 

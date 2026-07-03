@@ -765,15 +765,44 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 
 	// Partition children: emit PARTITION OF instead of standalone CREATE TABLE.
-	// Columns and constraints are inherited from the parent automatically.
+	// Columns and inherited constraints come from the parent automatically;
+	// only child-specific constraints (conparentid = 0) remain in the IR.
 	if table.PartitionOf != "" && table.PartitionBound != "" {
 		parentSchema := table.PartitionOfSchema
 		if parentSchema == "" {
 			parentSchema = table.Schema
 		}
 		parentName := ir.QualifyEntityNameWithQuotesMode(parentSchema, table.PartitionOf, targetSchema, qualifySchema)
-		sql := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s %s;", tableName, parentName, table.PartitionBound)
-		return sql, nil
+
+		// Include child-specific constraints in the PARTITION OF statement.
+		inlineConstraints := getInlineConstraintsForTable(table)
+		var constraintParts []string
+		var deferred []*deferredConstraint
+		currentKey := fmt.Sprintf("%s.%s", table.Schema, table.Name)
+		for _, constraint := range inlineConstraints {
+			if suppressedInlineFKs[constraintPathKey(constraint)] {
+				continue
+			}
+			if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) {
+				deferred = append(deferred, &deferredConstraint{
+					table:      table,
+					constraint: constraint,
+				})
+				continue
+			}
+			if def := generateConstraintSQL(constraint, targetSchema, qualifySchema); def != "" {
+				constraintParts = append(constraintParts, fmt.Sprintf("    %s", def))
+			}
+		}
+
+		var sql string
+		if len(constraintParts) > 0 {
+			sql = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s (\n%s\n) %s;",
+				tableName, parentName, strings.Join(constraintParts, ",\n"), table.PartitionBound)
+		} else {
+			sql = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s %s;", tableName, parentName, table.PartitionBound)
+		}
+		return sql, deferred
 	}
 
 	var parts []string
