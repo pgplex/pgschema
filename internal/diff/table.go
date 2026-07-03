@@ -413,20 +413,16 @@ func generateCreateTablesSQL(
 	existingTables map[string]bool,
 	shouldDeferPolicy func(*ir.RLSPolicy) bool,
 	suppressedInlineFKs map[string]bool,
+	allNewTables map[string]*ir.Table,
 ) ([]*ir.RLSPolicy, []*deferredConstraint) {
 	var deferredPolicies []*ir.RLSPolicy
 	var deferredConstraints []*deferredConstraint
 	createdTables := make(map[string]bool, len(tables))
 
-	allTables := make(map[string]*ir.Table, len(tables))
-	for _, t := range tables {
-		allTables[t.Schema+"."+t.Name] = t
-	}
-
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allTables)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement

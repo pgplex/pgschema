@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.11.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "PLACEHOLDER"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS orders_us PARTITION OF orders (\n    priority DEFAULT 10,\n    notes NOT NULL\n) FOR VALUES IN ('us');",
+          "type": "table",
+          "operation": "create",
+          "path": "public.orders_us"
+        }
+      ]
+    }
+  ]
+}
