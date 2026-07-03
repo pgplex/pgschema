@@ -106,6 +106,7 @@ func StartEmbeddedPostgres(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, e
 			"log_statement":              "none",      // Don't log SQL statements
 			"log_min_duration_statement": "-1",        // Don't log slow queries
 			"unix_socket_directories":    runtimePath, // Use a directory that is guaranteed to exist
+			"timezone":                   "UTC",       // Ensure platform-independent output for pg_get_expr
 		})
 
 	// Create and start PostgreSQL instance
