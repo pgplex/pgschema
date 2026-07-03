@@ -5,10 +5,10 @@ CREATE TABLE public.orders (
     notes text
 ) PARTITION BY LIST (region);
 
+CREATE TABLE public.orders_eu PARTITION OF public.orders
+    FOR VALUES IN ('eu');
+
 CREATE TABLE public.orders_us PARTITION OF public.orders (
     priority DEFAULT 10,
     notes NOT NULL
 ) FOR VALUES IN ('us');
-
-CREATE TABLE public.orders_eu PARTITION OF public.orders
-    FOR VALUES IN ('eu');
