@@ -34,7 +34,21 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 	}
 
 	// Build edges: if tableA has a foreign key to tableB, add edge tableB -> tableA
+	// Also: if tableA is a partition child of tableB, add edge tableB -> tableA
 	for keyA, tableA := range tableMap {
+		// Partition parent → child dependency
+		if tableA.PartitionOf != "" {
+			parentSchema := tableA.PartitionOfSchema
+			if parentSchema == "" {
+				parentSchema = tableA.Schema
+			}
+			keyB := parentSchema + "." + tableA.PartitionOf
+			if _, exists := tableMap[keyB]; exists && keyA != keyB {
+				adjList[keyB] = append(adjList[keyB], keyA)
+				inDegree[keyA]++
+			}
+		}
+
 		for _, constraint := range tableA.Constraints {
 			if constraint.Type == ir.ConstraintTypeForeignKey && constraint.ReferencedTable != "" {
 				// Build referenced table key

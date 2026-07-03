@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS events (
+    id bigint NOT NULL,
+    region text NOT NULL,
+    payload text
+) PARTITION BY LIST (region);
+
+CREATE TABLE IF NOT EXISTS events_eu PARTITION OF events FOR VALUES IN ('eu');
+
+CREATE TABLE IF NOT EXISTS events_other PARTITION OF events DEFAULT;
+
+CREATE TABLE IF NOT EXISTS events_us PARTITION OF events FOR VALUES IN ('us');

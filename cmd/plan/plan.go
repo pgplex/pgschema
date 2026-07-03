@@ -487,6 +487,11 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 				}
 			}
 
+			// Normalize partition parent schema reference
+			if table.PartitionOfSchema == fromSchema {
+				table.PartitionOfSchema = toSchema
+			}
+
 			// Normalize schema references in LIKE clauses
 			for i := range table.LikeClauses {
 				if table.LikeClauses[i].SourceSchema == fromSchema {

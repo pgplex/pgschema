@@ -673,6 +673,7 @@ func requiresPositionSorting(constraintType ConstraintType) bool {
 }
 
 // buildPartitionMapping builds a mapping from partition table names to their parent's partition keys
+// and populates partition child metadata (PartitionOf, PartitionOfSchema, PartitionBound) on child tables.
 func (i *Inspector) buildPartitionMapping(ctx context.Context, schema *IR, targetSchema string) map[string]string {
 	partitionMapping := make(map[string]string)
 
@@ -692,8 +693,18 @@ func (i *Inspector) buildPartitionMapping(ctx context.Context, schema *IR, targe
 		childTable := child.ChildTable
 		parentTable := child.ParentTable
 
-		// Find the parent table's partition key
 		dbSchema := schema.getOrCreateSchema(targetSchema)
+
+		// Set partition child metadata on the child table
+		if childTableInfo, exists := dbSchema.Tables[childTable]; exists {
+			childTableInfo.PartitionOf = parentTable
+			childTableInfo.PartitionOfSchema = child.ParentSchema
+			if child.PartitionBound.Valid {
+				childTableInfo.PartitionBound = child.PartitionBound.String
+			}
+		}
+
+		// Find the parent table's partition key
 		if parentTableInfo, exists := dbSchema.Tables[parentTable]; exists && parentTableInfo.IsPartitioned {
 			partitionMapping[childTable] = parentTableInfo.PartitionKey
 		}

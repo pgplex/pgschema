@@ -764,6 +764,14 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 
+	// Partition children: emit PARTITION OF instead of standalone CREATE TABLE.
+	// Columns and constraints are inherited from the parent automatically.
+	if table.PartitionOf != "" && table.PartitionBound != "" {
+		parentName := ir.QualifyEntityNameWithQuotesMode(table.PartitionOfSchema, table.PartitionOf, targetSchema, qualifySchema)
+		sql := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s %s;", tableName, parentName, table.PartitionBound)
+		return sql, nil
+	}
+
 	var parts []string
 	createPrefix := "CREATE TABLE IF NOT EXISTS"
 	if table.Unlogged {
