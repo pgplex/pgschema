@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -651,8 +652,13 @@ func runTenantSchemaTest(t *testing.T, testDataDir string) {
 	}
 }
 
-// normalizeSchemaOutput removes version-specific lines for comparison.
-// This allows comparing dumps across different PostgreSQL versions.
+// tzOffsetRe matches timezone offsets (e.g. -08, +00, +05:30) at the end of
+// quoted timestamp literals inside partition bound expressions. pg_get_expr
+// returns machine-local offsets, so we normalize them for cross-platform comparison.
+var tzOffsetRe = regexp.MustCompile(`(\d{2}:\d{2}:\d{2})[-+]\d{2}(:\d{2})?`)
+
+// normalizeSchemaOutput removes version-specific lines and normalizes
+// timezone offsets in partition bounds for cross-platform comparison.
 func normalizeSchemaOutput(output string) string {
 	lines := strings.Split(output, "\n")
 	var normalizedLines []string
@@ -662,6 +668,9 @@ func normalizeSchemaOutput(output string) string {
 		if strings.Contains(line, "-- Dumped by pgschema version") ||
 			strings.Contains(line, "-- Dumped from database version") {
 			continue
+		}
+		if strings.Contains(line, "PARTITION OF") || strings.Contains(line, "FOR VALUES") {
+			line = tzOffsetRe.ReplaceAllString(line, "${1}+00")
 		}
 		normalizedLines = append(normalizedLines, line)
 	}

@@ -62,6 +62,9 @@ type Table struct {
 	IsPartitioned     bool                   `json:"is_partitioned"`
 	PartitionStrategy string                 `json:"partition_strategy,omitempty"` // RANGE, LIST, HASH
 	PartitionKey      string                 `json:"partition_key,omitempty"`      // Column(s) used for partitioning
+	PartitionOf       string                 `json:"partition_of,omitempty"`       // Parent table name (partition children)
+	PartitionOfSchema string                 `json:"partition_of_schema,omitempty"` // Parent table schema (partition children)
+	PartitionBound    string                 `json:"partition_bound,omitempty"`    // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
 	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`       // LIKE clauses in CREATE TABLE
 	Unlogged          bool                   `json:"unlogged,omitempty"`           // True for UNLOGGED tables
 }

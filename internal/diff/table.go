@@ -764,6 +764,52 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 
+	// Partition children: emit PARTITION OF instead of standalone CREATE TABLE.
+	// Columns and inherited constraints come from the parent automatically;
+	// only child-specific constraints (conparentid = 0) remain in the IR.
+	if table.PartitionOf != "" && table.PartitionBound != "" {
+		parentSchema := table.PartitionOfSchema
+		if parentSchema == "" {
+			parentSchema = table.Schema
+		}
+		parentName := ir.QualifyEntityNameWithQuotesMode(parentSchema, table.PartitionOf, targetSchema, qualifySchema)
+
+		// Include child-specific constraints in the PARTITION OF statement.
+		inlineConstraints := getInlineConstraintsForTable(table)
+		var constraintParts []string
+		var deferred []*deferredConstraint
+		currentKey := fmt.Sprintf("%s.%s", table.Schema, table.Name)
+		for _, constraint := range inlineConstraints {
+			if suppressedInlineFKs[constraintPathKey(constraint)] {
+				continue
+			}
+			if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) {
+				deferred = append(deferred, &deferredConstraint{
+					table:      table,
+					constraint: constraint,
+				})
+				continue
+			}
+			if def := generateConstraintSQL(constraint, targetSchema, qualifySchema); def != "" {
+				constraintParts = append(constraintParts, fmt.Sprintf("    %s", def))
+			}
+		}
+
+		createPrefix := "CREATE TABLE IF NOT EXISTS"
+		if table.Unlogged {
+			createPrefix = "CREATE UNLOGGED TABLE IF NOT EXISTS"
+		}
+
+		var sql string
+		if len(constraintParts) > 0 {
+			sql = fmt.Sprintf("%s %s PARTITION OF %s (\n%s\n) %s;",
+				createPrefix, tableName, parentName, strings.Join(constraintParts, ",\n"), table.PartitionBound)
+		} else {
+			sql = fmt.Sprintf("%s %s PARTITION OF %s %s;", createPrefix, tableName, parentName, table.PartitionBound)
+		}
+		return sql, deferred
+	}
+
 	var parts []string
 	createPrefix := "CREATE TABLE IF NOT EXISTS"
 	if table.Unlogged {

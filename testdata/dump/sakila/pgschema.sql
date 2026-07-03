@@ -3,7 +3,7 @@
 --
 
 -- Dumped from database version PostgreSQL 18.0
--- Dumped by pgschema version 1.6.1
+-- Dumped by pgschema version 1.11.1
 
 
 --
@@ -350,18 +350,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_unq_rental_rental_date_inventory_id_custom
 -- Name: payment_p2022_01; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_01 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_01_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_01 PARTITION OF payment (
     CONSTRAINT payment_p2022_01_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_01_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_01_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-01-01 00:00:00+00') TO ('2022-02-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_01_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -385,18 +378,11 @@ CREATE INDEX IF NOT EXISTS payment_p2022_01_customer_id_idx ON payment_p2022_01 
 -- Name: payment_p2022_02; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_02 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_02_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_02 PARTITION OF payment (
     CONSTRAINT payment_p2022_02_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_02_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_02_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-02-01 00:00:00+00') TO ('2022-03-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_02_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -420,18 +406,11 @@ CREATE INDEX IF NOT EXISTS payment_p2022_02_customer_id_idx ON payment_p2022_02 
 -- Name: payment_p2022_03; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_03 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_03_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_03 PARTITION OF payment (
     CONSTRAINT payment_p2022_03_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_03_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_03_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-03-01 00:00:00+00') TO ('2022-04-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_03_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -455,18 +434,11 @@ CREATE INDEX IF NOT EXISTS payment_p2022_03_customer_id_idx ON payment_p2022_03 
 -- Name: payment_p2022_04; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_04 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_04_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_04 PARTITION OF payment (
     CONSTRAINT payment_p2022_04_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_04_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_04_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-04-01 00:00:00+00') TO ('2022-05-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_04_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -490,18 +462,11 @@ CREATE INDEX IF NOT EXISTS payment_p2022_04_customer_id_idx ON payment_p2022_04 
 -- Name: payment_p2022_05; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_05 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_05_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_05 PARTITION OF payment (
     CONSTRAINT payment_p2022_05_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_05_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_05_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-05-01 00:00:00+00') TO ('2022-06-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_05_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -525,18 +490,11 @@ CREATE INDEX IF NOT EXISTS payment_p2022_05_customer_id_idx ON payment_p2022_05 
 -- Name: payment_p2022_06; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_06 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_06_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_06 PARTITION OF payment (
     CONSTRAINT payment_p2022_06_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_06_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_06_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-06-01 00:00:00+00') TO ('2022-07-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_06_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -560,18 +518,11 @@ CREATE INDEX IF NOT EXISTS payment_p2022_06_customer_id_idx ON payment_p2022_06 
 -- Name: payment_p2022_07; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS payment_p2022_07 (
-    payment_id SERIAL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
-    amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_p2022_07_pkey PRIMARY KEY (payment_date, payment_id),
+CREATE TABLE IF NOT EXISTS payment_p2022_07 PARTITION OF payment (
     CONSTRAINT payment_p2022_07_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer (customer_id),
     CONSTRAINT payment_p2022_07_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_07_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
-);
+) FOR VALUES FROM ('2022-07-01 00:00:00+00') TO ('2022-08-01 00:00:00+00');
 
 --
 -- Name: idx_fk_payment_p2022_07_customer_id; Type: INDEX; Schema: -; Owner: -

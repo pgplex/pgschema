@@ -21,12 +21,7 @@ CREATE TABLE IF NOT EXISTS ledger (
 -- Name: ledger_2026_06; Type: TABLE; Schema: -; Owner: -
 --
 
-CREATE TABLE IF NOT EXISTS ledger_2026_06 (
-    id uuid,
-    amount bigint NOT NULL,
-    ts timestamptz,
-    CONSTRAINT ledger_2026_06_pkey PRIMARY KEY (ts, id)
-);
+CREATE TABLE IF NOT EXISTS ledger_2026_06 PARTITION OF ledger FOR VALUES FROM ('2026-06-01 00:00:00+00') TO ('2026-07-01 00:00:00+00');
 
 --
 -- Name: tg_noop(); Type: FUNCTION; Schema: -; Owner: -
