@@ -684,6 +684,8 @@ func (i *Inspector) buildPartitionMapping(ctx context.Context, schema *IR, targe
 		return partitionMapping
 	}
 
+	dbSchema := schema.getOrCreateSchema(targetSchema)
+
 	for _, child := range partitionChildren {
 		// Only process children in the target schema
 		if child.ChildSchema != targetSchema {
@@ -692,8 +694,6 @@ func (i *Inspector) buildPartitionMapping(ctx context.Context, schema *IR, targe
 
 		childTable := child.ChildTable
 		parentTable := child.ParentTable
-
-		dbSchema := schema.getOrCreateSchema(targetSchema)
 
 		// Set partition child metadata on the child table
 		if childTableInfo, exists := dbSchema.Tables[childTable]; exists {
