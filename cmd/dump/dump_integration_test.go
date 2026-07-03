@@ -652,10 +652,10 @@ func runTenantSchemaTest(t *testing.T, testDataDir string) {
 	}
 }
 
-// tzOffsetRe matches timezone offsets (e.g. -08, +00, -07) at the end of
+// tzOffsetRe matches timezone offsets (e.g. -08, +00, +05:30) at the end of
 // quoted timestamp literals inside partition bound expressions. pg_get_expr
 // returns machine-local offsets, so we normalize them for cross-platform comparison.
-var tzOffsetRe = regexp.MustCompile(`(\d{2}:\d{2}:\d{2})[-+]\d{2}`)
+var tzOffsetRe = regexp.MustCompile(`(\d{2}:\d{2}:\d{2})[-+]\d{2}(:\d{2})?`)
 
 // normalizeSchemaOutput removes version-specific lines and normalizes
 // timezone offsets in partition bounds for cross-platform comparison.
