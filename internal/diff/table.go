@@ -413,6 +413,7 @@ func generateCreateTablesSQL(
 	existingTables map[string]bool,
 	shouldDeferPolicy func(*ir.RLSPolicy) bool,
 	suppressedInlineFKs map[string]bool,
+	allNewTables map[string]*ir.Table,
 ) ([]*ir.RLSPolicy, []*deferredConstraint) {
 	var deferredPolicies []*ir.RLSPolicy
 	var deferredConstraints []*deferredConstraint
@@ -421,7 +422,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -759,7 +760,7 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool) (string, []*deferredConstraint) {
+func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table) (string, []*deferredConstraint) {
 	// Only include table name without schema if it's in the target schema (unless
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
@@ -774,7 +775,44 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		}
 		parentName := ir.QualifyEntityNameWithQuotesMode(parentSchema, table.PartitionOf, targetSchema, qualifySchema)
 
-		// Include child-specific constraints in the PARTITION OF statement.
+		// Include child-specific column overrides and constraints in the PARTITION OF statement.
+		var elementParts []string
+
+		// Detect per-child column overrides (DEFAULT, NOT NULL) by comparing against the parent.
+		parentKey := parentSchema + "." + table.PartitionOf
+		if parentTable, ok := allTables[parentKey]; ok {
+			parentCols := make(map[string]*ir.Column, len(parentTable.Columns))
+			for _, col := range parentTable.Columns {
+				parentCols[col.Name] = col
+			}
+			for _, col := range table.Columns {
+				parentCol := parentCols[col.Name]
+				if parentCol == nil {
+					continue
+				}
+				var overrides []string
+				childDefault := ""
+				parentDefault := ""
+				if col.DefaultValue != nil {
+					childDefault = *col.DefaultValue
+				}
+				if parentCol.DefaultValue != nil {
+					parentDefault = *parentCol.DefaultValue
+				}
+				if childDefault != parentDefault {
+					if col.DefaultValue != nil {
+						overrides = append(overrides, fmt.Sprintf("DEFAULT %s", *col.DefaultValue))
+					}
+				}
+				if !col.IsNullable && parentCol.IsNullable {
+					overrides = append(overrides, "NOT NULL")
+				}
+				if len(overrides) > 0 {
+					elementParts = append(elementParts, fmt.Sprintf("    %s %s", ir.QuoteIdentifier(col.Name), strings.Join(overrides, " ")))
+				}
+			}
+		}
+
 		inlineConstraints := getInlineConstraintsForTable(table)
 		var constraintParts []string
 		var deferred []*deferredConstraint
@@ -800,10 +838,11 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 			createPrefix = "CREATE UNLOGGED TABLE IF NOT EXISTS"
 		}
 
+		allParts := append(elementParts, constraintParts...)
 		var sql string
-		if len(constraintParts) > 0 {
+		if len(allParts) > 0 {
 			sql = fmt.Sprintf("%s %s PARTITION OF %s (\n%s\n) %s;",
-				createPrefix, tableName, parentName, strings.Join(constraintParts, ",\n"), table.PartitionBound)
+				createPrefix, tableName, parentName, strings.Join(allParts, ",\n"), table.PartitionBound)
 		} else {
 			sql = fmt.Sprintf("%s %s PARTITION OF %s %s;", createPrefix, tableName, parentName, table.PartitionBound)
 		}
