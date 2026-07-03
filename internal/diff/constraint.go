@@ -166,7 +166,12 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 	if old.CheckClause != new.CheckClause {
 		return false
 	}
-	if old.NoInherit != new.NoInherit {
+	// NoInherit (connoinherit) is only meaningful for CHECK constraints where
+	// it controls the NO INHERIT modifier. For PK/UNIQUE/FK/EXCLUDE constraints,
+	// PostgreSQL sets connoinherit inconsistently (e.g. true for a standalone
+	// constraint vs false for one created via PARTITION OF), so comparing it
+	// would cause false diffs on partition children (#495).
+	if old.Type == ir.ConstraintTypeCheck && old.NoInherit != new.NoInherit {
 		return false
 	}
 	if old.ExclusionDefinition != new.ExclusionDefinition {
