@@ -795,12 +795,17 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 			}
 		}
 
+		createPrefix := "CREATE TABLE IF NOT EXISTS"
+		if table.Unlogged {
+			createPrefix = "CREATE UNLOGGED TABLE IF NOT EXISTS"
+		}
+
 		var sql string
 		if len(constraintParts) > 0 {
-			sql = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s (\n%s\n) %s;",
-				tableName, parentName, strings.Join(constraintParts, ",\n"), table.PartitionBound)
+			sql = fmt.Sprintf("%s %s PARTITION OF %s (\n%s\n) %s;",
+				createPrefix, tableName, parentName, strings.Join(constraintParts, ",\n"), table.PartitionBound)
 		} else {
-			sql = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s PARTITION OF %s %s;", tableName, parentName, table.PartitionBound)
+			sql = fmt.Sprintf("%s %s PARTITION OF %s %s;", createPrefix, tableName, parentName, table.PartitionBound)
 		}
 		return sql, deferred
 	}
