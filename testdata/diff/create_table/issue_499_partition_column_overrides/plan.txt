@@ -1,0 +1,26 @@
+Plan: 3 to add.
+
+Summary by type:
+  tables: 3 to add
+
+Tables:
+  + orders
+  + orders_eu
+  + orders_us
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS orders (
+    id bigint NOT NULL,
+    region text NOT NULL,
+    priority integer DEFAULT 0,
+    notes text
+) PARTITION BY LIST (region);
+
+CREATE TABLE IF NOT EXISTS orders_eu PARTITION OF orders FOR VALUES IN ('eu');
+
+CREATE TABLE IF NOT EXISTS orders_us PARTITION OF orders (
+    priority DEFAULT 10,
+    notes NOT NULL
+) FOR VALUES IN ('us');
