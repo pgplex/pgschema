@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "COMMENT ON COLUMN ex.\"ID\" IS 'Primary identifier';",
+          "sql": "COMMENT ON COLUMN public.ex.\"ID\" IS 'Primary identifier';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.ex.ID"

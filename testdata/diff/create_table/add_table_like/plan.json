@@ -21,7 +21,7 @@
           "path": "public.users"
         },
         {
-          "sql": "COMMENT ON COLUMN users.created_at IS 'Record creation time';",
+          "sql": "COMMENT ON COLUMN public.users.created_at IS 'Record creation time';",
           "type": "table.column.comment",
           "operation": "create",
           "path": "public.users.created_at"
