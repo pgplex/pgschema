@@ -15,6 +15,6 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT _template_timestamps_check CHECK (created_at <= updated_at)
 );
 
-COMMENT ON COLUMN public.users.created_at IS 'Record creation time';
+COMMENT ON COLUMN users.created_at IS 'Record creation time';
 
 CREATE INDEX IF NOT EXISTS users_created_at_idx ON users (created_at);

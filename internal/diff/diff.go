@@ -2179,6 +2179,17 @@ func qualifyEntityNameMode(entitySchema, entityName, targetSchema string, qualif
 	return fmt.Sprintf("%s.%s", quotedSchema, quotedName)
 }
 
+// qualifyColumnCommentTable returns the table name for use in COMMENT ON COLUMN
+// statements. Like qualifyEntityNameMode, it omits the schema when the table is
+// in the target schema — unless the table name itself matches the target schema,
+// which would cause stripSchemaQualifications to strip the table qualifier.
+func qualifyColumnCommentTable(tableSchema, tableName, targetSchema string, qualifySchema bool) string {
+	if !qualifySchema && tableSchema == targetSchema && strings.EqualFold(tableName, targetSchema) {
+		return fmt.Sprintf("%s.%s", ir.QuoteIdentifier(tableSchema), ir.QuoteIdentifier(tableName))
+	}
+	return qualifyEntityNameMode(tableSchema, tableName, targetSchema, qualifySchema)
+}
+
 // quoteString properly quotes a string for SQL, handling single quotes
 func quoteString(s string) string {
 	// Escape single quotes by doubling them

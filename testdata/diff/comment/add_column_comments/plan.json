@@ -9,25 +9,25 @@
     {
       "steps": [
         {
-          "sql": "COMMENT ON COLUMN public.products.id IS 'Unique product identifier';",
+          "sql": "COMMENT ON COLUMN products.id IS 'Unique product identifier';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.products.id"
         },
         {
-          "sql": "COMMENT ON COLUMN public.products.name IS 'Product display name';",
+          "sql": "COMMENT ON COLUMN products.name IS 'Product display name';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.products.name"
         },
         {
-          "sql": "COMMENT ON COLUMN public.products.price IS 'Product price in USD';",
+          "sql": "COMMENT ON COLUMN products.price IS 'Product price in USD';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.products.price"
         },
         {
-          "sql": "COMMENT ON COLUMN public.products.created_at IS 'Timestamp when product was added';",
+          "sql": "COMMENT ON COLUMN products.created_at IS 'Timestamp when product was added';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.products.created_at"

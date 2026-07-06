@@ -15,31 +15,31 @@
           "path": "public.categories"
         },
         {
-          "sql": "COMMENT ON COLUMN public.categories.id IS 'Category unique identifier';",
+          "sql": "COMMENT ON COLUMN categories.id IS 'Category unique identifier';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.categories.id"
         },
         {
-          "sql": "COMMENT ON COLUMN public.categories.name IS 'Category display name';",
+          "sql": "COMMENT ON COLUMN categories.name IS 'Category display name';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.categories.name"
         },
         {
-          "sql": "COMMENT ON COLUMN public.categories.description IS 'Optional category description';",
+          "sql": "COMMENT ON COLUMN categories.description IS 'Optional category description';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.categories.description"
         },
         {
-          "sql": "COMMENT ON COLUMN public.categories.parent_id IS 'Parent category for hierarchical structure';",
+          "sql": "COMMENT ON COLUMN categories.parent_id IS 'Parent category for hierarchical structure';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.categories.parent_id"
         },
         {
-          "sql": "COMMENT ON COLUMN public.categories.created_at IS 'Category creation timestamp';",
+          "sql": "COMMENT ON COLUMN categories.created_at IS 'Category creation timestamp';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.categories.created_at"
@@ -57,7 +57,7 @@
           "path": "public.posts.views"
         },
         {
-          "sql": "COMMENT ON COLUMN public.posts.views IS 'Number of post views';",
+          "sql": "COMMENT ON COLUMN posts.views IS 'Number of post views';",
           "type": "table.column.comment",
           "operation": "create",
           "path": "public.posts.views"
@@ -69,31 +69,31 @@
           "path": "public.posts"
         },
         {
-          "sql": "COMMENT ON COLUMN public.posts.id IS 'Unique post identifier';",
+          "sql": "COMMENT ON COLUMN posts.id IS 'Unique post identifier';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.posts.id"
         },
         {
-          "sql": "COMMENT ON COLUMN public.posts.title IS 'Post title, max 200 characters';",
+          "sql": "COMMENT ON COLUMN posts.title IS 'Post title, max 200 characters';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.posts.title"
         },
         {
-          "sql": "COMMENT ON COLUMN public.posts.content IS 'Post body in markdown format';",
+          "sql": "COMMENT ON COLUMN posts.content IS 'Post body in markdown format';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.posts.content"
         },
         {
-          "sql": "COMMENT ON COLUMN public.posts.author_id IS 'Foreign key to users table';",
+          "sql": "COMMENT ON COLUMN posts.author_id IS 'Foreign key to users table';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.posts.author_id"
         },
         {
-          "sql": "COMMENT ON COLUMN public.posts.published_at IS 'Publication timestamp, NULL for drafts';",
+          "sql": "COMMENT ON COLUMN posts.published_at IS 'Publication timestamp, NULL for drafts';",
           "type": "table.column.comment",
           "operation": "alter",
           "path": "public.posts.published_at"

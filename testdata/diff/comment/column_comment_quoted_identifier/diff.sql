@@ -1,1 +1,1 @@
-COMMENT ON COLUMN public.ex."ID" IS 'Primary identifier';
+COMMENT ON COLUMN ex."ID" IS 'Primary identifier';
