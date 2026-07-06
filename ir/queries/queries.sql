@@ -165,11 +165,11 @@ LEFT JOIN LATERAL (
         -- same-schema function qualifiers while preserving type qualifiers (Issue #218)
         set_config('search_path', 'pg_catalog', true) as dummy,
         CASE
-            WHEN cb.attgenerated = 's' THEN NULL  -- Generated columns don't have defaults
+            WHEN cb.attgenerated IN ('s', 'v') THEN NULL  -- Generated columns don't have defaults
             ELSE COALESCE(pg_get_expr(cb.adbin, cb.adrelid), cb.column_default)
         END as column_default,
         CASE
-            WHEN cb.attgenerated = 's' THEN pg_get_expr(cb.adbin, cb.adrelid)
+            WHEN cb.attgenerated IN ('s', 'v') THEN pg_get_expr(cb.adbin, cb.adrelid)
             ELSE NULL
         END as generated_expr
 ) ge ON true
@@ -295,11 +295,11 @@ LEFT JOIN LATERAL (
         -- same-schema function qualifiers while preserving type qualifiers (Issue #218)
         set_config('search_path', 'pg_catalog', true) as dummy,
         CASE
-            WHEN cb.attgenerated = 's' THEN NULL  -- Generated columns don't have defaults
+            WHEN cb.attgenerated IN ('s', 'v') THEN NULL  -- Generated columns don't have defaults
             ELSE COALESCE(pg_get_expr(cb.adbin, cb.adrelid), cb.column_default)
         END as column_default,
         CASE
-            WHEN cb.attgenerated = 's' THEN pg_get_expr(cb.adbin, cb.adrelid)
+            WHEN cb.attgenerated IN ('s', 'v') THEN pg_get_expr(cb.adbin, cb.adrelid)
             ELSE NULL
         END as generated_expr
 ) ge ON true

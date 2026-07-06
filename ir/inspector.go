@@ -311,10 +311,12 @@ func (i *Inspector) buildColumns(ctx context.Context, schema *IR, targetSchema s
 			Comment:    comment,
 		}
 
-		// Handle generated columns first
-		isGeneratedColumn := i.safeInterfaceToString(col.Attgenerated) == "s"
+		// Handle generated columns first (attgenerated: 's' = STORED, 'v' = VIRTUAL in PG18+)
+		attgenerated := i.safeInterfaceToString(col.Attgenerated)
+		isGeneratedColumn := attgenerated == "s" || attgenerated == "v"
 		if isGeneratedColumn {
 			column.IsGenerated = true
+			column.GeneratedKind = attgenerated
 			if generatedExpr := i.safeInterfaceToString(col.GeneratedExpr); generatedExpr != "" {
 				column.GeneratedExpr = &generatedExpr
 			}

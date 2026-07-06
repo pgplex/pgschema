@@ -1731,8 +1731,11 @@ func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema strin
 
 	// 3. Generated column syntax (must come before constraints)
 	if column.IsGenerated && column.GeneratedExpr != nil {
-		// TODO: Add support for GENERATED ALWAYS AS (...) VIRTUAL when PostgreSQL 18 is supported
-		parts = append(parts, fmt.Sprintf("GENERATED ALWAYS AS (%s) STORED", *column.GeneratedExpr))
+		kind := "STORED"
+		if column.GeneratedKind == "v" {
+			kind = "VIRTUAL"
+		}
+		parts = append(parts, fmt.Sprintf("GENERATED ALWAYS AS (%s) %s", *column.GeneratedExpr, kind))
 	}
 
 	// 4. NOT NULL (skip for PK including multi-column PKs, identity, and SERIAL)

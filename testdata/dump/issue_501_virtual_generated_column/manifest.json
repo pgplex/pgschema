@@ -1,0 +1,9 @@
+{
+  "name": "issue_501_virtual_generated_column",
+  "description": "Test case for PG18 VIRTUAL generated column support (GitHub issue #501)",
+  "source": "https://github.com/pgplex/pgschema/issues/501",
+  "notes": [
+    "Tests that GENERATED ALWAYS AS (...) VIRTUAL columns are correctly preserved",
+    "Verifies VIRTUAL columns are not silently rewritten as DEFAULT expressions"
+  ]
+}
