@@ -101,6 +101,12 @@ func matchesAnyPattern(testName string, patterns []string) bool {
 	return false
 }
 
+// skipListRequiresPG18 defines test cases that use PG18+ syntax (e.g. VIRTUAL generated
+// columns). These are skipped on PostgreSQL versions below 18.
+var skipListRequiresPG18 = []string{
+	"create_table/issue_501_virtual_generated_column",
+}
+
 // ShouldSkipTest checks if a test should be skipped for the given PostgreSQL major version.
 // If the test should be skipped, it calls t.Skipf() which stops test execution.
 //
@@ -120,6 +126,11 @@ func ShouldSkipTest(t *testing.T, testName string, majorVersion int) {
 	// bundled with embedded-postgres).
 	if matchesAnyPattern(testName, skipListRequiresExtension) {
 		t.Skipf("Skipping test %q: requires third-party extension not available in embedded-postgres", testName)
+	}
+
+	// PG18+-required tests are skipped on older versions.
+	if majorVersion < 18 && matchesAnyPattern(testName, skipListRequiresPG18) {
+		t.Skipf("Skipping test %q on PostgreSQL %d: requires PostgreSQL 18+", testName, majorVersion)
 	}
 
 	// The full suite runs only against the latest version.
