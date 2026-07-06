@@ -83,6 +83,7 @@ type Column struct {
 	Identity      *Identity `json:"identity,omitempty"`
 	GeneratedExpr *string   `json:"generated_expr,omitempty"` // Expression for generated columns
 	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
+	GeneratedKind string    `json:"generated_kind,omitempty"` // "s" for STORED, "v" for VIRTUAL (PG18+)
 }
 
 // Identity represents PostgreSQL identity column configuration

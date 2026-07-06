@@ -1,0 +1,15 @@
+Plan: 1 to add.
+
+Summary by type:
+  tables: 1 to add
+
+Tables:
+  + vt
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS vt (
+    slug text NOT NULL,
+    identifier text GENERATED ALWAYS AS (('urn:sdp:catalog:'::text || slug)) VIRTUAL
+);
