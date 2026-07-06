@@ -1,0 +1,4 @@
+CREATE TABLE public (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);

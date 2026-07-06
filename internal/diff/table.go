@@ -456,7 +456,7 @@ func generateCreateTablesSQL(
 		// Add column comments
 		for _, column := range table.Columns {
 			if column.Comment != "" {
-				tableName := qualifyEntityNameMode(table.Schema, table.Name, targetSchema, collector.qualifySchema)
+				tableName := qualifyColumnCommentTable(table.Schema, table.Name, targetSchema, collector.qualifySchema)
 				sql := fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", tableName, ir.QuoteIdentifier(column.Name), quoteString(column.Comment))
 
 				// Create context for this statement
@@ -1134,7 +1134,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	// Add comments for new columns
 	for _, column := range td.AddedColumns {
 		if column.Comment != "" {
-			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+			tableName := qualifyColumnCommentTable(td.Table.Schema, td.Table.Name, targetSchema, false)
 			sql := fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", tableName, ir.QuoteIdentifier(column.Name), quoteString(column.Comment))
 
 			context := &diffContext{
@@ -1603,7 +1603,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	// Handle column comment changes
 	for _, colDiff := range td.ModifiedColumns {
 		if colDiff.Old.Comment != colDiff.New.Comment {
-			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+			tableName := qualifyColumnCommentTable(td.Table.Schema, td.Table.Name, targetSchema, false)
 			var sql string
 			if colDiff.New.Comment == "" {
 				sql = fmt.Sprintf("COMMENT ON COLUMN %s.%s IS NULL;", tableName, ir.QuoteIdentifier(colDiff.New.Name))

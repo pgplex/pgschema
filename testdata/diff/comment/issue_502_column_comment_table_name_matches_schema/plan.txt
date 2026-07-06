@@ -1,0 +1,16 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ public
+    ~ id (column.comment)
+    ~ name (column.comment)
+
+DDL to be executed:
+--------------------------------------------------
+
+COMMENT ON COLUMN public.public.id IS 'Primary key';
+
+COMMENT ON COLUMN public.public.name IS 'Display name';
