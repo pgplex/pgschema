@@ -247,6 +247,9 @@ func generateDropTriggersFromDroppedTables(tables []*ir.Table, targetSchema stri
 	}
 
 	sort.Slice(allTriggers, func(i, j int) bool {
+		if allTriggers[i].Schema != allTriggers[j].Schema {
+			return allTriggers[i].Schema < allTriggers[j].Schema
+		}
 		if allTriggers[i].Table != allTriggers[j].Table {
 			return allTriggers[i].Table < allTriggers[j].Table
 		}
@@ -284,6 +287,9 @@ func generateDropTriggersFromDroppedViews(views []*ir.View, targetSchema string,
 	}
 
 	sort.Slice(allTriggers, func(i, j int) bool {
+		if allTriggers[i].Schema != allTriggers[j].Schema {
+			return allTriggers[i].Schema < allTriggers[j].Schema
+		}
 		if allTriggers[i].Table != allTriggers[j].Table {
 			return allTriggers[i].Table < allTriggers[j].Table
 		}
