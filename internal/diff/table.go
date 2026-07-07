@@ -634,7 +634,7 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			}
 		}
 		for _, idx := range td.AddedIndexes {
-			if idx.Type == ir.IndexTypeUnique {
+			if idx.Type == ir.IndexTypeUnique && !idx.IsPartial {
 				addedUniqueIndexes[key] = append(addedUniqueIndexes[key], idx)
 			}
 		}

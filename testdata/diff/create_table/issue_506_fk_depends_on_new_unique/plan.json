@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "312e14d55791468f6809e0d7b91325d6b8fd802ac0fd3fdfe2bad8e973e591a5"
+    "hash": "a2e9edaed4b13aa629d2ed847ffd01634bf02251aaa187e810dc64ecc17497e1"
   },
   "groups": [
     {
@@ -15,16 +15,56 @@
           "path": "public.child"
         },
         {
+          "sql": "CREATE TABLE IF NOT EXISTS child2 (\n    id uuid,\n    parent2_id uuid,\n    tenant text NOT NULL,\n    CONSTRAINT child2_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.child2"
+        },
+        {
           "sql": "ALTER TABLE parent\nADD CONSTRAINT parent_id_tenant_key UNIQUE (id, tenant);",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.parent.parent_id_tenant_key"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS parent2_id_tenant_key ON parent2 (id, tenant);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.parent2.parent2_id_tenant_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'parent2_id_tenant_key';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index parent2_id_tenant_key"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.parent2.parent2_id_tenant_key"
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE child\nADD CONSTRAINT child_parent_id_tenant_fkey FOREIGN KEY (parent_id, tenant) REFERENCES parent (id, tenant);",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.child.child_parent_id_tenant_fkey"
+        },
+        {
+          "sql": "ALTER TABLE child2\nADD CONSTRAINT child2_parent2_id_tenant_fkey FOREIGN KEY (parent2_id, tenant) REFERENCES parent2 (id, tenant);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.child2.child2_parent2_id_tenant_fkey"
         }
       ]
     }
