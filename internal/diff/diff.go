@@ -2101,6 +2101,12 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	generateDropTriggersFromModifiedTables(d.modifiedTables, targetSchema, collector)
 	generateDropTriggersFromModifiedViews(d.modifiedViews, targetSchema, collector, preDroppedViews)
 
+	// Drop triggers from tables and views that are themselves being dropped.
+	// This must happen before DROP FUNCTION so that trigger→function
+	// dependencies are removed first (#505).
+	generateDropTriggersFromDroppedTables(d.droppedTables, targetSchema, collector)
+	generateDropTriggersFromDroppedViews(d.droppedViews, targetSchema, collector, preDroppedViews)
+
 	// Drop aggregates before functions, since an aggregate depends on its
 	// transition/final functions (issue #416).
 	generateDropAggregatesSQL(d.droppedAggregates, targetSchema, collector)

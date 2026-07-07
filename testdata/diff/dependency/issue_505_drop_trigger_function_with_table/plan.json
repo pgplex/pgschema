@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "b830414412e5c92476a85d494c5017028c5adcc5f7ead7b1322e85d7514349bc"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP TRIGGER IF EXISTS events_notify ON events;",
+          "type": "table.trigger",
+          "operation": "drop",
+          "path": "public.events.events_notify"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS notify_event();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.notify_event"
+        },
+        {
+          "sql": "DROP TABLE IF EXISTS events CASCADE;",
+          "type": "table",
+          "operation": "drop",
+          "path": "public.events"
+        }
+      ]
+    }
+  ]
+}
