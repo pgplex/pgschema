@@ -12,7 +12,7 @@ LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_users_email_pgschema_new';
 
-DROP INDEX idx_users_email;
+DROP INDEX IF EXISTS idx_users_email;
 
 ALTER INDEX idx_users_email_pgschema_new RENAME TO idx_users_email;
 
@@ -30,6 +30,6 @@ LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_users_status_pgschema_new';
 
-DROP INDEX idx_users_status;
+DROP INDEX IF EXISTS idx_users_status;
 
 ALTER INDEX idx_users_status_pgschema_new RENAME TO idx_users_status;

@@ -153,8 +153,13 @@ func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
 	concurrentSQL := generateIndexSQL(&tempIndex, true)
 	waitSQL := generateIndexWaitQueryWithName(tempIndexName)
 
-	// Drop old index and rename new one
-	dropSQL := fmt.Sprintf("DROP INDEX %s;", ir.QuoteIdentifier(index.Name))
+	// Drop old index and rename new one. Use IF EXISTS because a same-plan
+	// DROP COLUMN step may already have implicitly dropped this index
+	// (PostgreSQL drops indexes that depend on a dropped column), which
+	// would otherwise make this bare DROP INDEX fail with SQLSTATE 42704.
+	// Mirrors internal/diff/index.go's non-online DROP INDEX IF EXISTS.
+	// See issue #509 / #384.
+	dropSQL := fmt.Sprintf("DROP INDEX IF EXISTS %s;", ir.QuoteIdentifier(index.Name))
 	renameSQL := fmt.Sprintf("ALTER INDEX %s RENAME TO %s;", ir.QuoteIdentifier(tempIndexName), ir.QuoteIdentifier(index.Name))
 
 	return []RewriteStep{
@@ -199,8 +204,13 @@ func generateIndexChangeRewrite(indexDiff *diff.IndexDiff) []RewriteStep {
 	concurrentSQL := generateIndexSQL(&tempIndex, true)
 	waitSQL := generateIndexWaitQueryWithName(tempIndexName)
 
-	// Drop old index and rename new one
-	dropSQL := fmt.Sprintf("DROP INDEX %s;", ir.QuoteIdentifier(indexDiff.Old.Name))
+	// Drop old index and rename new one. Use IF EXISTS because a same-plan
+	// DROP COLUMN step may already have implicitly dropped this index
+	// (PostgreSQL drops indexes that depend on a dropped column), which
+	// would otherwise make this bare DROP INDEX fail with SQLSTATE 42704.
+	// Mirrors internal/diff/index.go's non-online DROP INDEX IF EXISTS.
+	// See issue #509 / #384.
+	dropSQL := fmt.Sprintf("DROP INDEX IF EXISTS %s;", ir.QuoteIdentifier(indexDiff.Old.Name))
 	renameSQL := fmt.Sprintf("ALTER INDEX %s RENAME TO %s;", ir.QuoteIdentifier(tempIndexName), ir.QuoteIdentifier(indexDiff.New.Name))
 
 	return []RewriteStep{
