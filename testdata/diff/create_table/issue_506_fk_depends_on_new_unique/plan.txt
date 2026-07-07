@@ -1,0 +1,26 @@
+Plan: 1 to add, 1 to modify.
+
+Summary by type:
+  tables: 1 to add, 1 to modify
+
+Tables:
+  + child
+    + child_parent_id_tenant_fkey (constraint)
+  ~ parent
+    + parent_id_tenant_key (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS child (
+    id uuid,
+    parent_id uuid,
+    tenant text NOT NULL,
+    CONSTRAINT child_pkey PRIMARY KEY (id)
+);
+
+ALTER TABLE parent
+ADD CONSTRAINT parent_id_tenant_key UNIQUE (id, tenant);
+
+ALTER TABLE child
+ADD CONSTRAINT child_parent_id_tenant_fkey FOREIGN KEY (parent_id, tenant) REFERENCES parent (id, tenant);

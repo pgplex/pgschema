@@ -620,7 +620,27 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			}
 		}
 	}
-	if len(replaced) == 0 {
+
+	// Unique/PK constraints and unique indexes newly added to existing tables
+	// in this migration. These are emitted in the modify phase, so FKs in new
+	// tables that depend on them must be deferred past CREATE TABLE (issue #506).
+	addedConstraints := make(map[string][]*ir.Constraint)
+	addedUniqueIndexes := make(map[string][]*ir.Index)
+	for _, td := range modifiedTables {
+		key := td.Table.Schema + "." + td.Table.Name
+		for _, c := range td.AddedConstraints {
+			if c.Type == ir.ConstraintTypeUnique || c.Type == ir.ConstraintTypePrimaryKey {
+				addedConstraints[key] = append(addedConstraints[key], c)
+			}
+		}
+		for _, idx := range td.AddedIndexes {
+			if idx.Type == ir.IndexTypeUnique {
+				addedUniqueIndexes[key] = append(addedUniqueIndexes[key], idx)
+			}
+		}
+	}
+
+	if len(replaced) == 0 && len(addedConstraints) == 0 && len(addedUniqueIndexes) == 0 {
 		return nil, nil, nil
 	}
 
@@ -654,9 +674,9 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 		}
 	}
 
-	// FKs on newly added tables that target a replaced constraint: keep them
-	// out of CREATE TABLE (create phase runs before the modify-phase swap) and
-	// add them with the other recreated FKs instead.
+	// FKs on newly added tables that target a replaced or newly-added constraint
+	// (or unique index): keep them out of CREATE TABLE (create phase runs before
+	// the modify phase) and add them after the modify phase instead (#439, #506).
 	suppressedInlineFKs = make(map[string]bool)
 	for _, table := range addedTables {
 		for _, name := range sortedKeys(table.Constraints) {
@@ -664,7 +684,10 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			if fk.Type != ir.ConstraintTypeForeignKey {
 				continue
 			}
-			if !fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)]) {
+			refKey := fkReferencedTableKey(fk)
+			if !fkReferencesAnyConstraint(fk, replaced[refKey]) &&
+				!fkReferencesAnyConstraint(fk, addedConstraints[refKey]) &&
+				!fkReferencesAnyUniqueIndex(fk, addedUniqueIndexes[refKey]) {
 				continue
 			}
 			suppressedInlineFKs[constraintPathKey(fk)] = true
@@ -708,6 +731,31 @@ func fkReferencesAnyConstraint(fk *ir.Constraint, candidates []*ir.Constraint) b
 		}
 		matched := true
 		for _, col := range c.Columns {
+			if !refCols[col.Name] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// fkReferencesAnyUniqueIndex reports whether the FK's referenced columns match
+// the column set of any of the given unique indexes.
+func fkReferencesAnyUniqueIndex(fk *ir.Constraint, candidates []*ir.Index) bool {
+	refCols := make(map[string]bool, len(fk.ReferencedColumns))
+	for _, col := range fk.ReferencedColumns {
+		refCols[col.Name] = true
+	}
+	for _, idx := range candidates {
+		if len(idx.Columns) != len(refCols) {
+			continue
+		}
+		matched := true
+		for _, col := range idx.Columns {
 			if !refCols[col.Name] {
 				matched = false
 				break

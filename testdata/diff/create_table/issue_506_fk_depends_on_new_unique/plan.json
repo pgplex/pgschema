@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "312e14d55791468f6809e0d7b91325d6b8fd802ac0fd3fdfe2bad8e973e591a5"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS child (\n    id uuid,\n    parent_id uuid,\n    tenant text NOT NULL,\n    CONSTRAINT child_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.child"
+        },
+        {
+          "sql": "ALTER TABLE parent\nADD CONSTRAINT parent_id_tenant_key UNIQUE (id, tenant);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.parent.parent_id_tenant_key"
+        },
+        {
+          "sql": "ALTER TABLE child\nADD CONSTRAINT child_parent_id_tenant_fkey FOREIGN KEY (parent_id, tenant) REFERENCES parent (id, tenant);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.child.child_parent_id_tenant_fkey"
+        }
+      ]
+    }
+  ]
+}
