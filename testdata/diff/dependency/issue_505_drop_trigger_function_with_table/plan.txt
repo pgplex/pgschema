@@ -1,0 +1,21 @@
+Plan: 2 to drop.
+
+Summary by type:
+  functions: 1 to drop
+  tables: 1 to drop
+
+Functions:
+  - notify_event
+
+Tables:
+  - events
+    - events_notify (trigger)
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP TRIGGER IF EXISTS events_notify ON events;
+
+DROP FUNCTION IF EXISTS notify_event();
+
+DROP TABLE IF EXISTS events CASCADE;

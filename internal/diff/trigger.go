@@ -234,6 +234,83 @@ func generateDropTriggersFromModifiedViews(views []*viewDiff, targetSchema strin
 	}
 }
 
+// generateDropTriggersFromDroppedTables emits DROP TRIGGER for all triggers on
+// tables that are being dropped. This must run before DROP FUNCTION so that
+// trigger→function dependencies are removed first (#505).
+func generateDropTriggersFromDroppedTables(tables []*ir.Table, targetSchema string, collector *diffCollector) {
+	var allTriggers []*ir.Trigger
+
+	for _, table := range tables {
+		for _, trigger := range table.Triggers {
+			allTriggers = append(allTriggers, trigger)
+		}
+	}
+
+	sort.Slice(allTriggers, func(i, j int) bool {
+		if allTriggers[i].Schema != allTriggers[j].Schema {
+			return allTriggers[i].Schema < allTriggers[j].Schema
+		}
+		if allTriggers[i].Table != allTriggers[j].Table {
+			return allTriggers[i].Table < allTriggers[j].Table
+		}
+		return allTriggers[i].Name < allTriggers[j].Name
+	})
+
+	for _, trigger := range allTriggers {
+		tableName := getTableNameWithSchema(trigger.Schema, trigger.Table, targetSchema)
+		sql := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(trigger.Name), tableName)
+
+		context := &diffContext{
+			Type:                DiffTypeTableTrigger,
+			Operation:           DiffOperationDrop,
+			Path:                fmt.Sprintf("%s.%s.%s", trigger.Schema, trigger.Table, trigger.Name),
+			Source:              trigger,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+}
+
+// generateDropTriggersFromDroppedViews emits DROP TRIGGER for all triggers on
+// views that are being dropped (same rationale as dropped tables, #505).
+func generateDropTriggersFromDroppedViews(views []*ir.View, targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) {
+	var allTriggers []*ir.Trigger
+
+	for _, view := range views {
+		viewKey := view.Schema + "." + view.Name
+		if preDroppedViews != nil && preDroppedViews[viewKey] {
+			continue
+		}
+		for _, trigger := range view.Triggers {
+			allTriggers = append(allTriggers, trigger)
+		}
+	}
+
+	sort.Slice(allTriggers, func(i, j int) bool {
+		if allTriggers[i].Schema != allTriggers[j].Schema {
+			return allTriggers[i].Schema < allTriggers[j].Schema
+		}
+		if allTriggers[i].Table != allTriggers[j].Table {
+			return allTriggers[i].Table < allTriggers[j].Table
+		}
+		return allTriggers[i].Name < allTriggers[j].Name
+	})
+
+	for _, trigger := range allTriggers {
+		tableName := getTableNameWithSchema(trigger.Schema, trigger.Table, targetSchema)
+		sql := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;", ir.QuoteIdentifier(trigger.Name), tableName)
+
+		context := &diffContext{
+			Type:                DiffTypeViewTrigger,
+			Operation:           DiffOperationDrop,
+			Path:                fmt.Sprintf("%s.%s.%s", trigger.Schema, trigger.Table, trigger.Name),
+			Source:              trigger,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+}
+
 // generateTriggerSQLWithMode generates CREATE [OR REPLACE] TRIGGER or CREATE CONSTRAINT TRIGGER statement
 func generateTriggerSQLWithMode(trigger *ir.Trigger, targetSchema string, qualifySchema bool) string {
 	// Build event list in standard order: INSERT, UPDATE, DELETE, TRUNCATE
