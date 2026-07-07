@@ -33,7 +33,7 @@
     {
       "steps": [
         {
-          "sql": "DROP INDEX idx_users_email;",
+          "sql": "DROP INDEX IF EXISTS idx_users_email;",
           "type": "table.index",
           "operation": "alter",
           "path": "public.users.idx_users_email"
@@ -73,7 +73,7 @@
     {
       "steps": [
         {
-          "sql": "DROP INDEX idx_users_status;",
+          "sql": "DROP INDEX IF EXISTS idx_users_status;",
           "type": "table.index",
           "operation": "alter",
           "path": "public.users.idx_users_status"

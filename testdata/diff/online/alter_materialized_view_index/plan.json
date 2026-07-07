@@ -33,7 +33,7 @@
     {
       "steps": [
         {
-          "sql": "DROP INDEX idx_user_summary_email;",
+          "sql": "DROP INDEX IF EXISTS idx_user_summary_email;",
           "type": "materialized_view.index",
           "operation": "alter",
           "path": "public.user_summary.idx_user_summary_email"
