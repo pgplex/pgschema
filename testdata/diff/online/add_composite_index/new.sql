@@ -7,3 +7,5 @@ CREATE TABLE public.users (
 );
 
 CREATE INDEX idx_users_email_status ON public.users (email, status DESC);
+
+CREATE INDEX idx_users_email_include ON public.users (email) INCLUDE (username);

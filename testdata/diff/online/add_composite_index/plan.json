@@ -9,6 +9,30 @@
     {
       "steps": [
         {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_include ON users (email) INCLUDE (username);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.users.idx_users_email_include"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'idx_users_email_include';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index idx_users_email_include"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.users.idx_users_email_include"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
           "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_status ON users (email, status DESC);",
           "type": "table.index",
           "operation": "create",

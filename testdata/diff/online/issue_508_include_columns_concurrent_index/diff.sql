@@ -1,1 +1,0 @@
-CREATE INDEX IF NOT EXISTS t_cov ON t (a) INCLUDE (b);
