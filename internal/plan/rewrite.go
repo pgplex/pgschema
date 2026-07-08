@@ -440,17 +440,23 @@ func generateIndexSQL(index *ir.Index, isConcurrent bool) string {
 	var columnParts []string
 	for _, col := range index.Columns {
 		part := col.Name
-		if col.Direction != "" && col.Direction != "ASC" {
-			part += " " + col.Direction
-		}
 		if col.Operator != "" {
 			part += " " + col.Operator
+		}
+		if col.Direction != "" && col.Direction != "ASC" {
+			part += " " + col.Direction
 		}
 		columnParts = append(columnParts, part)
 	}
 
 	sql.WriteString(joinStrings(columnParts, ", "))
 	sql.WriteString(")")
+
+	if len(index.IncludeColumns) > 0 {
+		sql.WriteString(" INCLUDE (")
+		sql.WriteString(strings.Join(index.IncludeColumns, ", "))
+		sql.WriteString(")")
+	}
 
 	if index.NullsNotDistinct && index.Type == ir.IndexTypeUnique {
 		sql.WriteString(" NULLS NOT DISTINCT")
