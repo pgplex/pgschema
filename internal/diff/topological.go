@@ -410,6 +410,20 @@ func extractTypeName(dataType, defaultSchema string) string {
 		typeName = typeName[:len(typeName)-2]
 	}
 
+	// Strip a trailing typmod suffix (e.g. "(10,2)") that the inspector appends
+	// when qualifying user-defined scalar types, so it matches the bare typeMap
+	// key. Only a purely numeric/comma/space typmod is stripped, so a quoted
+	// identifier that legally contains parentheses (which ends in '"', not ')')
+	// is left intact.
+	if i := strings.LastIndexByte(typeName, '('); i > 0 && strings.HasSuffix(typeName, ")") {
+		inner := typeName[i+1 : len(typeName)-1]
+		if inner != "" && strings.IndexFunc(inner, func(r rune) bool {
+			return !(r >= '0' && r <= '9' || r == ',' || r == ' ')
+		}) == -1 {
+			typeName = typeName[:i]
+		}
+	}
+
 	// Check if it's a schema-qualified name. The inspector emits user-defined
 	// type references via quote_ident (e.g. public."user"), so normalize each
 	// component by stripping quote_ident quoting before building the key.

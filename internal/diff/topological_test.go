@@ -199,6 +199,9 @@ func TestExtractTypeNameNormalizesQuoting(t *testing.T) {
 		{"public.user_kind[]", "public", "public", "user_kind"},  // array notation stripped
 		{`other."odd.name"`, "public", "other", "odd.name"},      // dot inside quotes is not a separator
 		{`"a.b".c`, "public", "a.b", "c"},                        // dotted schema, bare type
+		{"public.vector(384)", "public", "public", "vector"},     // typmod suffix stripped
+		{"s.num(10, 2)", "public", "s", "num"},                   // typmod with comma/space stripped
+		{`a."b"".c"`, "public", "a", `b".c`},                     // escaped quote ("") + dot inside a quoted ident
 	}
 	for _, c := range cases {
 		want := typeGraphKey(c.wantSchema, c.wantName)
