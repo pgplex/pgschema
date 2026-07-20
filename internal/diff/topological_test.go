@@ -187,6 +187,66 @@ func TestTopologicallySortTypesCompositeWithMultipleDependencies(t *testing.T) {
 	assertBefore("task", "project")
 }
 
+func TestExtractTypeNameNormalizesQuoting(t *testing.T) {
+	// Post-#493 the inspector emits user-defined type references via
+	// quote_ident (schema-qualified), while typeMap keys are bare
+	// (Schema + "." + Name). extractTypeName must reconcile the two.
+	cases := []struct{ in, schema, want string }{
+		{"user_kind", "public", "public.user_kind"},          // bare -> default schema
+		{"public.user_kind", "public", "public.user_kind"},   // already qualified
+		{`public."user"`, "public", "public.user"},           // quoted reserved-word name
+		{`"MySchema"."MyType"`, "public", "MySchema.MyType"},  // quoted schema + name
+		{"public.user_kind[]", "public", "public.user_kind"}, // array notation stripped
+		{`other."odd.name"`, "public", "other.odd.name"},     // dot inside quotes is not a separator
+	}
+	for _, c := range cases {
+		if got := extractTypeName(c.in, c.schema); got != c.want {
+			t.Errorf("extractTypeName(%q, %q) = %q, want %q", c.in, c.schema, got, c.want)
+		}
+	}
+}
+
+func TestTopologicallySortTypesQualifiedQuotedRefs(t *testing.T) {
+	// The inspector now qualifies same-schema composite-attribute and domain
+	// base-type references (e.g. public."odd name"). Dependency edges must
+	// still be found against bare typeMap keys.
+	referenced := &ir.Type{
+		Schema:     "public",
+		Name:       "odd name", // needs quote_ident
+		Kind:       ir.TypeKindEnum,
+		EnumValues: []string{"a", "b"},
+	}
+	composite := &ir.Type{
+		Schema: "public",
+		Name:   "holder",
+		Kind:   ir.TypeKindComposite,
+		Columns: []*ir.TypeColumn{
+			{Name: "c", DataType: `public."odd name"`, Position: 1},
+		},
+	}
+	dom := &ir.Type{
+		Schema:   "public",
+		Name:     "odd domain",
+		Kind:     ir.TypeKindDomain,
+		BaseType: `public."odd name"`,
+	}
+
+	sorted := topologicallySortTypes([]*ir.Type{composite, referenced, dom})
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 types, got %d", len(sorted))
+	}
+	order := make(map[string]int, len(sorted))
+	for idx, typ := range sorted {
+		order[typ.Name] = idx
+	}
+	if order["odd name"] >= order["holder"] {
+		t.Fatalf(`expected "odd name" before holder in %v`, order)
+	}
+	if order["odd name"] >= order["odd domain"] {
+		t.Fatalf(`expected "odd name" before "odd domain" in %v`, order)
+	}
+}
+
 func newTestEnumType(name string) *ir.Type {
 	return &ir.Type{
 		Schema:     "public",

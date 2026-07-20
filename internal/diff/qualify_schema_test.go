@@ -10,10 +10,13 @@ import (
 // These tests cover the `dump --qualify-schema` behavior at the SQL-builder level:
 // when qualifySchema is true, structural entity names are schema-qualified, even for
 // the target schema; when false (the default), the standard "smart qualification"
-// omits the target-schema prefix. Type references that arrive from the inspector
-// without schema identity stay bare (the flag cannot invent a schema for them) until
-// the IR preserves their schema separately (#493). The false cases double as the
-// byte-identical default-output guardrail for each builder.
+// omits the target-schema prefix. For type references whose schema the IR preserves
+// (columns, domain base types, composite attributes, aggregate state types — #493),
+// forced qualification keeps the schema and the default strips it. Function/procedure
+// parameter and return types still arrive from the inspector without schema identity
+// (it strips them during signature parsing), so for those the flag cannot invent a
+// schema and the reference stays bare. The false cases double as the byte-identical
+// default-output guardrail for each builder.
 
 func TestQualifySchema_ForeignKeyReference(t *testing.T) {
 	fk := &ir.Constraint{
@@ -48,9 +51,11 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 		Name:   "account",
 		Columns: []*ir.Column{
 			{Name: "id", Position: 1, DataType: "integer", IsNullable: false},
-			// Same-schema user-defined type references arrive from the inspector
-			// without schema identity, so the IR stores them bare (#493).
-			{Name: "kind", Position: 2, DataType: "user_kind", IsNullable: true},
+			// Post-#493 the inspector preserves the schema of same-schema
+			// user-defined type references, so the IR stores them qualified
+			// (e.g. public.user_kind). The render seam strips the target-schema
+			// prefix in default mode and keeps it under forced qualification.
+			{Name: "kind", Position: 2, DataType: "public.user_kind", IsNullable: true},
 		},
 	}
 	empty := map[string]bool{}
@@ -62,18 +67,18 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 	if strings.Contains(def, "public.account") || strings.Contains(def, "public.user_kind") {
 		t.Errorf("default should not qualify the target schema: %q", def)
 	}
+	if !strings.Contains(def, "kind user_kind") {
+		t.Errorf("default should strip the target-schema prefix from the type ref: %q", def)
+	}
 
 	qualified, _ := generateTableSQL(table, "public", true, empty, empty, empty, nil)
 	if !strings.Contains(qualified, "CREATE TABLE IF NOT EXISTS public.account (") {
 		t.Errorf("forced qualification should qualify the table name: %q", qualified)
 	}
-	// #493 limitation: forced qualification cannot *add* a schema to a bare
-	// same-schema type reference, so the column type stays bare.
-	if strings.Contains(qualified, "public.user_kind") {
-		t.Errorf("forced qualification must not invent a schema for a bare type ref: %q", qualified)
-	}
-	if !strings.Contains(qualified, "kind user_kind") {
-		t.Errorf("forced qualification should preserve the bare same-schema type ref: %q", qualified)
+	// #493: forced qualification keeps the schema the IR now carries on the
+	// same-schema type reference.
+	if !strings.Contains(qualified, "kind public.user_kind") {
+		t.Errorf("forced qualification should qualify the same-schema type ref: %q", qualified)
 	}
 }
 

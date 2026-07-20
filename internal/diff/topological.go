@@ -400,23 +400,43 @@ func extractTypeName(dataType, defaultSchema string) string {
 		typeName = typeName[:len(typeName)-2]
 	}
 
-	// Check if it's a schema-qualified name
-	if idx := findLastDot(typeName); idx != -1 {
-		return typeName // Already fully qualified
+	// Check if it's a schema-qualified name. The inspector emits user-defined
+	// type references via quote_ident (e.g. public."user"), but typeMap keys are
+	// built from bare, unquoted identifiers (Schema + "." + Name), so normalize
+	// each component by stripping quote_ident quoting before returning.
+	if idx := findLastUnquotedDot(typeName); idx != -1 {
+		return unquoteIdent(typeName[:idx]) + "." + unquoteIdent(typeName[idx+1:])
 	}
 
 	// Not qualified - use default schema
-	return defaultSchema + "." + typeName
+	return unquoteIdent(defaultSchema) + "." + unquoteIdent(typeName)
 }
 
-// findLastDot finds the last dot in a string, returning -1 if not found
-func findLastDot(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '.' {
-			return i
+// findLastUnquotedDot finds the last '.' that is not inside a double-quoted
+// identifier, returning -1 if none. This avoids splitting on a dot that is part
+// of a quoted identifier (e.g. the name in public."odd.name").
+func findLastUnquotedDot(s string) int {
+	inQuote := false
+	last := -1
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '"':
+			inQuote = !inQuote
+		case s[i] == '.' && !inQuote:
+			last = i
 		}
 	}
-	return -1
+	return last
+}
+
+// unquoteIdent removes quote_ident double-quoting from a single identifier
+// (e.g. "user" -> user, "Weird""Name" -> Weird"Name). Bare identifiers are
+// returned unchanged so this is safe on already-unquoted names.
+func unquoteIdent(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return strings.ReplaceAll(s[1:len(s)-1], `""`, `"`)
+	}
+	return s
 }
 
 // topologicallySortFunctions sorts functions across all schemas in dependency order

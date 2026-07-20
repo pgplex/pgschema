@@ -23,7 +23,11 @@ SELECT
     COALESCE(tf.proname, '') AS transition_function,
     COALESCE(tfn.nspname, '') AS transition_function_schema,
     -- Get state type
-    format_type(a.aggtranstype, NULL) AS state_type,
+    CASE
+        WHEN stn.nspname IS NULL OR stn.nspname = 'pg_catalog' OR stt.typcategory = 'A' THEN
+            format_type(a.aggtranstype, NULL)
+        ELSE quote_ident(stn.nspname) || '.' || quote_ident(stt.typname)
+    END AS state_type,
     -- Get initial condition
     a.agginitval AS initial_condition,
     -- Get final function if exists
@@ -34,6 +38,8 @@ SELECT
 FROM pg_proc p
 JOIN pg_namespace n ON p.pronamespace = n.oid
 JOIN pg_aggregate a ON a.aggfnoid = p.oid
+LEFT JOIN pg_type stt ON stt.oid = a.aggtranstype
+LEFT JOIN pg_namespace stn ON stt.typnamespace = stn.oid
 LEFT JOIN pg_proc tf ON a.aggtransfn = tf.oid
 LEFT JOIN pg_namespace tfn ON tf.pronamespace = tfn.oid
 LEFT JOIN pg_proc ff ON a.aggfinalfn = ff.oid
@@ -114,7 +120,11 @@ SELECT
     -- Transition function and state
     CASE WHEN tfn.nspname = n.nspname THEN quote_ident(tf.proname)
          ELSE quote_ident(tfn.nspname) || '.' || quote_ident(tf.proname) END AS transition_function,
-    format_type(a.aggtranstype, NULL) AS state_type,
+    CASE
+        WHEN stn.nspname IS NULL OR stn.nspname = 'pg_catalog' OR stt.typcategory = 'A' THEN
+            format_type(a.aggtranstype, NULL)
+        ELSE quote_ident(stn.nspname) || '.' || quote_ident(stt.typname)
+    END AS state_type,
     a.aggtransspace AS state_space,
     a.agginitval AS initial_condition,
     -- Final function
@@ -140,7 +150,11 @@ SELECT
     CASE WHEN a.aggminvtransfn = 0 THEN ''
          WHEN mitfn.nspname = n.nspname THEN quote_ident(mitf.proname)
          ELSE quote_ident(mitfn.nspname) || '.' || quote_ident(mitf.proname) END AS minv_transition_function,
-    CASE WHEN a.aggmtransfn = 0 THEN '' ELSE format_type(a.aggmtranstype, NULL) END AS mstate_type,
+    CASE WHEN a.aggmtransfn = 0 THEN ''
+         WHEN mstn.nspname IS NULL OR mstn.nspname = 'pg_catalog' OR mstt.typcategory = 'A' THEN
+            format_type(a.aggmtranstype, NULL)
+         ELSE quote_ident(mstn.nspname) || '.' || quote_ident(mstt.typname)
+    END AS mstate_type,
     a.aggmtransspace AS mstate_space,
     CASE WHEN a.aggmfinalfn = 0 THEN ''
          WHEN mffn.nspname = n.nspname THEN quote_ident(mff.proname)
@@ -156,6 +170,8 @@ SELECT
 FROM pg_proc p
 JOIN pg_namespace n ON p.pronamespace = n.oid
 JOIN pg_aggregate a ON a.aggfnoid = p.oid
+LEFT JOIN pg_type stt ON stt.oid = a.aggtranstype
+LEFT JOIN pg_namespace stn ON stt.typnamespace = stn.oid
 LEFT JOIN pg_proc tf ON a.aggtransfn = tf.oid
 LEFT JOIN pg_namespace tfn ON tf.pronamespace = tfn.oid
 LEFT JOIN pg_proc ff ON a.aggfinalfn = ff.oid
@@ -172,6 +188,8 @@ LEFT JOIN pg_proc mitf ON a.aggminvtransfn = mitf.oid
 LEFT JOIN pg_namespace mitfn ON mitf.pronamespace = mitfn.oid
 LEFT JOIN pg_proc mff ON a.aggmfinalfn = mff.oid
 LEFT JOIN pg_namespace mffn ON mff.pronamespace = mffn.oid
+LEFT JOIN pg_type mstt ON mstt.oid = a.aggmtranstype
+LEFT JOIN pg_namespace mstn ON mstt.typnamespace = mstn.oid
 LEFT JOIN pg_operator op ON op.oid = a.aggsortop
 LEFT JOIN pg_namespace opn ON op.oprnamespace = opn.oid
 LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_proc'::regclass AND d.objsubid = 0
@@ -350,13 +368,9 @@ WITH column_base AS (
         COALESCE(d.description, '') AS column_comment,
         CASE
             WHEN dt.typtype = 'd' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
-                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
-                END
+                quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
-                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
-                END
+                quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
             WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
                 -- Array types: apply same schema qualification logic to element type
                 -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
@@ -541,13 +555,9 @@ WITH column_base AS (
         COALESCE(d.description, '') AS column_comment,
         CASE
             WHEN dt.typtype = 'd' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
-                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
-                END
+                quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
-                CASE WHEN dn.nspname = c.table_schema THEN quote_ident(dt.typname)
-                     ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
-                END
+                quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
             WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
                 -- Array types: apply same schema qualification logic to element type
                 -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
@@ -732,11 +742,19 @@ SELECT
     t.typname AS type_name,
     a.attname AS column_name,
     a.attnum AS column_position,
-    format_type(a.atttypid, a.atttypmod) AS column_type
+    CASE
+        WHEN atn.nspname IS NULL OR atn.nspname = 'pg_catalog' OR at.typcategory = 'A' THEN
+            format_type(a.atttypid, a.atttypmod)
+        ELSE
+            quote_ident(atn.nspname) || '.' || quote_ident(at.typname)
+            || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+    END AS column_type
 FROM pg_type t
 JOIN pg_namespace n ON t.typnamespace = n.oid
 JOIN pg_class c ON t.typrelid = c.oid
 JOIN pg_attribute a ON c.oid = a.attrelid
+LEFT JOIN pg_type at ON at.oid = a.atttypid
+LEFT JOIN pg_namespace atn ON at.typnamespace = atn.oid
 WHERE t.typtype = 'c'  -- composite types only
     AND c.relkind = 'c'  -- only true composite types, not table types
     AND a.attnum > 0  -- exclude system columns
@@ -791,11 +809,19 @@ SELECT
     t.typname AS type_name,
     a.attname AS column_name,
     a.attnum AS column_position,
-    format_type(a.atttypid, a.atttypmod) AS column_type
+    CASE
+        WHEN atn.nspname IS NULL OR atn.nspname = 'pg_catalog' OR at.typcategory = 'A' THEN
+            format_type(a.atttypid, a.atttypmod)
+        ELSE
+            quote_ident(atn.nspname) || '.' || quote_ident(at.typname)
+            || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+    END AS column_type
 FROM pg_type t
 JOIN pg_namespace n ON t.typnamespace = n.oid
 JOIN pg_class c ON t.typrelid = c.oid
 JOIN pg_attribute a ON c.oid = a.attrelid
+LEFT JOIN pg_type at ON at.oid = a.atttypid
+LEFT JOIN pg_namespace atn ON at.typnamespace = atn.oid
 WHERE t.typtype = 'c'  -- composite types only
     AND c.relkind = 'c'  -- only true composite types, not table types
     AND a.attnum > 0  -- exclude system columns
@@ -1297,12 +1323,20 @@ const getDomains = `-- name: GetDomains :many
 SELECT 
     n.nspname AS domain_schema,
     t.typname AS domain_name,
-    format_type(t.typbasetype, t.typtypmod) AS base_type,
+    CASE
+        WHEN bn.nspname IS NULL OR bn.nspname = 'pg_catalog' OR bt.typcategory = 'A' THEN
+            format_type(t.typbasetype, t.typtypmod)
+        ELSE
+            quote_ident(bn.nspname) || '.' || quote_ident(bt.typname)
+            || COALESCE(substring(format_type(t.typbasetype, t.typtypmod) FROM '\([^)]*\)'), '')
+    END AS base_type,
     t.typnotnull AS not_null,
     t.typdefault AS default_value,
     COALESCE(d.description, '') AS domain_comment
 FROM pg_type t
 JOIN pg_namespace n ON t.typnamespace = n.oid
+LEFT JOIN pg_type bt ON bt.oid = t.typbasetype
+LEFT JOIN pg_namespace bn ON bt.typnamespace = bn.oid
 LEFT JOIN pg_description d ON d.objoid = t.oid AND d.classoid = 'pg_type'::regclass
 WHERE t.typtype = 'd'  -- Domain types only
     AND n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
@@ -1355,12 +1389,20 @@ const getDomainsForSchema = `-- name: GetDomainsForSchema :many
 SELECT 
     n.nspname AS domain_schema,
     t.typname AS domain_name,
-    format_type(t.typbasetype, t.typtypmod) AS base_type,
+    CASE
+        WHEN bn.nspname IS NULL OR bn.nspname = 'pg_catalog' OR bt.typcategory = 'A' THEN
+            format_type(t.typbasetype, t.typtypmod)
+        ELSE
+            quote_ident(bn.nspname) || '.' || quote_ident(bt.typname)
+            || COALESCE(substring(format_type(t.typbasetype, t.typtypmod) FROM '\([^)]*\)'), '')
+    END AS base_type,
     t.typnotnull AS not_null,
     t.typdefault AS default_value,
     COALESCE(d.description, '') AS domain_comment
 FROM pg_type t
 JOIN pg_namespace n ON t.typnamespace = n.oid
+LEFT JOIN pg_type bt ON bt.oid = t.typbasetype
+LEFT JOIN pg_namespace bn ON bt.typnamespace = bn.oid
 LEFT JOIN pg_description d ON d.objoid = t.oid AND d.classoid = 'pg_type'::regclass
 WHERE t.typtype = 'd'  -- Domain types only
     AND n.nspname = $1
