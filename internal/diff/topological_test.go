@@ -189,20 +189,28 @@ func TestTopologicallySortTypesCompositeWithMultipleDependencies(t *testing.T) {
 
 func TestExtractTypeNameNormalizesQuoting(t *testing.T) {
 	// Post-#493 the inspector emits user-defined type references via
-	// quote_ident (schema-qualified), while typeMap keys are bare
-	// (Schema + "." + Name). extractTypeName must reconcile the two.
-	cases := []struct{ in, schema, want string }{
-		{"user_kind", "public", "public.user_kind"},          // bare -> default schema
-		{"public.user_kind", "public", "public.user_kind"},   // already qualified
-		{`public."user"`, "public", "public.user"},           // quoted reserved-word name
-		{`"MySchema"."MyType"`, "public", "MySchema.MyType"},  // quoted schema + name
-		{"public.user_kind[]", "public", "public.user_kind"}, // array notation stripped
-		{`other."odd.name"`, "public", "other.odd.name"},     // dot inside quotes is not a separator
+	// quote_ident (schema-qualified). extractTypeName must normalize them to the
+	// same delimiter-safe key that typeGraphKey builds for typeMap entries.
+	cases := []struct{ in, schema, wantSchema, wantName string }{
+		{"user_kind", "public", "public", "user_kind"},           // bare -> default schema
+		{"public.user_kind", "public", "public", "user_kind"},    // already qualified
+		{`public."user"`, "public", "public", "user"},            // quoted reserved-word name
+		{`"MySchema"."MyType"`, "public", "MySchema", "MyType"},   // quoted schema + name
+		{"public.user_kind[]", "public", "public", "user_kind"},  // array notation stripped
+		{`other."odd.name"`, "public", "other", "odd.name"},      // dot inside quotes is not a separator
+		{`"a.b".c`, "public", "a.b", "c"},                        // dotted schema, bare type
 	}
 	for _, c := range cases {
-		if got := extractTypeName(c.in, c.schema); got != c.want {
-			t.Errorf("extractTypeName(%q, %q) = %q, want %q", c.in, c.schema, got, c.want)
+		want := typeGraphKey(c.wantSchema, c.wantName)
+		if got := extractTypeName(c.in, c.schema); got != want {
+			t.Errorf("extractTypeName(%q, %q) = %q, want %q", c.in, c.schema, got, want)
 		}
+	}
+
+	// The delimiter-safe key keeps legal-but-dotted identifiers distinct:
+	// schema "a.b" type "c" must not collide with schema "a" type "b.c".
+	if k1, k2 := extractTypeName(`"a.b".c`, "public"), extractTypeName(`a."b.c"`, "public"); k1 == k2 {
+		t.Errorf("dotted identifiers collided: both keyed as %q", k1)
 	}
 }
 

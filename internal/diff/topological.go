@@ -265,7 +265,7 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 	typeMap := make(map[string]*ir.Type)
 	var insertionOrder []string
 	for _, t := range types {
-		key := t.Schema + "." + t.Name
+		key := typeGraphKey(t.Schema, t.Name)
 		typeMap[key] = t
 		insertionOrder = append(insertionOrder, key)
 	}
@@ -387,8 +387,18 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 	return sortedTypes
 }
 
-// extractTypeName extracts a fully qualified type name from a data type string
-// It handles array notation (e.g., "status_type[]") and schema prefixes
+// typeGraphKey builds the lookup key used to identify a type in the dependency
+// graph. It joins schema and name with a NUL byte, which cannot appear in a
+// PostgreSQL identifier, so distinct (schema, name) pairs never collide even when
+// an identifier legally contains a '.' (e.g. schema "a.b" type "c" vs schema "a"
+// type "b.c").
+func typeGraphKey(schema, name string) string {
+	return schema + "\x00" + name
+}
+
+// extractTypeName maps a data type string to its dependency-graph key
+// (see typeGraphKey). It handles array notation (e.g., "status_type[]") and
+// schema prefixes.
 func extractTypeName(dataType, defaultSchema string) string {
 	if dataType == "" {
 		return ""
@@ -401,15 +411,14 @@ func extractTypeName(dataType, defaultSchema string) string {
 	}
 
 	// Check if it's a schema-qualified name. The inspector emits user-defined
-	// type references via quote_ident (e.g. public."user"), but typeMap keys are
-	// built from bare, unquoted identifiers (Schema + "." + Name), so normalize
-	// each component by stripping quote_ident quoting before returning.
+	// type references via quote_ident (e.g. public."user"), so normalize each
+	// component by stripping quote_ident quoting before building the key.
 	if idx := findLastUnquotedDot(typeName); idx != -1 {
-		return unquoteIdent(typeName[:idx]) + "." + unquoteIdent(typeName[idx+1:])
+		return typeGraphKey(unquoteIdent(typeName[:idx]), unquoteIdent(typeName[idx+1:]))
 	}
 
 	// Not qualified - use default schema
-	return unquoteIdent(defaultSchema) + "." + unquoteIdent(typeName)
+	return typeGraphKey(unquoteIdent(defaultSchema), unquoteIdent(typeName))
 }
 
 // findLastUnquotedDot finds the last '.' that is not inside a double-quoted

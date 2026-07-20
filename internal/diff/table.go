@@ -25,17 +25,29 @@ func stripSchemaPrefixMode(typeName, targetSchema string, qualifySchema bool) st
 		return typeName
 	}
 
-	// Check if the type has the target schema prefix at the beginning
-	prefix := targetSchema + "."
-	if after, found := strings.CutPrefix(typeName, prefix); found {
-		return after
+	// The inspector emits schema prefixes on type references via quote_ident, so
+	// the prefix is quoted when the schema name requires it (e.g. "My Schema").
+	// Strip both the raw and quote_ident forms so default (smart-qualification)
+	// output omits the target-schema prefix regardless of whether it needs quoting.
+	// QuoteIdentifier is a no-op for names that don't require quoting, so the two
+	// forms coincide for the common lowercase case.
+	forms := []string{targetSchema}
+	if quoted := ir.QuoteIdentifier(targetSchema); quoted != targetSchema {
+		forms = append(forms, quoted)
 	}
+	for _, schema := range forms {
+		// Check if the type has the target schema prefix at the beginning
+		prefix := schema + "."
+		if after, found := strings.CutPrefix(typeName, prefix); found {
+			return after
+		}
 
-	// Also handle type casts within expressions: ::schema.typename -> ::typename
-	// This is needed for function parameter default values like 'value'::schema.enum_type
-	castPrefix := "::" + targetSchema + "."
-	if strings.Contains(typeName, castPrefix) {
-		return strings.ReplaceAll(typeName, castPrefix, "::")
+		// Also handle type casts within expressions: ::schema.typename -> ::typename
+		// This is needed for function parameter default values like 'value'::schema.enum_type
+		castPrefix := "::" + schema + "."
+		if strings.Contains(typeName, castPrefix) {
+			return strings.ReplaceAll(typeName, castPrefix, "::")
+		}
 	}
 
 	return typeName

@@ -82,6 +82,29 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 	}
 }
 
+func TestStripSchemaPrefixMode_QuotedTargetSchema(t *testing.T) {
+	// The inspector qualifies same-schema type references via quote_ident, so a
+	// target schema whose name requires quoting arrives as "My Schema".user_kind.
+	// Default (smart-qualification) mode must still strip it; forced
+	// qualification keeps it. (Regression: previously only the raw, unquoted
+	// prefix was stripped, so quoted target schemas leaked into default output.)
+	const typeRef = `"My Schema".user_kind`
+	if got := stripSchemaPrefixMode(typeRef, "My Schema", false); got != "user_kind" {
+		t.Errorf("default should strip quoted target-schema prefix: got %q", got)
+	}
+	if got := stripSchemaPrefixMode(typeRef, "My Schema", true); got != typeRef {
+		t.Errorf("forced qualification should keep the ref: got %q", got)
+	}
+	// Cast form (e.g. a parameter default) with a quoted schema.
+	if got := stripSchemaPrefixMode(`'a'::"My Schema".mood`, "My Schema", false); got != `'a'::mood` {
+		t.Errorf("default should strip quoted schema in cast: got %q", got)
+	}
+	// Lowercase schema (no quoting required) is unaffected.
+	if got := stripSchemaPrefixMode("public.user_kind", "public", false); got != "user_kind" {
+		t.Errorf("default should strip unquoted prefix: got %q", got)
+	}
+}
+
 func TestQualifySchema_Type(t *testing.T) {
 	typ := &ir.Type{
 		Schema:     "public",
