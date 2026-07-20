@@ -378,7 +378,6 @@ WITH column_base AS (
                 -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname
-                    WHEN en.nspname = c.table_schema THEN quote_ident(et.typname)
                     ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
@@ -565,7 +564,6 @@ WITH column_base AS (
                 -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname
-                    WHEN en.nspname = c.table_schema THEN quote_ident(et.typname)
                     ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN

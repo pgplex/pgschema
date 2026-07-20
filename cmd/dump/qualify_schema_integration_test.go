@@ -20,10 +20,11 @@ import (
 
 const qualifySchemaSetupSQL = `
 CREATE TYPE color AS ENUM ('r', 'g', 'b');
--- column type: same-schema enum
+-- column type: same-schema enum (scalar and array)
 CREATE TABLE swatch (
-    id    integer PRIMARY KEY,
-    shade color
+    id     integer PRIMARY KEY,
+    shade  color,
+    shades color[]
 );
 -- domain base type: same-schema enum
 CREATE DOMAIN color_domain AS color;
@@ -75,6 +76,7 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 	}
 	for _, want := range []string{
 		"shade public.color",    // column type
+		"shades public.color[]", // same-schema array element type
 		"AS public.color",       // domain base type (CREATE DOMAIN ... AS public.color)
 		"currency public.color", // composite attribute
 		"STYPE = public.acc",    // aggregate state type
@@ -98,6 +100,7 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 	}
 	for _, want := range []string{
 		"shade color",
+		"shades color[]",
 		"AS color",
 		"currency color",
 		"STYPE = acc",
