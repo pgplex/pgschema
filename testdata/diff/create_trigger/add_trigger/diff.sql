@@ -8,6 +8,8 @@ CREATE OR REPLACE TRIGGER employees_last_modified_trigger
     FOR EACH ROW
     EXECUTE FUNCTION update_last_modified();
 
+COMMENT ON TRIGGER employees_last_modified_trigger ON employees IS 'Updates last_modified timestamp on every row update';
+
 CREATE OR REPLACE TRIGGER employees_salary_update_trigger
     BEFORE UPDATE OF salary ON employees
     FOR EACH ROW

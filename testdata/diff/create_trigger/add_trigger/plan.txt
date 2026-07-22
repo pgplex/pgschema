@@ -8,6 +8,7 @@ Tables:
   ~ employees
     + employees_insert_timestamp_trigger (trigger)
     + employees_last_modified_trigger (trigger)
+    ~ employees_last_modified_trigger (trigger)
     + employees_salary_update_trigger (trigger)
     + employees_truncate_log_trigger (trigger)
 
@@ -27,6 +28,8 @@ CREATE OR REPLACE TRIGGER employees_last_modified_trigger
     BEFORE UPDATE ON employees
     FOR EACH ROW
     EXECUTE FUNCTION update_last_modified();
+
+COMMENT ON TRIGGER employees_last_modified_trigger ON employees IS 'Updates last_modified timestamp on every row update';
 
 CREATE OR REPLACE TRIGGER employees_salary_update_trigger
     BEFORE UPDATE OF salary ON employees
