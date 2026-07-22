@@ -265,7 +265,7 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 	typeMap := make(map[string]*ir.Type)
 	var insertionOrder []string
 	for _, t := range types {
-		key := t.Schema + "." + t.Name
+		key := typeGraphKey(t.Schema, t.Name)
 		typeMap[key] = t
 		insertionOrder = append(insertionOrder, key)
 	}
@@ -387,8 +387,18 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 	return sortedTypes
 }
 
-// extractTypeName extracts a fully qualified type name from a data type string
-// It handles array notation (e.g., "status_type[]") and schema prefixes
+// typeGraphKey builds the lookup key used to identify a type in the dependency
+// graph. It joins schema and name with a NUL byte, which cannot appear in a
+// PostgreSQL identifier, so distinct (schema, name) pairs never collide even when
+// an identifier legally contains a '.' (e.g. schema "a.b" type "c" vs schema "a"
+// type "b.c").
+func typeGraphKey(schema, name string) string {
+	return schema + "\x00" + name
+}
+
+// extractTypeName maps a data type string to its dependency-graph key
+// (see typeGraphKey). It handles array notation (e.g., "status_type[]") and
+// schema prefixes.
 func extractTypeName(dataType, defaultSchema string) string {
 	if dataType == "" {
 		return ""
@@ -400,23 +410,56 @@ func extractTypeName(dataType, defaultSchema string) string {
 		typeName = typeName[:len(typeName)-2]
 	}
 
-	// Check if it's a schema-qualified name
-	if idx := findLastDot(typeName); idx != -1 {
-		return typeName // Already fully qualified
+	// Strip a trailing typmod suffix (e.g. "(10,2)") that the inspector appends
+	// when qualifying user-defined scalar types, so it matches the bare typeMap
+	// key. Only a purely numeric/comma/space typmod is stripped, so a quoted
+	// identifier that legally contains parentheses (which ends in '"', not ')')
+	// is left intact.
+	if i := strings.LastIndexByte(typeName, '('); i > 0 && strings.HasSuffix(typeName, ")") {
+		inner := typeName[i+1 : len(typeName)-1]
+		if inner != "" && strings.IndexFunc(inner, func(r rune) bool {
+			return !(r >= '0' && r <= '9' || r == ',' || r == ' ')
+		}) == -1 {
+			typeName = typeName[:i]
+		}
+	}
+
+	// Check if it's a schema-qualified name. The inspector emits user-defined
+	// type references via quote_ident (e.g. public."user"), so normalize each
+	// component by stripping quote_ident quoting before building the key.
+	if idx := findLastUnquotedDot(typeName); idx != -1 {
+		return typeGraphKey(unquoteIdent(typeName[:idx]), unquoteIdent(typeName[idx+1:]))
 	}
 
 	// Not qualified - use default schema
-	return defaultSchema + "." + typeName
+	return typeGraphKey(unquoteIdent(defaultSchema), unquoteIdent(typeName))
 }
 
-// findLastDot finds the last dot in a string, returning -1 if not found
-func findLastDot(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '.' {
-			return i
+// findLastUnquotedDot finds the last '.' that is not inside a double-quoted
+// identifier, returning -1 if none. This avoids splitting on a dot that is part
+// of a quoted identifier (e.g. the name in public."odd.name").
+func findLastUnquotedDot(s string) int {
+	inQuote := false
+	last := -1
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '"':
+			inQuote = !inQuote
+		case s[i] == '.' && !inQuote:
+			last = i
 		}
 	}
-	return -1
+	return last
+}
+
+// unquoteIdent removes quote_ident double-quoting from a single identifier
+// (e.g. "user" -> user, "Weird""Name" -> Weird"Name). Bare identifiers are
+// returned unchanged so this is safe on already-unquoted names.
+func unquoteIdent(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return strings.ReplaceAll(s[1:len(s)-1], `""`, `"`)
+	}
+	return s
 }
 
 // topologicallySortFunctions sorts functions across all schemas in dependency order

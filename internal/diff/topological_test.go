@@ -187,6 +187,77 @@ func TestTopologicallySortTypesCompositeWithMultipleDependencies(t *testing.T) {
 	assertBefore("task", "project")
 }
 
+func TestExtractTypeNameNormalizesQuoting(t *testing.T) {
+	// Post-#493 the inspector emits user-defined type references via
+	// quote_ident (schema-qualified). extractTypeName must normalize them to the
+	// same delimiter-safe key that typeGraphKey builds for typeMap entries.
+	cases := []struct{ in, schema, wantSchema, wantName string }{
+		{"user_kind", "public", "public", "user_kind"},           // bare -> default schema
+		{"public.user_kind", "public", "public", "user_kind"},    // already qualified
+		{`public."user"`, "public", "public", "user"},            // quoted reserved-word name
+		{`"MySchema"."MyType"`, "public", "MySchema", "MyType"},   // quoted schema + name
+		{"public.user_kind[]", "public", "public", "user_kind"},  // array notation stripped
+		{`other."odd.name"`, "public", "other", "odd.name"},      // dot inside quotes is not a separator
+		{`"a.b".c`, "public", "a.b", "c"},                        // dotted schema, bare type
+		{"public.vector(384)", "public", "public", "vector"},     // typmod suffix stripped
+		{"s.num(10, 2)", "public", "s", "num"},                   // typmod with comma/space stripped
+		{`a."b"".c"`, "public", "a", `b".c`},                     // escaped quote ("") + dot inside a quoted ident
+	}
+	for _, c := range cases {
+		want := typeGraphKey(c.wantSchema, c.wantName)
+		if got := extractTypeName(c.in, c.schema); got != want {
+			t.Errorf("extractTypeName(%q, %q) = %q, want %q", c.in, c.schema, got, want)
+		}
+	}
+
+	// The delimiter-safe key keeps legal-but-dotted identifiers distinct:
+	// schema "a.b" type "c" must not collide with schema "a" type "b.c".
+	if k1, k2 := extractTypeName(`"a.b".c`, "public"), extractTypeName(`a."b.c"`, "public"); k1 == k2 {
+		t.Errorf("dotted identifiers collided: both keyed as %q", k1)
+	}
+}
+
+func TestTopologicallySortTypesQualifiedQuotedRefs(t *testing.T) {
+	// The inspector now qualifies same-schema composite-attribute and domain
+	// base-type references (e.g. public."odd name"). Dependency edges must
+	// still be found against bare typeMap keys.
+	referenced := &ir.Type{
+		Schema:     "public",
+		Name:       "odd name", // needs quote_ident
+		Kind:       ir.TypeKindEnum,
+		EnumValues: []string{"a", "b"},
+	}
+	composite := &ir.Type{
+		Schema: "public",
+		Name:   "holder",
+		Kind:   ir.TypeKindComposite,
+		Columns: []*ir.TypeColumn{
+			{Name: "c", DataType: `public."odd name"`, Position: 1},
+		},
+	}
+	dom := &ir.Type{
+		Schema:   "public",
+		Name:     "odd domain",
+		Kind:     ir.TypeKindDomain,
+		BaseType: `public."odd name"`,
+	}
+
+	sorted := topologicallySortTypes([]*ir.Type{composite, referenced, dom})
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 types, got %d", len(sorted))
+	}
+	order := make(map[string]int, len(sorted))
+	for idx, typ := range sorted {
+		order[typ.Name] = idx
+	}
+	if order["odd name"] >= order["holder"] {
+		t.Fatalf(`expected "odd name" before holder in %v`, order)
+	}
+	if order["odd name"] >= order["odd domain"] {
+		t.Fatalf(`expected "odd name" before "odd domain" in %v`, order)
+	}
+}
+
 func newTestEnumType(name string) *ir.Type {
 	return &ir.Type{
 		Schema:     "public",
