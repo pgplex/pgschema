@@ -26,12 +26,14 @@ CREATE TABLE swatch (
     shade  color,
     shades color[]
 );
--- domain base type: same-schema enum
+-- domain base type: same-schema enum (scalar and array)
 CREATE DOMAIN color_domain AS color;
--- composite attribute: same-schema enum (plus a built-in that must stay bare)
+CREATE DOMAIN color_list AS color[];
+-- composite attribute: same-schema enum (scalar and array, plus a built-in that must stay bare)
 CREATE TYPE money_amount AS (
     amount   numeric,
-    currency color
+    currency color,
+    palette  color[]
 );
 -- aggregate state type: same-schema composite
 CREATE TYPE acc AS (n integer);
@@ -75,11 +77,13 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 		t.Fatalf("qualified dump failed: %v", err)
 	}
 	for _, want := range []string{
-		"shade public.color",    // column type
-		"shades public.color[]", // same-schema array element type
-		"AS public.color",       // domain base type (CREATE DOMAIN ... AS public.color)
-		"currency public.color", // composite attribute
-		"STYPE = public.acc",    // aggregate state type
+		"shade public.color",       // column type
+		"shades public.color[]",    // column type: same-schema array
+		"AS public.color;",         // domain base type: scalar (CREATE DOMAIN ... AS public.color)
+		"AS public.color[]",        // domain base type: array (CREATE DOMAIN ... AS public.color[])
+		"currency public.color",    // composite attribute: scalar
+		"palette public.color[]",   // composite attribute: array
+		"STYPE = public.acc",       // aggregate state type
 	} {
 		if !strings.Contains(qualified, want) {
 			t.Errorf("qualified dump missing %q\n---\n%s", want, qualified)
@@ -101,8 +105,10 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 	for _, want := range []string{
 		"shade color",
 		"shades color[]",
-		"AS color",
+		"AS color;",    // domain base type: scalar
+		"AS color[]",   // domain base type: array
 		"currency color",
+		"palette color[]",
 		"STYPE = acc",
 	} {
 		if !strings.Contains(def, want) {
