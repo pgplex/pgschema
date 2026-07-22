@@ -18,6 +18,8 @@ CREATE TRIGGER employees_last_modified_trigger
     FOR EACH ROW
     EXECUTE FUNCTION public.update_last_modified();
 
+COMMENT ON TRIGGER employees_last_modified_trigger ON public.employees IS 'Updates last_modified timestamp on every row update';
+
 CREATE TRIGGER employees_insert_timestamp_trigger
     AFTER INSERT ON public.employees
     FOR EACH ROW

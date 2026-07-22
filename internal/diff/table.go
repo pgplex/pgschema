@@ -1511,6 +1511,14 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
+
+		if trigger.Comment != "" {
+			generateTriggerComment(trigger, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
+		}
+
+		if trigger.Disabled {
+			generateTriggerEnabledState(trigger, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
+		}
 	}
 
 	// Add policies - already sorted by the Diff operation
