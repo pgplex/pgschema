@@ -1106,8 +1106,15 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		if oldSeq, exists := oldSequences[key]; exists {
 			// Skip sequences owned by table columns (created by SERIAL) for structural changes,
 			// but allow comment-only changes through so COMMENT ON SEQUENCE can be deployed.
-			isOwned := (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
-				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "")
+			// Gated on IsOwned (genuine pg_depend ownership) rather than non-empty
+			// OwnedByTable/OwnedByColumn: those two fields are also populated by a
+			// name-matching fallback for sequences merely *referenced* by a column's
+			// nextval() default (e.g. a standalone or shared sequence), which is not
+			// real ownership - see isSerialColumn/generateSequenceSQL for the same
+			// distinction. Using the non-owned-but-referenced case here would silently
+			// skip genuine structural changes (increment, min/max, cycle, cache) on
+			// such a sequence.
+			isOwned := oldSeq.IsOwned || newSeq.IsOwned
 			if isOwned {
 				if oldSeq.Comment != newSeq.Comment {
 					diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{

@@ -83,6 +83,61 @@ func TestTopologicallySortTablesOrdersSharedSequenceReferenceAfterOwner(t *testi
 	}
 }
 
+// Two different schemas can each genuinely own a sequence with the same bare
+// name. A referencer in one schema must be ordered after its own schema's
+// owner, not the other schema's same-named owner - proving sequenceOwnerTable
+// is keyed by schema-qualified name, not bare name.
+func TestTopologicallySortTablesOrdersSharedSequenceReferenceBySchemaNotBareName(t *testing.T) {
+	domainDefault := `nextval('domain.shared_seq'::regclass)`
+	publicDefault := `nextval('shared_seq'::regclass)`
+
+	domainOwner := &ir.Table{
+		Schema: "domain", Name: "owner",
+		Constraints: map[string]*ir.Constraint{},
+		Columns: []*ir.Column{
+			{Name: "id", DefaultValue: &domainDefault, HasOwnedSequence: true},
+		},
+	}
+	domainSharer := &ir.Table{
+		Schema: "domain", Name: "sharer",
+		Constraints: map[string]*ir.Constraint{},
+		Columns: []*ir.Column{
+			{Name: "owner_id", DefaultValue: &domainDefault, HasOwnedSequence: false},
+		},
+	}
+	publicOwner := &ir.Table{
+		Schema: "public", Name: "owner",
+		Constraints: map[string]*ir.Constraint{},
+		Columns: []*ir.Column{
+			{Name: "id", DefaultValue: &publicDefault, HasOwnedSequence: true},
+		},
+	}
+	publicSharer := &ir.Table{
+		Schema: "public", Name: "sharer",
+		Constraints: map[string]*ir.Constraint{},
+		Columns: []*ir.Column{
+			{Name: "owner_id", DefaultValue: &publicDefault, HasOwnedSequence: false},
+		},
+	}
+
+	sorted := topologicallySortTables([]*ir.Table{domainSharer, publicSharer, publicOwner, domainOwner})
+	if len(sorted) != 4 {
+		t.Fatalf("expected 4 tables, got %d", len(sorted))
+	}
+
+	order := make(map[string]int, len(sorted))
+	for idx, tbl := range sorted {
+		order[tbl.Schema+"."+tbl.Name] = idx
+	}
+
+	if order["domain.owner"] >= order["domain.sharer"] {
+		t.Fatalf("expected domain.owner before domain.sharer, got %v", order)
+	}
+	if order["public.owner"] >= order["public.sharer"] {
+		t.Fatalf("expected public.owner before public.sharer, got %v", order)
+	}
+}
+
 func newTestTable(name string, deps ...string) *ir.Table {
 	constraints := make(map[string]*ir.Constraint)
 	for idx, dep := range deps {

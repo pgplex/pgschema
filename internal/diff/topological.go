@@ -8,15 +8,22 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
-// nextvalSequenceNamePattern extracts the bare sequence name from a nextval()
+// nextvalSequenceNamePattern extracts the sequence reference from a nextval()
 // default expression, e.g. nextval('"questionReference_questionRefId_seq"'::regclass)
-// or nextval('domain.some_seq'::regclass) -> "some_seq" (schema prefix and quoting
-// stripped, matching how sequence names are keyed elsewhere in this package).
+// or nextval('domain.some_seq'::regclass).
 var nextvalSequenceNamePattern = regexp.MustCompile(`nextval\('([^']+)'`)
 
-// nextvalTargetSequenceName returns the bare sequence name a column's nextval()
-// default targets, or "" if the column has no such default.
-func nextvalTargetSequenceName(column *ir.Column) string {
+// nextvalTargetSequenceKey returns the schema-qualified key ("schema.name") a
+// column's nextval() default targets, or "" if the column has no such
+// default. If the default's sequence reference is itself schema-qualified,
+// that schema is used; otherwise fallbackSchema (the referencing column's own
+// table schema) is assumed, matching how an unqualified sequence name would
+// actually resolve via search_path in the overwhelming common case. Keying by
+// bare sequence name alone (as an earlier version of this function did) is
+// unsafe: two different schemas can each genuinely own a sequence with the
+// same name, and a bare-name map would collide, potentially ordering a
+// referencing table after the wrong same-named owner.
+func nextvalTargetSequenceKey(column *ir.Column, fallbackSchema string) string {
 	if column.DefaultValue == nil {
 		return ""
 	}
@@ -24,12 +31,18 @@ func nextvalTargetSequenceName(column *ir.Column) string {
 	if m == nil {
 		return ""
 	}
-	name := m[1]
-	// Strip an optional schema prefix (quoted or bare) before the sequence name.
-	if idx := strings.LastIndex(name, "."); idx != -1 {
-		name = name[idx+1:]
+	ref := m[1]
+	schema := fallbackSchema
+	name := ref
+	if idx := strings.LastIndex(ref, "."); idx != -1 {
+		schema = strings.Trim(ref[:idx], `"`)
+		name = ref[idx+1:]
 	}
-	return strings.Trim(name, `"`)
+	name = strings.Trim(name, `"`)
+	if name == "" {
+		return ""
+	}
+	return schema + "." + name
 }
 
 // topologicallySortTables sorts tables across all schemas in dependency order
@@ -69,8 +82,8 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 	for key, table := range tableMap {
 		for _, col := range table.Columns {
 			if col.HasOwnedSequence {
-				if seqName := nextvalTargetSequenceName(col); seqName != "" {
-					sequenceOwnerTable[seqName] = key
+				if seqKey := nextvalTargetSequenceKey(col, table.Schema); seqKey != "" {
+					sequenceOwnerTable[seqKey] = key
 				}
 			}
 		}
@@ -117,11 +130,11 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 			if col.HasOwnedSequence {
 				continue
 			}
-			seqName := nextvalTargetSequenceName(col)
-			if seqName == "" {
+			seqKey := nextvalTargetSequenceKey(col, tableA.Schema)
+			if seqKey == "" {
 				continue
 			}
-			if keyB, exists := sequenceOwnerTable[seqName]; exists && keyB != keyA {
+			if keyB, exists := sequenceOwnerTable[seqKey]; exists && keyB != keyA {
 				adjList[keyB] = append(adjList[keyB], keyA)
 				inDegree[keyA]++
 			}

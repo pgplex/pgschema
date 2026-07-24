@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/pgplex/pgschema/ir"
@@ -96,6 +97,52 @@ func TestGenerateSequenceSQL_OwnedByRequiresIsOwned(t *testing.T) {
 				t.Errorf("generateSequenceSQL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A sequence that is referenced by a column's nextval() default (populating
+// OwnedByTable/OwnedByColumn via the name-matching fallback) but NOT genuinely
+// owned (IsOwned=false) must still be compared structurally - a real
+// increment/min/max/cycle change on such a sequence must not be silently
+// dropped just because it looks "owned" by the loose OwnedByTable/Column
+// check.
+func TestGenerateMigration_ModifiedNonOwnedSequenceStructuralChangeDetected(t *testing.T) {
+	buildIR := func(increment int64) *ir.IR {
+		return &ir.IR{
+			Schemas: map[string]*ir.Schema{
+				"public": {
+					Name:      "public",
+					Tables:    map[string]*ir.Table{},
+					Views:     map[string]*ir.View{},
+					Functions: map[string]*ir.Function{},
+					Sequences: map[string]*ir.Sequence{
+						"shared_seq": {
+							Schema: "public", Name: "shared_seq", DataType: "bigint",
+							StartValue: 1, Increment: increment,
+							OwnedByTable: "sharer", OwnedByColumn: "owner_id", IsOwned: false,
+						},
+					},
+					Types: map[string]*ir.Type{},
+				},
+			},
+		}
+	}
+
+	oldIR := buildIR(1)
+	newIR := buildIR(2)
+
+	diffs := GenerateMigration(oldIR, newIR, "public")
+
+	found := false
+	for _, d := range diffs {
+		for _, stmt := range d.Statements {
+			if strings.Contains(stmt.SQL, "ALTER SEQUENCE") && strings.Contains(stmt.SQL, "INCREMENT") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected an ALTER SEQUENCE ... INCREMENT statement for a structurally-changed, non-owned sequence, got diffs: %+v", diffs)
 	}
 }
 
