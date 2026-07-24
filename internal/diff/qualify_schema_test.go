@@ -135,6 +135,7 @@ func TestQualifySchema_Sequence(t *testing.T) {
 		Increment:     1,
 		OwnedByTable:  "users",
 		OwnedByColumn: "id",
+		IsOwned:       true,
 	}
 
 	def := generateSequenceSQL(seq, "public", false)

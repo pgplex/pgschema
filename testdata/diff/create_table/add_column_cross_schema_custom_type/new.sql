@@ -9,7 +9,14 @@
 --   in search_path when applying to temp schema.
 --
 -- CUSTOM schema types (hstore, custom_text, custom_enum):
---   Written with schema qualifier because they're in utils schema.
+--   Written with schema qualifier because they're in utils schema. hstore is
+--   extension-owned, though, so the emitted DDL drops the qualifier anyway
+--   (see the extension-owned-type schema-qualifier fix): the schema an
+--   extension-owned type resolves to during plan-time introspection is an
+--   artifact of the temp/plan environment, not a property of any real deploy
+--   target, so it's never trustworthy to preserve verbatim - unlike
+--   custom_text/custom_enum, which are ordinary (non-extension) types whose
+--   schema is a stable, meaningful part of the desired state.
 
 CREATE TABLE public.users (
     id bigint PRIMARY KEY,
@@ -18,7 +25,9 @@ CREATE TABLE public.users (
     -- Extension type from public schema: unqualified (natural usage)
     -- Reproduces #197 - pgschema must include public in search_path
     fqdn citext NOT NULL,
-    -- Extension type from utils schema: must be schema-qualified
+    -- Extension type from utils schema: written schema-qualified here, but
+    -- extension-ownership means the emitted DDL strips the qualifier anyway
+    -- (see diff.sql) - it's never trustworthy at plan time.
     metadata utils.hstore,
     -- Custom domain from utils schema: must be schema-qualified
     description utils.custom_text,

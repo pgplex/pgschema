@@ -22,6 +22,18 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	oldType := stripSchemaPrefix(comparableColumnType(cd.Old), targetSchema)
 	newType := stripSchemaPrefix(comparableColumnType(cd.New), targetSchema)
 
+	// For extension-owned types (e.g. pgvector's "vector"), the schema a type
+	// resolves to during plan-time introspection is a temp-environment
+	// artifact, not a real difference - strip ANY schema qualifier (not just
+	// targetSchema's) before comparing or emitting DDL, mirroring columnsEqual
+	// so the two can't diverge on the same column.
+	if sameExtensionType(cd.Old, cd.New) {
+		oldBaseType = stripAnySchemaPrefix(oldBaseType)
+		newBaseType = stripAnySchemaPrefix(newBaseType)
+		oldType = stripAnySchemaPrefix(oldType)
+		newType = stripAnySchemaPrefix(newType)
+	}
+
 	// Check if there's a type change AND the column has a default value
 	// When a USING clause is needed, we must: DROP DEFAULT -> ALTER TYPE -> SET DEFAULT
 	// because PostgreSQL can't automatically cast default values during type changes with USING
@@ -157,6 +169,20 @@ func comparableColumnType(column *ir.Column) string {
 	return formatColumnDataType(column)
 }
 
+// sameExtensionType reports whether both columns' data types are owned by the
+// same Postgres extension (e.g. pgvector's "vector"). When true, a literal
+// schema-qualifier mismatch between the two sides is not a real diff: the
+// schema an extension-owned type resolves to during plan-time introspection
+// is an artifact of wherever the extension happened to land in the temp
+// environment, not a property of the live database's actual state. Callers
+// should still compare the schema-stripped type strings afterwards - this
+// only licenses stripping ANY schema qualifier (not just targetSchema's), it
+// does not mean the types are unconditionally equal (a real change, e.g. a
+// pgvector dimension change, must still be detected).
+func sameExtensionType(old, new *ir.Column) bool {
+	return old.ExtensionName != "" && old.ExtensionName == new.ExtensionName
+}
+
 // columnsEqual compares two columns for equality
 // targetSchema is used to normalize type names before comparison
 func columnsEqual(old, new *ir.Column, targetSchema string) bool {
@@ -169,6 +195,15 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 	// both numeric(18,6) and numeric(20,6).
 	oldType := stripSchemaPrefix(comparableColumnType(old), targetSchema)
 	newType := stripSchemaPrefix(comparableColumnType(new), targetSchema)
+	if sameExtensionType(old, new) {
+		// The plan-time schema an extension-owned type resolves to is an
+		// artifact of the temp environment, not a real difference - strip
+		// ANY schema qualifier (not just targetSchema's) before comparing,
+		// so only a genuine type change (e.g. a pgvector dimension change)
+		// still registers as a diff.
+		oldType = stripAnySchemaPrefix(oldType)
+		newType = stripAnySchemaPrefix(newType)
+	}
 	if oldType != newType {
 		return false
 	}

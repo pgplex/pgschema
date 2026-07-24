@@ -60,30 +60,32 @@ type Table struct {
 	Dependencies      []TableDependency      `json:"dependencies"`
 	Comment           string                 `json:"comment,omitempty"`
 	IsPartitioned     bool                   `json:"is_partitioned"`
-	PartitionStrategy string                 `json:"partition_strategy,omitempty"` // RANGE, LIST, HASH
-	PartitionKey      string                 `json:"partition_key,omitempty"`      // Column(s) used for partitioning
-	PartitionOf       string                 `json:"partition_of,omitempty"`       // Parent table name (partition children)
+	PartitionStrategy string                 `json:"partition_strategy,omitempty"`  // RANGE, LIST, HASH
+	PartitionKey      string                 `json:"partition_key,omitempty"`       // Column(s) used for partitioning
+	PartitionOf       string                 `json:"partition_of,omitempty"`        // Parent table name (partition children)
 	PartitionOfSchema string                 `json:"partition_of_schema,omitempty"` // Parent table schema (partition children)
-	PartitionBound    string                 `json:"partition_bound,omitempty"`    // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
-	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`       // LIKE clauses in CREATE TABLE
-	Unlogged          bool                   `json:"unlogged,omitempty"`           // True for UNLOGGED tables
+	PartitionBound    string                 `json:"partition_bound,omitempty"`     // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
+	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`        // LIKE clauses in CREATE TABLE
+	Unlogged          bool                   `json:"unlogged,omitempty"`            // True for UNLOGGED tables
 }
 
 // Column represents a table column
 type Column struct {
-	Name          string    `json:"name"`
-	Position      int       `json:"position"` // ordinal_position
-	DataType      string    `json:"data_type"`
-	IsNullable    bool      `json:"is_nullable"`
-	DefaultValue  *string   `json:"default_value,omitempty"`
-	MaxLength     *int      `json:"max_length,omitempty"`
-	Precision     *int      `json:"precision,omitempty"`
-	Scale         *int      `json:"scale,omitempty"`
-	Comment       string    `json:"comment,omitempty"`
-	Identity      *Identity `json:"identity,omitempty"`
-	GeneratedExpr *string   `json:"generated_expr,omitempty"` // Expression for generated columns
-	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
-	GeneratedKind string    `json:"generated_kind,omitempty"` // "s" for STORED, "v" for VIRTUAL (PG18+)
+	Name             string    `json:"name"`
+	Position         int       `json:"position"` // ordinal_position
+	DataType         string    `json:"data_type"`
+	IsNullable       bool      `json:"is_nullable"`
+	DefaultValue     *string   `json:"default_value,omitempty"`
+	MaxLength        *int      `json:"max_length,omitempty"`
+	Precision        *int      `json:"precision,omitempty"`
+	Scale            *int      `json:"scale,omitempty"`
+	Comment          string    `json:"comment,omitempty"`
+	Identity         *Identity `json:"identity,omitempty"`
+	GeneratedExpr    *string   `json:"generated_expr,omitempty"`     // Expression for generated columns
+	IsGenerated      bool      `json:"is_generated,omitempty"`       // True if this is a generated column
+	GeneratedKind    string    `json:"generated_kind,omitempty"`     // "s" for STORED, "v" for VIRTUAL (PG18+)
+	ExtensionName    string    `json:"extension_name,omitempty"`     // Extension owning this column's data type, if any
+	HasOwnedSequence bool      `json:"has_owned_sequence,omitempty"` // True if a sequence is genuinely OWNED BY this column (SERIAL/IDENTITY), not merely referenced by its default
 }
 
 // Identity represents PostgreSQL identity column configuration
@@ -207,7 +209,14 @@ type Sequence struct {
 	Cache         *int64 `json:"cache,omitempty"`
 	OwnedByTable  string `json:"owned_by_table,omitempty"`
 	OwnedByColumn string `json:"owned_by_column,omitempty"`
-	Comment       string `json:"comment,omitempty"`
+	// IsOwned is true only when OwnedByTable/OwnedByColumn come from a genuine
+	// pg_depend ownership edge (SERIAL/IDENTITY), not merely inferred from a
+	// column's nextval() default text (see GetSequencesForSchema). A column can
+	// reference a sequence it doesn't own (e.g. two tables sharing one sequence);
+	// OWNED BY must never be emitted, and the sequence must never be treated as
+	// implicitly created by CREATE TABLE, for such a sequence.
+	IsOwned bool   `json:"is_owned,omitempty"`
+	Comment string `json:"comment,omitempty"`
 }
 
 // Constraint represents a table constraint
@@ -367,9 +376,10 @@ const (
 
 // TypeColumn represents a column in a composite type
 type TypeColumn struct {
-	Name     string `json:"name"`
-	DataType string `json:"data_type"`
-	Position int    `json:"position"`
+	Name          string `json:"name"`
+	DataType      string `json:"data_type"`
+	Position      int    `json:"position"`
+	ExtensionName string `json:"extension_name,omitempty"` // Extension owning this attribute's data type, if any
 }
 
 // DomainConstraint represents a constraint on a domain
@@ -380,16 +390,17 @@ type DomainConstraint struct {
 
 // Type represents a PostgreSQL user-defined type
 type Type struct {
-	Schema      string              `json:"schema"`
-	Name        string              `json:"name"`
-	Kind        TypeKind            `json:"kind"`
-	Comment     string              `json:"comment,omitempty"`
-	EnumValues  []string            `json:"enum_values,omitempty"` // For ENUM types
-	Columns     []*TypeColumn       `json:"columns,omitempty"`     // For composite types
-	BaseType    string              `json:"base_type,omitempty"`   // For DOMAIN types
-	NotNull     bool                `json:"not_null,omitempty"`    // For DOMAIN types
-	Default     string              `json:"default,omitempty"`     // For DOMAIN types
-	Constraints []*DomainConstraint `json:"constraints,omitempty"` // For DOMAIN types
+	Schema        string              `json:"schema"`
+	Name          string              `json:"name"`
+	Kind          TypeKind            `json:"kind"`
+	Comment       string              `json:"comment,omitempty"`
+	EnumValues    []string            `json:"enum_values,omitempty"`    // For ENUM types
+	Columns       []*TypeColumn       `json:"columns,omitempty"`        // For composite types
+	BaseType      string              `json:"base_type,omitempty"`      // For DOMAIN types
+	NotNull       bool                `json:"not_null,omitempty"`       // For DOMAIN types
+	Default       string              `json:"default,omitempty"`        // For DOMAIN types
+	Constraints   []*DomainConstraint `json:"constraints,omitempty"`    // For DOMAIN types
+	ExtensionName string              `json:"extension_name,omitempty"` // Extension owning this domain's base type, if any
 }
 
 // Aggregate represents a database aggregate function.

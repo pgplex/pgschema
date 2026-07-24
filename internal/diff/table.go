@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -51,6 +52,25 @@ func stripSchemaPrefixMode(typeName, targetSchema string, qualifySchema bool) st
 	}
 
 	return typeName
+}
+
+// extensionTypeSchemaPrefix matches a leading schema qualifier (quoted or bare)
+// on a type name, e.g. "domain." in "domain.vector(384)" or `"My Schema".` in
+// `"My Schema".vector`.
+var extensionTypeSchemaPrefix = regexp.MustCompile(`^(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)\.`)
+
+// stripAnySchemaPrefix unconditionally removes a leading schema qualifier from
+// a type name, regardless of which schema it is. Unlike stripSchemaPrefix
+// (which only strips targetSchema), this is used for extension-owned types:
+// the schema such a type resolves to during plan-time introspection is an
+// artifact of wherever the extension happened to land in the temp
+// environment, not a property of the live database's actual state, so no
+// single targetSchema comparison is meaningful when emitting DDL for it.
+func stripAnySchemaPrefix(typeName string) string {
+	if typeName == "" {
+		return typeName
+	}
+	return extensionTypeSchemaPrefix.ReplaceAllString(typeName, "")
 }
 
 // stripTempSchemaPrefix removes temporary embedded postgres schema prefixes (pgschema_tmp_*).
@@ -1122,9 +1142,19 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			}
 		}
 
-		// Build column type and strip schema prefix if it matches target schema
+		// Build column type and strip schema prefix if it matches target schema.
+		// For extension-owned types, strip ANY schema qualifier unconditionally:
+		// there is no "old" (live) side to compare against for a brand-new column,
+		// and the schema such a type resolves to during plan-time introspection is
+		// an artifact of wherever the extension happened to land in the temp/plan
+		// environment - it has no bearing on where the extension actually lives on
+		// a real deploy target (see stripAnySchemaPrefix).
 		columnType := formatColumnDataType(column)
-		columnType = stripSchemaPrefix(columnType, targetSchema)
+		if column.ExtensionName != "" {
+			columnType = stripAnySchemaPrefix(columnType)
+		} else {
+			columnType = stripSchemaPrefix(columnType, targetSchema)
+		}
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 
 		// Build and append all column clauses
@@ -1749,7 +1779,16 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 
 	// Strip schema prefix if it matches the target schema (unless forced qualification
 	// is on, in which case the schema-qualified type name is preserved).
-	dataType = stripSchemaPrefixMode(dataType, targetSchema, qualifySchema)
+	// Extension-owned types are the exception: there is no "old" (live) side to
+	// compare against for a brand-new table, and the schema such a type resolves to
+	// at plan time is a temp/plan-environment artifact rather than a meaningful
+	// qualifier, so any schema prefix is stripped unconditionally, ignoring
+	// qualifySchema.
+	if column.ExtensionName != "" {
+		dataType = stripAnySchemaPrefix(dataType)
+	} else {
+		dataType = stripSchemaPrefixMode(dataType, targetSchema, qualifySchema)
+	}
 
 	builder.WriteString(dataType)
 
@@ -1823,10 +1862,19 @@ func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema strin
 	return result
 }
 
-// isSerialColumn checks if a column is a SERIAL column (integer type with nextval default)
+// isSerialColumn checks if a column is a SERIAL column (integer type with nextval
+// default, backed by a sequence the column genuinely OWNS). A column with an
+// integer type and a nextval() default that merely *references* some other,
+// standalone or differently-owned sequence (e.g. two tables sharing one sequence)
+// is not SERIAL - collapsing it to the SERIAL keyword would fabricate a brand-new
+// column-owned sequence in its place, silently replacing the real one.
 func isSerialColumn(column *ir.Column) bool {
 	// Check if column has nextval default
 	if column.DefaultValue == nil || !strings.Contains(*column.DefaultValue, "nextval") {
+		return false
+	}
+
+	if !column.HasOwnedSequence {
 		return false
 	}
 

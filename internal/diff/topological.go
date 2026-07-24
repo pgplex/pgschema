@@ -1,11 +1,36 @@
 package diff
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/pgplex/pgschema/ir"
 )
+
+// nextvalSequenceNamePattern extracts the bare sequence name from a nextval()
+// default expression, e.g. nextval('"questionReference_questionRefId_seq"'::regclass)
+// or nextval('domain.some_seq'::regclass) -> "some_seq" (schema prefix and quoting
+// stripped, matching how sequence names are keyed elsewhere in this package).
+var nextvalSequenceNamePattern = regexp.MustCompile(`nextval\('([^']+)'`)
+
+// nextvalTargetSequenceName returns the bare sequence name a column's nextval()
+// default targets, or "" if the column has no such default.
+func nextvalTargetSequenceName(column *ir.Column) string {
+	if column.DefaultValue == nil {
+		return ""
+	}
+	m := nextvalSequenceNamePattern.FindStringSubmatch(*column.DefaultValue)
+	if m == nil {
+		return ""
+	}
+	name := m[1]
+	// Strip an optional schema prefix (quoted or bare) before the sequence name.
+	if idx := strings.LastIndex(name, "."); idx != -1 {
+		name = name[idx+1:]
+	}
+	return strings.Trim(name, `"`)
+}
 
 // topologicallySortTables sorts tables across all schemas in dependency order
 // Tables that are referenced by foreign keys will come before the tables that reference them
@@ -33,8 +58,28 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 		adjList[key] = []string{}
 	}
 
+	// Map bare sequence name -> owning table key, for sequences genuinely OWNED
+	// (HasOwnedSequence) by a column in this table set. Used below to order a
+	// table whose column merely *references* another table's sequence (e.g. two
+	// tables sharing one sequence via an explicit nextval() default, with no
+	// formal FK tying them together) after that sequence's real owning table -
+	// otherwise CREATE TABLE can run before the sequence the DEFAULT depends on
+	// actually exists.
+	sequenceOwnerTable := make(map[string]string)
+	for key, table := range tableMap {
+		for _, col := range table.Columns {
+			if col.HasOwnedSequence {
+				if seqName := nextvalTargetSequenceName(col); seqName != "" {
+					sequenceOwnerTable[seqName] = key
+				}
+			}
+		}
+	}
+
 	// Build edges: if tableA has a foreign key to tableB, add edge tableB -> tableA
 	// Also: if tableA is a partition child of tableB, add edge tableB -> tableA
+	// Also: if tableA has a column whose nextval() default targets a sequence
+	// genuinely owned by tableB, add edge tableB -> tableA
 	for keyA, tableA := range tableMap {
 		// Partition parent → child dependency
 		if tableA.PartitionOf != "" {
@@ -63,6 +108,22 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 					adjList[keyB] = append(adjList[keyB], keyA)
 					inDegree[keyA]++
 				}
+			}
+		}
+
+		// Shared-sequence dependency: a column referencing (but not owning) a
+		// sequence must come after the table that genuinely owns it.
+		for _, col := range tableA.Columns {
+			if col.HasOwnedSequence {
+				continue
+			}
+			seqName := nextvalTargetSequenceName(col)
+			if seqName == "" {
+				continue
+			}
+			if keyB, exists := sequenceOwnerTable[seqName]; exists && keyB != keyA {
+				adjList[keyB] = append(adjList[keyB], keyA)
+				inDegree[keyA]++
 			}
 		}
 	}

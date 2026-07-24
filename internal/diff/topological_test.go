@@ -43,6 +43,46 @@ func TestTopologicallySortTablesHandlesCycles(t *testing.T) {
 	}
 }
 
+// A column can reference (via nextval() default) a sequence it does NOT own,
+// with no formal FK tying the two tables together (e.g. two tables sharing one
+// sequence). topologicallySortTables must still order the referencing table
+// after the table that genuinely owns the sequence, or CREATE TABLE can run
+// before the sequence's owning table - and hence the sequence itself - exists.
+func TestTopologicallySortTablesOrdersSharedSequenceReferenceAfterOwner(t *testing.T) {
+	seqDefault := `nextval('"owner_seq"'::regclass)`
+
+	owner := &ir.Table{
+		Schema: "public", Name: "owner",
+		Constraints: map[string]*ir.Constraint{},
+		Columns: []*ir.Column{
+			{Name: "id", DefaultValue: &seqDefault, HasOwnedSequence: true},
+		},
+	}
+	sharer := &ir.Table{
+		Schema: "public", Name: "sharer",
+		Constraints: map[string]*ir.Constraint{},
+		Columns: []*ir.Column{
+			{Name: "owner_id", DefaultValue: &seqDefault, HasOwnedSequence: false},
+		},
+	}
+	unrelated := newTestTable("unrelated")
+
+	// Feed sharer before owner to prove the ordering isn't just insertion order.
+	sorted := topologicallySortTables([]*ir.Table{sharer, unrelated, owner})
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 tables, got %d", len(sorted))
+	}
+
+	order := make(map[string]int, len(sorted))
+	for idx, tbl := range sorted {
+		order[tbl.Name] = idx
+	}
+
+	if order["owner"] >= order["sharer"] {
+		t.Fatalf("expected owner to be ordered before sharer, got %v", order)
+	}
+}
+
 func newTestTable(name string, deps ...string) *ir.Table {
 	constraints := make(map[string]*ir.Constraint)
 	for idx, dep := range deps {

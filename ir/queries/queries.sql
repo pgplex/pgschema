@@ -222,7 +222,34 @@ WITH column_base AS (
         a.attgenerated,
         ad.adbin,
         ad.adrelid,
-        cl.oid AS table_oid
+        cl.oid AS table_oid,
+        -- Extension that owns this column's data type, if any (deptype = 'e').
+        -- Used to treat schema-qualifier differences on extension-owned types
+        -- (e.g. pgvector's "vector") as non-diffs, since the plan-time temp
+        -- schema can land the extension in a different schema than live DB.
+        COALESCE(ext.extname, '') AS extension_name,
+        -- Whether a sequence is genuinely OWNED BY this column (deptype 'a' for
+        -- SERIAL-style ownership, 'i' for IDENTITY) as opposed to merely being
+        -- referenced by a nextval() default pointing at some other, standalone or
+        -- differently-owned sequence. A column only behaves like SERIAL when this
+        -- is true - otherwise its DEFAULT must be rendered explicitly rather than
+        -- collapsed to the SERIAL/BIGSERIAL/SMALLSERIAL keyword (issue: pgschema
+        -- must not fabricate a new column-owned sequence for a column that
+        -- legitimately shares another table's sequence).
+        --
+        -- Uses EXISTS rather than a LEFT JOIN: a column can have MULTIPLE
+        -- deptype='a'/classid=pg_class pg_depend rows (e.g. a manually created
+        -- index on the column has this exact shape too, not just a genuine owned
+        -- sequence) - a LEFT JOIN would duplicate the column_base row once per
+        -- such dependency, and whichever duplicate happened to sort first would
+        -- silently determine the result. EXISTS collapses this to a single,
+        -- deterministic boolean regardless of how many qualifying rows exist.
+        EXISTS (
+            SELECT 1 FROM pg_depend own_dep
+            JOIN pg_class own_seq ON own_seq.oid = own_dep.objid AND own_seq.relkind = 'S'
+            WHERE own_dep.refobjid = cl.oid AND own_dep.refobjsubid = a.attnum
+              AND own_dep.deptype IN ('a', 'i') AND own_dep.classid = 'pg_class'::regclass
+        ) AS has_owned_sequence
     FROM information_schema.columns c
     LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
     LEFT JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = n.oid
@@ -233,6 +260,8 @@ WITH column_base AS (
     LEFT JOIN pg_namespace dn ON dt.typnamespace = dn.oid
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
+    LEFT JOIN pg_depend dep ON dep.objid = dt.oid AND dep.deptype = 'e'
+    LEFT JOIN pg_extension ext ON ext.oid = dep.refobjid
     WHERE
         c.table_schema = $1
 )
@@ -259,6 +288,8 @@ SELECT
     cb.identity_minimum,
     cb.identity_cycle,
     cb.attgenerated,
+    cb.extension_name,
+    cb.has_owned_sequence,
     -- Use LATERAL join to guarantee execution order:
     -- 1. set_config sets search_path to only pg_catalog
     -- 2. pg_get_expr then uses that search_path and includes schema qualifiers for user types
@@ -1086,6 +1117,14 @@ SELECT
     s.cache_size,
     COALESCE(dep_table.relname, col_table.table_name) AS owned_by_table,
     COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column,
+    -- True only when Method 1 (real pg_depend ownership) matched, regardless of
+    -- Method 2's fuzzy nextval()-text fallback below. owned_by_table/owned_by_column
+    -- are a best-effort "who does this look like it belongs to" for reporting/dump
+    -- purposes (including the mixed-case pg_depend workaround Method 2 exists for);
+    -- is_owned is the precise signal for "does emitting OWNED BY / treating this as
+    -- an implicit SERIAL sequence make sense" - a column merely referencing another,
+    -- unrelated sequence via an explicit nextval() default must not count.
+    (d.objid IS NOT NULL) AS is_owned,
     COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
@@ -1423,7 +1462,10 @@ SELECT
     END AS base_type,
     t.typnotnull AS not_null,
     t.typdefault AS default_value,
-    COALESCE(d.description, '') AS domain_comment
+    COALESCE(d.description, '') AS domain_comment,
+    -- Extension that owns this domain's base type, if any (deptype = 'e').
+    -- See GetColumnsForSchema for why this matters (schema-qualifier false positives).
+    COALESCE(ext.extname, '') AS extension_name
 FROM pg_type t
 JOIN pg_namespace n ON t.typnamespace = n.oid
 LEFT JOIN pg_type bt ON bt.oid = t.typbasetype
@@ -1431,6 +1473,8 @@ LEFT JOIN pg_namespace bn ON bt.typnamespace = bn.oid
 LEFT JOIN pg_type bet ON bt.typelem = bet.oid
 LEFT JOIN pg_namespace ben ON bet.typnamespace = ben.oid
 LEFT JOIN pg_description d ON d.objoid = t.oid AND d.classoid = 'pg_type'::regclass
+LEFT JOIN pg_depend dep ON dep.objid = bt.oid AND dep.deptype = 'e'
+LEFT JOIN pg_extension ext ON ext.oid = dep.refobjid
 WHERE t.typtype = 'd'  -- Domain types only
     AND n.nspname = $1
 ORDER BY n.nspname, t.typname;
@@ -1480,7 +1524,10 @@ SELECT
         ELSE
             quote_ident(atn.nspname) || '.' || quote_ident(at.typname)
             || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
-    END AS column_type
+    END AS column_type,
+    -- Extension that owns this attribute's data type, if any (deptype = 'e').
+    -- See GetColumnsForSchema for why this matters (schema-qualifier false positives).
+    COALESCE(ext.extname, '') AS extension_name
 FROM pg_type t
 JOIN pg_namespace n ON t.typnamespace = n.oid
 JOIN pg_class c ON t.typrelid = c.oid
@@ -1489,6 +1536,8 @@ LEFT JOIN pg_type at ON at.oid = a.atttypid
 LEFT JOIN pg_namespace atn ON at.typnamespace = atn.oid
 LEFT JOIN pg_type aet ON at.typelem = aet.oid
 LEFT JOIN pg_namespace aen ON aet.typnamespace = aen.oid
+LEFT JOIN pg_depend dep ON dep.objid = at.oid AND dep.deptype = 'e'
+LEFT JOIN pg_extension ext ON ext.oid = dep.refobjid
 WHERE t.typtype = 'c'  -- composite types only
     AND c.relkind = 'c'  -- only true composite types, not table types
     AND a.attnum > 0  -- exclude system columns

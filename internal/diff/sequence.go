@@ -142,8 +142,11 @@ func generateSequenceSQL(seq *ir.Sequence, targetSchema string, qualifySchema bo
 		parts = append(parts, "CYCLE")
 	}
 
-	// Add sequence owner
-	if seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
+	// Add sequence owner. IsOwned gates this on a genuine pg_depend ownership edge -
+	// OwnedByTable/OwnedByColumn alone can also be a best-effort guess inferred from
+	// a column's nextval() default text (see GetSequencesForSchema), which must not
+	// be turned into an OWNED BY clause for a sequence the column doesn't really own.
+	if seq.IsOwned && seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
 		ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, qualifySchema)
 		parts = append(parts, fmt.Sprintf("OWNED BY %s.%s", ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn)))
 	}

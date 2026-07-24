@@ -252,8 +252,18 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 	case ir.TypeKindComposite:
 		var attributes []string
 		for _, attr := range typeObj.Columns {
-			// Strip schema prefix from data type if it matches the target schema
-			dataType := stripSchemaPrefixMode(attr.DataType, targetSchema, qualifySchema)
+			// Strip schema prefix from data type if it matches the target schema.
+			// Extension-owned attribute types are the exception: there is no "old"
+			// (live) side to compare against for a brand-new type, and the schema
+			// such a type resolves to at plan time is a temp/plan-environment
+			// artifact, so any qualifier is stripped unconditionally, ignoring
+			// qualifySchema.
+			var dataType string
+			if attr.ExtensionName != "" {
+				dataType = stripAnySchemaPrefix(attr.DataType)
+			} else {
+				dataType = stripSchemaPrefixMode(attr.DataType, targetSchema, qualifySchema)
+			}
 			attributes = append(attributes, fmt.Sprintf("%s %s", attr.Name, dataType))
 		}
 		return fmt.Sprintf("CREATE TYPE %s AS (%s);", typeName, strings.Join(attributes, ", "))
@@ -262,7 +272,14 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 		// cross-schema (or target-schema) prefix under forced qualification, strip the
 		// target-schema prefix otherwise. Note: same-schema user-defined base types are
 		// stored bare by the inspector, so this cannot *add* a prefix to them.
-		baseType := stripSchemaPrefixMode(typeObj.BaseType, targetSchema, qualifySchema)
+		// Extension-owned base types are the exception: any schema qualifier is
+		// stripped unconditionally, ignoring qualifySchema (same rationale as above).
+		var baseType string
+		if typeObj.ExtensionName != "" {
+			baseType = stripAnySchemaPrefix(typeObj.BaseType)
+		} else {
+			baseType = stripSchemaPrefixMode(typeObj.BaseType, targetSchema, qualifySchema)
+		}
 
 		// Use multi-line format for better readability if there are constraints
 		hasConstraints := len(typeObj.Constraints) > 0 || typeObj.NotNull || typeObj.Default != ""
@@ -298,8 +315,36 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 	}
 }
 
-// typesEqual compares two types for equality
-func typesEqual(old, new *ir.Type) bool {
+// sameExtensionTypeColumn reports whether both composite-type attributes' data
+// types are owned by the same Postgres extension. See sameExtensionType in
+// column.go for why this matters.
+func sameExtensionTypeColumn(old, new *ir.TypeColumn) bool {
+	return old.ExtensionName != "" && old.ExtensionName == new.ExtensionName
+}
+
+// sameExtensionDomainBaseType reports whether both domains' base types are
+// owned by the same Postgres extension. See sameExtensionType in column.go
+// for why this matters.
+func sameExtensionDomainBaseType(old, new *ir.Type) bool {
+	return old.ExtensionName != "" && old.ExtensionName == new.ExtensionName
+}
+
+// typeStringsEqual compares two (already targetSchema-stripped) type strings,
+// additionally stripping ANY schema qualifier from both sides when
+// sameExtension is true - see stripAnySchemaPrefix for why extension-owned
+// types need this instead of a plain targetSchema-only comparison.
+func typeStringsEqual(oldType, newType string, sameExtension bool) bool {
+	if sameExtension {
+		oldType = stripAnySchemaPrefix(oldType)
+		newType = stripAnySchemaPrefix(newType)
+	}
+	return oldType == newType
+}
+
+// typesEqual compares two types for equality. targetSchema is used to
+// normalize schema-qualified type references before comparison, mirroring
+// columnsEqual.
+func typesEqual(old, new *ir.Type, targetSchema string) bool {
 	if old.Schema != new.Schema {
 		return false
 	}
@@ -329,14 +374,21 @@ func typesEqual(old, new *ir.Type) bool {
 		}
 		for i, col := range old.Columns {
 			newCol := new.Columns[i]
-			if col.Name != newCol.Name || col.DataType != newCol.DataType {
+			if col.Name != newCol.Name {
+				return false
+			}
+			oldType := stripSchemaPrefix(col.DataType, targetSchema)
+			newType := stripSchemaPrefix(newCol.DataType, targetSchema)
+			if !typeStringsEqual(oldType, newType, sameExtensionTypeColumn(col, newCol)) {
 				return false
 			}
 		}
 
 	case ir.TypeKindDomain:
 		// For domain types, compare base type and constraints
-		if old.BaseType != new.BaseType {
+		oldBaseType := stripSchemaPrefix(old.BaseType, targetSchema)
+		newBaseType := stripSchemaPrefix(new.BaseType, targetSchema)
+		if !typeStringsEqual(oldBaseType, newBaseType, sameExtensionDomainBaseType(old, new)) {
 			return false
 		}
 		if old.NotNull != new.NotNull {

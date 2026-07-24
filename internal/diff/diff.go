@@ -846,7 +846,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range typeKeys {
 		newType := newTypes[key]
 		if oldType, exists := oldTypes[key]; exists {
-			if !typesEqual(oldType, newType) {
+			if !typesEqual(oldType, newType, targetSchema) {
 				diff.modifiedTypes = append(diff.modifiedTypes, &typeDiff{
 					Old: oldType,
 					New: newType,
@@ -1065,9 +1065,14 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		seq := newSequences[key]
 		if _, exists := oldSequences[key]; !exists {
 			// Skip sequences owned by table columns only if the column is also new
-			// (created by SERIAL in CREATE TABLE). If the column already exists,
-			// we need to create the sequence explicitly for ALTER COLUMN to use.
-			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+			// (created by SERIAL in CREATE TABLE) AND is the genuine SERIAL/IDENTITY
+			// owner of this sequence - not merely a column whose nextval() default
+			// happens to reference it (e.g. two tables sharing one sequence; see
+			// columnHasOwnedSequence). If the column already exists, or doesn't
+			// really own the sequence, it must be created explicitly.
+			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" &&
+				!columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) &&
+				columnHasOwnedSequence(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
 				// Sequence is created implicitly by CREATE TABLE (SERIAL). Emit its
 				// comment separately after all tables are created.
 				if seq.Comment != "" {
@@ -1084,8 +1089,11 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range oldSeqKeys {
 		seq := oldSequences[key]
 		if _, exists := newSequences[key]; !exists {
-			// Skip sequences owned by table columns (created by SERIAL)
-			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+			// Skip sequences owned by table columns (created by SERIAL) - see the
+			// added-sequences branch above for why columnHasOwnedSequence matters.
+			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" &&
+				!columnExistsInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) &&
+				columnHasOwnedSequence(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
 				continue
 			}
 			diff.droppedSequences = append(diff.droppedSequences, seq)
@@ -2309,6 +2317,25 @@ func columnExistsInTables(tables map[string]*ir.Table, schema, tableName, column
 		for _, col := range table.Columns {
 			if col.Name == columnName {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+// columnHasOwnedSequence reports whether the named column both exists and is
+// the genuine SERIAL/IDENTITY owner of a sequence, as opposed to a column that
+// merely references some other, standalone or differently-owned sequence via
+// an explicit nextval() default (e.g. two tables sharing one sequence). Used
+// to distinguish a sequence implicitly created by CREATE TABLE (SERIAL) - which
+// must not get its own explicit CREATE/DROP SEQUENCE statement - from one that
+// genuinely needs to be managed explicitly.
+func columnHasOwnedSequence(tables map[string]*ir.Table, schema, tableName, columnName string) bool {
+	tableKey := schema + "." + tableName
+	if table, exists := tables[tableKey]; exists {
+		for _, col := range table.Columns {
+			if col.Name == columnName {
+				return col.HasOwnedSequence
 			}
 		}
 	}

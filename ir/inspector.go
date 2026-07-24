@@ -304,11 +304,13 @@ func (i *Inspector) buildColumns(ctx context.Context, schema *IR, targetSchema s
 		dataType := normalizePostgreSQLType(resolvedType)
 
 		column := &Column{
-			Name:       columnName,
-			Position:   i.safeInterfaceToInt(col.OrdinalPosition, 0),
-			DataType:   dataType,
-			IsNullable: i.safeInterfaceToString(col.IsNullable) == "YES",
-			Comment:    comment,
+			Name:             columnName,
+			Position:         i.safeInterfaceToInt(col.OrdinalPosition, 0),
+			DataType:         dataType,
+			IsNullable:       i.safeInterfaceToString(col.IsNullable) == "YES",
+			Comment:          comment,
+			ExtensionName:    i.safeInterfaceToString(col.ExtensionName),
+			HasOwnedSequence: i.safeInterfaceToBool(col.HasOwnedSequence, false),
 		}
 
 		// Handle generated columns first (attgenerated: 's' = STORED, 'v' = VIRTUAL in PG18+)
@@ -948,6 +950,7 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 		if seq.OwnedByColumn.Valid {
 			sequence.OwnedByColumn = seq.OwnedByColumn.String
 		}
+		sequence.IsOwned = i.safeInterfaceToBool(seq.IsOwned, false)
 
 		// Skip sequences that are owned by identity columns
 		// Identity sequences should be managed through the identity column, not as separate sequences
@@ -1959,9 +1962,10 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 		}
 
 		typeCol := &TypeColumn{
-			Name:     col.ColumnName,
-			DataType: dataType,
-			Position: position,
+			Name:          col.ColumnName,
+			DataType:      dataType,
+			Position:      position,
+			ExtensionName: i.safeInterfaceToString(col.ExtensionName),
 		}
 
 		compositeColumnsMap[key] = append(compositeColumnsMap[key], typeCol)
@@ -2049,14 +2053,15 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 		constraints := domainConstraintsMap[key]
 
 		domainType := &Type{
-			Schema:      schemaName,
-			Name:        domainName,
-			Kind:        TypeKindDomain,
-			Comment:     comment,
-			BaseType:    baseType,
-			NotNull:     notNull,
-			Default:     defaultValue,
-			Constraints: constraints,
+			Schema:        schemaName,
+			Name:          domainName,
+			Kind:          TypeKindDomain,
+			Comment:       comment,
+			BaseType:      baseType,
+			NotNull:       notNull,
+			Default:       defaultValue,
+			Constraints:   constraints,
+			ExtensionName: i.safeInterfaceToString(d.ExtensionName),
 		}
 
 		dbSchema.SetType(domainName, domainType)

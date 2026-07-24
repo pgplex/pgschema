@@ -247,6 +247,12 @@ CREATE TABLE public.customer (
     active integer
 );
 
+--
+-- Name: customer_customer_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.customer_customer_id_seq OWNED BY public.customer.customer_id;
+
 
 --
 -- Name: rewards_report(integer, numeric); Type: FUNCTION; Schema: public; Owner: -
@@ -343,6 +349,12 @@ CREATE TABLE public.actor (
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
+--
+-- Name: actor_actor_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.actor_actor_id_seq OWNED BY public.actor.actor_id;
+
 
 --
 -- Name: category_category_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -365,6 +377,12 @@ CREATE TABLE public.category (
     name text NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
+
+--
+-- Name: category_category_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.category_category_id_seq OWNED BY public.category.category_id;
 
 
 --
@@ -399,6 +417,12 @@ CREATE TABLE public.film (
     special_features text[],
     fulltext tsvector NOT NULL
 );
+
+--
+-- Name: film_film_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.film_film_id_seq OWNED BY public.film.film_id;
 
 
 --
@@ -471,6 +495,12 @@ CREATE TABLE public.address (
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
+--
+-- Name: address_address_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.address_address_id_seq OWNED BY public.address.address_id;
+
 
 --
 -- Name: city_city_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -495,6 +525,12 @@ CREATE TABLE public.city (
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
+--
+-- Name: city_city_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.city_city_id_seq OWNED BY public.city.city_id;
+
 
 --
 -- Name: country_country_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -517,6 +553,12 @@ CREATE TABLE public.country (
     country text NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
+
+--
+-- Name: country_country_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.country_country_id_seq OWNED BY public.country.country_id;
 
 
 --
@@ -586,6 +628,12 @@ CREATE TABLE public.inventory (
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
+--
+-- Name: inventory_inventory_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inventory_inventory_id_seq OWNED BY public.inventory.inventory_id;
+
 
 --
 -- Name: language_language_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -608,6 +656,12 @@ CREATE TABLE public.language (
     name character(20) NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
+
+--
+-- Name: language_language_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.language_language_id_seq OWNED BY public.language.language_id;
 
 
 --
@@ -670,6 +724,12 @@ CREATE TABLE public.payment_p2022_01 (
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
+
+--
+-- Name: payment_payment_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.payment_payment_id_seq OWNED BY public.payment.payment_id;
 
 
 --
@@ -782,6 +842,12 @@ CREATE TABLE public.rental (
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
+--
+-- Name: rental_rental_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.rental_rental_id_seq OWNED BY public.rental.rental_id;
+
 
 --
 -- Name: rental_by_category; Type: MATERIALIZED VIEW; Schema: public; Owner: -
@@ -848,6 +914,12 @@ CREATE TABLE public.staff (
     picture bytea
 );
 
+--
+-- Name: staff_staff_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.staff_staff_id_seq OWNED BY public.staff.staff_id;
+
 
 --
 -- Name: store_store_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -871,6 +943,12 @@ CREATE TABLE public.store (
     address_id integer NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
+
+--
+-- Name: store_store_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.store_store_id_seq OWNED BY public.store.store_id;
 
 
 --

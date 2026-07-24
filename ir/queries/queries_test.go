@@ -3,6 +3,7 @@ package queries_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -60,6 +61,77 @@ func TestGetSequencesForSchemaDetectsMixedCaseSequenceInColumnDefault(t *testing
 	}
 
 	t.Fatalf("sequence %q not found; got sequences: %s", "orders_orderId_seq", sequenceNames(rows))
+}
+
+// TestGetColumnsForSchemaDetectsExtensionOwnedTypeRegardlessOfSchema covers the
+// extension-owned-type schema-qualifier fix: a column's data type can be owned
+// by an extension installed in a schema other than "public" (citext/hstore are
+// contrib modules bundled with the embedded-postgres binary; pgvector is not,
+// so it isn't used here). GetColumnsForSchema must report the extension name
+// regardless of which schema the extension lives in, and must report an empty
+// extension name for ordinary (non-extension-owned) columns.
+func TestGetColumnsForSchemaDetectsExtensionOwnedTypeRegardlessOfSchema(t *testing.T) {
+	conn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedTestPostgres)
+	defer conn.Close()
+
+	ctx := context.Background()
+	if _, err := conn.ExecContext(ctx, `DROP TABLE IF EXISTS docs CASCADE`); err != nil {
+		t.Fatalf("failed to drop test table: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `DROP SCHEMA IF EXISTS ext_schema CASCADE`); err != nil {
+		t.Fatalf("failed to drop test schema: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA ext_schema`); err != nil {
+		t.Fatalf("failed to create test schema: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS hstore SCHEMA ext_schema`); err != nil {
+		t.Fatalf("failed to create hstore extension: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE docs (id serial PRIMARY KEY, attrs ext_schema.hstore, plain_text text)`); err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		conn.ExecContext(ctx, `DROP TABLE IF EXISTS docs CASCADE`)
+		conn.ExecContext(ctx, `DROP SCHEMA IF EXISTS ext_schema CASCADE`)
+	}()
+
+	rows, err := queries.New(conn).GetColumnsForSchema(ctx, sql.NullString{String: "public", Valid: true})
+	if err != nil {
+		t.Fatalf("failed to get columns for schema: %v", err)
+	}
+
+	var foundAttrs, foundPlain bool
+	for _, row := range rows {
+		if fmt.Sprintf("%v", row.TableName) != "docs" {
+			continue
+		}
+		switch fmt.Sprintf("%v", row.ColumnName) {
+		case "attrs":
+			foundAttrs = true
+			if !row.ExtensionName.Valid || row.ExtensionName.String != "hstore" {
+				t.Errorf("attrs column: ExtensionName = %+v, want valid %q", row.ExtensionName, "hstore")
+			}
+		case "plain_text":
+			foundPlain = true
+			if row.ExtensionName.Valid && row.ExtensionName.String != "" {
+				t.Errorf("plain_text column: ExtensionName = %+v, want empty", row.ExtensionName)
+			}
+		}
+	}
+	if !foundAttrs {
+		t.Fatalf("attrs column not found; got columns: %s", columnNames(rows))
+	}
+	if !foundPlain {
+		t.Fatalf("plain_text column not found; got columns: %s", columnNames(rows))
+	}
+}
+
+func columnNames(rows []queries.GetColumnsForSchemaRow) string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, fmt.Sprintf("%v.%v", row.TableName, row.ColumnName))
+	}
+	return strings.Join(names, ", ")
 }
 
 func sequenceNames(rows []queries.GetSequencesForSchemaRow) string {
