@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pgplex/pgschema/ir"
 	"github.com/spf13/cobra"
 )
 
@@ -197,5 +198,41 @@ func TestPlanCommandFileError(t *testing.T) {
 	err := runPlan(PlanCmd, []string{})
 	if err == nil {
 		t.Error("Expected error when file doesn't exist, but got none")
+	}
+}
+
+func TestNormalizeSchemaNames_StripsSameSchemaQualifiersFromViewDefinitions(t *testing.T) {
+	irData := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"pgschema_tmp_20260326_123456_abcd1234": {
+				Name: "pgschema_tmp_20260326_123456_abcd1234",
+				Views: map[string]*ir.View{
+					"pattern_categories_valid": {
+						Schema: "pgschema_tmp_20260326_123456_abcd1234",
+						Name:   "pattern_categories_valid",
+						Definition: " SELECT id\n" +
+							"   FROM categories c\n" +
+							"  WHERE public.nlevel(path) = 8",
+					},
+				},
+			},
+		},
+	}
+
+	normalizeSchemaNames(irData, "pgschema_tmp_20260326_123456_abcd1234", "public")
+
+	schema := irData.Schemas["public"]
+	if schema == nil {
+		t.Fatal("expected schema to be renamed to public")
+	}
+
+	view := schema.Views["pattern_categories_valid"]
+	if view == nil {
+		t.Fatal("expected view to exist after schema normalization")
+	}
+
+	expected := " SELECT id\n   FROM categories c\n  WHERE nlevel(path) = 8"
+	if view.Definition != expected {
+		t.Fatalf("expected normalized view definition %q, got %q", expected, view.Definition)
 	}
 }

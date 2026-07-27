@@ -543,7 +543,7 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 		// Views
 		for _, view := range schema.Views {
 			view.Schema = toSchema
-			view.Definition = replaceString(view.Definition)
+			view.Definition = ir.StripSchemaPrefixFromBody(replaceString(view.Definition), toSchema)
 
 			// Normalize schema names in materialized view indexes
 			for _, index := range view.Indexes {
