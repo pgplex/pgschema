@@ -73,6 +73,7 @@
       {
         "tab": "Dev Journal",
         "pages": [
+          "blog/atlas-vs-pgschema",
           "blog/supabase-declarative-schema-vs-pgschema",
           "blog/demo-with-manus-and-asciinema",
           "blog/pgschema-postgres-declarative-schema-migration-like-terraform"

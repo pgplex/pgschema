@@ -1,0 +1,129 @@
+---
+title: "Migrating from Atlas to pgschema"
+description: "Comparing Atlas and pgschema for PostgreSQL schema management: pricing, supported Postgres objects, workflow, and what Atlas offers beyond pgschema."
+---
+
+Atlas and pgschema both bring a Terraform-style declarative workflow to database schema management: define the desired state, let the tool generate the migration.
+
+Atlas spans multiple database engines - MySQL, PostgreSQL, SQLite, MariaDB, SQL Server, ClickHouse, Redshift. pgschema focuses on Postgres alone, and that focus shows up directly in what's free: on Atlas, most Postgres object types beyond plain tables - views, triggers, functions, RLS, and more - sit behind Atlas Pro. pgschema ships all of it under Apache 2.0, no paywall. This post walks through what that means in practice for a Postgres-only team weighing a move.
+
+## Pricing
+
+pgschema is Apache 2.0 and free in full - every feature described below, with no separate paid tier.
+
+Atlas is split across three distributions: a Community Edition under Apache 2.0, a Standard distribution under the Atlas MSA, and Atlas Pro at \$9/seat/month after a 30-day trial. Which features land in which tier is detailed in the next section.
+
+## Supported Postgres Objects
+
+Atlas gates most Postgres object types beyond plain tables behind its Pro tier. pgschema ships all of them under Apache 2.0, no gating.
+
+Atlas's published feature compatibility list shows what the PostgreSQL driver supports in every edition: tables and columns, indexes, check/unique/exclusion constraints, foreign keys, enum types, and comments. Everything below that line is Pro.
+
+| Postgres object | Atlas | pgschema |
+|---|---|---|
+| Tables, columns, indexes, FKs, enums | Free | Free |
+| Views | Pro | Free |
+| Materialized views | Pro | Free |
+| Functions & procedures | Pro | Free |
+| Triggers | Pro | Free |
+| Sequences | Pro | Free |
+| Row-level security / policies | Pro | Free |
+| Domain types | Pro | Free |
+| Composite types | Pro | Free |
+| Table partitioning | Pro | Free |
+| Extensions | Pro | Not supported |
+| Foreign servers / FDW | Pro | Not supported |
+| Roles & users | Pro | Not supported |
+
+Most non-trivial Postgres schemas have at least one view, trigger, or RLS policy - and that's exactly where Atlas's free tier stops working. It's fine for a toy schema, not for a production one.
+
+That gating has a real price tag: Atlas Pro is \$9/seat/month, plus usage-based charges for CI/CD pipelines and databases. A 10-engineer team lands around \$90/month in seats alone, before usage. pgschema: \$0.
+
+The last three rows - extensions, FDW, roles - are different. pgschema doesn't gate them; it's just out of scope by design. pgschema manages a single schema, not the whole database or cluster. Extensions, foreign servers, and roles sit above that boundary - usually set up once by a DBA or infra tooling, not something an app developer touches when adding a column. Atlas, by contrast, manages at the database level, so it reaches into those cluster-adjacent objects too - just paywalled on Postgres like everything else.
+
+## Workflow
+
+### Plan, Review, Apply
+
+pgschema's [plan/review/apply workflow](/workflow/plan-review-apply) is part of the free tool, not an upsell on top of it: every `apply` is preceded by an explicit, reviewable plan, generated from a fresh comparison of your schema files against the live database.
+
+Atlas's equivalent - `schema plan`, the pre-plan/review/approve step that lets a team see the diff and approve it before anything touches the database - **requires Atlas Pro**. Community Edition can run `schema apply` directly, but without that reviewable plan step in front of it.
+
+### Online DDL
+
+pgschema automatically rewrites changes into safe online DDL by default: a plain `CREATE INDEX` becomes `CREATE INDEX CONCURRENTLY`, and a new foreign key or check constraint becomes `ADD CONSTRAINT ... NOT VALID` followed by `VALIDATE CONSTRAINT`. No manual intervention needed.
+
+Atlas can generate `CREATE INDEX CONCURRENTLY` too, but only if you explicitly configure the `concurrent_index` diff option - otherwise it defaults to a regular, table-locking `CREATE INDEX`. Catching that mistake is what Atlas's migration linter is for, and **migration linting requires Atlas Pro**, including the Postgres-specific locking checks.
+
+pgschema needs no linter and no opt-in config for this: it generates `CREATE INDEX CONCURRENTLY` and `ADD CONSTRAINT ... NOT VALID` by default, for free, every time.
+
+### Modular Schema Files
+
+Both tools let you split a schema across multiple files instead of one large file.
+
+Atlas's `src` attribute accepts a single file, a directory, or an explicit list, and its `fileset()` function adds glob-based selection (e.g. `fileset("schema/*.pg.hcl")`) - configuration that lives in `atlas.hcl`, separate from the schema files themselves.
+
+pgschema uses PostgreSQL's native `\i` include directive. Running `pgschema dump --multi-file` produces a schema directory with an entry-point file and per-object-type subdirectories:
+
+```
+schema/
+├── main.sql              # Entry point with \i directives
+├── tables/
+├── views/
+├── functions/
+└── indexes/
+```
+
+```sql
+\i tables/users.sql
+\i views/
+\i functions/
+```
+
+Because `\i` is native `psql` syntax, these files work directly with `psql` with no tool-specific config file to maintain alongside them.
+
+### Ignoring Objects for Gradual Onboarding
+
+Both tools support excluding objects from management, useful for onboarding an existing database incrementally rather than taking over the whole schema at once.
+
+Atlas's `exclude` attribute in `atlas.hcl` takes glob patterns applied at inspection time:
+
+```hcl
+env "prod" {
+  url     = "..."
+  exclude = ["temp_*", "test_*"]
+}
+```
+
+pgschema uses a [`.pgschemaignore`](/cli/ignore) file, with patterns grouped by object type and negation support:
+
+```toml
+[tables]
+patterns = ["temp_*", "test_*", "!test_core_*"]
+
+[views]
+patterns = ["debug_*", "analytics_*"]
+
+[functions]
+patterns = ["fn_test_*"]
+```
+
+The per-object-type grouping and `!`-negation make it straightforward to onboard a schema gradually: ignore everything except the tables you're actively managing, then shrink the ignore list over time as more of the schema comes under pgschema's control.
+
+## What Atlas Offers Beyond pgschema
+
+To be fair on the other direction: the paid Atlas Pro provides things pgschema doesn't offer. Briefly:
+
+- **Multi-engine support** - one tool across MySQL, PostgreSQL, SQLite, MariaDB, SQL Server, ClickHouse, and Redshift.
+- **Migration linting** - destructive-change, data-dependent, and backward-incompatible checks, plus Postgres-specific locking checks.
+- **Testing framework and checkpoints** - `migrate test` / `schema test`, and named checkpoints to roll back to.
+- **`migrate down`** - versioned rollback support.
+- **Drift detection and schema monitoring** - via Atlas Cloud.
+- **Integrations** - Kubernetes Operator, Terraform provider, GitHub Action, IDE plugins, Go SDK.
+- **Extensions, FDW, and roles as code** - database-level objects pgschema deliberately leaves out of scope.
+
+## Conclusion
+
+For a team on Postgres, pgschema's value case is straightforward: the full declarative workflow - views, functions, triggers, sequences, RLS, domain types, partitioning, and the plan/review/apply loop itself - is free and complete under Apache 2.0. There's no tier to budget for and no point where a schema "graduates" into needing a paid seat.
+
+If you're migrating a Postgres-only team off Atlas, the move is mostly a subtraction: no seat count to track, no feature list to check against a pricing page. Everything Atlas gates on Postgres is included from the start. The tradeoff is multi-engine support and the Pro-only tooling listed above. pgschema has no paid tier to build them into, so it doesn't offer them at any price.
