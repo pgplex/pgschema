@@ -73,6 +73,121 @@ func stripAnySchemaPrefix(typeName string) string {
 	return extensionTypeSchemaPrefix.ReplaceAllString(typeName, "")
 }
 
+// buildExtensionSchemaMap determines which schema each extension is
+// genuinely installed in on oldIR (the live/target database's
+// already-introspected state). This is the one place a trustworthy answer to
+// "where does extension X actually live on the real target?" can come from:
+// unlike newIR (built by applying desired-state SQL to a separate plan-time
+// comparison environment, which may install the same extension into a
+// different schema - see resolveExtensionTypeSchema), oldIR reflects the
+// real, already-deployed state.
+//
+// oldIR.Extensions (sourced directly from pg_extension via the inspector) is
+// authoritative and covers every installed extension, including ones not yet
+// referenced by any column or type. As a fallback - for IR values built or
+// hand-constructed before that field existed, e.g. in older cached plans or
+// tests - the schema is also inferred from any existing column/type already
+// using the extension. An extension with no entry in either source (it's
+// being introduced for the first time by this very migration, with nothing
+// on the live database to consult) has no entry, and callers must fall back
+// to best-effort handling.
+func buildExtensionSchemaMap(oldIR *ir.IR) map[string]string {
+	schemas := make(map[string]string)
+	if oldIR == nil {
+		return schemas
+	}
+	for extensionName, schemaName := range oldIR.Extensions {
+		if extensionName != "" && schemaName != "" {
+			schemas[extensionName] = schemaName
+		}
+	}
+	record := func(extensionName, dataType string) {
+		if extensionName == "" {
+			return
+		}
+		if _, exists := schemas[extensionName]; exists {
+			return
+		}
+		if schema := schemaPrefixOf(dataType); schema != "" {
+			schemas[extensionName] = schema
+		}
+	}
+	for _, schema := range oldIR.Schemas {
+		for _, table := range schema.Tables {
+			for _, col := range table.Columns {
+				record(col.ExtensionName, col.DataType)
+			}
+		}
+		for _, typ := range schema.Types {
+			record(typ.ExtensionName, typ.BaseType)
+			for _, attr := range typ.Columns {
+				record(attr.ExtensionName, attr.DataType)
+			}
+		}
+	}
+	return schemas
+}
+
+// schemaPrefixOf returns the leading schema qualifier (quoted or bare) of a
+// type name, unquoted, or "" if the type name has no qualifier.
+func schemaPrefixOf(typeName string) string {
+	m := extensionTypeSchemaPrefix.FindString(typeName)
+	if m == "" {
+		return ""
+	}
+	return strings.Trim(strings.TrimSuffix(m, "."), `"`)
+}
+
+// resolveExtensionTypeSchema qualifies an extension-owned type reference with
+// the schema that extension is genuinely installed in on the real/live
+// database (per extensionSchemas, built from oldIR by buildExtensionSchemaMap),
+// stripping whatever schema qualifier plan-time introspection happened to
+// attach. Plan-time introspection resolves extension-owned types against
+// whatever schema the extension happens to be installed in within the
+// (typically separate) plan-time comparison environment - that schema is
+// frequently an artifact of that environment, not the real target's actual
+// state, so it cannot be trusted verbatim (this is what motivated stripping
+// it in the first place). But bare-stripping unconditionally is also wrong:
+// if the extension is genuinely installed in some schema other than the
+// target schema (a perfectly normal setup - e.g. hstore installed once into
+// a shared "utils" schema), relying on search_path to find it can fail
+// outright. Falls back to an unqualified (bare) reference only when
+// extensionSchemas has no entry for this extension (it isn't used anywhere
+// in the live database yet - typically because this migration is
+// introducing it for the first time), matching the prior best-effort
+// behavior for that narrower case.
+// targetSchema/qualifySchema apply the same "smart qualification" convention
+// used throughout this package (see stripSchemaPrefixMode): the schema
+// prefix is omitted when it equals targetSchema, unless qualifySchema forces
+// it to stay. Without this, an extension genuinely installed in the target
+// schema (or, as in the citext-in-public case, the common case of an
+// extension installed in "public" while the target schema is also "public")
+// would get a redundant, always-on qualifier that the rest of the codebase's
+// output never uses for same-schema references.
+func resolveExtensionTypeSchema(typeName, extensionName string, extensionSchemas map[string]string, targetSchema string, qualifySchema bool) string {
+	bare := stripAnySchemaPrefix(typeName)
+	if bare == "" {
+		return bare
+	}
+	realSchema, ok := extensionSchemas[extensionName]
+	if !ok || realSchema == "" {
+		// No authoritative schema known for this extension (e.g. it isn't
+		// installed anywhere yet in oldIR). Under forced qualification, honor
+		// the `--qualify-schema` contract by preserving whatever qualifier
+		// (if any) was already present, rather than silently dropping it -
+		// mirrors stripSchemaPrefixMode's qualifySchema=true behavior for
+		// ordinary types, which likewise returns typeName unchanged.
+		if qualifySchema {
+			return typeName
+		}
+		return bare
+	}
+	if realSchema == targetSchema && !qualifySchema {
+		return bare
+	}
+	return ir.QuoteIdentifier(realSchema) + "." + bare
+}
+
 // stripTempSchemaPrefix removes temporary embedded postgres schema prefixes (pgschema_tmp_*).
 // These are used internally during plan generation and should not appear in output DDL.
 func stripTempSchemaPrefix(value string) string {
@@ -454,7 +569,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, collector.extensionSchemas, createdTables, existingTables, suppressedInlineFKs, allNewTables)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -840,7 +955,7 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table) (string, []*deferredConstraint) {
+func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, extensionSchemas map[string]string, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table) (string, []*deferredConstraint) {
 	// Only include table name without schema if it's in the target schema (unless
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
@@ -941,7 +1056,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	for _, column := range table.Columns {
 		// Build column definition with SERIAL detection
 		var builder strings.Builder
-		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema)
+		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema, extensionSchemas)
 		columnParts = append(columnParts, fmt.Sprintf("    %s", builder.String()))
 	}
 
@@ -1143,15 +1258,13 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		}
 
 		// Build column type and strip schema prefix if it matches target schema.
-		// For extension-owned types, strip ANY schema qualifier unconditionally:
-		// there is no "old" (live) side to compare against for a brand-new column,
-		// and the schema such a type resolves to during plan-time introspection is
-		// an artifact of wherever the extension happened to land in the temp/plan
-		// environment - it has no bearing on where the extension actually lives on
-		// a real deploy target (see stripAnySchemaPrefix).
+		// For extension-owned types, qualify with the schema the extension is
+		// genuinely installed in on the live database (see
+		// resolveExtensionTypeSchema) rather than trusting whatever schema
+		// plan-time introspection happened to resolve it to.
 		columnType := formatColumnDataType(column)
 		if column.ExtensionName != "" {
-			columnType = stripAnySchemaPrefix(columnType)
+			columnType = resolveExtensionTypeSchema(columnType, column.ExtensionName, collector.extensionSchemas, targetSchema, collector.qualifySchema)
 		} else {
 			columnType = stripSchemaPrefix(columnType, targetSchema)
 		}
@@ -1770,7 +1883,7 @@ func ensureCheckClauseParens(s string) string {
 
 // writeColumnDefinitionToBuilder builds column definitions with SERIAL detection and proper formatting
 // This is moved from ir/table.go to consolidate SQL generation in the diff module
-func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string, qualifySchema bool) {
+func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string, qualifySchema bool, extensionSchemas map[string]string) {
 	builder.WriteString(ir.QuoteIdentifier(column.Name))
 	builder.WriteString(" ")
 
@@ -1779,13 +1892,13 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 
 	// Strip schema prefix if it matches the target schema (unless forced qualification
 	// is on, in which case the schema-qualified type name is preserved).
-	// Extension-owned types are the exception: there is no "old" (live) side to
-	// compare against for a brand-new table, and the schema such a type resolves to
-	// at plan time is a temp/plan-environment artifact rather than a meaningful
-	// qualifier, so any schema prefix is stripped unconditionally, ignoring
+	// Extension-owned types are the exception: qualify with the schema the
+	// extension is genuinely installed in on the live database (see
+	// resolveExtensionTypeSchema) rather than trusting whatever schema
+	// plan-time introspection happened to resolve it to, ignoring
 	// qualifySchema.
 	if column.ExtensionName != "" {
-		dataType = stripAnySchemaPrefix(dataType)
+		dataType = resolveExtensionTypeSchema(dataType, column.ExtensionName, extensionSchemas, targetSchema, qualifySchema)
 	} else {
 		dataType = stripSchemaPrefixMode(dataType, targetSchema, qualifySchema)
 	}

@@ -17,6 +17,12 @@ type diffCollector struct {
 	// for the target schema (set by `dump --qualify-schema`). Default false preserves
 	// the standard "smart qualification" (omit the target-schema prefix).
 	qualifySchema bool
+
+	// extensionSchemas maps an extension name to the schema it is genuinely
+	// installed in on the live/target database (built from oldIR - see
+	// buildExtensionSchemaMap). Used to correctly qualify extension-owned
+	// type references in generated DDL instead of guessing.
+	extensionSchemas map[string]string
 }
 
 // newDiffCollector creates a new diffCollector

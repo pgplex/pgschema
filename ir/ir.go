@@ -10,7 +10,14 @@ import (
 type IR struct {
 	Metadata Metadata           `json:"metadata"`
 	Schemas  map[string]*Schema `json:"schemas"` // schema_name -> Schema
-	mu       sync.RWMutex       // Protects concurrent access to Schemas
+	// Extensions maps an installed extension's name to the schema it is
+	// installed in. Extensions are database-wide, not schema-scoped, so this
+	// is tracked at the IR level rather than per-Schema. Used to determine
+	// where an extension-owned type's real schema is on the live database,
+	// which cannot always be inferred from columns/types alone (e.g. the
+	// extension is installed but not yet referenced by any existing column).
+	Extensions map[string]string `json:"extensions,omitempty"`
+	mu         sync.RWMutex      // Protects concurrent access to Schemas
 }
 
 // Metadata contains information about the schema dump
@@ -595,7 +602,8 @@ func (cp *ColumnPrivilege) GetObjectName() string {
 // NewIR creates a new empty catalog IR
 func NewIR() *IR {
 	return &IR{
-		Schemas: make(map[string]*Schema),
+		Schemas:    make(map[string]*Schema),
+		Extensions: make(map[string]string),
 	}
 }
 

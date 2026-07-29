@@ -83,6 +83,7 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 	group2 := queryGroup{
 		name: "independent objects",
 		funcs: []func(context.Context, *IR, string) error{
+			i.buildExtensions,
 			i.buildSequences,
 			i.buildFunctions,
 			i.buildProcedures,
@@ -863,6 +864,25 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 			}
 			view.Indexes[indexName] = index
 		}
+	}
+
+	return nil
+}
+
+// buildExtensions records which schema each installed extension lives in.
+// Extensions are database-wide, so targetSchema is unused; the parameter is
+// kept only to match the queryGroup function signature.
+func (i *Inspector) buildExtensions(ctx context.Context, schema *IR, _ string) error {
+	extensions, err := i.queries.GetExtensions(ctx)
+	if err != nil {
+		return err
+	}
+
+	if schema.Extensions == nil {
+		schema.Extensions = make(map[string]string)
+	}
+	for _, ext := range extensions {
+		schema.Extensions[ext.ExtensionName] = ext.SchemaName
 	}
 
 	return nil

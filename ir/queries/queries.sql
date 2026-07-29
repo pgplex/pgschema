@@ -1755,3 +1755,18 @@ WHERE d.classid = 'pg_proc'::regclass
   AND d.refclassid = 'pg_proc'::regclass
   AND d.deptype = 'n'
   AND dependent_ns.nspname = $1;
+
+-- GetExtensions retrieves all installed extensions and the schema each is
+-- installed in. Extensions are database-wide (not schema-scoped), so this
+-- intentionally has no schema filter - used to determine where an
+-- extension-owned type's real schema is on the live/target database, which
+-- cannot always be inferred from a specific column or type already using it
+-- (e.g. the extension is installed but not yet referenced by any existing
+-- column at the time a migration first uses it).
+-- name: GetExtensions :many
+SELECT
+    e.extname AS extension_name,
+    n.nspname AS schema_name
+FROM pg_extension e
+JOIN pg_namespace n ON n.oid = e.extnamespace
+ORDER BY e.extname;

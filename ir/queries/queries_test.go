@@ -126,6 +126,43 @@ func TestGetColumnsForSchemaDetectsExtensionOwnedTypeRegardlessOfSchema(t *testi
 	}
 }
 
+func TestGetExtensionsReturnsInstallSchema(t *testing.T) {
+	conn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedTestPostgres)
+	defer conn.Close()
+
+	ctx := context.Background()
+	if _, err := conn.ExecContext(ctx, `DROP SCHEMA IF EXISTS ext_schema_gext CASCADE`); err != nil {
+		t.Fatalf("failed to drop test schema: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA ext_schema_gext`); err != nil {
+		t.Fatalf("failed to create test schema: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS hstore SCHEMA ext_schema_gext`); err != nil {
+		t.Fatalf("failed to create hstore extension: %v", err)
+	}
+	defer func() {
+		conn.ExecContext(ctx, `DROP SCHEMA IF EXISTS ext_schema_gext CASCADE`)
+	}()
+
+	rows, err := queries.New(conn).GetExtensions(ctx)
+	if err != nil {
+		t.Fatalf("failed to get extensions: %v", err)
+	}
+
+	found := false
+	for _, row := range rows {
+		if row.ExtensionName == "hstore" {
+			found = true
+			if row.SchemaName != "ext_schema_gext" {
+				t.Errorf("hstore extension: SchemaName = %q, want %q", row.SchemaName, "ext_schema_gext")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("hstore extension not found in GetExtensions results")
+	}
+}
+
 func columnNames(rows []queries.GetColumnsForSchemaRow) string {
 	names := make([]string, 0, len(rows))
 	for _, row := range rows {

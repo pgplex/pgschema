@@ -1645,6 +1645,50 @@ func (q *Queries) GetEnumValuesForSchema(ctx context.Context, dollar_1 sql.NullS
 	return items, nil
 }
 
+const getExtensions = `-- name: GetExtensions :many
+SELECT
+    e.extname AS extension_name,
+    n.nspname AS schema_name
+FROM pg_extension e
+JOIN pg_namespace n ON n.oid = e.extnamespace
+ORDER BY e.extname
+`
+
+type GetExtensionsRow struct {
+	ExtensionName string `db:"extension_name" json:"extension_name"`
+	SchemaName    string `db:"schema_name" json:"schema_name"`
+}
+
+// GetExtensions retrieves all installed extensions and the schema each is
+// installed in. Extensions are database-wide (not schema-scoped), so this
+// intentionally has no schema filter - used to determine where an
+// extension-owned type's real schema is on the live/target database, which
+// cannot always be inferred from a specific column or type already using it
+// (e.g. the extension is installed but not yet referenced by any existing
+// column at the time a migration first uses it).
+func (q *Queries) GetExtensions(ctx context.Context) ([]GetExtensionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getExtensions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetExtensionsRow
+	for rows.Next() {
+		var i GetExtensionsRow
+		if err := rows.Scan(&i.ExtensionName, &i.SchemaName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFunctionDependencies = `-- name: GetFunctionDependencies :many
 SELECT
     dependent_ns.nspname AS dependent_schema,

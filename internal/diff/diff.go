@@ -1067,12 +1067,23 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 			// Skip sequences owned by table columns only if the column is also new
 			// (created by SERIAL in CREATE TABLE) AND is the genuine SERIAL/IDENTITY
 			// owner of this sequence - not merely a column whose nextval() default
-			// happens to reference it (e.g. two tables sharing one sequence; see
-			// columnHasOwnedSequence). If the column already exists, or doesn't
-			// really own the sequence, it must be created explicitly.
+			// happens to reference it (e.g. two tables sharing one sequence). If the
+			// column already exists, or doesn't really own the sequence, it must be
+			// created explicitly.
+			//
+			// Ownership is verified via seq.IsOwned (a property of the sequence
+			// itself, from a genuine pg_depend edge) rather than
+			// columnHasOwnedSequence(tables, ...), which requires the owning table
+			// to be present in oldTables/newTables - a real gap for an
+			// ignore-filtered table: it's deliberately absent from the Tables maps
+			// (see inspector.go's ShouldIgnoreTable), even though its sequence is
+			// still present in the Sequences map (sequences are filtered by their
+			// own name pattern, not their owning table's). Relying on the Tables
+			// map here previously caused an ignored table's genuinely-owned
+			// sequence to be misclassified as needing an explicit DROP/CREATE.
 			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" &&
 				!columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) &&
-				columnHasOwnedSequence(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+				seq.IsOwned {
 				// Sequence is created implicitly by CREATE TABLE (SERIAL). Emit its
 				// comment separately after all tables are created.
 				if seq.Comment != "" {
@@ -1090,10 +1101,11 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		seq := oldSequences[key]
 		if _, exists := newSequences[key]; !exists {
 			// Skip sequences owned by table columns (created by SERIAL) - see the
-			// added-sequences branch above for why columnHasOwnedSequence matters.
+			// added-sequences branch above for why seq.IsOwned, not
+			// columnHasOwnedSequence(tables, ...), is used to verify ownership.
 			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" &&
 				!columnExistsInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) &&
-				columnHasOwnedSequence(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+				seq.IsOwned {
 				continue
 			}
 			diff.droppedSequences = append(diff.droppedSequences, seq)
@@ -1530,6 +1542,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
 	collector.qualifySchema = qualifySchema
+	collector.extensionSchemas = buildExtensionSchemaMap(oldIR)
 	diff.collectMigrationSQL(targetSchema, collector)
 	return collector.diffs
 }
@@ -2324,25 +2337,6 @@ func columnExistsInTables(tables map[string]*ir.Table, schema, tableName, column
 		for _, col := range table.Columns {
 			if col.Name == columnName {
 				return true
-			}
-		}
-	}
-	return false
-}
-
-// columnHasOwnedSequence reports whether the named column both exists and is
-// the genuine SERIAL/IDENTITY owner of a sequence, as opposed to a column that
-// merely references some other, standalone or differently-owned sequence via
-// an explicit nextval() default (e.g. two tables sharing one sequence). Used
-// to distinguish a sequence implicitly created by CREATE TABLE (SERIAL) - which
-// must not get its own explicit CREATE/DROP SEQUENCE statement - from one that
-// genuinely needs to be managed explicitly.
-func columnHasOwnedSequence(tables map[string]*ir.Table, schema, tableName, columnName string) bool {
-	tableKey := schema + "." + tableName
-	if table, exists := tables[tableKey]; exists {
-		for _, col := range table.Columns {
-			if col.Name == columnName {
-				return col.HasOwnedSequence
 			}
 		}
 	}

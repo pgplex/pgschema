@@ -106,6 +106,58 @@ func TestGenerateSequenceSQL_OwnedByRequiresIsOwned(t *testing.T) {
 // increment/min/max/cycle change on such a sequence must not be silently
 // dropped just because it looks "owned" by the loose OwnedByTable/Column
 // check.
+// A sequence genuinely owned (IsOwned=true) by a column of an ignore-filtered
+// table must not be classified as a genuine ADD/DROP: ignore-filtered tables
+// are deliberately absent from oldTables/newTables (see inspector.go's
+// ShouldIgnoreTable), even though their sequence is still present in the
+// Sequences map (sequences are filtered by their own name pattern, not their
+// owning table's). Relying on columnHasOwnedSequence(tables, ...) - which
+// requires the owning table to be present in that map - previously
+// misclassified such a sequence as needing an explicit DROP SEQUENCE, even
+// though nothing about the ignored table actually changed.
+func TestGenerateMigration_IgnoredTableOwnedSequenceNotDropped(t *testing.T) {
+	oldIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name:      "public",
+				Tables:    map[string]*ir.Table{}, // temp_backup itself is ignore-filtered
+				Views:     map[string]*ir.View{},
+				Functions: map[string]*ir.Function{},
+				Sequences: map[string]*ir.Sequence{
+					"temp_backup_id_seq": {
+						Schema: "public", Name: "temp_backup_id_seq", DataType: "integer",
+						StartValue: 1, Increment: 1,
+						OwnedByTable: "temp_backup", OwnedByColumn: "id", IsOwned: true,
+					},
+				},
+				Types: map[string]*ir.Type{},
+			},
+		},
+	}
+	newIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name:      "public",
+				Tables:    map[string]*ir.Table{},
+				Views:     map[string]*ir.View{},
+				Functions: map[string]*ir.Function{},
+				Sequences: map[string]*ir.Sequence{}, // never introspected - the ignored table was never created in the plan-time scratch db either
+				Types:     map[string]*ir.Type{},
+			},
+		},
+	}
+
+	diffs := GenerateMigration(oldIR, newIR, "public")
+
+	for _, d := range diffs {
+		for _, stmt := range d.Statements {
+			if strings.Contains(stmt.SQL, "DROP SEQUENCE") && strings.Contains(stmt.SQL, "temp_backup_id_seq") {
+				t.Errorf("expected no explicit DROP SEQUENCE for an ignore-filtered table's genuinely-owned sequence, got: %q", stmt.SQL)
+			}
+		}
+	}
+}
+
 func TestGenerateMigration_ModifiedNonOwnedSequenceStructuralChangeDetected(t *testing.T) {
 	buildIR := func(increment int64) *ir.IR {
 		return &ir.IR{
@@ -146,27 +198,3 @@ func TestGenerateMigration_ModifiedNonOwnedSequenceStructuralChangeDetected(t *t
 	}
 }
 
-func TestColumnHasOwnedSequence(t *testing.T) {
-	tables := map[string]*ir.Table{
-		"public.orders": {
-			Schema: "public", Name: "orders",
-			Columns: []*ir.Column{
-				{Name: "id", HasOwnedSequence: true},
-				{Name: "shared_id", HasOwnedSequence: false},
-			},
-		},
-	}
-
-	if !columnHasOwnedSequence(tables, "public", "orders", "id") {
-		t.Errorf("columnHasOwnedSequence() = false for genuinely owned column, want true")
-	}
-	if columnHasOwnedSequence(tables, "public", "orders", "shared_id") {
-		t.Errorf("columnHasOwnedSequence() = true for non-owning column, want false")
-	}
-	if columnHasOwnedSequence(tables, "public", "orders", "does_not_exist") {
-		t.Errorf("columnHasOwnedSequence() = true for missing column, want false")
-	}
-	if columnHasOwnedSequence(tables, "public", "missing_table", "id") {
-		t.Errorf("columnHasOwnedSequence() = true for missing table, want false")
-	}
-}

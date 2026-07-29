@@ -14,7 +14,7 @@ func generateCreateTypesSQL(types []*ir.Type, targetSchema string, collector *di
 	sortedTypes := topologicallySortTypes(types)
 
 	for _, typeObj := range sortedTypes {
-		sql := generateTypeSQL(typeObj, targetSchema, collector.qualifySchema)
+		sql := generateTypeSQL(typeObj, targetSchema, collector.qualifySchema, collector.extensionSchemas)
 
 		// Determine DiffType based on type kind
 
@@ -224,7 +224,7 @@ func generateAlterDomainStatements(oldDomain, newDomain *ir.Type, targetSchema s
 }
 
 // generateTypeSQL generates CREATE TYPE statement
-func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) string {
+func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool, extensionSchemas map[string]string) string {
 	// Only include type name without schema if it's in the target schema (unless
 	// forced qualification is on).
 	typeName := qualifyEntityNameMode(typeObj.Schema, typeObj.Name, targetSchema, qualifySchema)
@@ -253,14 +253,14 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 		var attributes []string
 		for _, attr := range typeObj.Columns {
 			// Strip schema prefix from data type if it matches the target schema.
-			// Extension-owned attribute types are the exception: there is no "old"
-			// (live) side to compare against for a brand-new type, and the schema
-			// such a type resolves to at plan time is a temp/plan-environment
-			// artifact, so any qualifier is stripped unconditionally, ignoring
-			// qualifySchema.
+			// Extension-owned attribute types are the exception: qualify with
+			// the schema the extension is genuinely installed in on the live
+			// database (see resolveExtensionTypeSchema) rather than trusting
+			// whatever schema plan-time introspection happened to resolve it
+			// to, ignoring qualifySchema.
 			var dataType string
 			if attr.ExtensionName != "" {
-				dataType = stripAnySchemaPrefix(attr.DataType)
+				dataType = resolveExtensionTypeSchema(attr.DataType, attr.ExtensionName, extensionSchemas, targetSchema, qualifySchema)
 			} else {
 				dataType = stripSchemaPrefixMode(attr.DataType, targetSchema, qualifySchema)
 			}
@@ -272,11 +272,12 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 		// cross-schema (or target-schema) prefix under forced qualification, strip the
 		// target-schema prefix otherwise. Note: same-schema user-defined base types are
 		// stored bare by the inspector, so this cannot *add* a prefix to them.
-		// Extension-owned base types are the exception: any schema qualifier is
-		// stripped unconditionally, ignoring qualifySchema (same rationale as above).
+		// Extension-owned base types are the exception: qualify with the schema
+		// the extension is genuinely installed in on the live database (same
+		// rationale as above).
 		var baseType string
 		if typeObj.ExtensionName != "" {
-			baseType = stripAnySchemaPrefix(typeObj.BaseType)
+			baseType = resolveExtensionTypeSchema(typeObj.BaseType, typeObj.ExtensionName, extensionSchemas, targetSchema, qualifySchema)
 		} else {
 			baseType = stripSchemaPrefixMode(typeObj.BaseType, targetSchema, qualifySchema)
 		}

@@ -172,6 +172,273 @@ func TestTypesEqual_ExtensionOwnedCompositeAttribute(t *testing.T) {
 	}
 }
 
+// These tests cover the DDL-emission half of the fix: for CREATE-path
+// statements (ADD COLUMN, CREATE TABLE, CREATE TYPE) there is no "old" side
+// of *this* column/type to compare against, so bare-stripping the schema
+// unconditionally is unsafe - it silently assumes the extension either lives
+// in the target schema or public, which is false whenever an extension is
+// deliberately installed elsewhere (e.g. hstore installed once into a shared
+// "utils" schema, per the real add_column_cross_schema_custom_type fixture).
+// resolveExtensionTypeSchema instead qualifies with wherever oldIR shows the
+// extension is genuinely installed, falling back to bare only when the
+// extension isn't used anywhere yet in oldIR.
+
+func TestSchemaPrefixOf(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"domain.vector(384)", "domain"},
+		{`"My Schema".vector`, "My Schema"},
+		{"vector(384)", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := schemaPrefixOf(tt.in); got != tt.want {
+			t.Errorf("schemaPrefixOf(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestBuildExtensionSchemaMap(t *testing.T) {
+	oldIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name: "public",
+				Tables: map[string]*ir.Table{
+					"users": {
+						Schema: "public", Name: "users",
+						Columns: []*ir.Column{
+							{Name: "id", DataType: "integer"},
+							{Name: "metadata", DataType: "utils.hstore", ExtensionName: "hstore"},
+						},
+					},
+				},
+				Types: map[string]*ir.Type{
+					"embedding_type": {
+						Schema: "public", Name: "embedding_type", Kind: ir.TypeKindDomain,
+						BaseType: "domain.vector(384)", ExtensionName: "vector",
+					},
+					"search_result": {
+						Schema: "public", Name: "search_result", Kind: ir.TypeKindComposite,
+						Columns: []*ir.TypeColumn{
+							{Name: "embedding", DataType: "domain.vector(384)", ExtensionName: "vector"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got := buildExtensionSchemaMap(oldIR)
+	if got["hstore"] != "utils" {
+		t.Errorf("expected hstore -> utils, got %q", got["hstore"])
+	}
+	if got["vector"] != "domain" {
+		t.Errorf("expected vector -> domain (from either the domain or composite type), got %q", got["vector"])
+	}
+	if _, exists := got["citext"]; exists {
+		t.Errorf("expected no entry for an extension not used anywhere in oldIR")
+	}
+	if got := buildExtensionSchemaMap(nil); len(got) != 0 {
+		t.Errorf("expected empty map for nil oldIR, got %v", got)
+	}
+}
+
+// oldIR.Extensions (sourced directly from pg_extension) is authoritative and
+// must be used even when no column/type anywhere yet uses that extension -
+// the real gap that column/type inference alone cannot cover (e.g. an
+// extension installed via a setup script but not yet referenced by any
+// existing column at the time a migration first uses it).
+func TestBuildExtensionSchemaMap_PrefersAuthoritativeExtensionsField(t *testing.T) {
+	oldIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name:   "public",
+				Tables: map[string]*ir.Table{},
+				Types:  map[string]*ir.Type{},
+			},
+		},
+		Extensions: map[string]string{
+			"hstore": "utils",
+		},
+	}
+
+	got := buildExtensionSchemaMap(oldIR)
+	if got["hstore"] != "utils" {
+		t.Errorf("expected hstore -> utils from the authoritative Extensions field even with no column usage, got %q", got["hstore"])
+	}
+}
+
+func TestResolveExtensionTypeSchema(t *testing.T) {
+	extensionSchemas := map[string]string{"hstore": "utils", "citext": "public"}
+
+	tests := []struct {
+		name                    string
+		typeName, extensionName string
+		targetSchema            string
+		qualifySchema           bool
+		want                    string
+	}{
+		{"known extension in a schema other than target -> qualifies with real schema",
+			"public.hstore", "hstore", "public", false, "utils.hstore"},
+		{"known extension, bare input -> qualifies with real schema",
+			"hstore", "hstore", "public", false, "utils.hstore"},
+		{"known extension already correctly qualified -> unchanged",
+			"utils.hstore", "hstore", "public", false, "utils.hstore"},
+		{"known extension installed IN the target schema -> smart-qualification omits the prefix",
+			"public.citext", "citext", "public", false, "citext"},
+		{"known extension installed in the target schema, but qualifySchema forces it back",
+			"public.citext", "citext", "public", true, "public.citext"},
+		{"unknown extension (not used anywhere in oldIR) -> falls back to bare",
+			"public.vector", "vector", "public", false, "vector"},
+		{"unknown extension, qualifySchema forced -> preserves original qualifier rather than dropping it (dump --qualify-schema contract)",
+			"public.vector", "vector", "public", true, "public.vector"},
+		{"unknown extension, qualifySchema forced, no original qualifier -> stays bare",
+			"vector", "vector", "public", true, "vector"},
+		{"empty type -> empty",
+			"", "hstore", "public", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveExtensionTypeSchema(tt.typeName, tt.extensionName, extensionSchemas, tt.targetSchema, tt.qualifySchema); got != tt.want {
+				t.Errorf("resolveExtensionTypeSchema(%q, %q, ..., %q, %v) = %q, want %q", tt.typeName, tt.extensionName, tt.targetSchema, tt.qualifySchema, got, tt.want)
+			}
+		})
+	}
+}
+
+// End-to-end: adding a new column of an extension-owned type whose extension
+// is genuinely installed outside both the target schema and "public" must
+// qualify with that real schema, not strip to a bare reference that only
+// resolves via search_path when the extension happens to live in the target
+// schema or public - the real regression this test guards against.
+func TestGenerateMigration_AddColumnExtensionOwnedTypeInNonTargetSchema_InferredFromSiblingColumn(t *testing.T) {
+	oldIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name: "public",
+				Tables: map[string]*ir.Table{
+					"users": {
+						Schema: "public", Name: "users",
+						Columns: []*ir.Column{{Name: "id", DataType: "integer", Position: 1}},
+					},
+					// Another table already uses hstore, so oldIR records where it
+					// really lives.
+					"other": {
+						Schema: "public", Name: "other",
+						Columns: []*ir.Column{
+							{Name: "id", DataType: "integer", Position: 1},
+							{Name: "tags", DataType: "utils.hstore", ExtensionName: "hstore", Position: 2},
+						},
+					},
+				},
+				Types: map[string]*ir.Type{},
+			},
+		},
+	}
+	newIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name: "public",
+				Tables: map[string]*ir.Table{
+					"users": {
+						Schema: "public", Name: "users",
+						Columns: []*ir.Column{
+							{Name: "id", DataType: "integer", Position: 1},
+							{Name: "metadata", DataType: "public.hstore", ExtensionName: "hstore", Position: 2},
+						},
+					},
+					"other": {
+						Schema: "public", Name: "other",
+						Columns: []*ir.Column{
+							{Name: "id", DataType: "integer", Position: 1},
+							{Name: "tags", DataType: "utils.hstore", ExtensionName: "hstore", Position: 2},
+						},
+					},
+				},
+				Types: map[string]*ir.Type{},
+			},
+		},
+	}
+
+	diffs := GenerateMigration(oldIR, newIR, "public")
+
+	found := false
+	for _, d := range diffs {
+		for _, stmt := range d.Statements {
+			if strings.Contains(stmt.SQL, "ADD COLUMN metadata") {
+				found = true
+				if !strings.Contains(stmt.SQL, "utils.hstore") {
+					t.Errorf("expected ADD COLUMN to qualify with the real schema (utils), got: %q", stmt.SQL)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected an ADD COLUMN metadata statement, got diffs: %+v", diffs)
+	}
+}
+
+// This is the exact real-world regression: an extension installed via a
+// setup/bootstrap script into a schema other than the target (e.g. hstore
+// into "utils") but not yet referenced by ANY existing column - so there is
+// no sibling column to infer the schema from, only oldIR.Extensions (sourced
+// from pg_extension) knows where it really lives. Without that authoritative
+// source, this case falls back to a bare, unqualified reference that fails
+// at real apply time whenever the extension isn't in the target schema or
+// public.
+func TestGenerateMigration_AddColumnExtensionOwnedTypeKnownOnlyViaExtensionsField(t *testing.T) {
+	oldIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name: "public",
+				Tables: map[string]*ir.Table{
+					"users": {
+						Schema: "public", Name: "users",
+						Columns: []*ir.Column{{Name: "id", DataType: "integer", Position: 1}},
+					},
+				},
+				Types: map[string]*ir.Type{},
+			},
+		},
+		Extensions: map[string]string{"hstore": "utils"},
+	}
+	newIR := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			"public": {
+				Name: "public",
+				Tables: map[string]*ir.Table{
+					"users": {
+						Schema: "public", Name: "users",
+						Columns: []*ir.Column{
+							{Name: "id", DataType: "integer", Position: 1},
+							{Name: "metadata", DataType: "public.hstore", ExtensionName: "hstore", Position: 2},
+						},
+					},
+				},
+				Types: map[string]*ir.Type{},
+			},
+		},
+		Extensions: map[string]string{"hstore": "utils"},
+	}
+
+	diffs := GenerateMigration(oldIR, newIR, "public")
+
+	found := false
+	for _, d := range diffs {
+		for _, stmt := range d.Statements {
+			if strings.Contains(stmt.SQL, "ADD COLUMN metadata") {
+				found = true
+				if !strings.Contains(stmt.SQL, "utils.hstore") {
+					t.Errorf("expected ADD COLUMN to qualify with the real schema (utils) from oldIR.Extensions, got: %q", stmt.SQL)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected an ADD COLUMN metadata statement, got diffs: %+v", diffs)
+	}
+}
+
 func TestStripAnySchemaPrefix(t *testing.T) {
 	tests := []struct {
 		name  string

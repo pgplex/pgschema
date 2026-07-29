@@ -8,10 +8,14 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
-// nextvalSequenceNamePattern extracts the sequence reference from a nextval()
-// default expression, e.g. nextval('"questionReference_questionRefId_seq"'::regclass)
-// or nextval('domain.some_seq'::regclass).
-var nextvalSequenceNamePattern = regexp.MustCompile(`nextval\('([^']+)'`)
+// nextvalSequenceLiteralPattern extracts the raw (still SQL-string-literal
+// escaped) sequence reference from a nextval() default expression, e.g.
+// nextval('"questionReference_questionRefId_seq"'::regclass) or
+// nextval('domain.some_seq'::regclass). A doubled single quote ('') inside
+// the literal - PostgreSQL's escaping for a literal single quote inside a
+// quoted identifier, e.g. nextval('"O''Reilly_seq"'::regclass) - is matched
+// as part of the literal instead of prematurely ending the match.
+var nextvalSequenceLiteralPattern = regexp.MustCompile(`nextval\('((?:[^']|'')*)'`)
 
 // nextvalTargetSequenceKey returns the schema-qualified key ("schema.name") a
 // column's nextval() default targets, or "" if the column has no such
@@ -27,18 +31,23 @@ func nextvalTargetSequenceKey(column *ir.Column, fallbackSchema string) string {
 	if column.DefaultValue == nil {
 		return ""
 	}
-	m := nextvalSequenceNamePattern.FindStringSubmatch(*column.DefaultValue)
+	m := nextvalSequenceLiteralPattern.FindStringSubmatch(*column.DefaultValue)
 	if m == nil {
 		return ""
 	}
-	ref := m[1]
+	// Un-escape the SQL string literal ('' -> ') before parsing it as an
+	// identifier reference. findLastUnquotedDot/unquoteIdent are dot-in-quotes
+	// aware, so a quoted identifier that itself legally contains a literal dot
+	// (e.g. nextval('"owner.seq"'::regclass), no schema qualifier at all) is
+	// not mistaken for a schema-qualified name.
+	ref := strings.ReplaceAll(m[1], `''`, `'`)
 	schema := fallbackSchema
 	name := ref
-	if idx := strings.LastIndex(ref, "."); idx != -1 {
-		schema = strings.Trim(ref[:idx], `"`)
+	if idx := findLastUnquotedDot(ref); idx != -1 {
+		schema = unquoteIdent(ref[:idx])
 		name = ref[idx+1:]
 	}
-	name = strings.Trim(name, `"`)
+	name = unquoteIdent(name)
 	if name == "" {
 		return ""
 	}

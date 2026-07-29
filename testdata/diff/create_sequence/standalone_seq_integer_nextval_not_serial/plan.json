@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE SEQUENCE IF NOT EXISTS \"dssAnswerSplit_dssSplitAnswerId_seq\";",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.dssAnswerSplit_dssSplitAnswerId_seq"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS \"dssAnswerSplit\" (\n    \"dssSplitAnswerId\" integer DEFAULT nextval('\"dssAnswerSplit_dssSplitAnswerId_seq\"'::regclass),\n    CONSTRAINT \"dssAnswerSplit_pkey\" PRIMARY KEY (\"dssSplitAnswerId\")\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.dssAnswerSplit"
+        }
+      ]
+    }
+  ]
+}

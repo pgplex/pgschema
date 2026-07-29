@@ -60,7 +60,7 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 	}
 	empty := map[string]bool{}
 
-	def, _ := generateTableSQL(table, "public", false, empty, empty, empty, nil)
+	def, _ := generateTableSQL(table, "public", false, nil, empty, empty, empty, nil)
 	if !strings.Contains(def, "CREATE TABLE IF NOT EXISTS account (") {
 		t.Errorf("default should use the bare table name: %q", def)
 	}
@@ -71,7 +71,7 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 		t.Errorf("default should strip the target-schema prefix from the type ref: %q", def)
 	}
 
-	qualified, _ := generateTableSQL(table, "public", true, empty, empty, empty, nil)
+	qualified, _ := generateTableSQL(table, "public", true, nil, empty, empty, empty, nil)
 	if !strings.Contains(qualified, "CREATE TABLE IF NOT EXISTS public.account (") {
 		t.Errorf("forced qualification should qualify the table name: %q", qualified)
 	}
@@ -113,7 +113,7 @@ func TestQualifySchema_Type(t *testing.T) {
 		EnumValues: []string{"active", "inactive"},
 	}
 
-	def := generateTypeSQL(typ, "public", false)
+	def := generateTypeSQL(typ, "public", false, nil)
 	if !strings.Contains(def, "CREATE TYPE status AS ENUM") {
 		t.Errorf("default should use the bare type name: %q", def)
 	}
@@ -121,7 +121,7 @@ func TestQualifySchema_Type(t *testing.T) {
 		t.Errorf("default should not qualify the target schema: %q", def)
 	}
 
-	qualified := generateTypeSQL(typ, "public", true)
+	qualified := generateTypeSQL(typ, "public", true, nil)
 	if !strings.Contains(qualified, "CREATE TYPE public.status AS ENUM") {
 		t.Errorf("forced qualification should qualify the type name: %q", qualified)
 	}

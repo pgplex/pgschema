@@ -138,6 +138,51 @@ func TestTopologicallySortTablesOrdersSharedSequenceReferenceBySchemaNotBareName
 	}
 }
 
+func TestNextvalTargetSequenceKey(t *testing.T) {
+	col := func(defaultValue string) *ir.Column {
+		return &ir.Column{DefaultValue: &defaultValue}
+	}
+
+	tests := []struct {
+		name           string
+		column         *ir.Column
+		fallbackSchema string
+		want           string
+	}{
+		{"unqualified bare sequence name -> uses fallback schema",
+			col(`nextval('owner_seq'::regclass)`), "public", "public.owner_seq"},
+		{"unqualified quoted sequence name -> uses fallback schema",
+			col(`nextval('"owner_seq"'::regclass)`), "public", "public.owner_seq"},
+		{"schema-qualified sequence name -> uses its own schema, not the fallback",
+			col(`nextval('domain.owner_seq'::regclass)`), "public", "domain.owner_seq"},
+		{"schema-qualified, both parts quoted",
+			col(`nextval('"Domain"."Owner_Seq"'::regclass)`), "public", "Domain.Owner_Seq"},
+		{"quoted identifier containing a literal dot, no schema qualifier",
+			// The whole reference is one quoted identifier ("owner.seq"), not a
+			// schema-qualified name - a naive dot-split would wrongly treat
+			// "owner" as the schema and "seq" as the name.
+			col(`nextval('"owner.seq"'::regclass)`), "public", "public.owner.seq"},
+		{"quoted identifier containing an escaped single quote",
+			// PostgreSQL escapes a literal single quote inside a quoted
+			// identifier, when placed in a string literal, by doubling it.
+			// A regex that stops at the first single quote would truncate
+			// this to just `"O`, losing `'Reilly_seq"` and everything after.
+			col(`nextval('"O''Reilly_seq"'::regclass)`), "public", "public.O'Reilly_seq"},
+		{"no default value -> empty",
+			&ir.Column{}, "public", ""},
+		{"default value without nextval -> empty",
+			col("0"), "public", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nextvalTargetSequenceKey(tt.column, tt.fallbackSchema); got != tt.want {
+				t.Errorf("nextvalTargetSequenceKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func newTestTable(name string, deps ...string) *ir.Table {
 	constraints := make(map[string]*ir.Constraint)
 	for idx, dep := range deps {

@@ -1,0 +1,21 @@
+Plan: 2 to add.
+
+Summary by type:
+  sequences: 1 to add
+  tables: 1 to add
+
+Sequences:
+  + dssAnswerSplit_dssSplitAnswerId_seq
+
+Tables:
+  + dssAnswerSplit
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE SEQUENCE IF NOT EXISTS "dssAnswerSplit_dssSplitAnswerId_seq";
+
+CREATE TABLE IF NOT EXISTS "dssAnswerSplit" (
+    "dssSplitAnswerId" integer DEFAULT nextval('"dssAnswerSplit_dssSplitAnswerId_seq"'::regclass),
+    CONSTRAINT "dssAnswerSplit_pkey" PRIMARY KEY ("dssSplitAnswerId")
+);
