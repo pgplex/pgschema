@@ -28,7 +28,7 @@ SELECT
             format_type(a.aggtranstype, NULL)
         WHEN stt.typcategory = 'A' THEN
             CASE
-                WHEN sten.nspname = 'pg_catalog' THEN stet.typname
+                WHEN sten.nspname = 'pg_catalog' THEN stet.typname::text
                 ELSE quote_ident(sten.nspname) || '.' || quote_ident(stet.typname)
             END || COALESCE(substring(format_type(a.aggtranstype, NULL) FROM '\([^)]*\)'), '') || '[]'
         ELSE quote_ident(stn.nspname) || '.' || quote_ident(stt.typname)
@@ -132,7 +132,7 @@ SELECT
             format_type(a.aggtranstype, NULL)
         WHEN stt.typcategory = 'A' THEN
             CASE
-                WHEN sten.nspname = 'pg_catalog' THEN stet.typname
+                WHEN sten.nspname = 'pg_catalog' THEN stet.typname::text
                 ELSE quote_ident(sten.nspname) || '.' || quote_ident(stet.typname)
             END || COALESCE(substring(format_type(a.aggtranstype, NULL) FROM '\([^)]*\)'), '') || '[]'
         ELSE quote_ident(stn.nspname) || '.' || quote_ident(stt.typname)
@@ -167,7 +167,7 @@ SELECT
             format_type(a.aggmtranstype, NULL)
          WHEN mstt.typcategory = 'A' THEN
             CASE
-                WHEN msten.nspname = 'pg_catalog' THEN mstet.typname
+                WHEN msten.nspname = 'pg_catalog' THEN mstet.typname::text
                 ELSE quote_ident(msten.nspname) || '.' || quote_ident(mstet.typname)
             END || COALESCE(substring(format_type(a.aggmtranstype, NULL) FROM '\([^)]*\)'), '') || '[]'
          ELSE quote_ident(mstn.nspname) || '.' || quote_ident(mstt.typname)
@@ -398,20 +398,18 @@ WITH column_base AS (
                 -- for non-array fixed-length types like name (typelem points to char).
                 -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
-                    WHEN en.nspname = 'pg_catalog' THEN et.typname
+                    WHEN en.nspname = 'pg_catalog' THEN et.typname::text
                     ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
-                -- Non-array base types: qualify if not in pg_catalog or table's schema
-                -- Use format_type to preserve typmod for extension types (e.g., vector(384) for pgvector)
                 CASE
-                    WHEN dn.nspname = 'pg_catalog' THEN c.udt_name
+                    WHEN dn.nspname = 'pg_catalog' THEN c.udt_name::text
                     WHEN dn.nspname = c.table_schema THEN
-                        dt.typname || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+                        dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                     ELSE
-                        dn.nspname || '.' || dt.typname || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+                        dn.nspname::text || '.' || dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                 END
-            ELSE c.udt_name
+            ELSE c.udt_name::text
         END AS resolved_type,
         c.is_identity,
         c.identity_generation,
@@ -579,25 +577,19 @@ WITH column_base AS (
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
             WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
-                -- Array types: apply same schema qualification logic to element type
-                -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
-                -- for non-array fixed-length types like name (typelem points to char).
-                -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
-                    WHEN en.nspname = 'pg_catalog' THEN et.typname
+                    WHEN en.nspname = 'pg_catalog' THEN et.typname::text
                     ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
-                -- Non-array base types: qualify if not in pg_catalog or table's schema
-                -- Use format_type to preserve typmod for extension types (e.g., vector(384) for pgvector)
                 CASE
-                    WHEN dn.nspname = 'pg_catalog' THEN c.udt_name
+                    WHEN dn.nspname = 'pg_catalog' THEN c.udt_name::text
                     WHEN dn.nspname = c.table_schema THEN
-                        dt.typname || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+                        dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                     ELSE
-                        dn.nspname || '.' || dt.typname || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+                        dn.nspname::text || '.' || dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                 END
-            ELSE c.udt_name
+            ELSE c.udt_name::text
         END AS resolved_type,
         c.is_identity,
         c.identity_generation,
@@ -766,7 +758,7 @@ SELECT
             format_type(a.atttypid, a.atttypmod)
         WHEN at.typcategory = 'A' THEN
             CASE
-                WHEN aen.nspname = 'pg_catalog' THEN aet.typname
+                WHEN aen.nspname = 'pg_catalog' THEN aet.typname::text
                 ELSE quote_ident(aen.nspname) || '.' || quote_ident(aet.typname)
             END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
         ELSE
@@ -840,7 +832,7 @@ SELECT
             format_type(a.atttypid, a.atttypmod)
         WHEN at.typcategory = 'A' THEN
             CASE
-                WHEN aen.nspname = 'pg_catalog' THEN aet.typname
+                WHEN aen.nspname = 'pg_catalog' THEN aet.typname::text
                 ELSE quote_ident(aen.nspname) || '.' || quote_ident(aet.typname)
             END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
         ELSE
@@ -1361,7 +1353,7 @@ SELECT
             format_type(t.typbasetype, t.typtypmod)
         WHEN bt.typcategory = 'A' THEN
             CASE
-                WHEN ben.nspname = 'pg_catalog' THEN bet.typname
+                WHEN ben.nspname = 'pg_catalog' THEN bet.typname::text
                 ELSE quote_ident(ben.nspname) || '.' || quote_ident(bet.typname)
             END || COALESCE(substring(format_type(t.typbasetype, t.typtypmod) FROM '\([^)]*\)'), '') || '[]'
         ELSE
@@ -1434,7 +1426,7 @@ SELECT
             format_type(t.typbasetype, t.typtypmod)
         WHEN bt.typcategory = 'A' THEN
             CASE
-                WHEN ben.nspname = 'pg_catalog' THEN bet.typname
+                WHEN ben.nspname = 'pg_catalog' THEN bet.typname::text
                 ELSE quote_ident(ben.nspname) || '.' || quote_ident(bet.typname)
             END || COALESCE(substring(format_type(t.typbasetype, t.typtypmod) FROM '\([^)]*\)'), '') || '[]'
         ELSE
