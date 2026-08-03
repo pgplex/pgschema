@@ -12,73 +12,85 @@
           "sql": "DROP PROCEDURE IF EXISTS simple_salary_update(IN p_emp_no integer, IN p_amount integer);",
           "type": "procedure",
           "operation": "drop",
-          "path": "public.simple_salary_update"
+          "path": "public.simple_salary_update",
+          "can_run_in_transaction": true
         },
         {
           "sql": "DROP TABLE IF EXISTS title CASCADE;",
           "type": "table",
           "operation": "drop",
-          "path": "public.title"
+          "path": "public.title",
+          "can_run_in_transaction": true
         },
         {
           "sql": "DROP TABLE IF EXISTS dept_manager CASCADE;",
           "type": "table",
           "operation": "drop",
-          "path": "public.dept_manager"
+          "path": "public.dept_manager",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE TYPE employee_status AS ENUM (\n    'active',\n    'inactive',\n    'terminated'\n);",
           "type": "type",
           "operation": "create",
-          "path": "public.employee_status"
+          "path": "public.employee_status",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE TABLE IF NOT EXISTS employee_status_log (\n    id SERIAL,\n    emp_no integer NOT NULL,\n    status employee_status NOT NULL,\n    effective_date date DEFAULT CURRENT_DATE NOT NULL,\n    notes text,\n    CONSTRAINT employee_status_log_pkey PRIMARY KEY (id),\n    CONSTRAINT employee_status_log_emp_no_fkey FOREIGN KEY (emp_no) REFERENCES employee (emp_no) ON DELETE CASCADE\n);",
           "type": "table",
           "operation": "create",
-          "path": "public.employee_status_log"
+          "path": "public.employee_status_log",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE INDEX IF NOT EXISTS idx_employee_status_log_effective_date ON employee_status_log (effective_date);",
           "type": "table.index",
           "operation": "create",
-          "path": "public.employee_status_log.idx_employee_status_log_effective_date"
+          "path": "public.employee_status_log.idx_employee_status_log_effective_date",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE INDEX IF NOT EXISTS idx_employee_status_log_emp_no ON employee_status_log (emp_no);",
           "type": "table.index",
           "operation": "create",
-          "path": "public.employee_status_log.idx_employee_status_log_emp_no"
+          "path": "public.employee_status_log.idx_employee_status_log_emp_no",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE OR REPLACE TRIGGER employee_status_log_trigger\n    AFTER INSERT OR UPDATE ON employee_status_log\n    FOR EACH ROW\n    EXECUTE FUNCTION log_dml_operations('hr', 'medium');",
           "type": "table.trigger",
           "operation": "create",
-          "path": "public.employee_status_log.employee_status_log_trigger"
+          "path": "public.employee_status_log.employee_status_log_trigger",
+          "can_run_in_transaction": true
         },
         {
           "sql": "ALTER TABLE audit ENABLE ROW LEVEL SECURITY;",
           "type": "table.rls",
           "operation": "create",
-          "path": "public.audit"
+          "path": "public.audit",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE POLICY audit_insert_system ON audit FOR INSERT TO PUBLIC WITH CHECK (true);",
           "type": "table.policy",
           "operation": "create",
-          "path": "public.audit.audit_insert_system"
+          "path": "public.audit.audit_insert_system",
+          "can_run_in_transaction": true
         },
         {
           "sql": "CREATE POLICY audit_user_isolation ON audit TO PUBLIC USING (user_name = CURRENT_USER);",
           "type": "table.policy",
           "operation": "create",
-          "path": "public.audit.audit_user_isolation"
+          "path": "public.audit.audit_user_isolation",
+          "can_run_in_transaction": true
         },
         {
           "sql": "ALTER TABLE employee ADD COLUMN status employee_status DEFAULT 'active'::employee_status NOT NULL;",
           "type": "table.column",
           "operation": "create",
-          "path": "public.employee.status"
+          "path": "public.employee.status",
+          "can_run_in_transaction": true
         }
       ]
     }

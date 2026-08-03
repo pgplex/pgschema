@@ -34,8 +34,9 @@ type Directive struct {
 
 // Step represents a single execution step with SQL and optional directive
 type Step struct {
-	SQL       string     `json:"sql"`
-	Directive *Directive `json:"directive,omitempty"`
+	SQL                 string     `json:"sql"`
+	Directive           *Directive `json:"directive,omitempty"`
+	CanRunInTransaction bool       `json:"can_run_in_transaction"`
 	// Metadata for summary generation
 	Type      string `json:"type,omitempty"`      // e.g., "table", "index"
 	Operation string `json:"operation,omitempty"` // e.g., "create", "alter", "drop"
@@ -174,11 +175,12 @@ func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
 			// For operations with rewrites, create one step per rewrite statement
 			for _, rewriteStep := range rewriteSteps {
 				step := Step{
-					SQL:       rewriteStep.SQL,
-					Type:      d.Type.String(),
-					Operation: d.Operation.String(),
-					Path:      d.Path,
-					Directive: rewriteStep.Directive,
+					SQL:                 rewriteStep.SQL,
+					Type:                d.Type.String(),
+					Operation:           d.Operation.String(),
+					Path:                d.Path,
+					Directive:           rewriteStep.Directive,
+					CanRunInTransaction: rewriteStep.CanRunInTransaction,
 				}
 
 				// Check if this step needs isolation (has directive or cannot run in transaction)
@@ -202,10 +204,11 @@ func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
 			// For operations without rewrites, create one step per canonical statement
 			for _, stmt := range d.Statements {
 				step := Step{
-					SQL:       stmt.SQL,
-					Type:      d.Type.String(),
-					Operation: d.Operation.String(),
-					Path:      d.Path,
+					SQL:                 stmt.SQL,
+					Type:                d.Type.String(),
+					Operation:           d.Operation.String(),
+					Path:                d.Path,
+					CanRunInTransaction: true,
 				}
 				// Canonical statements don't have directives
 				transactionalSteps = append(transactionalSteps, step)
@@ -385,6 +388,20 @@ func FromJSON(jsonData []byte) (*Plan, error) {
 	if err := json.Unmarshal(jsonData, &plan); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal plan JSON: %w", err)
 	}
+
+	// Backward compat: old plans may lack can_run_in_transaction.
+	// JSON unmarshaling defaults missing bools to false, but the correct
+	// default for most steps is true (only CONCURRENTLY steps are non-transactional).
+	// We detect missing-by-absence-of-CONCURRENTLY, which covers the canonical case.
+	for i := range plan.Groups {
+		for j := range plan.Groups[i].Steps {
+			s := &plan.Groups[i].Steps[j]
+			if !s.CanRunInTransaction && !strings.Contains(s.SQL, "CONCURRENTLY") {
+				s.CanRunInTransaction = true
+			}
+		}
+	}
+
 	return &plan, nil
 }
 
