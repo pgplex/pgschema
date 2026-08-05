@@ -269,7 +269,10 @@ func generateFunctionSQL(function *ir.Function, targetSchema string, qualifySche
 					stmt.WriteString(fmt.Sprintf("\nSET search_path = %s", value))
 				}
 			} else {
-				stmt.WriteString(fmt.Sprintf("\nSET %s = %s", key, value))
+				// Non-search_path settings are string literals: the proconfig
+				// array stores values without quotes, but valid migration SQL
+				// requires them (e.g. SET DateStyle = 'ISO, MDY').
+				stmt.WriteString(fmt.Sprintf("\nSET %s = %s", key, quoteString(value)))
 			}
 		}
 	}
