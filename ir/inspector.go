@@ -1038,11 +1038,9 @@ func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema
 		// This signature includes all parameter information including modes, names, types, and defaults
 		parameters := i.parseParametersFromSignature(signature, schemaName)
 
-		// Handle search_path
-		searchPath := ""
-		if fn.SearchPath.Valid {
-			searchPath = fn.SearchPath.String
-		}
+		// Preserve SET clauses from pg_proc.proconfig.
+		// Each entry is a raw "key=value" pair (e.g., "search_path=public", "TimeZone=UTC").
+		setConfig := fn.SetConfig
 
 		function := &Function{
 			Schema:            schemaName,
@@ -1057,7 +1055,7 @@ func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema
 			IsSecurityDefiner: isSecurityDefiner,
 			IsLeakproof:       isLeakproof,
 			Parallel:          parallelMode,
-			SearchPath:        searchPath,
+			SetConfig:         setConfig,
 		}
 
 		// Use name(arguments) as key to support function overloading

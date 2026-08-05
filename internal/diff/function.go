@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/pgplex/pgschema/ir"
@@ -242,17 +243,34 @@ func generateFunctionSQL(function *ir.Function, targetSchema string, qualifySche
 	}
 	// Note: Don't output PARALLEL UNSAFE (it's the default)
 
-	// Add SET search_path if specified
-	// Note: Multi-schema paths are output unquoted (e.g., "SET search_path = pg_catalog, public"),
-	// except for the empty search_path case which requires single quotes: SET search_path = ''
-	if function.SearchPath != "" {
-		// PostgreSQL stores SET search_path = '' as search_path="" in proconfig.
-		// The extracted value is "" (two double-quote chars). Render as '' (single-quoted empty string).
-		// Only the whole-value empty case is handled; mixed paths (e.g. pg_catalog, "") are not expected.
-		if function.SearchPath == `""` {
-			stmt.WriteString("\nSET search_path = ''")
-		} else {
-			stmt.WriteString(fmt.Sprintf("\nSET search_path = %s", function.SearchPath))
+	// Add SET clauses from pg_proc.proconfig.
+	// Each entry is a raw "key=value" pair (e.g., "search_path=public", "TimeZone=UTC").
+	// Render them in sorted order for deterministic output.
+	if len(function.SetConfig) > 0 {
+		sorted := make([]string, len(function.SetConfig))
+		copy(sorted, function.SetConfig)
+		sort.Strings(sorted)
+		for _, cfg := range sorted {
+			// Split on first '=' to separate key from value
+			eqIdx := strings.Index(cfg, "=")
+			if eqIdx < 0 {
+				continue
+			}
+			key := cfg[:eqIdx]
+			value := cfg[eqIdx+1:]
+
+			// search_path has special rendering: unquoted for multi-schema paths,
+			// single-quoted empty string for the empty-search_path case.
+			if key == "search_path" {
+				// PostgreSQL stores SET search_path = '' as search_path="" in proconfig.
+				if value == `""` {
+					stmt.WriteString("\nSET search_path = ''")
+				} else {
+					stmt.WriteString(fmt.Sprintf("\nSET search_path = %s", value))
+				}
+			} else {
+				stmt.WriteString(fmt.Sprintf("\nSET %s = %s", key, value))
+			}
 		}
 	}
 
@@ -389,7 +407,7 @@ func functionsEqualExceptAttributes(old, new *ir.Function) bool {
 	if old.IsSecurityDefiner != new.IsSecurityDefiner {
 		return false
 	}
-	if old.SearchPath != new.SearchPath {
+	if !setConfigEqual(old.SetConfig, new.SetConfig) {
 		return false
 	}
 	// Note: We intentionally do NOT compare IsLeakproof or Parallel here
@@ -433,7 +451,7 @@ func functionsEqual(old, new *ir.Function) bool {
 	if old.Parallel != new.Parallel {
 		return false
 	}
-	if old.SearchPath != new.SearchPath {
+	if !setConfigEqual(old.SetConfig, new.SetConfig) {
 		return false
 	}
 	if old.Comment != new.Comment {
@@ -482,7 +500,7 @@ func functionsEqualExceptComment(old, new *ir.Function) bool {
 	if old.Parallel != new.Parallel {
 		return false
 	}
-	if old.SearchPath != new.SearchPath {
+	if !setConfigEqual(old.SetConfig, new.SetConfig) {
 		return false
 	}
 	// Note: We intentionally do NOT compare Comment here
@@ -612,4 +630,30 @@ func generateFunctionComment(
 		CanRunInTransaction: true,
 	}
 	collector.collect(context, sql)
+}
+
+// setConfigEqual compares two SetConfig slices for equality.
+// Slices are sorted before comparison so that order differences (which are
+// semantically irrelevant) don't cause false-positive diffs.
+func setConfigEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	sortedA := make([]string, len(a))
+	copy(sortedA, a)
+	sort.Strings(sortedA)
+
+	sortedB := make([]string, len(b))
+	copy(sortedB, b)
+	sort.Strings(sortedB)
+
+	for i := range sortedA {
+		if sortedA[i] != sortedB[i] {
+			return false
+		}
+	}
+	return true
 }

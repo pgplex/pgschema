@@ -568,7 +568,9 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			fn.Schema = toSchema
 			fn.ReturnType = replaceString(fn.ReturnType)
 			fn.Definition = replaceString(fn.Definition)
-			fn.SearchPath = replaceString(fn.SearchPath)
+			for i := range fn.SetConfig {
+				fn.SetConfig[i] = replaceString(fn.SetConfig[i])
+			}
 			for _, param := range fn.Parameters {
 				param.DataType = replaceString(param.DataType)
 			}

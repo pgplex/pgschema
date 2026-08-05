@@ -149,7 +149,7 @@ type Function struct {
 	IsSecurityDefiner bool         `json:"is_security_definer,omitempty"` // SECURITY DEFINER
 	IsLeakproof       bool         `json:"is_leakproof,omitempty"`        // LEAKPROOF
 	Parallel          string       `json:"parallel,omitempty"`            // SAFE, UNSAFE, RESTRICTED
-	SearchPath        string       `json:"search_path,omitempty"`         // SET search_path value
+	SetConfig         []string     `json:"set_config,omitempty"`          // SET clauses from pg_proc.proconfig (e.g., "search_path=public", "TimeZone=UTC")
 	Dependencies      []string     `json:"dependencies,omitempty"`        // Function keys (name(args)) this function depends on
 }
 
