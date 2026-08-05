@@ -402,6 +402,8 @@ WITH column_base AS (
                     ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
+                -- Non-array base types: qualify if not in pg_catalog or table's schema
+                -- Use format_type to preserve typmod for extension types (e.g., vector(384) for pgvector)
                 CASE
                     WHEN dn.nspname = 'pg_catalog' THEN c.udt_name::text
                     WHEN dn.nspname = c.table_schema THEN
@@ -577,11 +579,17 @@ WITH column_base AS (
             WHEN dt.typtype = 'e' OR dt.typtype = 'c' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
             WHEN dt.typtype = 'b' AND dt.typcategory = 'A' THEN
+                -- Array types: apply same schema qualification logic to element type
+                -- Use typcategory = 'A' rather than typelem <> 0; the latter is true
+                -- for non-array fixed-length types like name (typelem points to char).
+                -- Use format_type to preserve typmod for element types (e.g., varchar(128)[] for character varying(128)[])
                 CASE
                     WHEN en.nspname = 'pg_catalog' THEN et.typname::text
                     ELSE quote_ident(en.nspname) || '.' || quote_ident(et.typname)
                 END || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '') || '[]'
             WHEN dt.typtype = 'b' THEN
+                -- Non-array base types: qualify if not in pg_catalog or table's schema
+                -- Use format_type to preserve typmod for extension types (e.g., vector(384) for pgvector)
                 CASE
                     WHEN dn.nspname = 'pg_catalog' THEN c.udt_name::text
                     WHEN dn.nspname = c.table_schema THEN
@@ -822,7 +830,7 @@ func (q *Queries) GetCompositeTypeColumns(ctx context.Context) ([]GetCompositeTy
 }
 
 const getCompositeTypeColumnsForSchema = `-- name: GetCompositeTypeColumnsForSchema :many
-SELECT
+SELECT 
     n.nspname AS type_schema,
     t.typname AS type_name,
     a.attname AS column_name,
@@ -1345,7 +1353,7 @@ func (q *Queries) GetDomainConstraintsForSchema(ctx context.Context, dollar_1 sq
 }
 
 const getDomains = `-- name: GetDomains :many
-SELECT
+SELECT 
     n.nspname AS domain_schema,
     t.typname AS domain_name,
     CASE
@@ -1418,7 +1426,7 @@ func (q *Queries) GetDomains(ctx context.Context) ([]GetDomainsRow, error) {
 }
 
 const getDomainsForSchema = `-- name: GetDomainsForSchema :many
-SELECT
+SELECT 
     n.nspname AS domain_schema,
     t.typname AS domain_name,
     CASE
@@ -1759,7 +1767,7 @@ SELECT
     p.prosecdef AS is_security_definer,
     p.proleakproof AS is_leakproof,
     p.proparallel AS parallel_mode,
-    (SELECT substring(cfg FROM 'search_path=(.*)') FROM unnest(p.proconfig) AS cfg WHERE cfg LIKE 'search_path=%') AS search_path
+    COALESCE(p.proconfig, '{}') AS set_config
 FROM information_schema.routines r
 LEFT JOIN pg_proc p ON p.proname = r.routine_name
     AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
@@ -1787,7 +1795,7 @@ type GetFunctionsForSchemaRow struct {
 	IsSecurityDefiner bool           `db:"is_security_definer" json:"is_security_definer"`
 	IsLeakproof       bool           `db:"is_leakproof" json:"is_leakproof"`
 	ParallelMode      interface{}    `db:"parallel_mode" json:"parallel_mode"`
-	SearchPath        sql.NullString `db:"search_path" json:"search_path"`
+	SetConfig         []string       `db:"set_config" json:"set_config"`
 }
 
 // GetFunctionsForSchema retrieves all user-defined functions for a specific schema
@@ -1815,7 +1823,7 @@ func (q *Queries) GetFunctionsForSchema(ctx context.Context, dollar_1 sql.NullSt
 			&i.IsSecurityDefiner,
 			&i.IsLeakproof,
 			&i.ParallelMode,
-			&i.SearchPath,
+			pq.Array(&i.SetConfig),
 		); err != nil {
 			return nil, err
 		}
