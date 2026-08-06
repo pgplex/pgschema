@@ -1869,8 +1869,31 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithViewDeps = deferRecreated(functionsWithViewDeps)
 	}
 
-	// Create functions WITHOUT view dependencies (functions may depend on tables created above)
-	generateCreateFunctionsSQL(functionsWithoutViewDeps, targetSchema, collector)
+	// Separate functions WITHOUT view deps into those that reference tables being
+	// created later (tablesWithDeps) and those that don't. Functions that query new
+	// tables must be created after the tables they depend on (issue #530).
+	functionsWithoutTableDeps := functionsWithoutViewDeps
+	var functionsWithTableDeps []*ir.Function
+	if len(tablesWithDeps) > 0 {
+		tablesWithDepsLookup := make(map[string]struct{}, len(tablesWithDeps))
+		for _, table := range tablesWithDeps {
+			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
+			tablesWithDepsLookup[qualified] = struct{}{}
+			tablesWithDepsLookup[strings.ToLower(table.Name)] = struct{}{}
+		}
+		functionsWithoutTableDeps = nil
+		for _, fn := range functionsWithoutViewDeps {
+			if functionReferencesNewTable(fn, tablesWithDepsLookup) {
+				functionsWithTableDeps = append(functionsWithTableDeps, fn)
+			} else {
+				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
+			}
+		}
+	}
+
+	// Create functions WITHOUT view dependencies AND WITHOUT table dependencies
+	// (these are safe to create before tables with function/domain dependencies)
+	generateCreateFunctionsSQL(functionsWithoutTableDeps, targetSchema, collector)
 
 	// Create domains WITH function dependencies (now that functions exist)
 	// These domains have CHECK constraints that reference functions
@@ -1881,6 +1904,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
 	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+
+	// Create functions WITHOUT view deps that reference new tables (now that all tables exist)
+	// These functions query tables that were created in tablesWithDeps above (issue #530)
+	generateCreateFunctionsSQL(functionsWithTableDeps, targetSchema, collector)
 
 	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
 	// These were skipped from addedSequences but their comments must still be deployed.
@@ -2596,6 +2623,23 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 			if _, ok := newFunctions[qualified]; ok {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// functionReferencesNewTable determines if a function body references any newly
+// added table that will be created after the first function batch (tablesWithDeps).
+// See https://github.com/pgplex/pgschema/issues/530
+func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) bool {
+	if len(newTables) == 0 || fn == nil || fn.Definition == "" {
+		return false
+	}
+
+	body := strings.ToLower(fn.Definition)
+	for tableName := range newTables {
+		if containsIdentifier(body, tableName) {
+			return true
 		}
 	}
 	return false
