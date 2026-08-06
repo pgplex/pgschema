@@ -722,10 +722,8 @@ func topologicallySortDeferredConstraints(deferred []*deferredConstraint) []*def
 	// Pre-index deferred constraints by their table for O(n) graph building:
 	// tableKey -> list of constraint graph keys on that table.
 	byTable := make(map[string][]string)
-	tableOf := make(map[string]string) // graph key -> table key
 	for graphKey, dc := range byGraphKey {
 		tk := tableKey(dc.constraint.Schema, dc.constraint.Table)
-		tableOf[graphKey] = tk
 		byTable[tk] = append(byTable[tk], graphKey)
 	}
 
