@@ -710,9 +710,7 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 	sort.Slice(preDrops, func(i, j int) bool {
 		return constraintPathKey(preDrops[i]) < constraintPathKey(preDrops[j])
 	})
-	sort.Slice(postAdds, func(i, j int) bool {
-		return constraintPathKey(postAdds[i].constraint) < constraintPathKey(postAdds[j].constraint)
-	})
+	postAdds = topologicallySortDeferredConstraints(postAdds)
 	return preDrops, postAdds, suppressedInlineFKs
 }
 

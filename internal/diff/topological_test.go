@@ -510,3 +510,122 @@ func TestBuildFunctionBodyDependenciesWithTopologicalSort(t *testing.T) {
 		t.Errorf("expected a_helper before z_wrapper, got order: %v", order)
 	}
 }
+
+func TestTopologicallySortDeferredConstraints_SimpleChain(t *testing.T) {
+	// Table B's FK references table A. Table C's FK references table B.
+	// B's FK (to A) must come before C's FK (to B).
+	deferred := []*deferredConstraint{
+		{ // FK on table C -> table B
+			table: &ir.Table{Schema: "public", Name: "c"},
+			constraint: &ir.Constraint{
+				Schema: "public", Table: "c", Name: "fk_c_to_b",
+				Type: ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public", ReferencedTable: "b",
+			},
+		},
+		{ // FK on table B -> table A
+			table: &ir.Table{Schema: "public", Name: "b"},
+			constraint: &ir.Constraint{
+				Schema: "public", Table: "b", Name: "fk_b_to_a",
+				Type: ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public", ReferencedTable: "a",
+			},
+		},
+	}
+
+	sorted := topologicallySortDeferredConstraints(deferred)
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 constraints, got %d", len(sorted))
+	}
+
+	// B's FK (to A) must come before C's FK (to B)
+	first := sorted[0].constraint.Name
+	second := sorted[1].constraint.Name
+	if first != "fk_b_to_a" || second != "fk_c_to_b" {
+		t.Errorf("expected [fk_b_to_a, fk_c_to_b], got [%s, %s]", first, second)
+	}
+}
+
+func TestTopologicallySortDeferredConstraints_NoDependency(t *testing.T) {
+	// Two FKs referencing unrelated tables. Should be alphabetical by constraint path.
+	deferred := []*deferredConstraint{
+		{
+			table: &ir.Table{Schema: "public", Name: "z"},
+			constraint: &ir.Constraint{
+				Schema: "public", Table: "z", Name: "fk_z",
+				Type: ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public", ReferencedTable: "unrelated",
+			},
+		},
+		{
+			table: &ir.Table{Schema: "public", Name: "a"},
+			constraint: &ir.Constraint{
+				Schema: "public", Table: "a", Name: "fk_a",
+				Type: ir.ConstraintTypeForeignKey,
+				ReferencedSchema: "public", ReferencedTable: "other",
+			},
+		},
+	}
+
+	sorted := topologicallySortDeferredConstraints(deferred)
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 constraints, got %d", len(sorted))
+	}
+
+	// No dependency: alphabetical by constraint path
+	first := sorted[0].constraint.Name
+	second := sorted[1].constraint.Name
+	if first != "fk_a" || second != "fk_z" {
+		t.Errorf("expected [fk_a, fk_z], got [%s, %s]", first, second)
+	}
+}
+
+func TestSortConstraintsByType(t *testing.T) {
+	// Same-type constraints should be ordered by name (stable sort).
+	constraints := []*ir.Constraint{
+		{Name: "fk_zebra", Type: ir.ConstraintTypeForeignKey},
+		{Name: "fk_alpha", Type: ir.ConstraintTypeForeignKey},
+		{Name: "chk_val", Type: ir.ConstraintTypeCheck},
+		{Name: "uq_email", Type: ir.ConstraintTypeUnique},
+		{Name: "pk_id", Type: ir.ConstraintTypePrimaryKey},
+		{Name: "excl_overlap", Type: ir.ConstraintTypeExclusion},
+	}
+
+	sortConstraintsByType(constraints)
+
+	expected := []string{"pk_id", "uq_email", "fk_alpha", "fk_zebra", "chk_val", "excl_overlap"}
+	for i, c := range constraints {
+		if c.Name != expected[i] {
+			t.Errorf("position %d: expected %s, got %s", i, expected[i], c.Name)
+		}
+	}
+}
+
+func TestConstraintTypeOrder(t *testing.T) {
+	if constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypePrimaryKey}) >= constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeUnique}) {
+		t.Error("PK should come before UNIQUE")
+	}
+	if constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeUnique}) >= constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeForeignKey}) {
+		t.Error("UNIQUE should come before FK")
+	}
+	if constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeForeignKey}) >= constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeCheck}) {
+		t.Error("FK should come before CHECK")
+	}
+	if constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeCheck}) >= constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeExclusion}) {
+		t.Error("CHECK should come before EXCLUDE")
+	}
+}
+
+func TestConstraintGraphKeyNoCollisions(t *testing.T) {
+	// Quoted identifiers with dots must not collide with unquoted dotted paths.
+	// schema "a.b" table "c" vs schema "a" table "b.c" — same dot-joined path,
+	// but different constraints.
+	c1 := &ir.Constraint{Schema: `a.b`, Table: `c`, Name: `fk`}
+	c2 := &ir.Constraint{Schema: `a`, Table: `b.c`, Name: `fk`}
+
+	k1 := constraintGraphKey(c1)
+	k2 := constraintGraphKey(c2)
+	if k1 == k2 {
+		t.Errorf("constraintGraphKey collision: %q == %q", k1, k2)
+	}
+}
