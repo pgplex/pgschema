@@ -2628,17 +2628,34 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 	return false
 }
 
+// tableRefPattern matches SQL table references: FROM table, JOIN table,
+// INSERT INTO table, UPDATE [ONLY] table, DELETE FROM table, TABLE table.
+// Captures the table name (possibly schema-qualified) in group 1.
+var tableRefPattern = regexp.MustCompile(
+	`(?i)(?:FROM|JOIN|INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM|TABLE)\s+` +
+		`([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)`,
+)
+
 // functionReferencesNewTable determines if a function body references any newly
 // added table that will be created after the first function batch (tablesWithDeps).
+// It looks for table names in SQL table-reference contexts (FROM, JOIN,
+// INSERT INTO, UPDATE, DELETE FROM) rather than scanning the entire body,
+// avoiding false positives from comments, literals, and aliases.
 // See https://github.com/pgplex/pgschema/issues/530
 func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) bool {
 	if len(newTables) == 0 || fn == nil || fn.Definition == "" {
 		return false
 	}
 
-	body := strings.ToLower(fn.Definition)
-	for tableName := range newTables {
-		if containsIdentifier(body, tableName) {
+	matches := tableRefPattern.FindAllStringSubmatch(fn.Definition, -1)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		ref := strings.ToLower(match[1])
+		// The lookup contains both qualified (schema.table) and unqualified
+		// (table) keys for each table, so a single check covers both forms.
+		if _, ok := newTables[ref]; ok {
 			return true
 		}
 	}
