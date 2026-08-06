@@ -1891,6 +1891,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
 	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
 	allDeferredConstraints := append(deferredConstraints1, deferredConstraints2...)
+	allDeferredConstraints = topologicallySortDeferredConstraints(allDeferredConstraints)
 	generateDeferredConstraintsSQL(allDeferredConstraints, targetSchema, collector)
 
 	// Create aggregates after their transition/final functions AND all tables exist
@@ -2222,13 +2223,24 @@ func sortTableObjects(tables []*tableDiff) {
 			return tableDiff.DroppedConstraints[i].Name < tableDiff.DroppedConstraints[j].Name
 		})
 
-		// Sort added constraints
+		// Sort added constraints by type (PK, UNIQUE, FK, CHECK, EXCLUDE) then by name.
+		// Type ordering ensures UNIQUE constraints exist before FKs that reference them
+		// — even within a single ALTER TABLE block PostgreSQL processes statements in
+		// order, so UNIQUE must come before FK. (#532)
 		sort.Slice(tableDiff.AddedConstraints, func(i, j int) bool {
+			oi, oj := constraintTypeOrder(tableDiff.AddedConstraints[i]), constraintTypeOrder(tableDiff.AddedConstraints[j])
+			if oi != oj {
+				return oi < oj
+			}
 			return tableDiff.AddedConstraints[i].Name < tableDiff.AddedConstraints[j].Name
 		})
 
-		// Sort modified constraints
+		// Sort modified constraints by type then by name
 		sort.Slice(tableDiff.ModifiedConstraints, func(i, j int) bool {
+			oi, oj := constraintTypeOrder(tableDiff.ModifiedConstraints[i].New), constraintTypeOrder(tableDiff.ModifiedConstraints[j].New)
+			if oi != oj {
+				return oi < oj
+			}
 			return tableDiff.ModifiedConstraints[i].New.Name < tableDiff.ModifiedConstraints[j].New.Name
 		})
 

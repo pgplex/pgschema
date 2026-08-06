@@ -687,6 +687,152 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 	return sortedTableDiffs
 }
 
+// topologicallySortDeferredConstraints sorts deferred FK constraints in dependency
+// order. An FK that references a UNIQUE/PK constraint on table B must come after any
+// FK on table B (which may, in turn, reference a UNIQUE/PK on table C, and so on).
+//
+// The dependency graph is built from table-level FK references: if FK_A's table has
+// any FK referencing table B, then FK_B (any deferred FK on table B) must come before
+// FK_A. This ensures that tables referenced by FKs have their own deferred FKs
+// satisfied first, enabling chains like:
+//
+//	C → B (FK on table C references B's PK)
+//	B → A (FK on table B references A's newly-added UNIQUE)
+//
+// Order: B's FK (to A) before C's FK (to B).
+//
+// When no dependency exists, falls back to alphabetical by constraint path for
+// deterministic output.
+func topologicallySortDeferredConstraints(deferred []*deferredConstraint) []*deferredConstraint {
+	if len(deferred) <= 1 {
+		return deferred
+	}
+
+	// Build keyed lookup by constraint path
+	byPath := make(map[string]*deferredConstraint)
+	var insertionOrder []string
+	for _, dc := range deferred {
+		key := constraintPathKey(dc.constraint)
+		byPath[key] = dc
+		insertionOrder = append(insertionOrder, key)
+	}
+
+	// Build table identity for each deferred FK
+	tableOf := make(map[string]string) // constraint path -> table key
+	for key, dc := range byPath {
+		tableOf[key] = dc.constraint.Schema + "." + dc.constraint.Table
+	}
+
+	// Build dependency graph: if FK_A references table B, and there is at least
+	// one deferred FK on table B, then the deferred FK(s) on B must come before FK_A.
+	inDegree := make(map[string]int)
+	adjList := make(map[string][]string)
+	for key := range byPath {
+		inDegree[key] = 0
+		adjList[key] = []string{}
+	}
+
+	for keyA, dcA := range byPath {
+		fk := dcA.constraint
+		if fk.Type != ir.ConstraintTypeForeignKey || fk.ReferencedTable == "" {
+			continue
+		}
+		refSchema := fk.ReferencedSchema
+		if refSchema == "" {
+			refSchema = fk.Schema
+		}
+		refTableKey := refSchema + "." + fk.ReferencedTable
+
+		// Find any deferred FK on the referenced table — they must come first.
+		for keyB := range byPath {
+			if keyA == keyB {
+				continue
+			}
+			if tableOf[keyB] == refTableKey {
+				adjList[keyB] = append(adjList[keyB], keyA)
+				inDegree[keyA]++
+			}
+		}
+	}
+
+	// Kahn's algorithm with deterministic cycle breaking
+	var queue []string
+	var result []string
+	processed := make(map[string]bool, len(byPath))
+
+	for key, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, key)
+		}
+	}
+	sort.Strings(queue)
+
+	for len(result) < len(byPath) {
+		if len(queue) == 0 {
+			next := nextInOrder(insertionOrder, processed)
+			if next == "" {
+				break
+			}
+			queue = append(queue, next)
+			inDegree[next] = 0
+		}
+
+		current := queue[0]
+		queue = queue[1:]
+		if processed[current] {
+			continue
+		}
+		processed[current] = true
+		result = append(result, current)
+
+		neighbors := append([]string(nil), adjList[current]...)
+		sort.Strings(neighbors)
+
+		for _, neighbor := range neighbors {
+			inDegree[neighbor]--
+			if inDegree[neighbor] <= 0 && !processed[neighbor] {
+				queue = append(queue, neighbor)
+				sort.Strings(queue)
+			}
+		}
+	}
+
+	sorted := make([]*deferredConstraint, 0, len(result))
+	for _, key := range result {
+		sorted = append(sorted, byPath[key])
+	}
+	return sorted
+}
+
+// sortConstraintsByType orders constraints by type for deterministic, safe DDL
+// emission: PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK, EXCLUDE. This ensures that
+// UNIQUE constraints exist before FKs that reference them (both within a single
+// table and when constraints from multiple tables are interleaved).
+func sortConstraintsByType(constraints []*ir.Constraint) {
+	sort.Slice(constraints, func(i, j int) bool {
+		return constraintTypeOrder(constraints[i]) < constraintTypeOrder(constraints[j])
+	})
+}
+
+// constraintTypeOrder returns a sort order for constraint types. Lower values
+// are emitted first.
+func constraintTypeOrder(c *ir.Constraint) int {
+	switch c.Type {
+	case ir.ConstraintTypePrimaryKey:
+		return 0
+	case ir.ConstraintTypeUnique:
+		return 1
+	case ir.ConstraintTypeForeignKey:
+		return 2
+	case ir.ConstraintTypeCheck:
+		return 3
+	case ir.ConstraintTypeExclusion:
+		return 4
+	default:
+		return 5
+	}
+}
+
 // constraintMatchesFKReference checks if a UNIQUE/PK constraint matches the columns
 // referenced by a foreign key constraint.
 // In PostgreSQL, composite foreign keys must reference columns in the same order as they
