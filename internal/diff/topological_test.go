@@ -581,8 +581,10 @@ func TestTopologicallySortDeferredConstraints_NoDependency(t *testing.T) {
 }
 
 func TestSortConstraintsByType(t *testing.T) {
+	// Same-type constraints should be ordered by name (stable sort).
 	constraints := []*ir.Constraint{
-		{Name: "fk_some", Type: ir.ConstraintTypeForeignKey},
+		{Name: "fk_zebra", Type: ir.ConstraintTypeForeignKey},
+		{Name: "fk_alpha", Type: ir.ConstraintTypeForeignKey},
 		{Name: "chk_val", Type: ir.ConstraintTypeCheck},
 		{Name: "uq_email", Type: ir.ConstraintTypeUnique},
 		{Name: "pk_id", Type: ir.ConstraintTypePrimaryKey},
@@ -591,7 +593,7 @@ func TestSortConstraintsByType(t *testing.T) {
 
 	sortConstraintsByType(constraints)
 
-	expected := []string{"pk_id", "uq_email", "fk_some", "chk_val", "excl_overlap"}
+	expected := []string{"pk_id", "uq_email", "fk_alpha", "fk_zebra", "chk_val", "excl_overlap"}
 	for i, c := range constraints {
 		if c.Name != expected[i] {
 			t.Errorf("position %d: expected %s, got %s", i, expected[i], c.Name)
@@ -611,5 +613,19 @@ func TestConstraintTypeOrder(t *testing.T) {
 	}
 	if constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeCheck}) >= constraintTypeOrder(&ir.Constraint{Type: ir.ConstraintTypeExclusion}) {
 		t.Error("CHECK should come before EXCLUDE")
+	}
+}
+
+func TestConstraintGraphKeyNoCollisions(t *testing.T) {
+	// Quoted identifiers with dots must not collide with unquoted dotted paths.
+	// schema "a.b" table "c" vs schema "a" table "b.c" — same dot-joined path,
+	// but different constraints.
+	c1 := &ir.Constraint{Schema: `a.b`, Table: `c`, Name: `fk`}
+	c2 := &ir.Constraint{Schema: `a`, Table: `b.c`, Name: `fk`}
+
+	k1 := constraintGraphKey(c1)
+	k2 := constraintGraphKey(c2)
+	if k1 == k2 {
+		t.Errorf("constraintGraphKey collision: %q == %q", k1, k2)
 	}
 }

@@ -708,31 +708,36 @@ func topologicallySortDeferredConstraints(deferred []*deferredConstraint) []*def
 		return deferred
 	}
 
-	// Build keyed lookup by constraint path
-	byPath := make(map[string]*deferredConstraint)
+	// Build keyed lookup by constraint path. Use NUL-byte separators so that
+	// quoted identifiers containing dots (e.g. "a.b".c) don't collide with
+	// unquoted dotted paths (a."b.c") — same pattern as typeGraphKey.
+	byGraphKey := make(map[string]*deferredConstraint)
 	var insertionOrder []string
 	for _, dc := range deferred {
-		key := constraintPathKey(dc.constraint)
-		byPath[key] = dc
+		key := constraintGraphKey(dc.constraint)
+		byGraphKey[key] = dc
 		insertionOrder = append(insertionOrder, key)
 	}
 
-	// Build table identity for each deferred FK
-	tableOf := make(map[string]string) // constraint path -> table key
-	for key, dc := range byPath {
-		tableOf[key] = dc.constraint.Schema + "." + dc.constraint.Table
+	// Pre-index deferred constraints by their table for O(n) graph building:
+	// tableKey -> list of constraint graph keys on that table.
+	byTable := make(map[string][]string)
+	tableOf := make(map[string]string) // graph key -> table key
+	for graphKey, dc := range byGraphKey {
+		tk := tableKey(dc.constraint.Schema, dc.constraint.Table)
+		tableOf[graphKey] = tk
+		byTable[tk] = append(byTable[tk], graphKey)
 	}
 
 	// Build dependency graph: if FK_A references table B, and there is at least
 	// one deferred FK on table B, then the deferred FK(s) on B must come before FK_A.
-	inDegree := make(map[string]int)
-	adjList := make(map[string][]string)
-	for key := range byPath {
-		inDegree[key] = 0
-		adjList[key] = []string{}
+	inDegree := make(map[string]int, len(byGraphKey))
+	adjList := make(map[string][]string, len(byGraphKey))
+	for graphKey := range byGraphKey {
+		inDegree[graphKey] = 0
 	}
 
-	for keyA, dcA := range byPath {
+	for graphKeyA, dcA := range byGraphKey {
 		fk := dcA.constraint
 		if fk.Type != ir.ConstraintTypeForeignKey || fk.ReferencedTable == "" {
 			continue
@@ -741,33 +746,31 @@ func topologicallySortDeferredConstraints(deferred []*deferredConstraint) []*def
 		if refSchema == "" {
 			refSchema = fk.Schema
 		}
-		refTableKey := refSchema + "." + fk.ReferencedTable
+		refTableKey := tableKey(refSchema, fk.ReferencedTable)
 
-		// Find any deferred FK on the referenced table — they must come first.
-		for keyB := range byPath {
-			if keyA == keyB {
+		// O(1) lookup: find deferred FKs on the referenced table.
+		for _, graphKeyB := range byTable[refTableKey] {
+			if graphKeyA == graphKeyB {
 				continue
 			}
-			if tableOf[keyB] == refTableKey {
-				adjList[keyB] = append(adjList[keyB], keyA)
-				inDegree[keyA]++
-			}
+			adjList[graphKeyB] = append(adjList[graphKeyB], graphKeyA)
+			inDegree[graphKeyA]++
 		}
 	}
 
 	// Kahn's algorithm with deterministic cycle breaking
 	var queue []string
 	var result []string
-	processed := make(map[string]bool, len(byPath))
+	processed := make(map[string]bool, len(byGraphKey))
 
-	for key, degree := range inDegree {
+	for graphKey, degree := range inDegree {
 		if degree == 0 {
-			queue = append(queue, key)
+			queue = append(queue, graphKey)
 		}
 	}
 	sort.Strings(queue)
 
-	for len(result) < len(byPath) {
+	for len(result) < len(byGraphKey) {
 		if len(queue) == 0 {
 			next := nextInOrder(insertionOrder, processed)
 			if next == "" {
@@ -798,19 +801,39 @@ func topologicallySortDeferredConstraints(deferred []*deferredConstraint) []*def
 	}
 
 	sorted := make([]*deferredConstraint, 0, len(result))
-	for _, key := range result {
-		sorted = append(sorted, byPath[key])
+	for _, graphKey := range result {
+		sorted = append(sorted, byGraphKey[graphKey])
 	}
 	return sorted
+}
+
+// constraintGraphKey builds a NUL-separated key for a constraint that is safe
+// against identifier collisions. The dot-joined constraintPathKey can produce
+// the same string for distinct constraints when quoted identifiers contain dots
+// (e.g. schema "a.b" table "c" constraint "d" vs schema "a" table "b.c"
+// constraint "d"). NUL cannot appear in a PostgreSQL identifier.
+func constraintGraphKey(c *ir.Constraint) string {
+	return c.Schema + "\x00" + c.Table + "\x00" + c.Name
+}
+
+// tableKey builds a NUL-separated key for a (schema, table) pair that is safe
+// against identifier collisions, matching the convention of constraintGraphKey.
+func tableKey(schema, table string) string {
+	return schema + "\x00" + table
 }
 
 // sortConstraintsByType orders constraints by type for deterministic, safe DDL
 // emission: PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK, EXCLUDE. This ensures that
 // UNIQUE constraints exist before FKs that reference them (both within a single
-// table and when constraints from multiple tables are interleaved).
+// table and when constraints from multiple tables are interleaved). Within the
+// same type, constraints are sorted by name for deterministic output.
 func sortConstraintsByType(constraints []*ir.Constraint) {
 	sort.Slice(constraints, func(i, j int) bool {
-		return constraintTypeOrder(constraints[i]) < constraintTypeOrder(constraints[j])
+		oi, oj := constraintTypeOrder(constraints[i]), constraintTypeOrder(constraints[j])
+		if oi != oj {
+			return oi < oj
+		}
+		return constraints[i].Name < constraints[j].Name
 	})
 }
 
