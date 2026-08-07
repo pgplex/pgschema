@@ -67,7 +67,7 @@ Most state-based tools spin up a temporary "shadow" database to validate migrati
 
 Fair question. We have no current plans to charge for pgschema.
 
-pgschema is sponsored by [Bytebase](https://www.bytebase.com), a commercial database DevSecOps platform. Bytebase covers the needs of teams that require controls beyond schema migration — data access control, data masking, audit logging, and multi-database management across an organization.
+pgschema is sponsored by [Bytebase](https://www.bytebase.com), a commercial database Governance platform. Bytebase covers the needs of teams that require controls beyond schema migration — data access control, data masking, audit logging, and multi-database management across an organization.
 
 ## Supported Schema Objects
 
