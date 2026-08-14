@@ -982,7 +982,11 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 	}
 	refKey := fmt.Sprintf("%s.%s", refSchema, constraint.ReferencedTable)
 	if refKey == currentKey {
-		return false
+		// Self-referencing FK: safe to inline only if it targets the PK
+		// (which is created inline with CREATE TABLE). If it targets a
+		// separate UNIQUE constraint/index, defer it — the UNIQUE is
+		// created after CREATE TABLE via generateCreateIndexesSQL.
+		return !selfRefFKTargetsPK(table, constraint)
 	}
 
 	// Check if the referenced table exists (either being created or already exists)
@@ -994,6 +998,34 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 	}
 
 	// Referenced table doesn't exist yet, defer the constraint
+	return true
+}
+
+// selfRefFKTargetsPK checks whether a self-referencing FK's referenced columns
+// match the table's primary key columns exactly.
+func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
+	var pk *ir.Constraint
+	for _, c := range table.Constraints {
+		if c.Type == ir.ConstraintTypePrimaryKey {
+			pk = c
+			break
+		}
+	}
+	if pk == nil {
+		return false
+	}
+	if len(fk.ReferencedColumns) != len(pk.Columns) {
+		return false
+	}
+	pkCols := make(map[string]struct{}, len(pk.Columns))
+	for _, col := range pk.Columns {
+		pkCols[col.Name] = struct{}{}
+	}
+	for _, col := range fk.ReferencedColumns {
+		if _, ok := pkCols[col.Name]; !ok {
+			return false
+		}
+	}
 	return true
 }
 
