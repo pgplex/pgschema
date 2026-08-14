@@ -2616,17 +2616,8 @@ func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) b
 	if len(newTables) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
 		return false
 	}
-	baseType := strings.ToLower(typeObj.BaseType)
-	if _, ok := newTables[baseType]; ok {
-		return true
-	}
-	if typeObj.Schema != "" {
-		qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), baseType)
-		if _, ok := newTables[qualified]; ok {
-			return true
-		}
-	}
-	return false
+	baseName := extractBaseTypeName(typeObj.BaseType)
+	return typeMatchesLookup(baseName, typeObj.Schema, newTables)
 }
 
 // domainReferencesNewFunction determines if a domain references any newly added functions
