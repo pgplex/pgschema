@@ -13,5 +13,6 @@ CREATE TABLE public.user_pending_permissions (
     amount numeric(18,6) NOT NULL DEFAULT 0,
     arfcn_dl text DEFAULT 'unknown',
     priority text,
-    flag public."MyStatus" DEFAULT 'active'::"MyStatus"
+    flag public."MyStatus" DEFAULT 'active'::"MyStatus",
+    scores integer
 );

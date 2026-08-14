@@ -15,5 +15,6 @@ CREATE TABLE public.user_pending_permissions (
     amount numeric(20,6) NOT NULL DEFAULT 0,
     arfcn_dl integer DEFAULT 0,
     priority integer,
-    flag public."mystatus" DEFAULT 'on'::"mystatus"
+    flag public."mystatus" DEFAULT 'on'::"mystatus",
+    scores integer[]
 );

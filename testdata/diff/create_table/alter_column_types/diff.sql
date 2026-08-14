@@ -35,3 +35,5 @@ ALTER TABLE user_pending_permissions ALTER COLUMN flag DROP DEFAULT;
 ALTER TABLE user_pending_permissions ALTER COLUMN flag TYPE mystatus USING flag::mystatus;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN flag SET DEFAULT 'on'::mystatus;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN scores TYPE integer[] USING scores::integer[];

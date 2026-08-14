@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.2",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "4ca158097daebfce0ecb7adac4a5c34041eccef1cc674e9c31981e7e74b36599"
+    "hash": "e9d10c926863ca30fce8dbea089105a5fefedd19dcb4c8ec181d4a2410e9fbee"
   },
   "groups": [
     {
@@ -109,6 +109,12 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.flag"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN scores TYPE integer[] USING scores::integer[];",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.scores"
         }
       ]
     }
