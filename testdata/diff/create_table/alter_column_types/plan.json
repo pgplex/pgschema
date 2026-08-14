@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.2",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "e9d10c926863ca30fce8dbea089105a5fefedd19dcb4c8ec181d4a2410e9fbee"
+    "hash": "113021c146951149a4fc255d57cbde2c8e6894bcb3e7c01f33f2cadc4222ae6f"
   },
   "groups": [
     {
@@ -91,24 +91,6 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.priority"
-        },
-        {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN flag DROP DEFAULT;",
-          "type": "table.column",
-          "operation": "alter",
-          "path": "public.user_pending_permissions.flag"
-        },
-        {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN flag TYPE mystatus USING flag::mystatus;",
-          "type": "table.column",
-          "operation": "alter",
-          "path": "public.user_pending_permissions.flag"
-        },
-        {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN flag SET DEFAULT 'on'::mystatus;",
-          "type": "table.column",
-          "operation": "alter",
-          "path": "public.user_pending_permissions.flag"
         },
         {
           "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN scores TYPE integer[] USING scores::integer[];",
