@@ -128,8 +128,12 @@ func needsUsingClause(oldType, newType string) bool {
 
 func normalizeBaseTypeName(typeName string) string {
 	t := typeName
-	if idx := strings.Index(t, "("); idx != -1 {
-		t = t[:idx]
+	if open := strings.Index(t, "("); open != -1 {
+		if close := strings.Index(t[open:], ")"); close != -1 {
+			t = t[:open] + t[open+close+1:]
+		} else {
+			t = t[:open]
+		}
 	}
 	t = strings.TrimPrefix(t, "pg_catalog.")
 	if !strings.Contains(t, "\"") {
