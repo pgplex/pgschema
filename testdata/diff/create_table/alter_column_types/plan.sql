@@ -29,5 +29,3 @@ ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl TYPE integer USING ar
 ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl SET DEFAULT 0;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN priority TYPE integer USING priority::integer;
-
-ALTER TABLE user_pending_permissions ALTER COLUMN scores TYPE integer[] USING scores::integer[];
