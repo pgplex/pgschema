@@ -127,12 +127,15 @@ func needsUsingClause(oldType, newType string) bool {
 }
 
 func normalizeBaseTypeName(typeName string) string {
-	t := strings.ToLower(typeName)
+	t := typeName
 	t = strings.TrimSuffix(t, "[]")
 	if idx := strings.Index(t, "("); idx != -1 {
 		t = t[:idx]
 	}
 	t = strings.TrimPrefix(t, "pg_catalog.")
+	if !strings.Contains(t, "\"") {
+		t = strings.ToLower(t)
+	}
 	return t
 }
 
