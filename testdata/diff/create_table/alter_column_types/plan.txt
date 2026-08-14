@@ -11,8 +11,10 @@ Tables:
   ~ user_pending_permissions
     ~ action (column)
     ~ amount (column)
+    ~ arfcn_dl (column)
     ~ id (column)
     ~ object_ids_ints (column)
+    ~ priority (column)
     ~ status (column)
     ~ tags (column)
     ~ user_id (column)
@@ -43,3 +45,11 @@ ALTER TABLE user_pending_permissions ALTER COLUMN status SET DEFAULT 'pending'::
 ALTER TABLE user_pending_permissions ALTER COLUMN tags TYPE action_type[] USING tags::action_type[];
 
 ALTER TABLE user_pending_permissions ALTER COLUMN amount TYPE numeric(20,6);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl DROP DEFAULT;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl TYPE integer USING arfcn_dl::integer;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl SET DEFAULT 0;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN priority TYPE integer USING priority::integer;

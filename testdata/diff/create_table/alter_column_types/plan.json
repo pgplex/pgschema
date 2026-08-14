@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.2",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "614655f95d349ec321da570d4e232db71f8bfb57404998153f9fd53720cd2acb"
+    "hash": "31ef5d21f4bfa9713df469db3eb54585bf60ea348f09608b21f7d05eae9f3f02"
   },
   "groups": [
     {
@@ -67,6 +67,30 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.amount"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.arfcn_dl"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl TYPE integer USING arfcn_dl::integer;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.arfcn_dl"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl SET DEFAULT 0;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.arfcn_dl"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN priority TYPE integer USING priority::integer;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.priority"
         }
       ]
     }
