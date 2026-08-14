@@ -29,3 +29,9 @@ ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl TYPE integer USING ar
 ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl SET DEFAULT 0;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN priority TYPE integer USING priority::integer;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN flag DROP DEFAULT;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN flag TYPE mystatus USING flag::mystatus;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN flag SET DEFAULT 'on'::mystatus;
