@@ -982,7 +982,10 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 	}
 	refKey := fmt.Sprintf("%s.%s", refSchema, constraint.ReferencedTable)
 	if refKey == currentKey {
-		return false
+		// Self-referencing FK: safe to inline only if it targets the PK.
+		// If it targets a non-PK UNIQUE constraint, defer it so the
+		// UNIQUE exists before the FK is validated.
+		return !selfRefFKTargetsPK(table, constraint)
 	}
 
 	// Check if the referenced table exists (either being created or already exists)
@@ -994,6 +997,33 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 	}
 
 	// Referenced table doesn't exist yet, defer the constraint
+	return true
+}
+
+// selfRefFKTargetsPK checks whether a self-referencing FK's referenced columns
+// match the table's primary key columns in position order. Order matters for
+// composite keys: PK (a,b) and UNIQUE (b,a) are different targets.
+func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
+	var pk *ir.Constraint
+	for _, c := range table.Constraints {
+		if c.Type == ir.ConstraintTypePrimaryKey {
+			pk = c
+			break
+		}
+	}
+	if pk == nil {
+		return false
+	}
+	if len(fk.ReferencedColumns) != len(pk.Columns) {
+		return false
+	}
+	pkSorted := sortConstraintColumnsByPosition(pk.Columns)
+	refSorted := sortConstraintColumnsByPosition(fk.ReferencedColumns)
+	for i := range pkSorted {
+		if pkSorted[i].Name != refSorted[i].Name {
+			return false
+		}
+	}
 	return true
 }
 

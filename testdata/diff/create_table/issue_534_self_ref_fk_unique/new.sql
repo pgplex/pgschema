@@ -1,0 +1,10 @@
+CREATE TABLE parent_orgs (
+    id bigint PRIMARY KEY,
+    external_key uuid NOT NULL UNIQUE,
+    parent_id bigint,
+    migrated_from_external_key uuid,
+    CONSTRAINT fk_parent
+        FOREIGN KEY (parent_id) REFERENCES parent_orgs (id),
+    CONSTRAINT fk_self_migrated_from
+        FOREIGN KEY (migrated_from_external_key) REFERENCES parent_orgs (external_key)
+);
