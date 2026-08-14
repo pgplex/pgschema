@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "CREATE TABLE IF NOT EXISTS parent_orgs (\n    id bigint,\n    external_key uuid NOT NULL,\n    migrated_from_external_key uuid,\n    CONSTRAINT parent_orgs_pkey PRIMARY KEY (id),\n    CONSTRAINT parent_orgs_external_key_key UNIQUE (external_key)\n);",
+          "sql": "CREATE TABLE IF NOT EXISTS parent_orgs (\n    id bigint,\n    external_key uuid NOT NULL,\n    parent_id bigint,\n    migrated_from_external_key uuid,\n    CONSTRAINT parent_orgs_pkey PRIMARY KEY (id),\n    CONSTRAINT parent_orgs_external_key_key UNIQUE (external_key),\n    CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent_orgs (id)\n);",
           "type": "table",
           "operation": "create",
           "path": "public.parent_orgs"
