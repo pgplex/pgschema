@@ -543,7 +543,7 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 		// Views
 		for _, view := range schema.Views {
 			view.Schema = toSchema
-			view.Definition = replaceString(view.Definition)
+			view.Definition = stripQualifiers(replaceString(view.Definition))
 
 			// Normalize schema names in materialized view indexes
 			for _, index := range view.Indexes {
@@ -738,13 +738,40 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 	prefix := schema + "."
 	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)\(`)
 	typePattern := regexp.MustCompile(`::` + regexp.QuoteMeta(prefix))
+	replaceQualifiers := func(s string) string {
+		s = funcPattern.ReplaceAllString(s, `${1}(`)
+		return typePattern.ReplaceAllString(s, "::")
+	}
 	return func(s string) string {
 		if s == "" || !strings.Contains(s, prefix) {
 			return s
 		}
-		s = funcPattern.ReplaceAllString(s, `${1}(`)
-		s = typePattern.ReplaceAllString(s, "::")
-		return s
+
+		var result strings.Builder
+		result.Grow(len(s))
+		segmentStart := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] != '\'' {
+				continue
+			}
+
+			result.WriteString(replaceQualifiers(s[segmentStart:i]))
+			literalStart := i
+			for i++; i < len(s); i++ {
+				if s[i] != '\'' {
+					continue
+				}
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				break
+			}
+			result.WriteString(s[literalStart:min(i+1, len(s))])
+			segmentStart = min(i+1, len(s))
+		}
+		result.WriteString(replaceQualifiers(s[segmentStart:]))
+		return result.String()
 	}
 }
 
