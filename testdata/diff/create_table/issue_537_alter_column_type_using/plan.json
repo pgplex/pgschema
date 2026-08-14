@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.2",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "a52f40be8be2a13060af818d7d99051b800fdc17849783178d232e172fbe5fac"
+    "hash": "7fc696e55228a1c3a86836518282f5bba5d1ea7f6ff42dd24418f99332188ea9"
   },
   "groups": [
     {
@@ -13,6 +13,24 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.nr_cell_du.arfcn_dl"
+        },
+        {
+          "sql": "ALTER TABLE nr_cell_du ALTER COLUMN priority DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.nr_cell_du.priority"
+        },
+        {
+          "sql": "ALTER TABLE nr_cell_du ALTER COLUMN priority TYPE integer USING priority::integer;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.nr_cell_du.priority"
+        },
+        {
+          "sql": "ALTER TABLE nr_cell_du ALTER COLUMN priority SET DEFAULT 0;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.nr_cell_du.priority"
         }
       ]
     }
