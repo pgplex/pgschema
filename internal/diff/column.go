@@ -128,7 +128,6 @@ func needsUsingClause(oldType, newType string) bool {
 
 func normalizeBaseTypeName(typeName string) string {
 	t := typeName
-	t = strings.TrimSuffix(t, "[]")
 	if idx := strings.Index(t, "("); idx != -1 {
 		t = t[:idx]
 	}
