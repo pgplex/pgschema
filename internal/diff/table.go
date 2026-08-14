@@ -982,10 +982,9 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 	}
 	refKey := fmt.Sprintf("%s.%s", refSchema, constraint.ReferencedTable)
 	if refKey == currentKey {
-		// Self-referencing FK: safe to inline only if it targets the PK
-		// (which is created inline with CREATE TABLE). If it targets a
-		// separate UNIQUE constraint/index, defer it — the UNIQUE is
-		// created after CREATE TABLE via generateCreateIndexesSQL.
+		// Self-referencing FK: safe to inline only if it targets the PK.
+		// If it targets a non-PK UNIQUE constraint, defer it so the
+		// UNIQUE exists before the FK is validated.
 		return !selfRefFKTargetsPK(table, constraint)
 	}
 
@@ -1018,27 +1017,14 @@ func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
 	if len(fk.ReferencedColumns) != len(pk.Columns) {
 		return false
 	}
-	pkByPos := sortedColumnNames(pk.Columns)
-	refByPos := sortedColumnNames(fk.ReferencedColumns)
-	for i := range pkByPos {
-		if pkByPos[i] != refByPos[i] {
+	pkSorted := sortConstraintColumnsByPosition(pk.Columns)
+	refSorted := sortConstraintColumnsByPosition(fk.ReferencedColumns)
+	for i := range pkSorted {
+		if pkSorted[i].Name != refSorted[i].Name {
 			return false
 		}
 	}
 	return true
-}
-
-func sortedColumnNames(cols []*ir.ConstraintColumn) []string {
-	sorted := make([]*ir.ConstraintColumn, len(cols))
-	copy(sorted, cols)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Position < sorted[j].Position
-	})
-	names := make([]string, len(sorted))
-	for i, c := range sorted {
-		names[i] = c.Name
-	}
-	return names
 }
 
 // constraintDroppedWithColumns reports whether dropping any column in droppedColumnSet
