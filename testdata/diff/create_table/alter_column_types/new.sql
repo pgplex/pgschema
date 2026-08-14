@@ -8,5 +8,7 @@ CREATE TABLE public.user_pending_permissions (
     action public.action_type,
     status public.action_type DEFAULT 'pending',
     tags public.action_type[],
-    amount numeric(20,6) NOT NULL DEFAULT 0
+    amount numeric(20,6) NOT NULL DEFAULT 0,
+    arfcn_dl integer DEFAULT 0,
+    priority integer
 );

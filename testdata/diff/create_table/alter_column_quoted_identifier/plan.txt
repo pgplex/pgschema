@@ -10,4 +10,4 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
-ALTER TABLE ex ALTER COLUMN "ID" TYPE bigint;
+ALTER TABLE ex ALTER COLUMN "ID" TYPE bigint USING "ID"::bigint;
