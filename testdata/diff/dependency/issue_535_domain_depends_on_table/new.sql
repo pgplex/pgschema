@@ -1,0 +1,3 @@
+CREATE TABLE x ();
+
+CREATE DOMAIN y AS x;

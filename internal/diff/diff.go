@@ -1761,28 +1761,49 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Build function lookup early - needed for both domain and table dependency checks
 	newFunctionLookup := buildFunctionLookup(d.addedFunctions)
 
-	// Separate types into domains with/without function dependencies
-	// Domains with function deps (e.g., CHECK constraints referencing functions) must be created after functions
-	typesWithoutFunctionDeps := []*ir.Type{}
+	// Build lookup of new table names for domain-references-table check.
+	// A table implicitly creates a composite row type with the same name,
+	// so CREATE DOMAIN y AS x requires CREATE TABLE x to come first.
+	newTableNameLookup := make(map[string]struct{}, len(d.addedTables))
+	for _, table := range d.addedTables {
+		newTableNameLookup[strings.ToLower(table.Name)] = struct{}{}
+		if table.Schema != "" {
+			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
+			newTableNameLookup[qualified] = struct{}{}
+		}
+	}
+
+	// Separate types into three buckets:
+	// 1. Types/domains that can be created immediately (no function or table deps)
+	// 2. Domains whose base type is a new table's row type (must wait for tables)
+	// 3. Domains with function deps (must wait for functions)
+	typesWithoutDeps := []*ir.Type{}
+	domainsWithTableDeps := []*ir.Type{}
 	domainsWithFunctionDeps := []*ir.Type{}
 	deferredDomainLookup := make(map[string]struct{})
 
 	for _, typeObj := range d.addedTypes {
 		if typeObj.Kind == ir.TypeKindDomain && domainReferencesNewFunction(typeObj, newFunctionLookup) {
 			domainsWithFunctionDeps = append(domainsWithFunctionDeps, typeObj)
-			// Track deferred domains so we can defer tables that use them
+			deferredDomainLookup[strings.ToLower(typeObj.Name)] = struct{}{}
+			if typeObj.Schema != "" {
+				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
+				deferredDomainLookup[qualified] = struct{}{}
+			}
+		} else if typeObj.Kind == ir.TypeKindDomain && domainReferencesNewTable(typeObj, newTableNameLookup) {
+			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
 			deferredDomainLookup[strings.ToLower(typeObj.Name)] = struct{}{}
 			if typeObj.Schema != "" {
 				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
 				deferredDomainLookup[qualified] = struct{}{}
 			}
 		} else {
-			typesWithoutFunctionDeps = append(typesWithoutFunctionDeps, typeObj)
+			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 		}
 	}
 
-	// Create types WITHOUT function dependencies (enum, composite, and domains without function deps)
-	generateCreateTypesSQL(typesWithoutFunctionDeps, targetSchema, collector)
+	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
+	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
 
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, targetSchema, collector)
@@ -1827,6 +1848,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
 	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+
+	// Create domains whose base type is a new table's row type (now that tables exist)
+	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -2580,6 +2604,26 @@ func tableUsesDeferredDomain(table *ir.Table, deferredDomains map[string]struct{
 			if _, ok := deferredDomains[qualified]; ok {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// domainReferencesNewTable determines if a domain's base type is a composite row type
+// implicitly created by a new table. Tables create an implicit composite type with the
+// same name, so CREATE DOMAIN y AS x requires CREATE TABLE x to exist first.
+func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) bool {
+	if len(newTables) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
+		return false
+	}
+	baseType := strings.ToLower(typeObj.BaseType)
+	if _, ok := newTables[baseType]; ok {
+		return true
+	}
+	if typeObj.Schema != "" {
+		qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), baseType)
+		if _, ok := newTables[qualified]; ok {
+			return true
 		}
 	}
 	return false

@@ -1,0 +1,16 @@
+Plan: 2 to add.
+
+Summary by type:
+  tables: 1 to add
+
+Tables:
+  + x
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS x (
+
+);
+
+CREATE DOMAIN y AS x;
