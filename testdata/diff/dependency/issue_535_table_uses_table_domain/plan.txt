@@ -1,0 +1,21 @@
+Plan: 3 to add.
+
+Summary by type:
+  tables: 2 to add
+
+Tables:
+  + base
+  + uses
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS base (
+
+);
+
+CREATE DOMAIN d AS base;
+
+CREATE TABLE IF NOT EXISTS uses (
+    dcol d
+);

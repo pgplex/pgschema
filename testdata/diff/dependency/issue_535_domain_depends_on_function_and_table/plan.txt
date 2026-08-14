@@ -1,0 +1,33 @@
+Plan: 3 to add.
+
+Summary by type:
+  functions: 1 to add
+  tables: 1 to add
+
+Functions:
+  + validate_row
+
+Tables:
+  + t
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS t (
+
+);
+
+CREATE OR REPLACE FUNCTION validate_row(
+    val anyelement
+)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+  RETURN val IS NOT NULL;
+END
+$$;
+
+CREATE DOMAIN d AS t
+  CONSTRAINT d_check CHECK (validate_row(VALUE));

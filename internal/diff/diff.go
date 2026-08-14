@@ -1761,28 +1761,69 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Build function lookup early - needed for both domain and table dependency checks
 	newFunctionLookup := buildFunctionLookup(d.addedFunctions)
 
-	// Separate types into domains with/without function dependencies
-	// Domains with function deps (e.g., CHECK constraints referencing functions) must be created after functions
-	typesWithoutFunctionDeps := []*ir.Type{}
-	domainsWithFunctionDeps := []*ir.Type{}
-	deferredDomainLookup := make(map[string]struct{})
-
-	for _, typeObj := range d.addedTypes {
-		if typeObj.Kind == ir.TypeKindDomain && domainReferencesNewFunction(typeObj, newFunctionLookup) {
-			domainsWithFunctionDeps = append(domainsWithFunctionDeps, typeObj)
-			// Track deferred domains so we can defer tables that use them
-			deferredDomainLookup[strings.ToLower(typeObj.Name)] = struct{}{}
-			if typeObj.Schema != "" {
-				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
-				deferredDomainLookup[qualified] = struct{}{}
-			}
-		} else {
-			typesWithoutFunctionDeps = append(typesWithoutFunctionDeps, typeObj)
+	// Build lookup of new table names for domain-references-table check.
+	// A table implicitly creates a composite row type with the same name,
+	// so CREATE DOMAIN y AS x requires CREATE TABLE x to come first.
+	newTableNameLookup := make(map[string]struct{}, len(d.addedTables))
+	for _, table := range d.addedTables {
+		newTableNameLookup[strings.ToLower(table.Name)] = struct{}{}
+		if table.Schema != "" {
+			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
+			newTableNameLookup[qualified] = struct{}{}
 		}
 	}
 
-	// Create types WITHOUT function dependencies (enum, composite, and domains without function deps)
-	generateCreateTypesSQL(typesWithoutFunctionDeps, targetSchema, collector)
+	// Separate types into three buckets:
+	// 1. Types/domains with no deps on new functions or tables — created immediately.
+	// 2. Domains with function deps ONLY (no table dep) — created after functions
+	//    but before tables, so tables that use the domain as a column type work.
+	// 3. Domains with table deps (with or without function deps) — created after
+	//    ALL tables, because the domain's base type is a table's implicit row type.
+	typesWithoutDeps := []*ir.Type{}
+	domainsWithFunctionDepsOnly := []*ir.Type{}
+	domainsWithTableDeps := []*ir.Type{}
+	// Two separate lookups so table classification can distinguish which
+	// deferred-domain bucket a column type belongs to.
+	functionDomainLookup := make(map[string]struct{})
+	tableDomainLookup := make(map[string]struct{})
+
+	addToLookup := func(lookup map[string]struct{}, typeObj *ir.Type) {
+		lookup[strings.ToLower(typeObj.Name)] = struct{}{}
+		if typeObj.Schema != "" {
+			qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
+			lookup[qualified] = struct{}{}
+		}
+	}
+
+	for _, typeObj := range d.addedTypes {
+		if typeObj.Kind != ir.TypeKindDomain {
+			typesWithoutDeps = append(typesWithoutDeps, typeObj)
+			continue
+		}
+		hasTableDep := domainReferencesNewTable(typeObj, newTableNameLookup)
+		hasFunctionDep := domainReferencesNewFunction(typeObj, newFunctionLookup)
+		if hasTableDep {
+			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
+			addToLookup(tableDomainLookup, typeObj)
+		} else if hasFunctionDep {
+			domainsWithFunctionDepsOnly = append(domainsWithFunctionDepsOnly, typeObj)
+			addToLookup(functionDomainLookup, typeObj)
+		} else {
+			typesWithoutDeps = append(typesWithoutDeps, typeObj)
+		}
+	}
+	// Combined lookup for all deferred domains (used by table classification
+	// to detect ANY deferred domain dependency).
+	deferredDomainLookup := make(map[string]struct{}, len(functionDomainLookup)+len(tableDomainLookup))
+	for k, v := range functionDomainLookup {
+		deferredDomainLookup[k] = v
+	}
+	for k, v := range tableDomainLookup {
+		deferredDomainLookup[k] = v
+	}
+
+	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
+	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
 
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, targetSchema, collector)
@@ -1812,13 +1853,20 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create default privileges BEFORE tables so auto-grants apply to new tables
 	generateCreateDefaultPrivilegesSQL(d.addedDefaultPrivileges, targetSchema, collector)
 
-	// Separate tables into those that depend on new functions/deferred domains and those that don't
-	// This ensures we create functions and domains before tables that use them
+	// Separate tables into three buckets based on their dependencies:
+	// 1. No deps → created first (functions may reference these)
+	// 2. Depends on new functions or function-dep-only domains → created after
+	//    functions and function-dep domains
+	// 3. Uses a table-dep domain as a column type → created after table-dep
+	//    domains (which themselves come after all other tables)
 	tablesWithoutDeps := []*ir.Table{}
 	tablesWithDeps := []*ir.Table{}
+	tablesAfterTableDomains := []*ir.Table{}
 
 	for _, table := range d.addedTables {
-		if tableReferencesNewFunction(table, newFunctionLookup) || tableUsesDeferredDomain(table, deferredDomainLookup) {
+		if tableUsesDeferredDomain(table, tableDomainLookup) {
+			tablesAfterTableDomains = append(tablesAfterTableDomains, table)
+		} else if tableReferencesNewFunction(table, newFunctionLookup) || tableUsesDeferredDomain(table, functionDomainLookup) {
 			tablesWithDeps = append(tablesWithDeps, table)
 		} else {
 			tablesWithoutDeps = append(tablesWithoutDeps, table)
@@ -1869,14 +1917,15 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithViewDeps = deferRecreated(functionsWithViewDeps)
 	}
 
-	// Separate functions WITHOUT view deps into those that reference tables being
-	// created later (tablesWithDeps) and those that don't. Functions that query new
-	// tables must be created after the tables they depend on (issue #530).
+	// Separate functions WITHOUT view deps into those that reference deferred
+	// tables (tablesWithDeps or tablesAfterTableDomains) and those that don't.
+	// Functions that query new tables must be created after those tables (issue #530).
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
-	if len(tablesWithDeps) > 0 {
-		tablesWithDepsLookup := make(map[string]struct{}, len(tablesWithDeps))
-		for _, table := range tablesWithDeps {
+	allDeferredTables := append(tablesWithDeps, tablesAfterTableDomains...)
+	if len(allDeferredTables) > 0 {
+		tablesWithDepsLookup := make(map[string]struct{}, len(allDeferredTables))
+		for _, table := range allDeferredTables {
 			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
 			tablesWithDepsLookup[qualified] = struct{}{}
 			tablesWithDepsLookup[strings.ToLower(table.Name)] = struct{}{}
@@ -1895,9 +1944,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// (these are safe to create before tables with function/domain dependencies)
 	generateCreateFunctionsSQL(functionsWithoutTableDeps, targetSchema, collector)
 
-	// Create domains WITH function dependencies (now that functions exist)
-	// These domains have CHECK constraints that reference functions
-	generateCreateTypesSQL(domainsWithFunctionDeps, targetSchema, collector)
+	// Create domains that only depend on functions (not tables). These must come
+	// after functions but before tables, because tables may use these domains as
+	// column types.
+	generateCreateTypesSQL(domainsWithFunctionDepsOnly, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
@@ -1909,15 +1959,23 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// These functions query tables that were created in tablesWithDeps above (issue #530)
 	generateCreateFunctionsSQL(functionsWithTableDeps, targetSchema, collector)
 
+	// Create domains whose base type is a new table's implicit row type (issue #535).
+	// Emitted after ALL other tables so the row type exists, even if the domain also
+	// depends on a function (which was already created above).
+	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
+
+	// Create tables that use table-dep domains as column types (now that those domains exist).
+	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+
 	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
 	// These were skipped from addedSequences but their comments must still be deployed.
 	for _, seq := range d.addedSerialSeqComments {
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
 
-	// Add deferred foreign key constraints from BOTH batches AFTER all tables are created
-	// This ensures FK references to tables in the second batch (function-dependent tables) work correctly
-	allDeferredConstraints := append(deferredConstraints1, deferredConstraints2...)
+	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
+	// This ensures FK references to tables in any batch work correctly
+	allDeferredConstraints := append(append(deferredConstraints1, deferredConstraints2...), deferredConstraints3...)
 	allDeferredConstraints = topologicallySortDeferredConstraints(allDeferredConstraints)
 	generateDeferredConstraintsSQL(allDeferredConstraints, targetSchema, collector)
 
@@ -1926,8 +1984,8 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// before views, which may reference the aggregates in their definitions.
 	generateCreateAggregatesSQL(d.addedAggregates, targetSchema, collector)
 
-	// Merge deferred policies from both batches
-	allDeferredPolicies := append(deferredPolicies1, deferredPolicies2...)
+	// Merge deferred policies from all batches
+	allDeferredPolicies := append(append(deferredPolicies1, deferredPolicies2...), deferredPolicies3...)
 
 	// Create policies after functions/procedures to satisfy dependencies
 	generateCreatePoliciesSQL(allDeferredPolicies, targetSchema, collector)
@@ -2583,6 +2641,17 @@ func tableUsesDeferredDomain(table *ir.Table, deferredDomains map[string]struct{
 		}
 	}
 	return false
+}
+
+// domainReferencesNewTable determines if a domain's base type is a composite row type
+// implicitly created by a new table. Tables create an implicit composite type with the
+// same name, so CREATE DOMAIN y AS x requires CREATE TABLE x to exist first.
+func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) bool {
+	if len(newTables) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
+		return false
+	}
+	baseName := extractBaseTypeName(typeObj.BaseType)
+	return typeMatchesLookup(baseName, typeObj.Schema, newTables)
 }
 
 // domainReferencesNewFunction determines if a domain references any newly added functions
