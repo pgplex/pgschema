@@ -1002,7 +1002,8 @@ func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKe
 }
 
 // selfRefFKTargetsPK checks whether a self-referencing FK's referenced columns
-// match the table's primary key columns exactly.
+// match the table's primary key columns in position order. Order matters for
+// composite keys: PK (a,b) and UNIQUE (b,a) are different targets.
 func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
 	var pk *ir.Constraint
 	for _, c := range table.Constraints {
@@ -1017,16 +1018,27 @@ func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
 	if len(fk.ReferencedColumns) != len(pk.Columns) {
 		return false
 	}
-	pkCols := make(map[string]struct{}, len(pk.Columns))
-	for _, col := range pk.Columns {
-		pkCols[col.Name] = struct{}{}
-	}
-	for _, col := range fk.ReferencedColumns {
-		if _, ok := pkCols[col.Name]; !ok {
+	pkByPos := sortedColumnNames(pk.Columns)
+	refByPos := sortedColumnNames(fk.ReferencedColumns)
+	for i := range pkByPos {
+		if pkByPos[i] != refByPos[i] {
 			return false
 		}
 	}
 	return true
+}
+
+func sortedColumnNames(cols []*ir.ConstraintColumn) []string {
+	sorted := make([]*ir.ConstraintColumn, len(cols))
+	copy(sorted, cols)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Position < sorted[j].Position
+	})
+	names := make([]string, len(sorted))
+	for i, c := range sorted {
+		names[i] = c.Name
+	}
+	return names
 }
 
 // constraintDroppedWithColumns reports whether dropping any column in droppedColumnSet
