@@ -1774,24 +1774,32 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Separate types into three buckets:
-	// 1. Types/domains that can be created immediately (no function or table deps)
-	// 2. Domains whose base type is a new table's row type (must wait for tables)
-	// 3. Domains with function deps (must wait for functions)
+	// 1. Types/domains with no deps on new functions or tables — created immediately.
+	// 2. Domains with function deps ONLY (no table dep) — created after functions
+	//    but before tables, so tables that use the domain as a column type work.
+	// 3. Domains with table deps (with or without function deps) — created after
+	//    ALL tables, because the domain's base type is a table's implicit row type.
 	typesWithoutDeps := []*ir.Type{}
+	domainsWithFunctionDepsOnly := []*ir.Type{}
 	domainsWithTableDeps := []*ir.Type{}
-	domainsWithFunctionDeps := []*ir.Type{}
 	deferredDomainLookup := make(map[string]struct{})
 
 	for _, typeObj := range d.addedTypes {
-		if typeObj.Kind == ir.TypeKindDomain && domainReferencesNewFunction(typeObj, newFunctionLookup) {
-			domainsWithFunctionDeps = append(domainsWithFunctionDeps, typeObj)
+		if typeObj.Kind != ir.TypeKindDomain {
+			typesWithoutDeps = append(typesWithoutDeps, typeObj)
+			continue
+		}
+		hasTableDep := domainReferencesNewTable(typeObj, newTableNameLookup)
+		hasFunctionDep := domainReferencesNewFunction(typeObj, newFunctionLookup)
+		if hasTableDep {
+			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
 			deferredDomainLookup[strings.ToLower(typeObj.Name)] = struct{}{}
 			if typeObj.Schema != "" {
 				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
 				deferredDomainLookup[qualified] = struct{}{}
 			}
-		} else if typeObj.Kind == ir.TypeKindDomain && domainReferencesNewTable(typeObj, newTableNameLookup) {
-			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
+		} else if hasFunctionDep {
+			domainsWithFunctionDepsOnly = append(domainsWithFunctionDepsOnly, typeObj)
 			deferredDomainLookup[strings.ToLower(typeObj.Name)] = struct{}{}
 			if typeObj.Schema != "" {
 				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
@@ -1848,9 +1856,6 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
 	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
-
-	// Create domains whose base type is a new table's row type (now that tables exist)
-	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -1919,9 +1924,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// (these are safe to create before tables with function/domain dependencies)
 	generateCreateFunctionsSQL(functionsWithoutTableDeps, targetSchema, collector)
 
-	// Create domains WITH function dependencies (now that functions exist)
-	// These domains have CHECK constraints that reference functions
-	generateCreateTypesSQL(domainsWithFunctionDeps, targetSchema, collector)
+	// Create domains that only depend on functions (not tables). These must come
+	// after functions but before tables, because tables may use these domains as
+	// column types.
+	generateCreateTypesSQL(domainsWithFunctionDepsOnly, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
@@ -1932,6 +1938,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create functions WITHOUT view deps that reference new tables (now that all tables exist)
 	// These functions query tables that were created in tablesWithDeps above (issue #530)
 	generateCreateFunctionsSQL(functionsWithTableDeps, targetSchema, collector)
+
+	// Create domains whose base type is a new table's implicit row type (issue #535).
+	// Emitted after ALL tables so the row type exists, even if the domain also
+	// depends on a function (which was already created above).
+	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
 
 	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
 	// These were skipped from addedSequences but their comments must still be deployed.
