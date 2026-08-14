@@ -1,7 +1,7 @@
 > [!NOTE]
 > pgplex: The Postgres Toolchain for Humans and Agents - [pgconsole](https://github.com/pgplex/pgconsole) · **pgschema** · [pgtui](https://github.com/pgplex/pgtui) · [pgparser](https://github.com/pgplex/pgparser)
 > 
-> Brought to you by [Bytebase](https://www.bytebase.com/), open-source database Governance platform.
+> Brought to you by [Bytebase](https://www.bytebase.com/), open-source database governance platform.
 
 ![](https://raw.githubusercontent.com/pgplex/website/refs/heads/main/public/banner-pgschema.png)
 
