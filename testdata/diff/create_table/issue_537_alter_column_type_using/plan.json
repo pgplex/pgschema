@@ -3,16 +3,16 @@
   "pgschema_version": "1.12.2",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "9d443bc536153eed8fce077bfacc3d7f42b1a94f02d33868bb78be3b9de05088"
+    "hash": "a52f40be8be2a13060af818d7d99051b800fdc17849783178d232e172fbe5fac"
   },
   "groups": [
     {
       "steps": [
         {
-          "sql": "ALTER TABLE ex ALTER COLUMN \"ID\" TYPE bigint USING \"ID\"::bigint;",
+          "sql": "ALTER TABLE nr_cell_du ALTER COLUMN arfcn_dl TYPE integer USING arfcn_dl::integer;",
           "type": "table.column",
           "operation": "alter",
-          "path": "public.ex.ID"
+          "path": "public.nr_cell_du.arfcn_dl"
         }
       ]
     }

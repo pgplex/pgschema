@@ -4,10 +4,10 @@ Summary by type:
   tables: 1 to modify
 
 Tables:
-  ~ ex
-    ~ ID (column)
+  ~ nr_cell_du
+    ~ arfcn_dl (column)
 
 DDL to be executed:
 --------------------------------------------------
 
-ALTER TABLE ex ALTER COLUMN "ID" TYPE bigint USING "ID"::bigint;
+ALTER TABLE nr_cell_du ALTER COLUMN arfcn_dl TYPE integer USING arfcn_dl::integer;

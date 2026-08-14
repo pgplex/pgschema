@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "pgschema_version": "1.12.1",
+  "pgschema_version": "1.12.2",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
     "hash": "614655f95d349ec321da570d4e232db71f8bfb57404998153f9fd53720cd2acb"
@@ -15,19 +15,19 @@
           "path": "public.action_type"
         },
         {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN id TYPE bigint;",
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN id TYPE bigint USING id::bigint;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.id"
         },
         {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN user_id TYPE bigint;",
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN user_id TYPE bigint USING user_id::bigint;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.user_id"
         },
         {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN object_ids_ints TYPE bigint[];",
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN object_ids_ints TYPE bigint[] USING object_ids_ints::bigint[];",
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.object_ids_ints"

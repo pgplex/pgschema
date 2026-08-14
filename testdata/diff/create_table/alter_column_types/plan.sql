@@ -4,11 +4,11 @@ CREATE TYPE action_type AS ENUM (
     'rejected'
 );
 
-ALTER TABLE user_pending_permissions ALTER COLUMN id TYPE bigint;
+ALTER TABLE user_pending_permissions ALTER COLUMN id TYPE bigint USING id::bigint;
 
-ALTER TABLE user_pending_permissions ALTER COLUMN user_id TYPE bigint;
+ALTER TABLE user_pending_permissions ALTER COLUMN user_id TYPE bigint USING user_id::bigint;
 
-ALTER TABLE user_pending_permissions ALTER COLUMN object_ids_ints TYPE bigint[];
+ALTER TABLE user_pending_permissions ALTER COLUMN object_ids_ints TYPE bigint[] USING object_ids_ints::bigint[];
 
 ALTER TABLE user_pending_permissions ALTER COLUMN action TYPE action_type USING action::action_type;
 

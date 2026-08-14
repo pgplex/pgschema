@@ -112,36 +112,28 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 
 // needsUsingClause determines if a type conversion requires a USING clause.
 //
-// This is especially important when converting to or from custom types (like ENUMs),
-// because PostgreSQL often cannot implicitly cast these types. To avoid generating
-// invalid migrations, this function takes a conservative approach:
-//
-//   - Any conversion involving at least one non–built-in (custom) type will require
-//     a USING clause.
-//   - For built-in → built-in conversions we still assume PostgreSQL provides an
-//     implicit cast in most cases; callers should be aware that some edge cases
-//     (e.g. certain text → json conversions) may still need manual adjustment.
+// PostgreSQL rejects bare ALTER COLUMN TYPE when no implicit cast exists between
+// the old and new types (SQLSTATE 42804). When the base type names differ, we
+// always emit USING col::newtype — a redundant USING is harmless when an implicit
+// cast exists, but a missing one breaks the migration. When only modifiers change
+// (e.g. numeric(18,6) → numeric(20,6)), no USING is needed.
 func needsUsingClause(oldType, newType string) bool {
-	// Check if old type is text-like
-	oldIsTextLike := ir.IsTextLikeType(oldType)
-
-	// Determine whether the old/new types are PostgreSQL built-ins
-	oldIsBuiltIn := ir.IsBuiltInType(oldType)
-	newIsBuiltIn := ir.IsBuiltInType(newType)
-
-	// Preserve existing behavior: text-like → non–built-in likely needs USING
-	if oldIsTextLike && !newIsBuiltIn {
-		return true
+	oldNorm := normalizeBaseTypeName(oldType)
+	newNorm := normalizeBaseTypeName(newType)
+	if oldNorm == newNorm {
+		return false
 	}
+	return true
+}
 
-	// Be conservative for any conversion involving custom (non–built-in) types:
-	// this covers custom → custom and built-in ↔ custom conversions.
-	if !oldIsBuiltIn || !newIsBuiltIn {
-		return true
+func normalizeBaseTypeName(typeName string) string {
+	t := strings.ToLower(typeName)
+	t = strings.TrimSuffix(t, "[]")
+	if idx := strings.Index(t, "("); idx != -1 {
+		t = t[:idx]
 	}
-
-	// For built-in → built-in types we assume an implicit cast is available.
-	return false
+	t = strings.TrimPrefix(t, "pg_catalog.")
+	return t
 }
 
 // comparableColumnType returns the column's data type including any
