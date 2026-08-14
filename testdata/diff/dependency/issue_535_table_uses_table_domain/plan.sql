@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS base (
+
+);
+
+CREATE DOMAIN d AS base;
+
+CREATE TABLE IF NOT EXISTS uses (
+    dcol d
+);
