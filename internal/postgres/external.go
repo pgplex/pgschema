@@ -35,10 +35,12 @@ type ExternalDatabaseConfig struct {
 	SSLMode            string
 	TargetMajorVersion int // Expected major version to match
 	// TargetExtensions maps extension name to its installation schema on the
-	// target database. Extensions installed on both databases must live in the
-	// same schema on each side; otherwise extension-owned types (e.g. pgvector's
-	// vector) resolve to different schema-qualified names and the generated plan
-	// is silently wrong (issue #518).
+	// target database. Optional: when populated (typically from querying the
+	// target database), NewExternalDatabase validates that extensions installed
+	// on both databases live in the same schema on each side; when empty or nil,
+	// the validation is skipped. Without it, extension-owned types (e.g.
+	// pgvector's vector) installed in different schemas resolve to different
+	// schema-qualified names and the generated plan is silently wrong (issue #518).
 	TargetExtensions map[string]string
 }
 
