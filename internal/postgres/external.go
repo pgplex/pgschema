@@ -257,32 +257,6 @@ func getExtensionSchemas(db *sql.DB) (map[string]string, error) {
 	return extensions, rows.Err()
 }
 
-// GetExtensionSchemasFromDB connects to a database and returns the installation
-// schema of every installed extension, keyed by extension name.
-// This is a convenience function that opens a connection, queries, and closes it.
-func GetExtensionSchemasFromDB(host string, port int, database, user, password, sslmode string) (map[string]string, error) {
-	finalSSLMode := sslmode
-	if finalSSLMode == "" {
-		finalSSLMode = "prefer"
-	}
-	config := &util.ConnectionConfig{
-		Host:     host,
-		Port:     port,
-		Database: database,
-		User:     user,
-		Password: password,
-		SSLMode:  finalSSLMode,
-	}
-
-	db, err := util.Connect(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer db.Close()
-
-	return getExtensionSchemas(db)
-}
-
 // detectMajorVersion queries the database to determine its PostgreSQL major version
 func detectMajorVersion(db *sql.DB) (int, error) {
 	ctx := context.Background()

@@ -103,7 +103,7 @@ func TestExternalDatabase_VersionMismatch(t *testing.T) {
 	targetHost, targetPort, targetDatabase, targetUser, targetPassword := targetDB.GetConnectionDetails()
 
 	// Detect version from target database
-	pgVersion, err := postgres.DetectPostgresVersionFromDB(
+	pgVersion, _, err := postgres.DetectPostgresVersionAndExtensionsFromDB(
 		targetHost,
 		targetPort,
 		targetDatabase,
