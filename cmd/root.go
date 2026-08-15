@@ -37,6 +37,7 @@ Commands:
 
 Use "pgschema [command] --help" for more information about a command.`,
 		version.App(), GitCommit, platform(), BuildDate),
+	Version: version.App(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		setupLogger()
 		globallogger.SetGlobal(logger, Debug)
@@ -45,6 +46,8 @@ Use "pgschema [command] --help" for more information about a command.`,
 
 func init() {
 	RootCmd.PersistentFlags().BoolVar(&Debug, "debug", false, "Enable debug logging")
+	// Print a clean, machine-parseable version line, e.g. "1.12.3"
+	RootCmd.SetVersionTemplate("{{.Version}}\n")
 	RootCmd.CompletionOptions.DisableDefaultCmd = true
 	RootCmd.AddCommand(dump.DumpCmd)
 	RootCmd.AddCommand(plan.PlanCmd)

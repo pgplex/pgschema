@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/pgplex/pgschema/internal/version"
 )
 
 func TestRootCommand(t *testing.T) {
@@ -37,6 +39,31 @@ func TestRootCommandWithoutArgs(t *testing.T) {
 	output := buf.String()
 	if !strings.Contains(output, "Declarative schema migration for Postgres") {
 		t.Errorf("expected output to contain description, got: %s", output)
+	}
+}
+
+func TestRootCommandVersionFlag(t *testing.T) {
+	// Reset flags that earlier tests may have set on the shared global RootCmd.
+	// pflag does not reset flag values between Parse calls, and cobra checks
+	// the help flag before the version flag.
+	if err := RootCmd.Flags().Set("help", "false"); err != nil {
+		t.Fatalf("failed to reset help flag: %v", err)
+	}
+
+	var buf bytes.Buffer
+	RootCmd.SetOut(&buf)
+	RootCmd.SetErr(&buf)
+	RootCmd.SetArgs([]string{"--version"})
+
+	err := RootCmd.Execute()
+	if err != nil {
+		t.Errorf("root command with --version failed: %v", err)
+	}
+
+	output := buf.String()
+	expected := version.App() + "\n"
+	if output != expected {
+		t.Errorf("expected version output %q, got %q", expected, output)
 	}
 }
 
