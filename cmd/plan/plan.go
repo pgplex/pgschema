@@ -221,6 +221,21 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 
 	// If plan-host is provided, use external database
 	if config.PlanDBHost != "" {
+		// Collect the target's extension installation schemas so the external
+		// database can verify shared extensions live in the same schema on both
+		// sides (issue #518).
+		targetExtensions, err := postgres.GetExtensionSchemasFromDB(
+			config.Host,
+			config.Port,
+			config.DB,
+			config.User,
+			config.Password,
+			config.SSLMode,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query target database extensions: %w", err)
+		}
+
 		externalConfig := &postgres.ExternalDatabaseConfig{
 			Host:               config.PlanDBHost,
 			Port:               config.PlanDBPort,
@@ -229,6 +244,7 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 			Password:           config.PlanDBPassword,
 			SSLMode:            config.PlanDBSSLMode,
 			TargetMajorVersion: targetMajorVersion,
+			TargetExtensions:   targetExtensions,
 		}
 		return postgres.NewExternalDatabase(externalConfig)
 	}
