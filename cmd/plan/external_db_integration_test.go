@@ -103,7 +103,7 @@ func TestExternalDatabase_VersionMismatch(t *testing.T) {
 	targetHost, targetPort, targetDatabase, targetUser, targetPassword := targetDB.GetConnectionDetails()
 
 	// Detect version from target database
-	pgVersion, err := postgres.DetectPostgresVersionFromDB(
+	pgVersion, _, err := postgres.DetectPostgresVersionAndExtensionsFromDB(
 		targetHost,
 		targetPort,
 		targetDatabase,
@@ -113,6 +113,69 @@ func TestExternalDatabase_VersionMismatch(t *testing.T) {
 	)
 	require.NoError(t, err, "should detect PostgreSQL version")
 	assert.NotEmpty(t, pgVersion, "version should not be empty")
+}
+
+// TestExternalDatabase_ExtensionSchemaMismatch tests that provider creation fails fast
+// when an extension is installed in different schemas on the plan and target databases.
+// Extension-owned types (e.g. pgvector's vector, citext) are schema-qualified by whatever
+// schema their extension resolves to, so a mismatch silently produces a wrong plan:
+// spurious ALTER COLUMN TYPE or CREATE TABLE DDL referencing a schema that doesn't
+// exist on the target (issue #518).
+func TestExternalDatabase_ExtensionSchemaMismatch(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	targetDB := testutil.SetupPostgres(t)
+	defer targetDB.Stop()
+
+	externalPlanDB := testutil.SetupPostgres(t)
+	defer externalPlanDB.Stop()
+
+	// Install citext into schema "exts" on the target, but "public" on the plan database
+	targetConn, targetHost, targetPort, targetDatabase, targetUser, targetPassword := testutil.ConnectToPostgres(t, targetDB)
+	defer targetConn.Close()
+	_, err := targetConn.Exec("CREATE SCHEMA exts")
+	require.NoError(t, err)
+	_, err = targetConn.Exec("CREATE EXTENSION citext SCHEMA exts")
+	require.NoError(t, err)
+
+	planConn, planHost, planPort, planDatabase, planUser, planPassword := testutil.ConnectToPostgres(t, externalPlanDB)
+	defer planConn.Close()
+	_, err = planConn.Exec("CREATE EXTENSION citext SCHEMA public")
+	require.NoError(t, err)
+
+	config := &PlanConfig{
+		Host:            targetHost,
+		Port:            targetPort,
+		DB:              targetDatabase,
+		User:            targetUser,
+		Password:        targetPassword,
+		Schema:          "public",
+		ApplicationName: "pgschema-test",
+		PlanDBHost:      planHost,
+		PlanDBPort:      planPort,
+		PlanDBDatabase:  planDatabase,
+		PlanDBUser:      planUser,
+		PlanDBPassword:  planPassword,
+	}
+
+	_, err = CreateDesiredStateProvider(config)
+	require.Error(t, err, "should fail when extension schemas differ between plan and target databases")
+	assert.Contains(t, err.Error(), "citext", "error should name the mismatched extension")
+	assert.Contains(t, err.Error(), "exts", "error should name the target schema")
+	assert.Contains(t, err.Error(), "public", "error should name the plan database schema")
+
+	// After moving the extension to the matching schema, provider creation succeeds
+	_, err = planConn.Exec("CREATE SCHEMA exts")
+	require.NoError(t, err)
+	_, err = planConn.Exec("ALTER EXTENSION citext SET SCHEMA exts")
+	require.NoError(t, err)
+
+	provider2, err := CreateDesiredStateProvider(config)
+	require.NoError(t, err, "matching extension schemas should pass validation")
+	provider2.Stop()
 }
 
 // TestExternalDatabase_CleanupOnError tests that temporary schema is cleaned up on errors

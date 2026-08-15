@@ -199,7 +199,9 @@ type PlanConfig struct {
 // for validating the desired state schema. The caller is responsible for calling Stop() on the returned provider.
 func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvider, error) {
 	// Detect target database PostgreSQL version (needed for both embedded and external)
-	pgVersion, err := postgres.DetectPostgresVersionFromDB(
+	// and its extension installation schemas (needed for the external database's
+	// extension schema consistency check, issue #518) in a single connection.
+	pgVersion, targetExtensions, err := postgres.DetectPostgresVersionAndExtensionsFromDB(
 		config.Host,
 		config.Port,
 		config.DB,
@@ -229,6 +231,7 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 			Password:           config.PlanDBPassword,
 			SSLMode:            config.PlanDBSSLMode,
 			TargetMajorVersion: targetMajorVersion,
+			TargetExtensions:   targetExtensions,
 		}
 		return postgres.NewExternalDatabase(externalConfig)
 	}

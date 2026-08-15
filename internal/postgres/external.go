@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pgplex/pgschema/cmd/util"
@@ -32,6 +34,14 @@ type ExternalDatabaseConfig struct {
 	Password           string
 	SSLMode            string
 	TargetMajorVersion int // Expected major version to match
+	// TargetExtensions maps extension name to its installation schema on the
+	// target database. Optional: when populated (typically from querying the
+	// target database), NewExternalDatabase validates that extensions installed
+	// on both databases live in the same schema on each side; when empty or nil,
+	// the validation is skipped. Without it, extension-owned types (e.g.
+	// pgvector's vector) installed in different schemas resolve to different
+	// schema-qualified names and the generated plan is silently wrong (issue #518).
+	TargetExtensions map[string]string
 }
 
 // sslModeOrDefault returns the configured SSL mode, defaulting to "prefer" if empty
@@ -75,6 +85,12 @@ func NewExternalDatabase(config *ExternalDatabaseConfig) (*ExternalDatabase, err
 			"version mismatch: plan database is PostgreSQL %d, but target database is PostgreSQL %d (exact major version match required)",
 			majorVersion, config.TargetMajorVersion,
 		)
+	}
+
+	// Validate that extensions installed on both databases live in the same schema
+	if err := validateExtensionSchemas(db, config.TargetExtensions); err != nil {
+		db.Close()
+		return nil, err
 	}
 
 	// Generate temporary schema name with unique timestamp
@@ -183,6 +199,64 @@ func (ed *ExternalDatabase) Stop() error {
 	}
 
 	return nil
+}
+
+// validateExtensionSchemas ensures every extension installed on both the plan and
+// target databases lives in the same schema on each side. Extension-owned types
+// (e.g. pgvector's vector) are schema-qualified by whatever schema their extension
+// is installed in, so a mismatch makes the two sides' type names differ and yields
+// a silently wrong plan: spurious ALTER COLUMN TYPE, or CREATE TABLE DDL that
+// references a schema that doesn't exist on the target (issue #518).
+// Extensions present on only one side are not an error: if the desired state
+// actually needs a missing extension, applying it to the plan database fails
+// loudly with the existing hint.
+func validateExtensionSchemas(db *sql.DB, targetExtensions map[string]string) error {
+	if len(targetExtensions) == 0 {
+		return nil
+	}
+
+	planExtensions, err := getExtensionSchemas(db)
+	if err != nil {
+		return fmt.Errorf("failed to query plan database extensions: %w", err)
+	}
+
+	var mismatches []string
+	for name, planSchema := range planExtensions {
+		if targetSchema, ok := targetExtensions[name]; ok && targetSchema != planSchema {
+			mismatches = append(mismatches, fmt.Sprintf(
+				"extension %q is installed in schema %q on the plan database but schema %q on the target database",
+				name, planSchema, targetSchema))
+		}
+	}
+	if len(mismatches) == 0 {
+		return nil
+	}
+
+	sort.Strings(mismatches)
+	return fmt.Errorf(
+		"extension schema mismatch: %s; the plan database must mirror the target's extension schemas (use ALTER EXTENSION ... SET SCHEMA or reinstall with CREATE EXTENSION ... WITH SCHEMA), see https://www.pgschema.com/cli/plan-db",
+		strings.Join(mismatches, "; "))
+}
+
+// getExtensionSchemas returns the installation schema of every extension in the
+// connected database, keyed by extension name.
+func getExtensionSchemas(db *sql.DB) (map[string]string, error) {
+	rows, err := db.QueryContext(context.Background(),
+		"SELECT e.extname, n.nspname FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	extensions := make(map[string]string)
+	for rows.Next() {
+		var name, schema string
+		if err := rows.Scan(&name, &schema); err != nil {
+			return nil, err
+		}
+		extensions[name] = schema
+	}
+	return extensions, rows.Err()
 }
 
 // detectMajorVersion queries the database to determine its PostgreSQL major version

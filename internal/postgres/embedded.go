@@ -48,9 +48,11 @@ type EmbeddedPostgresConfig struct {
 	Password string
 }
 
-// DetectPostgresVersionFromDB connects to a database and detects its version
-// This is a convenience function that opens a connection, detects the version, and closes it
-func DetectPostgresVersionFromDB(host string, port int, database, user, password, sslmode string) (PostgresVersion, error) {
+// DetectPostgresVersionAndExtensionsFromDB connects to a database and detects its
+// version along with the installation schema of every installed extension (keyed by
+// extension name). Gathering both over a single connection avoids a second
+// connect/close round trip during plan generation.
+func DetectPostgresVersionAndExtensionsFromDB(host string, port int, database, user, password, sslmode string) (PostgresVersion, map[string]string, error) {
 	// Build connection config
 	finalSSLMode := sslmode
 	if finalSSLMode == "" {
@@ -68,12 +70,22 @@ func DetectPostgresVersionFromDB(host string, port int, database, user, password
 	// Connect to database
 	db, err := util.Connect(config)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to database: %w", err)
+		return "", nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer db.Close()
 
 	// Detect version
-	return detectPostgresVersion(db)
+	version, err := detectPostgresVersion(db)
+	if err != nil {
+		return "", nil, err
+	}
+
+	extensions, err := getExtensionSchemas(db)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to query extensions: %w", err)
+	}
+
+	return version, extensions, nil
 }
 
 // StartEmbeddedPostgres starts a temporary embedded PostgreSQL instance
