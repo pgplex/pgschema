@@ -1918,21 +1918,30 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Separate functions WITHOUT view deps into those that reference deferred
-	// tables (tablesWithDeps or tablesAfterTableDomains) and those that don't.
-	// Functions that query new tables must be created after those tables (issue #530).
+	// tables and those that don't. Functions that query new tables must be
+	// created after those tables (issue #530). Functions referencing tables in
+	// tablesAfterTableDomains (the last table batch) must come after even that
+	// batch, or a signature using such a table's row type fails to resolve.
+	buildTableLookup := func(tables []*ir.Table) map[string]struct{} {
+		lookup := make(map[string]struct{}, len(tables))
+		for _, table := range tables {
+			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
+			lookup[qualified] = struct{}{}
+			lookup[strings.ToLower(table.Name)] = struct{}{}
+		}
+		return lookup
+	}
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
-	allDeferredTables := append(tablesWithDeps, tablesAfterTableDomains...)
-	if len(allDeferredTables) > 0 {
-		tablesWithDepsLookup := make(map[string]struct{}, len(allDeferredTables))
-		for _, table := range allDeferredTables {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
-			tablesWithDepsLookup[qualified] = struct{}{}
-			tablesWithDepsLookup[strings.ToLower(table.Name)] = struct{}{}
-		}
+	var functionsAfterAllTables []*ir.Function
+	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 {
+		tablesWithDepsLookup := buildTableLookup(tablesWithDeps)
+		lastBatchLookup := buildTableLookup(tablesAfterTableDomains)
 		functionsWithoutTableDeps = nil
 		for _, fn := range functionsWithoutViewDeps {
-			if functionReferencesNewTable(fn, tablesWithDepsLookup) {
+			if functionReferencesNewTable(fn, lastBatchLookup) {
+				functionsAfterAllTables = append(functionsAfterAllTables, fn)
+			} else if functionReferencesNewTable(fn, tablesWithDepsLookup) {
 				functionsWithTableDeps = append(functionsWithTableDeps, fn)
 			} else {
 				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
@@ -1966,6 +1975,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+
+	// Create functions that reference tables in the last table batch above.
+	generateCreateFunctionsSQL(functionsAfterAllTables, targetSchema, collector)
 
 	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
 	// These were skipped from addedSequences but their comments must still be deployed.
@@ -2469,14 +2481,31 @@ func buildRecreatedViewLookup(modifiedViews []*viewDiff) map[string]struct{} {
 // in its return type or parameter types. This handles cases where functions use
 // view composite types (e.g., RETURNS SETOF view_name or parameter of view_name type).
 func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bool {
-	if len(newViews) == 0 || fn == nil {
+	return functionSignatureReferencesRelation(fn, newViews)
+}
+
+// functionSignatureReferencesRelation determines if a function's return type or
+// parameter types reference a relation in the lookup. PostgreSQL exposes both
+// tables and views as composite types, so a function using one in its signature
+// must be created after that relation exists.
+func functionSignatureReferencesRelation(fn *ir.Function, relations map[string]struct{}) bool {
+	if len(relations) == 0 || fn == nil {
 		return false
 	}
 
 	// Check return type (e.g., "SETOF public.actor", "actor", "SETOF actor")
 	if fn.ReturnType != "" {
 		typeName := extractBaseTypeName(fn.ReturnType)
-		if typeMatchesLookup(typeName, fn.Schema, newViews) {
+		if typeMatchesLookup(typeName, fn.Schema, relations) {
+			return true
+		}
+	}
+
+	// Check output column types of a TABLE(...) return type (e.g.,
+	// "TABLE(r uses, n integer)"). pg_get_function_arguments excludes
+	// TABLE-mode columns, so they only appear in the return type.
+	for _, colType := range tableReturnColumnTypes(fn.ReturnType) {
+		if typeMatchesLookup(extractBaseTypeName(colType), fn.Schema, relations) {
 			return true
 		}
 	}
@@ -2485,13 +2514,68 @@ func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bo
 	for _, param := range fn.Parameters {
 		if param.DataType != "" {
 			typeName := extractBaseTypeName(param.DataType)
-			if typeMatchesLookup(typeName, fn.Schema, newViews) {
+			if typeMatchesLookup(typeName, fn.Schema, relations) {
 				return true
 			}
 		}
 	}
 
 	return false
+}
+
+// tableReturnColumnTypes extracts the column type expressions from a TABLE(...)
+// return type produced by pg_get_function_result, e.g. "TABLE(r uses, n integer)"
+// yields ["uses", "integer"]. Returns nil when the return type is not TABLE(...).
+func tableReturnColumnTypes(returnType string) []string {
+	t := strings.TrimSpace(returnType)
+	if len(t) < 7 || !strings.EqualFold(t[:6], "TABLE(") || !strings.HasSuffix(t, ")") {
+		return nil
+	}
+	inner := t[6 : len(t)-1]
+
+	var types []string
+	appendColType := func(col string) {
+		col = strings.TrimSpace(col)
+		// Strip the leading column name (possibly a quoted identifier
+		// containing spaces) to leave the type expression.
+		var typeExpr string
+		if strings.HasPrefix(col, `"`) {
+			if end := strings.Index(col[1:], `"`); end >= 0 {
+				typeExpr = col[end+2:]
+			}
+		} else if idx := strings.IndexByte(col, ' '); idx >= 0 {
+			typeExpr = col[idx+1:]
+		}
+		if typeExpr = strings.TrimSpace(typeExpr); typeExpr != "" {
+			types = append(types, typeExpr)
+		}
+	}
+
+	// Split on top-level commas, ignoring commas inside parentheses (e.g.
+	// numeric(10,2)) and quoted identifiers.
+	depth, start := 0, 0
+	inQuote := false
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '"':
+			inQuote = !inQuote
+		case '(':
+			if !inQuote {
+				depth++
+			}
+		case ')':
+			if !inQuote {
+				depth--
+			}
+		case ',':
+			if !inQuote && depth == 0 {
+				appendColType(inner[start:i])
+				start = i + 1
+			}
+		}
+	}
+	appendColType(inner[start:])
+	return types
 }
 
 // extractBaseTypeName extracts the base type name from a type expression,
@@ -2717,14 +2801,25 @@ var tableRefPattern = regexp.MustCompile(
 		`([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)`,
 )
 
-// functionReferencesNewTable determines if a function body references any newly
+// functionReferencesNewTable determines if a function references any newly
 // added table that will be created after the first function batch (tablesWithDeps).
-// It looks for table names in SQL table-reference contexts (FROM, JOIN,
-// INSERT INTO, UPDATE, DELETE FROM) rather than scanning the entire body,
-// avoiding false positives from comments, literals, and aliases.
+// It checks the function signature for table composite types (issue #545) and
+// looks for table names in SQL table-reference contexts (FROM, JOIN,
+// INSERT INTO, UPDATE, DELETE FROM) in the body rather than scanning the entire
+// body, avoiding false positives from comments, literals, and aliases.
 // See https://github.com/pgplex/pgschema/issues/530
 func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) bool {
-	if len(newTables) == 0 || fn == nil || fn.Definition == "" {
+	if len(newTables) == 0 || fn == nil {
+		return false
+	}
+
+	// A table also defines an implicit composite row type, so a function using
+	// it as a parameter or return type must be created after the table.
+	if functionSignatureReferencesRelation(fn, newTables) {
+		return true
+	}
+
+	if fn.Definition == "" {
 		return false
 	}
 

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "pgschema_version": "1.12.2",
+  "pgschema_version": "1.12.3",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
     "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
@@ -19,6 +19,12 @@
           "type": "table",
           "operation": "create",
           "path": "public.x"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION x_check(\n    row_x x\n)\nRETURNS boolean\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN row_x.flag;\nEND;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.x_check"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION x_is_flagged(\n    id bigint\n)\nRETURNS boolean\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT x.flag FROM x WHERE x.id = id;\n$$;",

@@ -14,3 +14,12 @@ CREATE FUNCTION public.x_is_flagged(id bigint)
 RETURNS boolean LANGUAGE sql STABLE AS $$
     SELECT x.flag FROM x WHERE x.id = id;
 $$;
+
+-- Issue #545: depends on table x only through its parameter type (implicit
+-- composite row type); the body never references the table itself.
+CREATE FUNCTION public.x_check(row_x x)
+RETURNS boolean LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN row_x.flag;
+END;
+$$;
