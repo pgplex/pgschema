@@ -1918,21 +1918,30 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Separate functions WITHOUT view deps into those that reference deferred
-	// tables (tablesWithDeps or tablesAfterTableDomains) and those that don't.
-	// Functions that query new tables must be created after those tables (issue #530).
+	// tables and those that don't. Functions that query new tables must be
+	// created after those tables (issue #530). Functions referencing tables in
+	// tablesAfterTableDomains (the last table batch) must come after even that
+	// batch, or a signature using such a table's row type fails to resolve.
+	buildTableLookup := func(tables []*ir.Table) map[string]struct{} {
+		lookup := make(map[string]struct{}, len(tables))
+		for _, table := range tables {
+			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
+			lookup[qualified] = struct{}{}
+			lookup[strings.ToLower(table.Name)] = struct{}{}
+		}
+		return lookup
+	}
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
-	allDeferredTables := append(tablesWithDeps, tablesAfterTableDomains...)
-	if len(allDeferredTables) > 0 {
-		tablesWithDepsLookup := make(map[string]struct{}, len(allDeferredTables))
-		for _, table := range allDeferredTables {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), strings.ToLower(table.Name))
-			tablesWithDepsLookup[qualified] = struct{}{}
-			tablesWithDepsLookup[strings.ToLower(table.Name)] = struct{}{}
-		}
+	var functionsAfterAllTables []*ir.Function
+	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 {
+		tablesWithDepsLookup := buildTableLookup(tablesWithDeps)
+		lastBatchLookup := buildTableLookup(tablesAfterTableDomains)
 		functionsWithoutTableDeps = nil
 		for _, fn := range functionsWithoutViewDeps {
-			if functionReferencesNewTable(fn, tablesWithDepsLookup) {
+			if functionReferencesNewTable(fn, lastBatchLookup) {
+				functionsAfterAllTables = append(functionsAfterAllTables, fn)
+			} else if functionReferencesNewTable(fn, tablesWithDepsLookup) {
 				functionsWithTableDeps = append(functionsWithTableDeps, fn)
 			} else {
 				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
@@ -1966,6 +1975,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+
+	// Create functions that reference tables in the last table batch above.
+	generateCreateFunctionsSQL(functionsAfterAllTables, targetSchema, collector)
 
 	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
 	// These were skipped from addedSequences but their comments must still be deployed.
