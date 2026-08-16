@@ -2469,14 +2469,22 @@ func buildRecreatedViewLookup(modifiedViews []*viewDiff) map[string]struct{} {
 // in its return type or parameter types. This handles cases where functions use
 // view composite types (e.g., RETURNS SETOF view_name or parameter of view_name type).
 func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bool {
-	if len(newViews) == 0 || fn == nil {
+	return functionSignatureReferencesRelation(fn, newViews)
+}
+
+// functionSignatureReferencesRelation determines if a function's return type or
+// parameter types reference a relation in the lookup. PostgreSQL exposes both
+// tables and views as composite types, so a function using one in its signature
+// must be created after that relation exists.
+func functionSignatureReferencesRelation(fn *ir.Function, relations map[string]struct{}) bool {
+	if len(relations) == 0 || fn == nil {
 		return false
 	}
 
 	// Check return type (e.g., "SETOF public.actor", "actor", "SETOF actor")
 	if fn.ReturnType != "" {
 		typeName := extractBaseTypeName(fn.ReturnType)
-		if typeMatchesLookup(typeName, fn.Schema, newViews) {
+		if typeMatchesLookup(typeName, fn.Schema, relations) {
 			return true
 		}
 	}
@@ -2485,7 +2493,7 @@ func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bo
 	for _, param := range fn.Parameters {
 		if param.DataType != "" {
 			typeName := extractBaseTypeName(param.DataType)
-			if typeMatchesLookup(typeName, fn.Schema, newViews) {
+			if typeMatchesLookup(typeName, fn.Schema, relations) {
 				return true
 			}
 		}
@@ -2717,14 +2725,25 @@ var tableRefPattern = regexp.MustCompile(
 		`([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)`,
 )
 
-// functionReferencesNewTable determines if a function body references any newly
+// functionReferencesNewTable determines if a function references any newly
 // added table that will be created after the first function batch (tablesWithDeps).
-// It looks for table names in SQL table-reference contexts (FROM, JOIN,
-// INSERT INTO, UPDATE, DELETE FROM) rather than scanning the entire body,
-// avoiding false positives from comments, literals, and aliases.
+// It checks the function signature for table composite types (issue #545) and
+// looks for table names in SQL table-reference contexts (FROM, JOIN,
+// INSERT INTO, UPDATE, DELETE FROM) in the body rather than scanning the entire
+// body, avoiding false positives from comments, literals, and aliases.
 // See https://github.com/pgplex/pgschema/issues/530
 func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) bool {
-	if len(newTables) == 0 || fn == nil || fn.Definition == "" {
+	if len(newTables) == 0 || fn == nil {
+		return false
+	}
+
+	// A table also defines an implicit composite row type, so a function using
+	// it as a parameter or return type must be created after the table.
+	if functionSignatureReferencesRelation(fn, newTables) {
+		return true
+	}
+
+	if fn.Definition == "" {
 		return false
 	}
 

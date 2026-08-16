@@ -16,6 +16,18 @@ CREATE TABLE IF NOT EXISTS x (
     CONSTRAINT x_public_id_key UNIQUE (public_id)
 );
 
+CREATE OR REPLACE FUNCTION x_check(
+    row_x x
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+BEGIN
+    RETURN row_x.flag;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION x_is_flagged(
     id bigint
 )

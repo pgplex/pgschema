@@ -1,11 +1,12 @@
-Plan: 3 to add.
+Plan: 4 to add.
 
 Summary by type:
-  functions: 2 to add
+  functions: 3 to add
   tables: 1 to add
 
 Functions:
   + random_id
+  + x_check
   + x_is_flagged
 
 Tables:
@@ -31,6 +32,18 @@ CREATE TABLE IF NOT EXISTS x (
     CONSTRAINT x_name_key UNIQUE (name),
     CONSTRAINT x_public_id_key UNIQUE (public_id)
 );
+
+CREATE OR REPLACE FUNCTION x_check(
+    row_x x
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+BEGIN
+    RETURN row_x.flag;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION x_is_flagged(
     id bigint
