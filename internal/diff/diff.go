@@ -2501,6 +2501,15 @@ func functionSignatureReferencesRelation(fn *ir.Function, relations map[string]s
 		}
 	}
 
+	// Check output column types of a TABLE(...) return type (e.g.,
+	// "TABLE(r uses, n integer)"). pg_get_function_arguments excludes
+	// TABLE-mode columns, so they only appear in the return type.
+	for _, colType := range tableReturnColumnTypes(fn.ReturnType) {
+		if typeMatchesLookup(extractBaseTypeName(colType), fn.Schema, relations) {
+			return true
+		}
+	}
+
 	// Check parameter types
 	for _, param := range fn.Parameters {
 		if param.DataType != "" {
@@ -2512,6 +2521,61 @@ func functionSignatureReferencesRelation(fn *ir.Function, relations map[string]s
 	}
 
 	return false
+}
+
+// tableReturnColumnTypes extracts the column type expressions from a TABLE(...)
+// return type produced by pg_get_function_result, e.g. "TABLE(r uses, n integer)"
+// yields ["uses", "integer"]. Returns nil when the return type is not TABLE(...).
+func tableReturnColumnTypes(returnType string) []string {
+	t := strings.TrimSpace(returnType)
+	if len(t) < 7 || !strings.EqualFold(t[:6], "TABLE(") || !strings.HasSuffix(t, ")") {
+		return nil
+	}
+	inner := t[6 : len(t)-1]
+
+	var types []string
+	appendColType := func(col string) {
+		col = strings.TrimSpace(col)
+		// Strip the leading column name (possibly a quoted identifier
+		// containing spaces) to leave the type expression.
+		var typeExpr string
+		if strings.HasPrefix(col, `"`) {
+			if end := strings.Index(col[1:], `"`); end >= 0 {
+				typeExpr = col[end+2:]
+			}
+		} else if idx := strings.IndexByte(col, ' '); idx >= 0 {
+			typeExpr = col[idx+1:]
+		}
+		if typeExpr = strings.TrimSpace(typeExpr); typeExpr != "" {
+			types = append(types, typeExpr)
+		}
+	}
+
+	// Split on top-level commas, ignoring commas inside parentheses (e.g.
+	// numeric(10,2)) and quoted identifiers.
+	depth, start := 0, 0
+	inQuote := false
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '"':
+			inQuote = !inQuote
+		case '(':
+			if !inQuote {
+				depth++
+			}
+		case ')':
+			if !inQuote {
+				depth--
+			}
+		case ',':
+			if !inQuote && depth == 0 {
+				appendColType(inner[start:i])
+				start = i + 1
+			}
+		}
+	}
+	appendColType(inner[start:])
+	return types
 }
 
 // extractBaseTypeName extracts the base type name from a type expression,

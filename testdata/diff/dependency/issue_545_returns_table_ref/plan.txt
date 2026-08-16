@@ -1,0 +1,38 @@
+Plan: 3 to add.
+
+Summary by type:
+  functions: 2 to add
+  tables: 1 to add
+
+Functions:
+  + random_id
+  + x_rows
+
+Tables:
+  + x
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE OR REPLACE FUNCTION random_id()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$
+    SELECT CAST(1000000000 + floor(random() * 9000000000) AS bigint);
+$$;
+
+CREATE TABLE IF NOT EXISTS x (
+    id bigint DEFAULT random_id(),
+    CONSTRAINT x_pkey PRIMARY KEY (id)
+);
+
+CREATE OR REPLACE FUNCTION x_rows()
+RETURNS TABLE(r x)
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+BEGIN
+    RETURN;
+END;
+$$;

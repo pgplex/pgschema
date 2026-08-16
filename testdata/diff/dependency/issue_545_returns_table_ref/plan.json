@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.3",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION random_id()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$\n    SELECT CAST(1000000000 + floor(random() * 9000000000) AS bigint);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.random_id"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS x (\n    id bigint DEFAULT random_id(),\n    CONSTRAINT x_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.x"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION x_rows()\nRETURNS TABLE(r x)\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN;\nEND;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.x_rows"
+        }
+      ]
+    }
+  ]
+}
