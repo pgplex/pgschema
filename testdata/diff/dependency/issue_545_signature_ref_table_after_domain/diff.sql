@@ -19,3 +19,13 @@ BEGIN
     RETURN r.dcol IS NOT NULL;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION uses_rows()
+RETURNS TABLE(r uses)
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+BEGIN
+    RETURN;
+END;
+$$;

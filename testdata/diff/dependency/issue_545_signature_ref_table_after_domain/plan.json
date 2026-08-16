@@ -31,6 +31,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.uses_check"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION uses_rows()\nRETURNS TABLE(r uses)\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN;\nEND;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.uses_rows"
         }
       ]
     }
