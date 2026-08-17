@@ -5,11 +5,11 @@
 
 ![](https://raw.githubusercontent.com/pgplex/website/refs/heads/main/public/banner-pgschema.png)
 
-<a href="https://www.star-history.com/?repos=pgplex%2Fpgschema&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#pgplex/pgschema&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=pgplex/pgschema&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=pgplex/pgschema&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=pgplex/pgschema&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=pgplex/pgschema&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=pgplex/pgschema&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=pgplex/pgschema&type=date&legend=top-left" />
  </picture>
 </a>
 
