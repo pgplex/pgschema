@@ -131,8 +131,8 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 // non-comment parts, and reassembles.
 //
 // Limitation: E'...' escape-string syntax uses backslash-escaped quotes (E'it\'s')
-// rather than doubled quotes ('it''s'). This parser only recognises the '' form.
-// With E'content\'', a backslash-escaped quote may cause the parser to mistrack
+// rather than doubled quotes ('it”s'). This parser only recognises the ” form.
+// With E'content\”, a backslash-escaped quote may cause the parser to mistrack
 // string boundaries, which can result in either:
 //   - false-negative: schema qualifiers after the string are not stripped, or
 //   - false-positive: schema prefixes inside the E-string are incorrectly stripped.
@@ -526,9 +526,10 @@ func hintExtensionDependency(err error, hint string) error {
 // references objects in another schema (e.g. REFERENCES auth.users) that the
 // plan database does not have (issues #122, #548).
 //
-// .pgschemaignore cannot help: plan applies the SQL before ignore filtering,
-// so PostgreSQL still requires the referenced objects to exist. Stub them in
-// the desired SQL, or use a plan database that already has them.
+// .pgschemaignore can help when the referenced table is ignored and exists
+// on the target DB: plan stubs ignored FK targets before apply (issue #548).
+// If the table is missing entirely, users must still provide a manual stub or
+// a plan database that already has the referenced objects.
 //
 // 3F000 invalid_schema_name: "schema \"auth\" does not exist"
 // 42P01 undefined_table: "relation \"auth.users\" does not exist"

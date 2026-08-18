@@ -19,7 +19,6 @@ var referencesFollowKeywords = map[string]bool{
 	"from":   true,
 	"where":  true,
 	"set":    true,
-	"public": true,
 	"all":    true,
 	"table":  true,
 	"schema": true,

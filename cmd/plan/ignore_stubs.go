@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/logger"
@@ -51,7 +52,7 @@ func prependIgnoredTableStubs(ctx context.Context, cfg *util.ConnectionConfig, i
 	}
 	defer conn.Close()
 
-	var stubs string
+	var stubs strings.Builder
 	for _, ref := range toStub {
 		ddl, err := ir.BuildTableStubSQL(ctx, conn, ref.Schema, ref.Table, targetSchema)
 		if err != nil {
@@ -62,8 +63,8 @@ func prependIgnoredTableStubs(ctx context.Context, cfg *util.ConnectionConfig, i
 		}
 		logger.Get().Debug("prepending stub for ignored foreign key target",
 			"schema", ref.Schema, "table", ref.Table)
-		stubs += ddl
+		stubs.WriteString(ddl)
 	}
 
-	return stubs + desiredSQL, nil
+	return stubs.String() + desiredSQL, nil
 }

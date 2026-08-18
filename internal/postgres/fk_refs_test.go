@@ -31,6 +31,12 @@ func TestExtractForeignKeyTargets(t *testing.T) {
 			want:          []QualifiedName{{Schema: "public", Table: "users"}},
 		},
 		{
+			name:          "table name can be public",
+			sql:           "CREATE TABLE child (ref_id int REFERENCES public(id));",
+			defaultSchema: "public",
+			want:          []QualifiedName{{Schema: "public", Table: "public"}},
+		},
+		{
 			name:          "quoted identifiers",
 			sql:           `CREATE TABLE t (id int REFERENCES "Auth"."Users" (id));`,
 			defaultSchema: "public",

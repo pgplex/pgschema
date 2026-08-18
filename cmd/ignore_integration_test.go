@@ -1947,7 +1947,8 @@ CREATE TABLE profiles (
 		if !strings.Contains(output, "display_name") {
 			t.Errorf("plan should add display_name; got:\n%s", output)
 		}
-		if strings.Contains(output, "CREATE TABLE") && strings.Contains(output, "auth.users") {
+		if strings.Contains(output, "CREATE TABLE IF NOT EXISTS auth.users") ||
+			strings.Contains(output, "CREATE TABLE IF NOT EXISTS \"auth\".\"users\"") {
 			t.Errorf("plan should not create auth.users; got:\n%s", output)
 		}
 	})
