@@ -73,6 +73,7 @@
       {
         "tab": "Dev Journal",
         "pages": [
+          "blog/five-lesser-known-postgres-syntax",
           "blog/atlas-vs-pgschema",
           "blog/supabase-declarative-schema-vs-pgschema",
           "blog/demo-with-manus-and-asciinema",
