@@ -50,6 +50,9 @@ patterns = ["fk_temp_*"]
 
 [triggers]
 patterns = ["trg_temp_*"]
+
+[schemas]
+patterns = ["auth"]
 `
 
 	err := os.WriteFile(testFile, []byte(tomlContent), 0644)
@@ -99,6 +102,10 @@ patterns = ["trg_temp_*"]
 
 	if len(config.Triggers) != 1 || config.Triggers[0] != "trg_temp_*" {
 		t.Errorf("Expected triggers patterns [\"trg_temp_*\"], got %v", config.Triggers)
+	}
+
+	if len(config.Schemas) != 1 || config.Schemas[0] != "auth" {
+		t.Errorf("Expected schemas patterns [\"auth\"], got %v", config.Schemas)
 	}
 }
 

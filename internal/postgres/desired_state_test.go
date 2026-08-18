@@ -426,3 +426,76 @@ func TestHintExtensionDependency(t *testing.T) {
 		}
 	})
 }
+
+func TestHintCrossSchemaReference(t *testing.T) {
+	const hint = "this schema may reference objects in another schema"
+
+	t.Run("invalid_schema_name gets hint", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: `schema "auth" does not exist`,
+			Code:    "3F000",
+		}
+		result := hintCrossSchemaReference(pgErr, hint)
+		if !strings.Contains(result.Error(), "Hint: "+hint) {
+			t.Errorf("expected hint to be appended, got: %s", result.Error())
+		}
+		var unwrapped *pgconn.PgError
+		if !errors.As(result, &unwrapped) {
+			t.Error("expected wrapped error to preserve PgError")
+		}
+	})
+
+	t.Run("undefined_table gets hint", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: `relation "auth.users" does not exist`,
+			Code:    "42P01",
+		}
+		result := hintCrossSchemaReference(pgErr, hint)
+		if !strings.Contains(result.Error(), "Hint: "+hint) {
+			t.Errorf("expected hint to be appended, got: %s", result.Error())
+		}
+	})
+
+	t.Run("hint applies after enhanceApplyError wrapping", func(t *testing.T) {
+		sql := "CREATE TABLE users (id uuid REFERENCES auth.users(id));"
+		pgErr := &pgconn.PgError{
+			Message:  `schema "auth" does not exist`,
+			Code:     "3F000",
+			Position: int32(strings.Index(sql, "auth.users") + 1),
+		}
+		result := hintCrossSchemaReference(enhanceApplyError(pgErr, sql), hint)
+		if !strings.Contains(result.Error(), "Hint: "+hint) {
+			t.Errorf("expected hint on enhanced error, got: %s", result.Error())
+		}
+	})
+
+	t.Run("extension SQLSTATE is not hinted", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: `type "citext" does not exist`,
+			Code:    "42704",
+		}
+		result := hintCrossSchemaReference(pgErr, hint)
+		if result != error(pgErr) {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
+
+	t.Run("other SQLSTATE passes through", func(t *testing.T) {
+		pgErr := &pgconn.PgError{
+			Message: "syntax error",
+			Code:    "42601",
+		}
+		result := hintCrossSchemaReference(pgErr, hint)
+		if result != error(pgErr) {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
+
+	t.Run("non-pg error passes through", func(t *testing.T) {
+		origErr := fmt.Errorf("some other error")
+		result := hintCrossSchemaReference(origErr, hint)
+		if result != origErr {
+			t.Errorf("expected same error instance, got: %s", result.Error())
+		}
+	})
+}

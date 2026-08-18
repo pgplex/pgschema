@@ -23,6 +23,9 @@ The `.pgschemaignore` file is automatically loaded when present in the current d
 Create a `.pgschemaignore` file in your project directory using TOML format:
 
 ```toml
+[schemas]
+patterns = ["auth", "storage"]
+
 [tables]
 patterns = ["temp_*", "test_*", "!test_core_*"]
 
@@ -128,11 +131,40 @@ patterns = ["fk_*", "!fk_core_*"]
 This is useful when:
 
 1. **Out-of-band constraints** - A constraint is added and managed manually (e.g. disabled during an AWS DMS migration and re-added afterward), and you don't want `pgschema plan` to flag it for drop.
-2. **Cross-schema foreign keys** - When modules live in separate schemas with foreign keys between them, ignore the cross-schema foreign keys so each schema can be bootstrapped independently, then drop the ignore to let pgschema manage them once all tables exist.
+2. **Cross-schema foreign keys** - Prefer ignoring the referenced schema or table (see below) so `plan` can stub it. Alternatively, omit the FK from the desired SQL and ignore the live constraint by name so each schema can be bootstrapped independently.
 
 <Warning>
 Patterns match the constraint name only, which is not necessarily unique across tables. Be careful with broad patterns like `*`, as ignoring a primary key or unique constraint can leave a table without the keys it needs.
 </Warning>
+
+## Schemas and Cross-Schema Foreign Keys
+
+The `[schemas]` section matches **schema names**. Combined with schema-qualified `[tables]` patterns (`auth.users`, `auth.*`), this is the way to keep a foreign key to an unmanaged schema (for example Supabase `auth.users`) in your desired SQL.
+
+```toml
+[schemas]
+patterns = ["auth"]
+
+# Or ignore only specific tables in another schema:
+# [tables]
+# patterns = ["auth.users"]
+```
+
+```sql
+-- schema.sql (your app schema only — no auth stub required)
+CREATE TABLE profiles (
+    id UUID PRIMARY KEY,
+    auth_user_id UUID NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE
+);
+```
+
+When `plan` applies this SQL to its temporary database, it clones a structural stub of each ignored FK target from the **target** database (columns plus PRIMARY KEY / UNIQUE constraints), so PostgreSQL can create the foreign key. You do **not** need a manual `CREATE TABLE auth.users` stub in your schema file or a separate external plan database for this case. The auto-stub is not part of the managed schema: dump does not emit `auth.users`, and plan will not create or drop it.
+
+The referenced table must already exist on the target database. If it does not, use a manual stub in your schema file or an [external plan database](/cli/plan-db).
+
+<Note>
+Cross-schema table patterns must be schema-qualified (`auth.users` or `auth.*`). A bare pattern like `users` only matches tables in the schema you are managing, so it will not stub `auth.users`.
+</Note>
 
 ## Triggers
 

@@ -183,6 +183,43 @@ func TestIgnoreConfig_NilConfig(t *testing.T) {
 	if config.ShouldIgnoreTrigger("any_trigger") {
 		t.Error("nil config should not ignore any trigger")
 	}
+	if config.ShouldIgnoreSchema("auth") {
+		t.Error("nil config should not ignore any schema")
+	}
+	if config.ShouldIgnoreReferencedTable("auth", "users", "public") {
+		t.Error("nil config should not ignore referenced tables")
+	}
+}
+
+func TestIgnoreConfig_ShouldIgnoreReferencedTable(t *testing.T) {
+	config := &IgnoreConfig{
+		Tables:  []string{"temp_*", "auth.users", "auth.*_backup"},
+		Schemas: []string{"storage"},
+	}
+
+	tests := []struct {
+		schema       string
+		table        string
+		targetSchema string
+		want         bool
+	}{
+		{schema: "auth", table: "users", targetSchema: "public", want: true},
+		{schema: "auth", table: "sessions", targetSchema: "public", want: false},
+		{schema: "auth", table: "foo_backup", targetSchema: "public", want: true},
+		{schema: "storage", table: "objects", targetSchema: "public", want: true},
+		{schema: "public", table: "temp_cache", targetSchema: "public", want: true},
+		{schema: "public", table: "users", targetSchema: "public", want: false},
+		// Bare table pattern must not match across schemas
+		{schema: "auth", table: "temp_cache", targetSchema: "public", want: false},
+	}
+
+	for _, tt := range tests {
+		got := config.ShouldIgnoreReferencedTable(tt.schema, tt.table, tt.targetSchema)
+		if got != tt.want {
+			t.Errorf("ShouldIgnoreReferencedTable(%q, %q, %q) = %v, want %v",
+				tt.schema, tt.table, tt.targetSchema, got, tt.want)
+		}
+	}
 }
 
 func TestMatchPattern(t *testing.T) {

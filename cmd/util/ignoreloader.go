@@ -42,10 +42,17 @@ type TomlConfig struct {
 	Triggers          TriggerIgnoreConfig          `toml:"triggers,omitempty"`
 	Privileges        PrivilegeIgnoreConfig        `toml:"privileges,omitempty"`
 	DefaultPrivileges DefaultPrivilegeIgnoreConfig `toml:"default_privileges,omitempty"`
+	Schemas           SchemaIgnoreConfig           `toml:"schemas,omitempty"`
 }
 
 // TableIgnoreConfig represents table-specific ignore configuration
 type TableIgnoreConfig struct {
+	Patterns []string `toml:"patterns,omitempty"`
+}
+
+// SchemaIgnoreConfig represents schema-specific ignore configuration.
+// Used to stub cross-schema FK targets (e.g. Supabase auth) at plan time.
+type SchemaIgnoreConfig struct {
 	Patterns []string `toml:"patterns,omitempty"`
 }
 
@@ -156,6 +163,7 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 		Triggers:          tomlConfig.Triggers.Patterns,
 		Privileges:        tomlConfig.Privileges.Patterns,
 		DefaultPrivileges: tomlConfig.DefaultPrivileges.Patterns,
+		Schemas:           tomlConfig.Schemas.Patterns,
 	}
 
 	return config, nil

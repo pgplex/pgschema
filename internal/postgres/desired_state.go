@@ -131,8 +131,8 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 // non-comment parts, and reassembles.
 //
 // Limitation: E'...' escape-string syntax uses backslash-escaped quotes (E'it\'s')
-// rather than doubled quotes ('it''s'). This parser only recognises the '' form.
-// With E'content\'', a backslash-escaped quote may cause the parser to mistrack
+// rather than doubled quotes ('it”s'). This parser only recognises the ” form.
+// With E'content\”, a backslash-escaped quote may cause the parser to mistrack
 // string boundaries, which can result in either:
 //   - false-negative: schema qualifiers after the string are not stripped, or
 //   - false-positive: schema prefixes inside the E-string are incorrectly stripped.
@@ -492,23 +492,47 @@ func enhanceApplyError(err error, sql string) error {
 	return fmt.Errorf("%w\n\nError location (line %d, column %d):\n%s", err, line, col, snippet.String())
 }
 
+// hintOnSQLState appends hint when the error (or a wrapped error) is a
+// PostgreSQL error whose SQLSTATE is one of codes.
+func hintOnSQLState(err error, hint string, codes ...string) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	for _, code := range codes {
+		if pgErr.Code == code {
+			return fmt.Errorf("%w\nHint: %s", err, hint)
+		}
+	}
+	return err
+}
+
 // hintExtensionDependency appends hint to errors whose SQLSTATE indicates a
 // missing type, function, operator, or operator class — the typical failure
 // when the desired state depends on a PostgreSQL extension (e.g. btree_gist,
 // citext, pgvector) that is not available in the plan database (issue #436).
 // pgschema does not manage extension lifecycle, so the hint guides the user
 // toward a plan database that has the extension installed.
+//
+// 42704 undefined_object: "type X does not exist", "data type X has no
+// default operator class for access method gist"
+// 42883 undefined_function: "function X does not exist", "operator does not exist"
 func hintExtensionDependency(err error, hint string) error {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return err
-	}
-	switch pgErr.Code {
-	// 42704 undefined_object: "type X does not exist", "data type X has no
-	// default operator class for access method gist"
-	// 42883 undefined_function: "function X does not exist", "operator does not exist"
-	case "42704", "42883":
-		return fmt.Errorf("%w\nHint: %s", err, hint)
-	}
-	return err
+	return hintOnSQLState(err, hint, "42704", "42883")
+}
+
+// hintCrossSchemaReference appends hint to errors whose SQLSTATE indicates a
+// missing schema or relation — the typical failure when desired-state SQL
+// references objects in another schema (e.g. REFERENCES auth.users) that the
+// plan database does not have (issues #122, #548).
+//
+// .pgschemaignore can help when the referenced table is ignored and exists
+// on the target DB: plan stubs ignored FK targets before apply (issue #548).
+// If the table is missing entirely, users must still provide a manual stub or
+// a plan database that already has the referenced objects.
+//
+// 3F000 invalid_schema_name: "schema \"auth\" does not exist"
+// 42P01 undefined_table: "relation \"auth.users\" does not exist"
+func hintCrossSchemaReference(err error, hint string) error {
+	return hintOnSQLState(err, hint, "3F000", "42P01")
 }
