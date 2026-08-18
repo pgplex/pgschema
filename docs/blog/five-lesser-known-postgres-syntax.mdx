@@ -3,8 +3,6 @@ title: "5 lesser known Postgres syntax"
 description: "Building a declarative schema migration tool for Postgres means you eventually meet syntax most schema files never write. Five intriguing clauses from 200+ closed user reports."
 ---
 
-Building a declarative schema migration tool for Postgres means you eventually meet syntax most schema files never write. Below I've picked the five most intriguing from our 200+ closed user reports.
-
 ## 1. UNIQUE NULLS NOT DISTINCT (PG15)
 
 Postgres treats NULL as distinct from NULL. `UNIQUE (email)` will store two rows with `email IS NULL`.
