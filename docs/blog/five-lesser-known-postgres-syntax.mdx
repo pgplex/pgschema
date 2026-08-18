@@ -1,104 +1,41 @@
 ---
 title: "Five lesser-known Postgres syntax features"
-description: "pgschema just crossed 1,000 GitHub stars. Five lesser-known Postgres clauses we learned from closed issues: NULLS NOT DISTINCT, EXCLUDE, WITHOUT OVERLAPS, BEGIN ATOMIC, and AS RESTRICTIVE."
+description: "pgschema just crossed 1,000 GitHub stars. Five lesser-known Postgres clauses from closed issues: NULLS NOT DISTINCT, WITHOUT OVERLAPS, BEGIN ATOMIC, CHECK (false) NO INHERIT, and CREATE CONSTRAINT TRIGGER."
 ---
 
-pgschema just crossed [1,000 GitHub stars](https://github.com/pgplex/pgschema). The interesting part of that number is not the number. It is the [closed issues](https://github.com/pgplex/pgschema/issues?q=is%3Aissue+state%3Aclosed) behind it — most of them some corner of Postgres syntax that dumps, plans, or applies quietly dropped.
-
-Here are five clauses that showed up in those issues. Most schema files never use them. Postgres still does.
+pgschema just crossed [1,000 GitHub stars](https://github.com/pgplex/pgschema). Building a declarative schema tool for Postgres means you eventually meet syntax most schema files never write. These five showed up in [closed issues](https://github.com/pgplex/pgschema/issues?q=is%3Aissue+state%3Aclosed).
 
 ## 1. `UNIQUE NULLS NOT DISTINCT`
 
-By default, Postgres treats `NULL` as distinct from `NULL`. A `UNIQUE (email)` constraint happily stores two rows with `email IS NULL`.
+Postgres treats `NULL` as distinct from `NULL`. `UNIQUE (email)` will store two rows with `email IS NULL`.
 
-PostgreSQL 15 added an opt-in that makes NULL-bearing tuples collide:
+PostgreSQL 15 added the opt-in that makes those rows collide:
 
 ```sql
-CREATE TABLE identities (
-    a integer,
-    b integer,
-    CONSTRAINT identities_uniq UNIQUE NULLS NOT DISTINCT (a, b)
-);
-
--- also valid on a unique index
-CREATE UNIQUE INDEX identities_email_uidx
-    ON identities (a) NULLS NOT DISTINCT;
+CONSTRAINT identities_uniq UNIQUE NULLS NOT DISTINCT (a, b)
 ```
 
-Two `(NULL, 1)` rows now violate the constraint. That is the SQL-standard uniqueness most people assume they already have.
+That is the uniqueness most people think they already have. [#355](https://github.com/pgplex/pgschema/issues/355), [#412](https://github.com/pgplex/pgschema/issues/412)
 
-pgschema used to keep this modifier on indexes and silently drop it from table constraints. Same keyword, two code paths: [#355](https://github.com/pgplex/pgschema/issues/355), [#412](https://github.com/pgplex/pgschema/issues/412).
+## 2. `WITHOUT OVERLAPS` / `PERIOD`
 
-## 2. `EXCLUDE USING gist (... WITH &&)`
-
-`UNIQUE` is equality. `EXCLUDE` is uniqueness for any operator.
-
-The usual example is "no overlapping bookings":
+PostgreSQL 18 temporal keys. One `id`, several versions, those versions cannot overlap in time:
 
 ```sql
-CREATE TABLE bookings (
-    id integer PRIMARY KEY,
-    org_id uuid NOT NULL,
-    start_time timestamptz NOT NULL,
-    end_time timestamptz NOT NULL,
-    CONSTRAINT excl_no_overlap EXCLUDE USING gist (
-        org_id WITH =,
-        tstzrange(start_time, end_time, '[)') WITH &&
-    )
-);
+PRIMARY KEY (id, valid_period WITHOUT OVERLAPS)
+
+FOREIGN KEY (contact_id, PERIOD valid_period)
+    REFERENCES contacts (id, PERIOD valid_period)
 ```
 
-Same `org_id` and overlapping time ranges cannot both exist. The GiST index is not the feature — the `WITH` operators are. Dumping this as a plain `CREATE INDEX` keeps the index and loses the constraint. That was [#281](https://github.com/pgplex/pgschema/issues/281).
+Drop either clause and you still have a composite key. You no longer have a temporal one. [#364](https://github.com/pgplex/pgschema/issues/364)
 
-## 3. `WITHOUT OVERLAPS` and `PERIOD` (PostgreSQL 18)
+## 3. `BEGIN ATOMIC`
 
-PostgreSQL 18 turned that overlap idea into first-class keys. A temporal primary key is a regular key plus a range that must not overlap:
-
-```sql
-CREATE TABLE contacts (
-    id uuid NOT NULL,
-    name text NOT NULL,
-    valid_period tstzrange NOT NULL
-        DEFAULT tstzrange(now(), 'infinity', '[)'),
-    PRIMARY KEY (id, valid_period WITHOUT OVERLAPS)
-);
-
-CREATE TABLE conversations (
-    id uuid NOT NULL,
-    contact_id uuid NOT NULL,
-    valid_period tstzrange NOT NULL
-        DEFAULT tstzrange(now(), 'infinity', '[)'),
-    PRIMARY KEY (id, valid_period WITHOUT OVERLAPS),
-    FOREIGN KEY (contact_id, PERIOD valid_period)
-        REFERENCES contacts (id, PERIOD valid_period)
-);
-```
-
-`WITHOUT OVERLAPS` on the primary key: one `id` can exist in several versions, but those versions cannot overlap in time. `PERIOD` on the foreign key: a conversation can only point at a contact version whose period covers its own.
-
-Drop either clause and you still have a composite key. You no longer have a temporal one. [#364](https://github.com/pgplex/pgschema/issues/364).
-
-## 4. `BEGIN ATOMIC`
-
-Most Postgres functions are a string:
+Most Postgres functions are a dollar-quoted string. PostgreSQL 14 added the SQL-standard form, where the body is real SQL:
 
 ```sql
-CREATE FUNCTION add_with_tax(amount numeric, tax_rate numeric DEFAULT 0.1)
-RETURNS numeric
-LANGUAGE sql
-AS $$
-    SELECT amount + (amount * tax_rate);
-$$;
-```
-
-PostgreSQL 14 added the SQL-standard form. The body is SQL, not a quoted string, so the parser sees the statements:
-
-```sql
-CREATE FUNCTION transfer_funds(
-    sender_id integer,
-    receiver_id integer,
-    amount numeric
-)
+CREATE FUNCTION transfer_funds(sender_id int, receiver_id int, amount numeric)
 RETURNS void
 LANGUAGE sql
 BEGIN ATOMIC
@@ -107,41 +44,32 @@ BEGIN ATOMIC
 END;
 ```
 
-No dollar quotes. Multiple statements. Dependency tracking works because the statements are real SQL. Dumping this inside `AS $$ ... $$` wraps `BEGIN ATOMIC` in a string, and feeding that dump back in is a syntax error. [#241](https://github.com/pgplex/pgschema/issues/241).
+No `$$`. The parser sees the statements. [#241](https://github.com/pgplex/pgschema/issues/241)
 
-## 5. `CREATE POLICY ... AS RESTRICTIVE`
+## 4. `CHECK (false) NO INHERIT`
 
-RLS policies default to `PERMISSIVE`. Permissive policies for the same command are OR-ed: any one of them granting access is enough.
-
-`RESTRICTIVE` policies are AND-ed. Every restrictive policy must pass, on top of at least one permissive grant:
+An always-false check that does **not** apply to child tables. Standard pattern on an `INHERITS` parent: reject inserts on the parent, let children accept them.
 
 ```sql
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY users_own_rows ON users
-    TO PUBLIC
-    USING (id = current_setting('app.user_id')::integer);
-
-CREATE POLICY users_not_locked ON users
-    AS RESTRICTIVE
-    TO PUBLIC
-    USING (NOT locked);
+CONSTRAINT no_direct_insert CHECK (false) NO INHERIT
 ```
 
-A user can see their own row (`users_own_rows`) only if the account is not locked (`users_not_locked`). Omit `AS RESTRICTIVE` and the second policy becomes another OR — which is the opposite of a lockout. [#477](https://github.com/pgplex/pgschema/issues/477).
+Without `NO INHERIT`, every child inherits the always-false check and nothing can insert. [#386](https://github.com/pgplex/pgschema/issues/386)
 
-Related and also easy to miss: table owners bypass RLS unless you `ALTER TABLE ... FORCE ROW LEVEL SECURITY` ([#214](https://github.com/pgplex/pgschema/issues/214)).
+## 5. `CREATE CONSTRAINT TRIGGER`
 
-## Honorable mentions
+A trigger that behaves like a constraint: it can be deferred to commit time. Regular `CREATE TRIGGER` cannot.
 
-These are almost as obscure. Each one arrived the same way: a closed issue, a missing clause, a schema that no longer meant what it said.
+```sql
+CREATE CONSTRAINT TRIGGER prevent_code_update
+    AFTER UPDATE ON products
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_code_update();
+```
 
-- `CHECK (false) NO INHERIT` — an always-false check that does **not** apply to child tables, so the parent of an `INHERITS` hierarchy rejects inserts while children stay writable ([#386](https://github.com/pgplex/pgschema/issues/386))
-- `CREATE CONSTRAINT TRIGGER` — a trigger that can be `DEFERRABLE INITIALLY DEFERRED`, like a constraint ([#60](https://github.com/pgplex/pgschema/issues/60))
-- `REFERENCING OLD TABLE AS ...` / `NEW TABLE AS ...` — transition tables on statement-level triggers ([#59](https://github.com/pgplex/pgschema/issues/59))
-- `GENERATED ALWAYS AS (...) VIRTUAL` — PostgreSQL 18 generated columns computed on read, not stored ([#501](https://github.com/pgplex/pgschema/issues/501))
-- `CREATE VIEW ... WITH (security_invoker = true)` — the view runs with the caller's rights so underlying RLS still applies ([#343](https://github.com/pgplex/pgschema/issues/343))
+Fire after the rest of the transaction, or not at all if the row is changed back. [#60](https://github.com/pgplex/pgschema/issues/60)
 
-Postgres has a lot of syntax. A declarative tool has to keep all of it, including the clauses that look optional until they are not.
+Postgres has a lot of syntax. A dump/plan/apply tool has to keep the clauses that look optional until they are not.
 
-If you hit another one, [open an issue](https://github.com/pgplex/pgschema/issues). That is how this list got written.
+[github.com/pgplex/pgschema](https://github.com/pgplex/pgschema)
