@@ -3,39 +3,37 @@ title: "5 lesser known Postgres syntax?"
 description: "pgschema just crossed 1,000 GitHub stars. Five lesser-known Postgres clauses from closed issues: NULLS NOT DISTINCT, WITHOUT OVERLAPS, BEGIN ATOMIC, CHECK (false) NO INHERIT, and CREATE CONSTRAINT TRIGGER."
 ---
 
-pgschema just crossed [1,000 GitHub stars](https://github.com/pgplex/pgschema). Building a declarative schema tool for Postgres means you eventually meet syntax most schema files never write. These five showed up in [closed issues](https://github.com/pgplex/pgschema/issues?q=is%3Aissue+state%3Aclosed).
+pgschema just crossed [1,000 GitHub stars](https://github.com/pgplex/pgschema).
 
-## 1. `UNIQUE NULLS NOT DISTINCT`
+Building a declarative schema tool for Postgres means you eventually meet syntax most schema files never write. These five showed up in closed issues.
 
-Postgres treats `NULL` as distinct from `NULL`. `UNIQUE (email)` will store two rows with `email IS NULL`.
+**1. UNIQUE NULLS NOT DISTINCT (PG15)**
 
-PostgreSQL 15 added the opt-in that makes those rows collide:
+Postgres treats NULL as distinct from NULL. `UNIQUE (email)` will store two rows with `email IS NULL`.
 
-```sql
-CONSTRAINT identities_uniq UNIQUE NULLS NOT DISTINCT (a, b)
-```
+`UNIQUE NULLS NOT DISTINCT (email)` makes those two rows collide — the uniqueness most people think they already have.
 
-That is the uniqueness most people think they already have. [#355](https://github.com/pgplex/pgschema/issues/355), [#412](https://github.com/pgplex/pgschema/issues/412)
-
-## 2. `WITHOUT OVERLAPS` / `PERIOD`
-
-PostgreSQL 18 temporal keys. One `id`, several versions, those versions cannot overlap in time:
+**2. WITHOUT OVERLAPS / PERIOD (PG18)**
 
 ```sql
 PRIMARY KEY (id, valid_period WITHOUT OVERLAPS)
+```
 
+One id, several versions, those versions cannot overlap in time.
+
+```sql
 FOREIGN KEY (contact_id, PERIOD valid_period)
     REFERENCES contacts (id, PERIOD valid_period)
 ```
 
-Drop either clause and you still have a composite key. You no longer have a temporal one. [#364](https://github.com/pgplex/pgschema/issues/364)
+The child period has to sit inside a parent version.
 
-## 3. `BEGIN ATOMIC`
+**3. BEGIN ATOMIC (PG14)**
 
-Most Postgres functions are a dollar-quoted string. PostgreSQL 14 added the SQL-standard form, where the body is real SQL:
+Most functions are a dollar-quoted string. The SQL-standard form is not:
 
 ```sql
-CREATE FUNCTION transfer_funds(sender_id int, receiver_id int, amount numeric)
+CREATE FUNCTION transfer_funds(...)
 RETURNS void
 LANGUAGE sql
 BEGIN ATOMIC
@@ -44,21 +42,21 @@ BEGIN ATOMIC
 END;
 ```
 
-No `$$`. The parser sees the statements. [#241](https://github.com/pgplex/pgschema/issues/241)
+No `$$` quotes. The parser sees real statements.
 
-## 4. `CHECK (false) NO INHERIT`
+**4. CHECK (false) NO INHERIT**
 
-An always-false check that does **not** apply to child tables. Standard pattern on an `INHERITS` parent: reject inserts on the parent, let children accept them.
+Classic pattern on an `INHERITS` parent: reject inserts on the parent, let children accept them.
 
 ```sql
 CONSTRAINT no_direct_insert CHECK (false) NO INHERIT
 ```
 
-Without `NO INHERIT`, every child inherits the always-false check and nothing can insert. [#386](https://github.com/pgplex/pgschema/issues/386)
+Without `NO INHERIT`, every child inherits the always-false check and nothing can insert.
 
-## 5. `CREATE CONSTRAINT TRIGGER`
+**5. CREATE CONSTRAINT TRIGGER**
 
-A trigger that behaves like a constraint: it can be deferred to commit time. Regular `CREATE TRIGGER` cannot.
+A trigger that behaves like a constraint: it can be `DEFERRABLE INITIALLY DEFERRED` and fire at commit. Regular `CREATE TRIGGER` cannot.
 
 ```sql
 CREATE CONSTRAINT TRIGGER prevent_code_update
@@ -68,7 +66,7 @@ CREATE CONSTRAINT TRIGGER prevent_code_update
     EXECUTE FUNCTION prevent_code_update();
 ```
 
-Fire after the rest of the transaction, or not at all if the row is changed back. [#60](https://github.com/pgplex/pgschema/issues/60)
+Fire after the rest of the transaction — or not at all if the row is changed back.
 
 Postgres has a lot of syntax. A dump/plan/apply tool has to keep the clauses that look optional until they are not.
 
