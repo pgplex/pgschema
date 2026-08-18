@@ -158,9 +158,9 @@ CREATE TABLE profiles (
 );
 ```
 
-When `plan` applies this SQL to its temporary database, it clones a structural stub of each ignored FK target from the **target** database (columns plus PRIMARY KEY / UNIQUE constraints), so PostgreSQL can create the foreign key. The stub is not part of the managed schema: dump does not emit `auth.users`, and plan will not create or drop it.
+When `plan` applies this SQL to its temporary database, it clones a structural stub of each ignored FK target from the **target** database (columns plus PRIMARY KEY / UNIQUE constraints), so PostgreSQL can create the foreign key. You do **not** need a manual `CREATE TABLE auth.users` stub in your schema file or a separate external plan database for this case. The auto-stub is not part of the managed schema: dump does not emit `auth.users`, and plan will not create or drop it.
 
-The referenced table must already exist on the target database. If it does not, add a stub `CREATE SCHEMA` / `CREATE TABLE` to your schema file, or use an [external plan database](/cli/plan-db).
+The referenced table must already exist on the target database. If it does not, use a manual stub in your schema file or an [external plan database](/cli/plan-db).
 
 <Note>
 Cross-schema table patterns must be schema-qualified (`auth.users` or `auth.*`). A bare pattern like `users` only matches tables in the schema you are managing, so it will not stub `auth.users`.

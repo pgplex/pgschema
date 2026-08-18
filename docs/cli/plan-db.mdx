@@ -15,7 +15,7 @@ By default, the `plan` command (and `apply` command in File Mode) spins up a tem
 Use an external database for plan generation when:
 
 - Your schema uses **PostgreSQL extensions** (like `hstore`, `postgis`, `uuid-ossp`, etc.) - The embedded database doesn't have extensions pre-installed, causing plan generation to fail with "type does not exist" errors ([#121](https://github.com/pgplex/pgschema/issues/121))
-- Your schema has **cross-schema foreign key references** - The embedded approach only loads one schema at a time, breaking foreign key constraints that reference tables in other schemas ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548)). If the referenced table already exists on the target database, you can [ignore that schema or table](/cli/ignore) instead and pgschema will stub it for plan. Otherwise stub the objects in the desired SQL file, or use an external plan database (see below).
+- Your schema has **cross-schema foreign key references** to tables you do not manage (for example Supabase `auth.users`) - If the referenced table exists on the target database, [ignore that schema or table](/cli/ignore) and pgschema stubs it automatically during plan (embedded postgres is enough). Use the fallbacks below only when the table is missing on target ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548))
 
 ### How It Works
 
@@ -104,30 +104,46 @@ CREATE TABLE products (
 
 ### Handling Cross-Schema Foreign Keys
 
-If your schema has foreign keys that reference tables in other schemas, those referenced objects must exist when `plan` applies your desired-state SQL.
+If your schema has foreign keys that reference tables in other schemas (for example `REFERENCES auth.users`), those referenced objects must exist when `plan` applies your desired-state SQL to its temporary database.
 
-If the referenced table already exists on the **target** database and you do not want pgschema to manage it, ignore it and keep the FK in your schema file. `plan` clones a stub from the target:
+**Recommended: ignore the referenced schema or table** (default embedded plan database — no manual stub, no external plan DB):
 
 ```toml
 # .pgschemaignore
 [schemas]
 patterns = ["auth"]
+
+# Or a single table:
+# [tables]
+# patterns = ["auth.users"]
 ```
 
-See [Ignore](/cli/ignore) for schema-qualified table patterns (`auth.users`).
+```sql
+-- schema.sql — your app schema only
+CREATE TABLE profiles (
+  id SERIAL PRIMARY KEY,
+  auth_user_id UUID NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE
+);
+```
 
-Otherwise, two approaches work:
+When you run `pgschema plan`, pgschema clones a structural stub of each ignored FK target from the **target** database (columns plus PRIMARY KEY / UNIQUE constraints) into the temporary plan instance. The stub is not managed: dump does not emit `auth.users`, and plan will not create or drop it on the target.
 
-**Stub in the schema file** (works with the default embedded plan database). Keep managing only your app schema (`--schema public` or `--schema backend`); the stub exists so PostgreSQL can create the FK:
+Requirements:
+
+- The referenced table must already exist on the **target** database (for example Supabase already has `auth.users`).
+- Ignore patterns for cross-schema tables must be schema-qualified (`auth.users`, `auth.*`, or `[schemas] auth`). A bare `users` pattern only matches tables in the schema you are managing.
+
+See [Ignore](/cli/ignore) for full details.
+
+**Fallback: stub in the schema file** — when the referenced table is not on the target:
 
 ```sql
--- schema.sql
 CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE IF NOT EXISTS auth.users (
   id UUID PRIMARY KEY
 );
 
-CREATE TABLE users (
+CREATE TABLE profiles (
   id SERIAL PRIMARY KEY,
   auth_user_id UUID NOT NULL UNIQUE REFERENCES auth.users (id)
 );
@@ -135,54 +151,31 @@ CREATE TABLE users (
 
 `pgschema dump` of your app schema will not emit the stub, so keep it in source (for example via `\i`).
 
-**Or create the objects in an external plan database:**
+**Fallback: external plan database** — when you cannot rely on the target during plan, or need objects that only exist in another database:
 
 ```sql
--- In your plan database, create referenced schemas and tables
+-- In your plan database
 CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE IF NOT EXISTS auth.users (
   id SERIAL PRIMARY KEY,
   email TEXT NOT NULL
 );
-
-CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS billing.customers (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES auth.users(id)
-);
 ```
 
-Then run plan or apply:
-
 ```bash
-# Set up referenced schemas in plan database
-psql -h localhost -U postgres -d pgschema_plan << 'EOF'
-CREATE SCHEMA IF NOT EXISTS auth;
-CREATE TABLE IF NOT EXISTS auth.users (id SERIAL PRIMARY KEY, email TEXT NOT NULL);
-EOF
-
-# Now run plan for your main schema that references auth.users
 pgschema plan \
   --file schema.sql \
   --schema public \
   --host localhost --db myapp --user postgres \
   --plan-host localhost --plan-db pgschema_plan --plan-user postgres
-
-# Or use apply command to plan and apply in one step (File Mode)
-pgschema apply \
-  --file schema.sql \
-  --schema public \
-  --host localhost --db myapp --user postgres \
-  --plan-host localhost --plan-db pgschema_plan --plan-user postgres \
-  --auto-approve
 ```
 
-Your `schema.sql` can now reference tables in other schemas (without inlining the stub):
+Your `schema.sql` references `auth.users` without inlining the stub:
 
 ```sql
 CREATE TABLE orders (
   id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES auth.users(id),  -- Cross-schema FK works
+  user_id INTEGER REFERENCES auth.users(id),
   total DECIMAL(10,2)
 );
 ```

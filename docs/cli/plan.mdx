@@ -14,7 +14,7 @@ The plan command follows infrastructure-as-code principles similar to Terraform:
 1. Generate a detailed migration plan with proper dependency ordering
 1. Display the plan without making any changes
 
-By default, pgschema uses an embedded PostgreSQL instance to validate your desired state SQL. For schemas using PostgreSQL extensions or cross-schema references, you can use an external database instead. See [External Plan Database](/cli/plan-db) for details.
+By default, pgschema uses an embedded PostgreSQL instance to validate your desired state SQL. Cross-schema foreign keys to unmanaged tables (for example Supabase `auth.users`) work with the default embedded instance when you [ignore those schemas](/cli/ignore). For PostgreSQL extensions, or when referenced tables are not on the target, see [External Plan Database](/cli/plan-db).
 
 ## Basic Usage
 
@@ -130,7 +130,7 @@ pgschema plan --host localhost --db myapp --user postgres --password mypassword 
 
 ## Plan Database Options
 
-By default, the plan command uses an embedded PostgreSQL instance to validate your desired state SQL. For schemas that require PostgreSQL extensions or have cross-schema references, you can provide an external database. See [External Plan Database](/cli/plan-db) for complete documentation.
+By default, the plan command uses an embedded PostgreSQL instance to validate your desired state SQL. Cross-schema FKs to ignored tables are stubbed from the target automatically; extensions and other edge cases may need an external database. See [External Plan Database](/cli/plan-db) for complete documentation.
 
 ## Plan Options
 

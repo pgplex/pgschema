@@ -269,7 +269,7 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	if _, err := util.ExecContextWithLogging(ctx, conn, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
 		enhanced := enhanceApplyError(err, schemaAgnosticSQL)
 		enhanced = hintExtensionDependency(enhanced, "this schema may depend on a PostgreSQL extension, which the embedded plan database cannot provide. Use an external plan database with the extension installed (--plan-host), see https://www.pgschema.com/cli/plan-db")
-		enhanced = hintCrossSchemaReference(enhanced, "this schema may reference objects in another schema that the embedded plan database does not have. Add a stub CREATE SCHEMA/TABLE in your desired SQL, or use an external plan database that already has those objects (--plan-host), see https://www.pgschema.com/cli/plan-db")
+		enhanced = hintCrossSchemaReference(enhanced, "this schema may reference objects in another schema that the embedded plan database does not have. If the table exists on the target database, add it to .pgschemaignore ([schemas] or schema-qualified [tables] pattern, e.g. auth or auth.users), see https://www.pgschema.com/cli/ignore. Otherwise add a stub CREATE SCHEMA/TABLE in your desired SQL, or use an external plan database (--plan-host), see https://www.pgschema.com/cli/plan-db")
 		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ep.tempSchema, enhanced)
 	}
 
