@@ -16,7 +16,7 @@ The apply command supports two execution modes:
 1. Display the plan for review
 1. Apply the changes (with optional confirmation and safety checks)
 
-By default, File Mode uses an embedded PostgreSQL instance to validate the desired state. For schemas using PostgreSQL extensions or cross-schema references, you can use an external database instead via the `--plan-*` flags. See [External Plan Database](/cli/plan-db) for details.
+By default, File Mode uses an embedded PostgreSQL instance to validate the desired state. Cross-schema FKs to ignored tables are stubbed from the target automatically; for extensions or other cases see [External Plan Database](/cli/plan-db).
 
 ### Plan Mode (Execute Pre-generated Plan)
 1. Load a pre-generated plan from JSON file
@@ -128,7 +128,7 @@ pgschema apply --host localhost --db myapp --user postgres --password mypassword
 
 ## Plan Database Options
 
-When using File Mode (`--file`), the apply command generates a plan internally using a temporary PostgreSQL instance. By default, this uses embedded PostgreSQL. For schemas that require PostgreSQL extensions or have cross-schema references, you can provide an external database. See [External Plan Database](/cli/plan-db) for complete documentation.
+When using File Mode (`--file`), the apply command generates a plan internally using a temporary PostgreSQL instance. Cross-schema FKs to ignored tables work with the default embedded instance; extensions and other edge cases may need an external database. See [External Plan Database](/cli/plan-db) for complete documentation.
 
 **Note**: These options only apply when using `--file` mode. When using `--plan` mode, the plan has already been generated.
 
