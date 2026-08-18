@@ -1,11 +1,9 @@
 ---
-title: "5 lesser known Postgres syntax?"
-description: "pgschema just crossed 1,000 GitHub stars. Five lesser-known Postgres clauses from closed issues: NULLS NOT DISTINCT, WITHOUT OVERLAPS, BEGIN ATOMIC, CHECK (false) NO INHERIT, and CREATE CONSTRAINT TRIGGER."
+title: "5 lesser known Postgres syntax"
+description: "Building a declarative schema migration tool for Postgres means you eventually meet syntax most schema files never write. Five intriguing clauses from 200+ closed user reports."
 ---
 
-pgschema just crossed [1,000 GitHub stars](https://github.com/pgplex/pgschema).
-
-Building a declarative schema tool for Postgres means you eventually meet syntax most schema files never write. These five showed up in closed issues.
+Building a declarative schema migration tool for Postgres means you eventually meet syntax most schema files never write. Below I've picked the five most intriguing from our 200+ closed user reports.
 
 **1. UNIQUE NULLS NOT DISTINCT (PG15)**
 
@@ -68,6 +66,4 @@ CREATE CONSTRAINT TRIGGER prevent_code_update
 
 Fire after the rest of the transaction — or not at all if the row is changed back.
 
-Postgres has a lot of syntax. A dump/plan/apply tool has to keep the clauses that look optional until they are not.
-
-[github.com/pgplex/pgschema](https://github.com/pgplex/pgschema)
+Postgres has a lot of syntax. What's your secret tip?
