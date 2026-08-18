@@ -15,7 +15,7 @@ By default, the `plan` command (and `apply` command in File Mode) spins up a tem
 Use an external database for plan generation when:
 
 - Your schema uses **PostgreSQL extensions** (like `hstore`, `postgis`, `uuid-ossp`, etc.) - The embedded database doesn't have extensions pre-installed, causing plan generation to fail with "type does not exist" errors ([#121](https://github.com/pgplex/pgschema/issues/121))
-- Your schema has **cross-schema foreign key references** - The embedded approach only loads one schema at a time, breaking foreign key constraints that reference tables in other schemas ([#122](https://github.com/pgplex/pgschema/issues/122))
+- Your schema has **cross-schema foreign key references** - The embedded approach only loads one schema at a time, breaking foreign key constraints that reference tables in other schemas ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548)). You can also stub those objects in the desired SQL file itself (see below).
 
 ### How It Works
 
@@ -104,7 +104,28 @@ CREATE TABLE products (
 
 ### Handling Cross-Schema Foreign Keys
 
-If your schema has foreign keys that reference tables in other schemas, you need to create those schemas in the plan database:
+If your schema has foreign keys that reference tables in other schemas, those referenced objects must exist when `plan` applies your desired-state SQL. `.pgschemaignore` cannot skip this: the SQL is applied before ignore filtering.
+
+Two approaches work:
+
+**Stub in the schema file** (works with the default embedded plan database). Keep managing only your app schema (`--schema public` or `--schema backend`); the stub exists so PostgreSQL can create the FK:
+
+```sql
+-- schema.sql
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE TABLE IF NOT EXISTS auth.users (
+  id UUID PRIMARY KEY
+);
+
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  auth_user_id UUID NOT NULL UNIQUE REFERENCES auth.users (id)
+);
+```
+
+`pgschema dump` of your app schema will not emit the stub, so keep it in source (for example via `\i`).
+
+**Or create the objects in an external plan database:**
 
 ```sql
 -- In your plan database, create referenced schemas and tables
@@ -146,7 +167,7 @@ pgschema apply \
   --auto-approve
 ```
 
-Your `schema.sql` can now reference tables in other schemas:
+Your `schema.sql` can now reference tables in other schemas (without inlining the stub):
 
 ```sql
 CREATE TABLE orders (

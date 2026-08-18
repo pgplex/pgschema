@@ -128,7 +128,11 @@ patterns = ["fk_*", "!fk_core_*"]
 This is useful when:
 
 1. **Out-of-band constraints** - A constraint is added and managed manually (e.g. disabled during an AWS DMS migration and re-added afterward), and you don't want `pgschema plan` to flag it for drop.
-2. **Cross-schema foreign keys** - When modules live in separate schemas with foreign keys between them, ignore the cross-schema foreign keys so each schema can be bootstrapped independently, then drop the ignore to let pgschema manage them once all tables exist.
+2. **Cross-schema foreign keys** - When modules live in separate schemas with foreign keys between them, omit the FK from the desired SQL and ignore the live constraint so each schema can be bootstrapped independently. Drop the ignore later to let pgschema manage the FK once all tables exist.
+
+<Note>
+Ignore cannot make `plan` succeed when the desired-state SQL itself contains `REFERENCES other_schema.table`. Plan applies that SQL to a temporary database **before** ignore filtering, so PostgreSQL still requires the referenced schema and table to exist. Add a stub `CREATE SCHEMA` / `CREATE TABLE` in your schema file, or use an [external plan database](/cli/plan-db) that already has those objects (for example Supabase `auth.users`).
+</Note>
 
 <Warning>
 Patterns match the constraint name only, which is not necessarily unique across tables. Be careful with broad patterns like `*`, as ignoring a primary key or unique constraint can leave a table without the keys it needs.

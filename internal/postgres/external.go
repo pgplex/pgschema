@@ -176,6 +176,7 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	if _, err := util.ExecContextWithLogging(ctx, conn, schemaAgnosticSQL, "apply desired state SQL to temporary schema"); err != nil {
 		enhanced := enhanceApplyError(err, schemaAgnosticSQL)
 		enhanced = hintExtensionDependency(enhanced, "this schema may depend on a PostgreSQL extension that is not installed in the plan database. Install the extension in the plan database (CREATE EXTENSION) and re-run, see https://www.pgschema.com/cli/plan-db")
+		enhanced = hintCrossSchemaReference(enhanced, "this schema may reference objects in another schema that are not present in the plan database. Create those schemas/tables in the plan database, or add a stub CREATE SCHEMA/TABLE in your desired SQL, see https://www.pgschema.com/cli/plan-db")
 		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ed.tempSchema, enhanced)
 	}
 
