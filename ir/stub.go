@@ -37,9 +37,9 @@ func BuildTableStubSQL(ctx context.Context, db *sql.DB, schema, table, targetSch
 	}
 
 	b.WriteString("-- pgschema: stub for ignored table ")
-	b.WriteString(schema)
+	b.WriteString(sanitizeComment(schema))
 	b.WriteString(".")
-	b.WriteString(table)
+	b.WriteString(sanitizeComment(table))
 	b.WriteString("\nCREATE TABLE IF NOT EXISTS ")
 	b.WriteString(qualified)
 	b.WriteString(" (\n")
@@ -141,4 +141,16 @@ ORDER BY con.contype, con.conname`
 		}
 	}
 	return defs, rows.Err()
+}
+
+// sanitizeComment replaces control characters (newlines, tabs, etc.) in a
+// string destined for a SQL line comment so quoted identifiers cannot break
+// out of the comment and inject SQL.
+func sanitizeComment(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r < 0x20 {
+			return ' '
+		}
+		return r
+	}, s)
 }
