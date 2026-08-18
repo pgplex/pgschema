@@ -1835,3 +1835,133 @@ CREATE AGGREGATE group_concat(text) (
 		}
 	})
 }
+
+// TestIgnoreCrossSchemaForeignKey verifies that ignoring a schema (or a
+// schema-qualified table) lets plan apply desired SQL that REFERENCES that
+// table without a stub CREATE TABLE in the schema file (issue #548).
+func TestIgnoreCrossSchemaForeignKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	_, err := conn.Exec(`
+		CREATE SCHEMA auth;
+		CREATE TABLE auth.users (
+			id uuid PRIMARY KEY,
+			raw_app_meta_data jsonb
+		);
+		CREATE TABLE profiles (
+			id SERIAL PRIMARY KEY,
+			auth_user_id uuid NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE
+		);
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create cross-schema fixture: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWd); err != nil {
+			t.Fatalf("Failed to restore working directory: %v", err)
+		}
+	}()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Stubs are created in the shared plan database, not the target. Drop
+	// leftover auth schema so this test and later tests are not polluted.
+	sharedConn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedEmbeddedPG)
+	defer sharedConn.Close()
+	if _, err := sharedConn.Exec("DROP SCHEMA IF EXISTS auth CASCADE"); err != nil {
+		t.Fatalf("Failed to drop leftover auth schema: %v", err)
+	}
+	defer func() {
+		_, _ = sharedConn.Exec("DROP SCHEMA IF EXISTS auth CASCADE")
+	}()
+
+	schemaSQL := `
+CREATE TABLE profiles (
+    id SERIAL PRIMARY KEY,
+    auth_user_id uuid NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE,
+    display_name text
+);
+`
+	if err := os.WriteFile("schema.sql", []byte(schemaSQL), 0644); err != nil {
+		t.Fatalf("Failed to write schema file: %v", err)
+	}
+
+	containerInfo := &struct {
+		Conn     *sql.DB
+		Host     string
+		Port     int
+		DBName   string
+		User     string
+		Password string
+	}{
+		Conn:     conn,
+		Host:     host,
+		Port:     port,
+		DBName:   dbname,
+		User:     user,
+		Password: password,
+	}
+
+	t.Run("without_ignore_fails", func(t *testing.T) {
+		os.Remove(".pgschemaignore")
+		config := &planCmd.PlanConfig{
+			Host:            host,
+			Port:            port,
+			DB:              dbname,
+			User:            user,
+			Password:        password,
+			Schema:          "public",
+			File:            "schema.sql",
+			ApplicationName: "pgschema",
+		}
+		_, err := planCmd.GeneratePlan(config, sharedEmbeddedPG)
+		if err == nil {
+			t.Fatal("expected plan to fail without ignore when REFERENCES auth.users")
+		}
+		if !strings.Contains(err.Error(), "auth") {
+			t.Errorf("expected error to mention auth schema, got: %v", err)
+		}
+	})
+
+	t.Run("schemas_section", func(t *testing.T) {
+		if err := os.WriteFile(".pgschemaignore", []byte("[schemas]\npatterns = [\"auth\"]\n"), 0644); err != nil {
+			t.Fatalf("Failed to write ignore file: %v", err)
+		}
+		output := executeIgnorePlanCommand(t, containerInfo, "schema.sql")
+		if strings.Contains(output, "DROP") {
+			t.Errorf("plan should not drop objects; got:\n%s", output)
+		}
+		if !strings.Contains(output, "display_name") {
+			t.Errorf("plan should add display_name; got:\n%s", output)
+		}
+		if strings.Contains(output, "CREATE TABLE") && strings.Contains(output, "auth.users") {
+			t.Errorf("plan should not create auth.users; got:\n%s", output)
+		}
+	})
+
+	t.Run("qualified_table_pattern", func(t *testing.T) {
+		if err := os.WriteFile(".pgschemaignore", []byte("[tables]\npatterns = [\"auth.users\"]\n"), 0644); err != nil {
+			t.Fatalf("Failed to write ignore file: %v", err)
+		}
+		output := executeIgnorePlanCommand(t, containerInfo, "schema.sql")
+		if strings.Contains(output, "DROP") {
+			t.Errorf("plan should not drop objects; got:\n%s", output)
+		}
+		if !strings.Contains(output, "display_name") {
+			t.Errorf("plan should add display_name; got:\n%s", output)
+		}
+	})
+}

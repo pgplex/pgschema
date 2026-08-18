@@ -297,6 +297,25 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 
 	ctx := context.Background()
 
+	// Clone ignored FK targets from the target database into the plan SQL so
+	// REFERENCES auth.users (and same-schema ignored tables) can apply without
+	// those tables appearing in the desired schema file (issue #548).
+	if ignoreConfig != nil {
+		connCfg := &util.ConnectionConfig{
+			Host:            config.Host,
+			Port:            config.Port,
+			Database:        config.DB,
+			User:            config.User,
+			Password:        config.Password,
+			SSLMode:         config.SSLMode,
+			ApplicationName: config.ApplicationName,
+		}
+		desiredState, err = prependIgnoredTableStubs(ctx, connCfg, ignoreConfig, config.Schema, desiredState)
+		if err != nil {
+			return nil, fmt.Errorf("failed to stub ignored foreign key targets: %w", err)
+		}
+	}
+
 	// Apply desired state SQL to the provider (embedded postgres or external database)
 	if err := provider.ApplySchema(ctx, config.Schema, desiredState); err != nil {
 		return nil, fmt.Errorf("failed to apply desired state: %w", err)

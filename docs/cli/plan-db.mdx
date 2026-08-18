@@ -15,7 +15,7 @@ By default, the `plan` command (and `apply` command in File Mode) spins up a tem
 Use an external database for plan generation when:
 
 - Your schema uses **PostgreSQL extensions** (like `hstore`, `postgis`, `uuid-ossp`, etc.) - The embedded database doesn't have extensions pre-installed, causing plan generation to fail with "type does not exist" errors ([#121](https://github.com/pgplex/pgschema/issues/121))
-- Your schema has **cross-schema foreign key references** - The embedded approach only loads one schema at a time, breaking foreign key constraints that reference tables in other schemas ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548)). You can also stub those objects in the desired SQL file itself (see below).
+- Your schema has **cross-schema foreign key references** - The embedded approach only loads one schema at a time, breaking foreign key constraints that reference tables in other schemas ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548)). If the referenced table already exists on the target database, you can [ignore that schema or table](/cli/ignore) instead and pgschema will stub it for plan. Otherwise stub the objects in the desired SQL file, or use an external plan database (see below).
 
 ### How It Works
 
@@ -104,9 +104,19 @@ CREATE TABLE products (
 
 ### Handling Cross-Schema Foreign Keys
 
-If your schema has foreign keys that reference tables in other schemas, those referenced objects must exist when `plan` applies your desired-state SQL. `.pgschemaignore` cannot skip this: the SQL is applied before ignore filtering.
+If your schema has foreign keys that reference tables in other schemas, those referenced objects must exist when `plan` applies your desired-state SQL.
 
-Two approaches work:
+If the referenced table already exists on the **target** database and you do not want pgschema to manage it, ignore it and keep the FK in your schema file. `plan` clones a stub from the target:
+
+```toml
+# .pgschemaignore
+[schemas]
+patterns = ["auth"]
+```
+
+See [Ignore](/cli/ignore) for schema-qualified table patterns (`auth.users`).
+
+Otherwise, two approaches work:
 
 **Stub in the schema file** (works with the default embedded plan database). Keep managing only your app schema (`--schema public` or `--schema backend`); the stub exists so PostgreSQL can create the FK:
 

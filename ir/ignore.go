@@ -28,14 +28,44 @@ type IgnoreConfig struct {
 	Triggers          []string `toml:"triggers,omitempty"`
 	Privileges        []string `toml:"privileges,omitempty"`
 	DefaultPrivileges []string `toml:"default_privileges,omitempty"`
+	Schemas           []string `toml:"schemas,omitempty"`
 }
 
-// ShouldIgnoreTable checks if a table should be ignored based on the patterns
+// ShouldIgnoreTable checks if a table should be ignored based on the patterns.
+// Patterns match the unqualified table name (e.g. "temp_*").
 func (c *IgnoreConfig) ShouldIgnoreTable(tableName string) bool {
 	if c == nil {
 		return false
 	}
 	return c.shouldIgnore(tableName, c.Tables)
+}
+
+// ShouldIgnoreSchema checks if a schema should be ignored based on the [schemas] patterns.
+func (c *IgnoreConfig) ShouldIgnoreSchema(schemaName string) bool {
+	if c == nil {
+		return false
+	}
+	return c.shouldIgnore(schemaName, c.Schemas)
+}
+
+// ShouldIgnoreReferencedTable reports whether a table used as an FK target should
+// be treated as ignored for plan-time stubbing.
+//
+// Cross-schema references (schema != targetSchema) match [schemas] patterns or
+// schema-qualified table patterns such as "auth.users" / "auth.*". Bare table
+// names are not matched across schemas, so ignoring local "users" does not
+// stub auth.users. Same-schema references use ordinary table-name patterns.
+func (c *IgnoreConfig) ShouldIgnoreReferencedTable(schema, table, targetSchema string) bool {
+	if c == nil {
+		return false
+	}
+	if schema != "" && schema != targetSchema {
+		if c.ShouldIgnoreSchema(schema) {
+			return true
+		}
+		return c.shouldIgnore(schema+"."+table, c.Tables)
+	}
+	return c.ShouldIgnoreTable(table)
 }
 
 // ShouldIgnoreView checks if a view should be ignored based on the patterns
