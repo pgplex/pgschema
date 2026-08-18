@@ -5,13 +5,13 @@ description: "Building a declarative schema migration tool for Postgres means yo
 
 Building a declarative schema migration tool for Postgres means you eventually meet syntax most schema files never write. Below I've picked the five most intriguing from our 200+ closed user reports.
 
-**1. UNIQUE NULLS NOT DISTINCT (PG15)**
+## 1. UNIQUE NULLS NOT DISTINCT (PG15)
 
 Postgres treats NULL as distinct from NULL. `UNIQUE (email)` will store two rows with `email IS NULL`.
 
 `UNIQUE NULLS NOT DISTINCT (email)` makes those two rows collide — the uniqueness most people think they already have.
 
-**2. WITHOUT OVERLAPS / PERIOD (PG18)**
+## 2. WITHOUT OVERLAPS / PERIOD (PG18)
 
 ```sql
 PRIMARY KEY (id, valid_period WITHOUT OVERLAPS)
@@ -26,7 +26,7 @@ FOREIGN KEY (contact_id, PERIOD valid_period)
 
 The child period has to sit inside a parent version.
 
-**3. BEGIN ATOMIC (PG14)**
+## 3. BEGIN ATOMIC (PG14)
 
 Most functions are a dollar-quoted string. The SQL-standard form is not:
 
@@ -42,7 +42,9 @@ END;
 
 No `$$` quotes. The parser sees real statements.
 
-**4. CHECK (false) NO INHERIT**
+## 4. CHECK (false) NO INHERIT
+
+My personal favorite, since it feels like applying design patterns to SQL.
 
 Classic pattern on an `INHERITS` parent: reject inserts on the parent, let children accept them.
 
@@ -52,7 +54,7 @@ CONSTRAINT no_direct_insert CHECK (false) NO INHERIT
 
 Without `NO INHERIT`, every child inherits the always-false check and nothing can insert.
 
-**5. CREATE CONSTRAINT TRIGGER**
+## 5. CREATE CONSTRAINT TRIGGER
 
 A trigger that behaves like a constraint: it can be `DEFERRABLE INITIALLY DEFERRED` and fire at commit. Regular `CREATE TRIGGER` cannot.
 
