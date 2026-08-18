@@ -131,8 +131,8 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 // non-comment parts, and reassembles.
 //
 // Limitation: E'...' escape-string syntax uses backslash-escaped quotes (E'it\'s')
-// rather than doubled quotes ('it”s'). This parser only recognises the ” form.
-// With E'content\”, a backslash-escaped quote may cause the parser to mistrack
+// rather than doubled quotes ('it''s'). This parser only recognises the '' form.
+// With E'content\'', a backslash-escaped quote may cause the parser to mistrack
 // string boundaries, which can result in either:
 //   - false-negative: schema qualifiers after the string are not stripped, or
 //   - false-positive: schema prefixes inside the E-string are incorrectly stripped.
