@@ -254,8 +254,11 @@ func needsRecreate(old, new *ir.RLSPolicy) bool {
 	if old.Permissive != new.Permissive {
 		return true
 	}
-	// PostgreSQL ALTER POLICY cannot clear an existing WITH CHECK clause,
-	// so removing it requires DROP + CREATE.
+	// PostgreSQL ALTER POLICY cannot clear an existing USING or WITH CHECK
+	// clause, so removing either requires DROP + CREATE.
+	if old.Using != "" && new.Using == "" {
+		return true
+	}
 	if old.WithCheck != "" && new.WithCheck == "" {
 		return true
 	}

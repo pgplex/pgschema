@@ -1661,6 +1661,19 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				CanRunInTransaction: true,
 			}
 			collector.collect(context, sql)
+
+			if policyDiff.New.Comment != "" {
+				sql = fmt.Sprintf("COMMENT ON POLICY %s ON %s IS %s;",
+					ir.QuoteIdentifier(policyDiff.New.Name), tableName, quoteString(policyDiff.New.Comment))
+				context = &diffContext{
+					Type:                DiffTypeTablePolicy,
+					Operation:           DiffOperationAlter,
+					Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, policyDiff.New.Name),
+					Source:              policyDiff,
+					CanRunInTransaction: true,
+				}
+				collector.collect(context, sql)
+			}
 		} else {
 			// Use ALTER POLICY for simple changes
 			sql := generateAlterPolicySQL(policyDiff.Old, policyDiff.New, targetSchema)
