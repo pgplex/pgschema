@@ -2,13 +2,12 @@ package plan
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	"github.com/pgplex/pgschema/cmd/util"
-	"github.com/pgplex/pgschema/internal/logger"
 	"github.com/pgplex/pgschema/internal/postgres"
 	"github.com/pgplex/pgschema/ir"
+	"github.com/pgplex/pgschema/cmd/util"
+	"github.com/pgplex/pgschema/internal/logger"
 )
 
 // prependPartitionParentStubs creates stub CREATE TABLE ... PARTITION BY
@@ -60,11 +59,6 @@ func prependPartitionParentStubs(ctx context.Context, cfg *util.ConnectionConfig
 		}
 		logger.Get().Debug("prepending stub for cross-schema partition parent",
 			"schema", ref.Schema, "table", ref.Table)
-		// Drop the parent if it already exists in the plan DB (e.g. when the
-		// plan DB mirrors the target). CASCADE detaches existing partitions so
-		// the desired SQL can re-attach its own partition children cleanly.
-		qualified := ir.QualifyEntityNameWithQuotesMode(ref.Schema, ref.Table, targetSchema, ref.Schema != targetSchema)
-		stubs.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE;\n", qualified))
 		stubs.WriteString(ddl)
 	}
 
