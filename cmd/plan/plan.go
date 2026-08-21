@@ -316,6 +316,24 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		}
 	}
 
+	// Stub cross-schema partition parents so PARTITION OF references resolve
+	// in the plan database (issue #552).
+	{
+		connCfg := &util.ConnectionConfig{
+			Host:            config.Host,
+			Port:            config.Port,
+			Database:        config.DB,
+			User:            config.User,
+			Password:        config.Password,
+			SSLMode:         config.SSLMode,
+			ApplicationName: config.ApplicationName,
+		}
+		desiredState, err = prependPartitionParentStubs(ctx, connCfg, config.Schema, desiredState)
+		if err != nil {
+			return nil, fmt.Errorf("failed to stub cross-schema partition parents: %w", err)
+		}
+	}
+
 	// Apply desired state SQL to the provider (embedded postgres or external database)
 	if err := provider.ApplySchema(ctx, config.Schema, desiredState); err != nil {
 		return nil, fmt.Errorf("failed to apply desired state: %w", err)

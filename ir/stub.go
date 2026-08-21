@@ -71,6 +71,95 @@ func BuildTableStubSQL(ctx context.Context, db *sql.DB, schema, table, targetSch
 	return b.String(), nil
 }
 
+// BuildPartitionedTableStubSQL returns CREATE TABLE DDL for a partitioned
+// parent table that is referenced by PARTITION OF from a child in another
+// schema. The stub uses the provided stubName (unqualified) so it lands in
+// the temp schema via search_path, avoiding mutations to persistent schemas
+// in the plan database. The stub includes the PARTITION BY clause so the
+// child can attach as a partition.
+//
+// Returns an empty string if the table does not exist or is not partitioned.
+func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table, stubName string) (string, error) {
+	cols, err := queryStubColumns(ctx, db, schema, table)
+	if err != nil {
+		return "", err
+	}
+	if len(cols) == 0 {
+		return "", nil
+	}
+
+	partDef, err := queryPartitionKeyDef(ctx, db, schema, table)
+	if err != nil {
+		return "", err
+	}
+	if partDef == "" {
+		return "", nil
+	}
+
+	constraints, err := queryStubConstraints(ctx, db, schema, table)
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+
+	b.WriteString("-- pgschema: stub for cross-schema partition parent ")
+	b.WriteString(sanitizeComment(schema))
+	b.WriteString(".")
+	b.WriteString(sanitizeComment(table))
+	b.WriteString("\nCREATE TABLE IF NOT EXISTS ")
+	b.WriteString(QuoteIdentifier(stubName))
+	b.WriteString(" (\n")
+
+	for i, col := range cols {
+		b.WriteString("    ")
+		b.WriteString(QuoteIdentifier(col.name))
+		b.WriteString(" ")
+		b.WriteString(col.dataType)
+		if col.notNull {
+			b.WriteString(" NOT NULL")
+		}
+		if i < len(cols)-1 || len(constraints) > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+
+	for i, def := range constraints {
+		b.WriteString("    ")
+		b.WriteString(def)
+		if i < len(constraints)-1 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString(") PARTITION BY ")
+	b.WriteString(partDef)
+	b.WriteString(";\n")
+	return b.String(), nil
+}
+
+func queryPartitionKeyDef(ctx context.Context, db *sql.DB, schema, table string) (string, error) {
+	const q = `
+SELECT pg_catalog.pg_get_partkeydef(c.oid)
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = $1
+  AND c.relname = $2
+  AND c.relkind = 'p'`
+
+	var def string
+	err := db.QueryRowContext(ctx, q, schema, table).Scan(&def)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("query partition key def for %s.%s: %w", schema, table, err)
+	}
+	return def, nil
+}
+
 type stubColumn struct {
 	name     string
 	dataType string
