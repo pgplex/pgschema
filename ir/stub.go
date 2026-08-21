@@ -73,13 +73,13 @@ func BuildTableStubSQL(ctx context.Context, db *sql.DB, schema, table, targetSch
 
 // BuildPartitionedTableStubSQL returns CREATE TABLE DDL for a partitioned
 // parent table that is referenced by PARTITION OF from a child in another
-// schema. The stub uses an unqualified table name so it lands in the temp
-// schema via search_path, avoiding mutations to persistent schemas in the
-// plan database. The stub includes the PARTITION BY clause so the child can
-// attach as a partition.
+// schema. The stub uses the provided stubName (unqualified) so it lands in
+// the temp schema via search_path, avoiding mutations to persistent schemas
+// in the plan database. The stub includes the PARTITION BY clause so the
+// child can attach as a partition.
 //
 // Returns an empty string if the table does not exist or is not partitioned.
-func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table string) (string, error) {
+func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table, stubName string) (string, error) {
 	cols, err := queryStubColumns(ctx, db, schema, table)
 	if err != nil {
 		return "", err
@@ -108,7 +108,7 @@ func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table
 	b.WriteString(".")
 	b.WriteString(sanitizeComment(table))
 	b.WriteString("\nCREATE TABLE IF NOT EXISTS ")
-	b.WriteString(QuoteIdentifier(table))
+	b.WriteString(QuoteIdentifier(stubName))
 	b.WriteString(" (\n")
 
 	for i, col := range cols {

@@ -11,12 +11,22 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
+// partitionStubPrefix is prepended to stub table names to avoid collisions
+// with real tables in the temp schema.
+const partitionStubPrefix = "_pgschema_partstub_"
+
+// partitionStubName returns a unique unqualified name for a cross-schema
+// partition parent stub: _pgschema_partstub_<schema>__<table>.
+func partitionStubName(schema, table string) string {
+	return partitionStubPrefix + schema + "__" + table
+}
+
 // prependPartitionParentStubs creates stub CREATE TABLE ... PARTITION BY
 // statements for cross-schema partition parents referenced by PARTITION OF
-// in the desired SQL. The stubs use unqualified names so they land in the
-// temp schema via search_path, and the PARTITION OF references in the
-// desired SQL are rewritten to also be unqualified. This avoids creating
-// or mutating persistent objects outside the temp schema in the plan database.
+// in the desired SQL. Each stub uses a unique prefixed name to avoid
+// collisions with real tables or other stubs, and PARTITION OF references
+// are rewritten to point to the stub name. Everything stays inside the
+// temp schema via search_path.
 func prependPartitionParentStubs(ctx context.Context, cfg *util.ConnectionConfig, targetSchema, desiredSQL string) (string, error) {
 	refs := postgres.ExtractPartitionOfTargets(desiredSQL, targetSchema)
 	if len(refs) == 0 {
@@ -54,7 +64,8 @@ func prependPartitionParentStubs(ctx context.Context, cfg *util.ConnectionConfig
 	var stubs strings.Builder
 	rewritten := desiredSQL
 	for _, ref := range toStub {
-		ddl, err := ir.BuildPartitionedTableStubSQL(ctx, conn, ref.Schema, ref.Table)
+		stubName := partitionStubName(ref.Schema, ref.Table)
+		ddl, err := ir.BuildPartitionedTableStubSQL(ctx, conn, ref.Schema, ref.Table, stubName)
 		if err != nil {
 			return "", err
 		}
@@ -64,42 +75,41 @@ func prependPartitionParentStubs(ctx context.Context, cfg *util.ConnectionConfig
 			return "", fmt.Errorf("cross-schema partition parent %s.%s not found or not a partitioned table on the target database", ref.Schema, ref.Table)
 		}
 		logger.Get().Debug("prepending stub for cross-schema partition parent",
-			"schema", ref.Schema, "table", ref.Table)
+			"schema", ref.Schema, "table", ref.Table, "stubName", stubName)
 		stubs.WriteString(ddl)
 
-		// Rewrite PARTITION OF references to strip the cross-schema prefix so
-		// they resolve to the stub in the temp schema via search_path.
-		rewritten = stripPartitionOfSchema(rewritten, ref.Schema, ref.Table)
+		// Rewrite PARTITION OF references to point to the stub name.
+		rewritten = rewritePartitionOfRef(rewritten, ref.Schema, ref.Table, stubName)
 	}
 
 	return stubs.String() + rewritten, nil
 }
 
-// stripPartitionOfSchema rewrites "PARTITION OF schema.table" to
-// "PARTITION OF table" in SQL, handling both quoted and unquoted identifiers.
-func stripPartitionOfSchema(sql, schema, table string) string {
-	// Build the qualified reference as it appears in SQL.
-	// Handle both quoted and unquoted forms.
+// rewritePartitionOfRef rewrites "PARTITION OF schema.table" to
+// "PARTITION OF stubName" in SQL, handling both quoted and unquoted identifiers.
+func rewritePartitionOfRef(sql, schema, table, stubName string) string {
+	// Build the qualified reference patterns as they may appear in SQL.
 	patterns := []struct{ old, new string }{
-		// unquoted: schema.table
+		// unquoted: schema.table → stubName
 		{
 			old: strings.ToLower(schema) + "." + strings.ToLower(table),
-			new: strings.ToLower(table),
+			new: ir.QuoteIdentifier(stubName),
 		},
 	}
 
-	// Also handle quoted schema: "schema".table, "schema"."table", schema."table"
+	// Also handle quoted identifiers
 	quotedSchema := ir.QuoteIdentifier(schema)
 	quotedTable := ir.QuoteIdentifier(table)
+	quotedStub := ir.QuoteIdentifier(stubName)
 	if quotedSchema != schema {
 		patterns = append(patterns,
-			struct{ old, new string }{quotedSchema + "." + table, table},
-			struct{ old, new string }{quotedSchema + "." + quotedTable, quotedTable},
+			struct{ old, new string }{quotedSchema + "." + table, quotedStub},
+			struct{ old, new string }{quotedSchema + "." + quotedTable, quotedStub},
 		)
 	}
 	if quotedTable != table {
 		patterns = append(patterns,
-			struct{ old, new string }{schema + "." + quotedTable, quotedTable},
+			struct{ old, new string }{schema + "." + quotedTable, quotedStub},
 		)
 	}
 
@@ -119,7 +129,6 @@ func replacePartitionOfRef(sql, oldRef, newRef string) string {
 	var b strings.Builder
 	i := 0
 	for i < len(sql) {
-		// Find "partition" keyword
 		idx := strings.Index(lower[i:], "partition")
 		if idx < 0 {
 			b.WriteString(sql[i:])
@@ -128,7 +137,6 @@ func replacePartitionOfRef(sql, oldRef, newRef string) string {
 		pos := i + idx
 		b.WriteString(sql[i:pos])
 
-		// Check if it's followed by whitespace + "of" + whitespace + oldRef
 		rest := pos + len("partition")
 		j := rest
 		for j < len(sql) && (sql[j] == ' ' || sql[j] == '\t' || sql[j] == '\n' || sql[j] == '\r') {
@@ -141,7 +149,6 @@ func replacePartitionOfRef(sql, oldRef, newRef string) string {
 				k++
 			}
 			if k+len(lowerOld) <= len(sql) && strings.EqualFold(sql[k:k+len(lowerOld)], lowerOld) {
-				// Matched — write "PARTITION OF <newRef>" preserving original case of keywords
 				b.WriteString(sql[pos:afterOf])
 				b.WriteString(sql[afterOf:k])
 				b.WriteString(newRef)
