@@ -134,6 +134,47 @@ func ExtractCreateTableNames(sql, defaultSchema string) []QualifiedName {
 	return out
 }
 
+// ExtractPartitionOfTargets returns schema-qualified table names that appear
+// as PARTITION OF targets in sql. Unqualified names use defaultSchema.
+// String literals, comments, and dollar-quoted bodies are skipped.
+func ExtractPartitionOfTargets(sql, defaultSchema string) []QualifiedName {
+	seen := make(map[string]bool)
+	var out []QualifiedName
+
+	walkSQLCode(sql, func(code string) {
+		i := 0
+		for i < len(code) {
+			idx := indexKeyword(code, i, "partition")
+			if idx < 0 {
+				return
+			}
+			i = idx + len("partition")
+			i = skipSpace(code, i)
+			if !hasKeywordAt(code, i, "of") {
+				continue
+			}
+			i += len("of")
+			schema, table, next, ok := parseQualifiedName(code, i)
+			if !ok {
+				i = next
+				continue
+			}
+			i = next
+			if schema == "" {
+				schema = defaultSchema
+			}
+			key := schema + "." + table
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, QualifiedName{Schema: schema, Table: table})
+		}
+	})
+
+	return out
+}
+
 func walkSQLCode(sql string, fn func(code string)) {
 	for _, seg := range splitDollarQuotedSegments(sql) {
 		if seg.quoted {

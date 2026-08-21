@@ -71,6 +71,110 @@ func BuildTableStubSQL(ctx context.Context, db *sql.DB, schema, table, targetSch
 	return b.String(), nil
 }
 
+// BuildPartitionedTableStubSQL returns CREATE SCHEMA / CREATE TABLE DDL for a
+// partitioned parent table that is referenced by PARTITION OF from a child in
+// another schema. The stub includes the PARTITION BY clause so the child can
+// attach as a partition.
+//
+// Returns an empty string if the table does not exist or is not partitioned.
+func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table, targetSchema string) (string, error) {
+	cols, err := queryStubColumns(ctx, db, schema, table)
+	if err != nil {
+		return "", err
+	}
+	if len(cols) == 0 {
+		return "", nil
+	}
+
+	partStrategy, partKey, err := queryPartitionInfo(ctx, db, schema, table)
+	if err != nil {
+		return "", err
+	}
+	if partStrategy == "" {
+		return "", nil
+	}
+
+	constraints, err := queryStubConstraints(ctx, db, schema, table)
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	qualified := QualifyEntityNameWithQuotesMode(schema, table, targetSchema, schema != targetSchema)
+
+	if schema != targetSchema {
+		b.WriteString("CREATE SCHEMA IF NOT EXISTS ")
+		b.WriteString(QuoteIdentifier(schema))
+		b.WriteString(";\n")
+	}
+
+	b.WriteString("-- pgschema: stub for cross-schema partition parent ")
+	b.WriteString(sanitizeComment(schema))
+	b.WriteString(".")
+	b.WriteString(sanitizeComment(table))
+	b.WriteString("\nCREATE TABLE IF NOT EXISTS ")
+	b.WriteString(qualified)
+	b.WriteString(" (\n")
+
+	for i, col := range cols {
+		b.WriteString("    ")
+		b.WriteString(QuoteIdentifier(col.name))
+		b.WriteString(" ")
+		b.WriteString(col.dataType)
+		if col.notNull {
+			b.WriteString(" NOT NULL")
+		}
+		if i < len(cols)-1 || len(constraints) > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+
+	for i, def := range constraints {
+		b.WriteString("    ")
+		b.WriteString(def)
+		if i < len(constraints)-1 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString(") PARTITION BY ")
+	b.WriteString(partStrategy)
+	b.WriteString(" (")
+	b.WriteString(partKey)
+	b.WriteString(");\n")
+	return b.String(), nil
+}
+
+func queryPartitionInfo(ctx context.Context, db *sql.DB, schema, table string) (strategy, key string, err error) {
+	const q = `
+SELECT
+    CASE c.relkind WHEN 'p' THEN
+        CASE pt.partstrat
+            WHEN 'h' THEN 'HASH'
+            WHEN 'l' THEN 'LIST'
+            WHEN 'r' THEN 'RANGE'
+        END
+    END AS strategy,
+    pg_catalog.pg_get_partkeydef(c.oid) AS partition_key
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_catalog.pg_partitioned_table pt ON pt.partrelid = c.oid
+WHERE n.nspname = $1
+  AND c.relname = $2
+  AND c.relkind = 'p'`
+
+	err = db.QueryRowContext(ctx, q, schema, table).Scan(&strategy, &key)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("query partition info for %s.%s: %w", schema, table, err)
+	}
+	return strategy, key, nil
+}
+
 type stubColumn struct {
 	name     string
 	dataType string

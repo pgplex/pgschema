@@ -126,3 +126,52 @@ func TestExtractCreateTableNames(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractPartitionOfTargets(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		defaultSchema string
+		want          []QualifiedName
+	}{
+		{
+			name:          "simple partition of",
+			sql:           "CREATE TABLE child PARTITION OF parent FOR VALUES IN ('a');",
+			defaultSchema: "public",
+			want:          []QualifiedName{{Schema: "public", Table: "parent"}},
+		},
+		{
+			name:          "qualified partition of",
+			sql:           "CREATE TABLE data.child PARTITION OF core.parent FOR VALUES FROM (1) TO (100);",
+			defaultSchema: "data",
+			want:          []QualifiedName{{Schema: "core", Table: "parent"}},
+		},
+		{
+			name:          "multiple partitions same parent deduped",
+			sql:           "CREATE TABLE c1 PARTITION OF parent FOR VALUES IN ('a');\nCREATE TABLE c2 PARTITION OF parent FOR VALUES IN ('b');",
+			defaultSchema: "public",
+			want:          []QualifiedName{{Schema: "public", Table: "parent"}},
+		},
+		{
+			name:          "partition by not matched",
+			sql:           "CREATE TABLE parent (id int) PARTITION BY RANGE (id);",
+			defaultSchema: "public",
+			want:          nil,
+		},
+		{
+			name:          "quoted identifiers",
+			sql:           `CREATE TABLE "Child" PARTITION OF "Parent" FOR VALUES IN (1);`,
+			defaultSchema: "public",
+			want:          []QualifiedName{{Schema: "public", Table: "Parent"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractPartitionOfTargets(tt.sql, tt.defaultSchema)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ExtractPartitionOfTargets() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
