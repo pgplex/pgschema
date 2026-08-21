@@ -175,3 +175,48 @@ func TestExtractPartitionOfTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractDefaultPrivilegeRoles(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []string
+	}{
+		{
+			name: "single role",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;`,
+			want: []string{"postgres"},
+		},
+		{
+			name: "quoted role",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA public GRANT ALL ON TABLES TO authenticated;`,
+			want: []string{"supabase_admin"},
+		},
+		{
+			name: "multiple distinct roles deduped",
+			sql: `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT INSERT ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA public GRANT ALL ON TABLES TO authenticated;`,
+			want: []string{"postgres", "supabase_admin"},
+		},
+		{
+			name: "no alter default privileges",
+			sql:  `CREATE TABLE users (id int); ALTER TABLE users ADD COLUMN name text;`,
+			want: nil,
+		},
+		{
+			name: "case insensitive keywords",
+			sql:  `alter default privileges for role myuser in schema public grant select on tables to reader;`,
+			want: []string{"myuser"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractDefaultPrivilegeRoles(tt.sql)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ExtractDefaultPrivilegeRoles() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
