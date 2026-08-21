@@ -175,21 +175,26 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// the desired SQL can apply in the plan database without "permission denied"
 	// errors (issue #553). The plan user must be a member of these roles for
 	// PostgreSQL to accept the ALTER DEFAULT PRIVILEGES statement.
-	stubRoles := ExtractDefaultPrivilegeRoles(schemaAgnosticSQL)
-	for _, role := range stubRoles {
-		createRoleSQL := fmt.Sprintf("DO $$ BEGIN CREATE ROLE %s; EXCEPTION WHEN duplicate_object THEN NULL; END $$", quoteIdent(role))
+	// Only roles that do not already exist are created and tracked for cleanup.
+	candidateRoles := ExtractDefaultPrivilegeRoles(schemaAgnosticSQL)
+	for _, role := range candidateRoles {
+		var exists bool
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)", role).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to check existence of role %s: %w", role, err)
+		}
+		if exists {
+			continue
+		}
+		createRoleSQL := fmt.Sprintf("CREATE ROLE %s", quoteIdent(role))
 		if _, err := util.ExecContextWithLogging(ctx, conn, createRoleSQL, "create stub role for default privileges"); err != nil {
 			return fmt.Errorf("failed to create stub role %s: %w", role, err)
 		}
 		grantSQL := fmt.Sprintf("GRANT %s TO %s", quoteIdent(role), quoteIdent(ed.username))
 		if _, err := util.ExecContextWithLogging(ctx, conn, grantSQL, "grant stub role membership"); err != nil {
-			// Ignore if already a member
-			if !strings.Contains(err.Error(), "already a member") {
-				return fmt.Errorf("failed to grant role %s to %s: %w", role, ed.username, err)
-			}
+			return fmt.Errorf("failed to grant role %s to %s: %w", role, ed.username, err)
 		}
+		ed.stubRoles = append(ed.stubRoles, role)
 	}
-	ed.stubRoles = stubRoles
 
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
@@ -214,8 +219,10 @@ func (ed *ExternalDatabase) Stop() error {
 		// Ignore errors - this is best effort cleanup
 		_, _ = ed.db.ExecContext(ctx, dropSchemaSQL)
 
-		// Drop stub roles created for ALTER DEFAULT PRIVILEGES (issue #553)
+		// Clean up stub roles we created for ALTER DEFAULT PRIVILEGES (issue #553).
+		// Only roles we actually created are tracked, so this won't touch pre-existing roles.
 		for _, role := range ed.stubRoles {
+			_, _ = ed.db.ExecContext(ctx, fmt.Sprintf("REVOKE %s FROM %s", quoteIdent(role), quoteIdent(ed.username)))
 			_, _ = ed.db.ExecContext(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(role)))
 		}
 	}
