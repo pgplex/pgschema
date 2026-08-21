@@ -86,11 +86,11 @@ func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table
 		return "", nil
 	}
 
-	partStrategy, partKey, err := queryPartitionInfo(ctx, db, schema, table)
+	partDef, err := queryPartitionKeyDef(ctx, db, schema, table)
 	if err != nil {
 		return "", err
 	}
-	if partStrategy == "" {
+	if partDef == "" {
 		return "", nil
 	}
 
@@ -140,39 +140,29 @@ func BuildPartitionedTableStubSQL(ctx context.Context, db *sql.DB, schema, table
 	}
 
 	b.WriteString(") PARTITION BY ")
-	b.WriteString(partStrategy)
-	b.WriteString(" (")
-	b.WriteString(partKey)
-	b.WriteString(");\n")
+	b.WriteString(partDef)
+	b.WriteString(";\n")
 	return b.String(), nil
 }
 
-func queryPartitionInfo(ctx context.Context, db *sql.DB, schema, table string) (strategy, key string, err error) {
+func queryPartitionKeyDef(ctx context.Context, db *sql.DB, schema, table string) (string, error) {
 	const q = `
-SELECT
-    CASE c.relkind WHEN 'p' THEN
-        CASE pt.partstrat
-            WHEN 'h' THEN 'HASH'
-            WHEN 'l' THEN 'LIST'
-            WHEN 'r' THEN 'RANGE'
-        END
-    END AS strategy,
-    pg_catalog.pg_get_partkeydef(c.oid) AS partition_key
+SELECT pg_catalog.pg_get_partkeydef(c.oid)
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-LEFT JOIN pg_catalog.pg_partitioned_table pt ON pt.partrelid = c.oid
 WHERE n.nspname = $1
   AND c.relname = $2
   AND c.relkind = 'p'`
 
-	err = db.QueryRowContext(ctx, q, schema, table).Scan(&strategy, &key)
+	var def string
+	err := db.QueryRowContext(ctx, q, schema, table).Scan(&def)
 	if err == sql.ErrNoRows {
-		return "", "", nil
+		return "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("query partition info for %s.%s: %w", schema, table, err)
+		return "", fmt.Errorf("query partition key def for %s.%s: %w", schema, table, err)
 	}
-	return strategy, key, nil
+	return def, nil
 }
 
 type stubColumn struct {
