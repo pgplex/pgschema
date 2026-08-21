@@ -176,7 +176,7 @@ func ExtractPartitionOfTargets(sql, defaultSchema string) []QualifiedName {
 }
 
 // ExtractDefaultPrivilegeRoles returns distinct role names that appear in
-// ALTER DEFAULT PRIVILEGES FOR ROLE <role> statements in sql.
+// ALTER DEFAULT PRIVILEGES FOR { ROLE | USER } <role> [, <role> ...] statements.
 // String literals, comments, and dollar-quoted bodies are skipped.
 func ExtractDefaultPrivilegeRoles(sql string) []string {
 	seen := make(map[string]bool)
@@ -201,19 +201,31 @@ func ExtractDefaultPrivilegeRoles(sql string) []string {
 			}
 			i += len("for")
 			i = skipSpace(code, i)
-			if !hasKeywordAt(code, i, "role") {
+			if !hasKeywordAt(code, i, "role") && !hasKeywordAt(code, i, "user") {
 				continue
 			}
-			i += len("role")
-			_, role, next, ok := parseQualifiedName(code, i)
-			if !ok {
+			if hasKeywordAt(code, i, "role") {
+				i += len("role")
+			} else {
+				i += len("user")
+			}
+			for {
+				_, role, next, ok := parseQualifiedName(code, i)
+				if !ok {
+					i = next
+					break
+				}
 				i = next
-				continue
-			}
-			i = next
-			if !seen[role] {
-				seen[role] = true
-				out = append(out, role)
+				if !seen[role] {
+					seen[role] = true
+					out = append(out, role)
+				}
+				i = skipSpace(code, i)
+				if i < len(code) && code[i] == ',' {
+					i++
+				} else {
+					break
+				}
 			}
 		}
 	})

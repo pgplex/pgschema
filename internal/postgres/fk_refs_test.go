@@ -209,6 +209,21 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA public GRANT ALL ON
 			sql:  `alter default privileges for role myuser in schema public grant select on tables to reader;`,
 			want: []string{"myuser"},
 		},
+		{
+			name: "FOR USER synonym",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR USER myuser IN SCHEMA public GRANT SELECT ON TABLES TO reader;`,
+			want: []string{"myuser"},
+		},
+		{
+			name: "comma-separated role list",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR ROLE role1, role2, role3 IN SCHEMA public GRANT SELECT ON TABLES TO reader;`,
+			want: []string{"role1", "role2", "role3"},
+		},
+		{
+			name: "comma-separated with FOR USER",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR USER admin, "app_owner" IN SCHEMA public GRANT ALL ON TABLES TO app;`,
+			want: []string{"admin", "app_owner"},
+		},
 	}
 
 	for _, tt := range tests {
