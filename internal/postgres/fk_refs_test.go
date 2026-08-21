@@ -175,3 +175,63 @@ func TestExtractPartitionOfTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractDefaultPrivilegeRoles(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []string
+	}{
+		{
+			name: "single role",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;`,
+			want: []string{"postgres"},
+		},
+		{
+			name: "quoted role",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA public GRANT ALL ON TABLES TO authenticated;`,
+			want: []string{"supabase_admin"},
+		},
+		{
+			name: "multiple distinct roles deduped",
+			sql: `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT INSERT ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA public GRANT ALL ON TABLES TO authenticated;`,
+			want: []string{"postgres", "supabase_admin"},
+		},
+		{
+			name: "no alter default privileges",
+			sql:  `CREATE TABLE users (id int); ALTER TABLE users ADD COLUMN name text;`,
+			want: nil,
+		},
+		{
+			name: "case insensitive keywords",
+			sql:  `alter default privileges for role myuser in schema public grant select on tables to reader;`,
+			want: []string{"myuser"},
+		},
+		{
+			name: "FOR USER synonym",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR USER myuser IN SCHEMA public GRANT SELECT ON TABLES TO reader;`,
+			want: []string{"myuser"},
+		},
+		{
+			name: "comma-separated role list",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR ROLE role1, role2, role3 IN SCHEMA public GRANT SELECT ON TABLES TO reader;`,
+			want: []string{"role1", "role2", "role3"},
+		},
+		{
+			name: "comma-separated with FOR USER",
+			sql:  `ALTER DEFAULT PRIVILEGES FOR USER admin, "app_owner" IN SCHEMA public GRANT ALL ON TABLES TO app;`,
+			want: []string{"admin", "app_owner"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractDefaultPrivilegeRoles(tt.sql)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ExtractDefaultPrivilegeRoles() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}

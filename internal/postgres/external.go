@@ -21,8 +21,9 @@ type ExternalDatabase struct {
 	database           string
 	username           string
 	password           string
-	tempSchema         string // Temporary schema name with timestamp suffix
-	targetMajorVersion int    // Expected major version (from target database)
+	tempSchema         string   // Temporary schema name with timestamp suffix
+	targetMajorVersion int      // Expected major version (from target database)
+	stubRoles          []string // Roles created for ALTER DEFAULT PRIVILEGES (issue #553)
 }
 
 // ExternalDatabaseConfig holds configuration for connecting to an external database
@@ -170,6 +171,35 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// so we need to rewrite it to point to the temporary schema (issue #335)
 	schemaAgnosticSQL = replaceSchemaInSearchPath(schemaAgnosticSQL, schema, ed.tempSchema)
 
+	// Create stub roles referenced by ALTER DEFAULT PRIVILEGES FOR ROLE so that
+	// the desired SQL can apply in the plan database without "permission denied"
+	// errors (issue #553). The plan user must be a member of these roles for
+	// PostgreSQL to accept the ALTER DEFAULT PRIVILEGES statement.
+	// Only roles that do not already exist are created and tracked for cleanup.
+	candidateRoles := ExtractDefaultPrivilegeRoles(schemaAgnosticSQL)
+	for _, role := range candidateRoles {
+		var exists bool
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)", role).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to check existence of role %s: %w", role, err)
+		}
+		if exists {
+			var isMember bool
+			if err := conn.QueryRowContext(ctx, "SELECT pg_has_role($1, $2, 'MEMBER')", ed.username, role).Scan(&isMember); err != nil || !isMember {
+				return fmt.Errorf("role %q already exists in the plan database and the plan user %q is not a member of it; grant membership manually or use a plan user that is already a member of that role", role, ed.username)
+			}
+			continue
+		}
+		createRoleSQL := fmt.Sprintf("CREATE ROLE %s", quoteIdent(role))
+		if _, err := util.ExecContextWithLogging(ctx, conn, createRoleSQL, "create stub role for default privileges"); err != nil {
+			return fmt.Errorf("failed to create stub role %s: %w", role, err)
+		}
+		grantSQL := fmt.Sprintf("GRANT %s TO %s", quoteIdent(role), quoteIdent(ed.username))
+		if _, err := util.ExecContextWithLogging(ctx, conn, grantSQL, "grant stub role membership"); err != nil {
+			return fmt.Errorf("failed to grant role %s to %s: %w", role, ed.username, err)
+		}
+		ed.stubRoles = append(ed.stubRoles, role)
+	}
+
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.
@@ -192,6 +222,13 @@ func (ed *ExternalDatabase) Stop() error {
 		dropSchemaSQL := fmt.Sprintf("DROP SCHEMA IF EXISTS \"%s\" CASCADE", ed.tempSchema)
 		// Ignore errors - this is best effort cleanup
 		_, _ = ed.db.ExecContext(ctx, dropSchemaSQL)
+
+		// Clean up stub roles we created for ALTER DEFAULT PRIVILEGES (issue #553).
+		// Only roles we actually created are tracked, so this won't touch pre-existing roles.
+		for _, role := range ed.stubRoles {
+			_, _ = ed.db.ExecContext(ctx, fmt.Sprintf("REVOKE %s FROM %s", quoteIdent(role), quoteIdent(ed.username)))
+			_, _ = ed.db.ExecContext(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(role)))
+		}
 	}
 
 	// Close database connection
@@ -258,6 +295,10 @@ func getExtensionSchemas(db *sql.DB) (map[string]string, error) {
 		extensions[name] = schema
 	}
 	return extensions, rows.Err()
+}
+
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // detectMajorVersion queries the database to determine its PostgreSQL major version

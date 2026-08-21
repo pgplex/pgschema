@@ -175,6 +175,64 @@ func ExtractPartitionOfTargets(sql, defaultSchema string) []QualifiedName {
 	return out
 }
 
+// ExtractDefaultPrivilegeRoles returns distinct role names that appear in
+// ALTER DEFAULT PRIVILEGES FOR { ROLE | USER } <role> [, <role> ...] statements.
+// String literals, comments, and dollar-quoted bodies are skipped.
+func ExtractDefaultPrivilegeRoles(sql string) []string {
+	seen := make(map[string]bool)
+	var out []string
+
+	walkSQLCode(sql, func(code string) {
+		i := 0
+		for i < len(code) {
+			idx := indexKeyword(code, i, "default")
+			if idx < 0 {
+				return
+			}
+			i = idx + len("default")
+			i = skipSpace(code, i)
+			if !hasKeywordAt(code, i, "privileges") {
+				continue
+			}
+			i += len("privileges")
+			i = skipSpace(code, i)
+			if !hasKeywordAt(code, i, "for") {
+				continue
+			}
+			i += len("for")
+			i = skipSpace(code, i)
+			if !hasKeywordAt(code, i, "role") && !hasKeywordAt(code, i, "user") {
+				continue
+			}
+			if hasKeywordAt(code, i, "role") {
+				i += len("role")
+			} else {
+				i += len("user")
+			}
+			for {
+				_, role, next, ok := parseQualifiedName(code, i)
+				if !ok {
+					i = next
+					break
+				}
+				i = next
+				if !seen[role] {
+					seen[role] = true
+					out = append(out, role)
+				}
+				i = skipSpace(code, i)
+				if i < len(code) && code[i] == ',' {
+					i++
+				} else {
+					break
+				}
+			}
+		}
+	})
+
+	return out
+}
+
 func walkSQLCode(sql string, fn func(code string)) {
 	for _, seg := range splitDollarQuotedSegments(sql) {
 		if seg.quoted {
