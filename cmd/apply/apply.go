@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	planCmd "github.com/pgplex/pgschema/cmd/plan"
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/fingerprint"
@@ -18,6 +21,13 @@ import (
 	"github.com/pgplex/pgschema/ir"
 	"github.com/spf13/cobra"
 )
+
+// lockNotAvailableSQLState is the PostgreSQL SQLSTATE raised when a statement
+// fails to acquire a lock before lock_timeout expires.
+const lockNotAvailableSQLState = "55P03"
+
+// maxLockRetryBackoff caps the exponential backoff between lock timeout retries.
+const maxLockRetryBackoff = 30 * time.Second
 
 var (
 	applyHost            string
@@ -31,6 +41,8 @@ var (
 	applyAutoApprove     bool
 	applyNoColor         bool
 	applyLockTimeout     string
+	applyLockRetries     int
+	applyLockRetryWait   time.Duration
 	applyApplicationName string
 
 	// Plan database connection flags (optional - for using external database instead of embedded postgres)
@@ -72,6 +84,8 @@ func init() {
 	ApplyCmd.Flags().BoolVar(&applyAutoApprove, "auto-approve", false, "Apply changes without prompting for approval")
 	ApplyCmd.Flags().BoolVar(&applyNoColor, "no-color", false, "Disable colored output")
 	ApplyCmd.Flags().StringVar(&applyLockTimeout, "lock-timeout", "", "Maximum time to wait for database locks (e.g., 30s, 5m, 1h)")
+	ApplyCmd.Flags().IntVar(&applyLockRetries, "lock-timeout-retries", 0, "Number of times to retry a statement that fails with a lock timeout (requires --lock-timeout)")
+	ApplyCmd.Flags().DurationVar(&applyLockRetryWait, "lock-timeout-retry-wait", 1*time.Second, "Initial wait before retrying a lock timeout failure; doubles after each retry up to 30s")
 	ApplyCmd.Flags().StringVar(&applyApplicationName, "application-name", "pgschema", "Application name for database connection (visible in pg_stat_activity) (env: PGAPPNAME)")
 
 	// Plan database connection flags (optional - for using external database instead of embedded postgres when using --file)
@@ -103,6 +117,8 @@ type ApplyConfig struct {
 	NoColor         bool
 	Quiet           bool // Suppress plan display and progress messages (useful for tests)
 	LockTimeout     string
+	LockRetries     int           // Number of retries on lock timeout (55P03) failures
+	LockRetryWait   time.Duration // Initial backoff before the first retry; doubles thereafter
 	ApplicationName string
 	SSLMode         string
 	// Plan database configuration (needed when GeneratePlan checks provider SSL mode)
@@ -247,13 +263,15 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 		return nil
 	}
 
+	retry := lockRetryConfig{MaxRetries: config.LockRetries, Backoff: config.LockRetryWait}
+
 	// Execute by groups with wait directive support
 	for i, group := range migrationPlan.Groups {
 		if !config.Quiet {
 			fmt.Printf("\nExecuting group %d/%d...\n", i+1, len(migrationPlan.Groups))
 		}
 
-		err = executeGroup(ctx, conn, group, i+1, config.Quiet)
+		err = executeGroup(ctx, conn, group, i+1, config.Quiet, retry)
 		if err != nil {
 			return err
 		}
@@ -316,6 +334,12 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Lock timeout retries only make sense alongside a lock timeout: without one,
+	// statements block indefinitely instead of failing with a retryable error.
+	if applyLockRetries > 0 && applyLockTimeout == "" {
+		return fmt.Errorf("--lock-timeout-retries requires --lock-timeout to be set")
+	}
+
 	// Build configuration
 	config := &ApplyConfig{
 		Host:            applyHost,
@@ -327,6 +351,8 @@ func RunApply(cmd *cobra.Command, args []string) error {
 		AutoApprove:     applyAutoApprove,
 		NoColor:         applyNoColor,
 		LockTimeout:     applyLockTimeout,
+		LockRetries:     applyLockRetries,
+		LockRetryWait:   applyLockRetryWait,
 		ApplicationName: applyApplicationName,
 		SSLMode:         finalSSLMode,
 	}
@@ -444,7 +470,7 @@ func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, 
 }
 
 // executeGroup executes all steps in a group, handling directives separately from SQL statements
-func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool) error {
+func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool, retry lockRetryConfig) error {
 	// Check if this group has directives
 	hasDirectives := false
 
@@ -457,15 +483,15 @@ func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, 
 
 	if !hasDirectives {
 		// No directives - concatenate all SQL and execute in implicit transaction
-		return executeGroupConcatenated(ctx, conn, group, groupNum, quiet)
+		return executeGroupConcatenated(ctx, conn, group, groupNum, quiet, retry)
 	} else {
 		// Has directives - execute statements individually
-		return executeGroupIndividually(ctx, conn, group, groupNum, quiet)
+		return executeGroupIndividually(ctx, conn, group, groupNum, quiet, retry)
 	}
 }
 
 // executeGroupConcatenated concatenates all SQL statements and executes them in an implicit transaction
-func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool) error {
+func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool, retry lockRetryConfig) error {
 	var sqlStatements []string
 
 	// Collect all SQL statements
@@ -480,8 +506,9 @@ func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.Exec
 		fmt.Printf("  Executing %d statements in implicit transaction\n", len(sqlStatements))
 	}
 
-	// Execute all statements in a single call (implicit transaction)
-	_, err := util.ExecContextWithLogging(ctx, conn, concatenatedSQL, fmt.Sprintf("execute %d statements in group %d", len(sqlStatements), groupNum))
+	// Execute all statements in a single call (implicit transaction). Since the
+	// batch is atomic, retrying the whole batch on a lock timeout is safe.
+	_, err := execWithLockRetry(ctx, conn, concatenatedSQL, fmt.Sprintf("execute %d statements in group %d", len(sqlStatements), groupNum), retry, quiet)
 	if err != nil {
 		return fmt.Errorf("failed to execute concatenated statements in group %d: %w", groupNum, err)
 	}
@@ -490,7 +517,7 @@ func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.Exec
 }
 
 // executeGroupIndividually executes statements individually without transactions
-func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool) error {
+func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool, retry lockRetryConfig) error {
 	for stepIdx, step := range group.Steps {
 		if step.Directive != nil {
 			// Handle directive execution
@@ -504,13 +531,63 @@ func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.Exec
 				fmt.Printf("  Executing: %s\n", truncateSQL(step.SQL, 80))
 			}
 
-			_, err := util.ExecContextWithLogging(ctx, conn, step.SQL, fmt.Sprintf("execute statement in group %d, step %d", groupNum, stepIdx+1))
+			_, err := execWithLockRetry(ctx, conn, step.SQL, fmt.Sprintf("execute statement in group %d, step %d", groupNum, stepIdx+1), retry, quiet)
 			if err != nil {
 				return fmt.Errorf("failed to execute statement in group %d, step %d: %w", groupNum, stepIdx+1, err)
 			}
 		}
 	}
 	return nil
+}
+
+// lockRetryConfig controls retry behavior for statements that fail because they
+// could not acquire a lock before lock_timeout expired (SQLSTATE 55P03).
+type lockRetryConfig struct {
+	MaxRetries int           // Number of additional attempts after the first failure
+	Backoff    time.Duration // Initial wait before the first retry; doubles after each subsequent retry
+}
+
+// sqlExecer is satisfied by both *sql.DB and *sql.Conn, matching util.ExecContextWithLogging.
+type sqlExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// isLockTimeoutError reports whether err is a PostgreSQL error raised because a
+// statement failed to acquire a lock before lock_timeout expired.
+func isLockTimeoutError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == lockNotAvailableSQLState
+	}
+	return false
+}
+
+// execWithLockRetry executes sqlStmt, retrying with exponential backoff when the
+// failure is a lock timeout (SQLSTATE 55P03). Any other error is returned immediately.
+func execWithLockRetry(ctx context.Context, conn sqlExecer, sqlStmt, description string, retry lockRetryConfig, quiet bool) (sql.Result, error) {
+	backoff := retry.Backoff
+
+	for attempt := 0; ; attempt++ {
+		result, err := util.ExecContextWithLogging(ctx, conn, sqlStmt, description)
+		if err == nil || !isLockTimeoutError(err) || attempt >= retry.MaxRetries {
+			return result, err
+		}
+
+		if !quiet {
+			fmt.Printf("  Lock not available, retrying in %s (attempt %d/%d)...\n", backoff, attempt+1, retry.MaxRetries)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > maxLockRetryBackoff {
+			backoff = maxLockRetryBackoff
+		}
+	}
 }
 
 // truncateSQL truncates a SQL statement for display purposes

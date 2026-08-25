@@ -101,6 +101,24 @@ func TestApplyCommand(t *testing.T) {
 		t.Errorf("Expected default lock-timeout to be empty, got '%s'", lockTimeoutFlag.DefValue)
 	}
 
+	// Test lock-timeout-retries flag
+	lockRetriesFlag := flags.Lookup("lock-timeout-retries")
+	if lockRetriesFlag == nil {
+		t.Error("Expected --lock-timeout-retries flag to be defined")
+	}
+	if lockRetriesFlag.DefValue != "0" {
+		t.Errorf("Expected default lock-timeout-retries to be '0', got '%s'", lockRetriesFlag.DefValue)
+	}
+
+	// Test lock-timeout-retry-wait flag
+	lockRetryWaitFlag := flags.Lookup("lock-timeout-retry-wait")
+	if lockRetryWaitFlag == nil {
+		t.Error("Expected --lock-timeout-retry-wait flag to be defined")
+	}
+	if lockRetryWaitFlag.DefValue != "1s" {
+		t.Errorf("Expected default lock-timeout-retry-wait to be '1s', got '%s'", lockRetryWaitFlag.DefValue)
+	}
+
 	// Test application-name flag
 	applicationNameFlag := flags.Lookup("application-name")
 	if applicationNameFlag == nil {
@@ -208,11 +226,15 @@ func TestApplyCommandFlagValidation(t *testing.T) {
 	origUser := applyUser
 	origFile := applyFile
 	origPlan := applyPlan
+	origLockTimeout := applyLockTimeout
+	origLockRetries := applyLockRetries
 	defer func() {
 		applyDB = origDB
 		applyUser = origUser
 		applyFile = origFile
 		applyPlan = origPlan
+		applyLockTimeout = origLockTimeout
+		applyLockRetries = origLockRetries
 	}()
 
 	t.Run("neither file nor plan specified", func(t *testing.T) {
@@ -227,6 +249,24 @@ func TestApplyCommandFlagValidation(t *testing.T) {
 			t.Error("Expected error when neither --file nor --plan is specified")
 		}
 		if err != nil && err.Error() != "either --file or --plan must be specified" {
+			t.Errorf("Expected specific error message, got: %v", err)
+		}
+	})
+
+	t.Run("lock timeout retries without lock timeout", func(t *testing.T) {
+		// Reset flags
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = "schema.sql"
+		applyPlan = ""
+		applyLockTimeout = ""
+		applyLockRetries = 3
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil {
+			t.Error("Expected error when --lock-timeout-retries is set without --lock-timeout")
+		}
+		if err != nil && err.Error() != "--lock-timeout-retries requires --lock-timeout to be set" {
 			t.Errorf("Expected specific error message, got: %v", err)
 		}
 	})
