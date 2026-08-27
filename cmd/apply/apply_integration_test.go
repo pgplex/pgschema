@@ -1521,3 +1521,86 @@ func TestApplyCommand_LockTimeoutRetryExhausted(t *testing.T) {
 	require.NoError(t, scanErr)
 	assert.False(t, priceColumnExists, "price column should not exist after the apply failed")
 }
+
+// TestApplyCommand_LockTimeoutRetryNotAppliedToConcurrentIndex verifies that
+// lock-timeout retries are NOT applied to statements executed individually
+// outside a transaction, such as CREATE INDEX CONCURRENTLY. Those statements
+// run with "IF NOT EXISTS", so blindly retrying after a partial failure could
+// silently skip rebuilding a leftover invalid index instead of surfacing the
+// failure. The apply should fail after a single lock-timeout attempt rather
+// than retrying.
+func TestApplyCommand_LockTimeoutRetryNotAppliedToConcurrentIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	_, err := conn.ExecContext(ctx, `CREATE TABLE items (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL)`)
+	require.NoError(t, err, "should create initial schema")
+
+	tmpDir := t.TempDir()
+	desiredStateFile := filepath.Join(tmpDir, "desired_state.sql")
+	desiredStateSQL := `
+		CREATE TABLE items (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL
+		);
+
+		CREATE INDEX idx_items_name ON public.items USING btree (name);
+	`
+	require.NoError(t, os.WriteFile(desiredStateFile, []byte(desiredStateSQL), 0644))
+
+	planConfig := &planCmd.PlanConfig{
+		Host:            host,
+		Port:            port,
+		DB:              dbname,
+		User:            user,
+		Password:        password,
+		Schema:          "public",
+		File:            desiredStateFile,
+		ApplicationName: "pgschema",
+	}
+	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	require.NoError(t, err, "should generate migration plan")
+	require.Contains(t, migrationPlan.ToSQL(plan.SQLFormatRaw), "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_items_name")
+
+	// Hold a lock strong enough to block CREATE INDEX CONCURRENTLY's initial
+	// lock acquisition, and never release it during the test.
+	blockerConn, err := util.Connect(&util.ConnectionConfig{
+		Host: host, Port: port, Database: dbname, User: user, Password: password,
+		SSLMode: "prefer", ApplicationName: "pgschema-test-blocker",
+	})
+	require.NoError(t, err)
+	defer blockerConn.Close()
+
+	blockerTx, err := blockerConn.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = blockerTx.ExecContext(ctx, `LOCK TABLE items IN SHARE UPDATE EXCLUSIVE MODE`)
+	require.NoError(t, err, "should acquire a conflicting lock on items")
+	defer blockerTx.Rollback()
+
+	applyConfig := &ApplyConfig{
+		Host: host, Port: port, DB: dbname, User: user, Password: password,
+		Schema:          "public",
+		Plan:            migrationPlan,
+		AutoApprove:     true,
+		Quiet:           true,
+		LockTimeout:     "150ms",
+		RetryCount:      5,
+		RetryInterval:   2 * time.Second,
+		ApplicationName: "pgschema",
+	}
+
+	start := time.Now()
+	err = ApplyMigration(applyConfig, nil)
+	elapsed := time.Since(start)
+
+	require.Error(t, err, "apply should fail since the lock is never released")
+	assert.Less(t, elapsed, 1*time.Second, "apply should fail after a single lock-timeout attempt, not after waiting out any retry-interval")
+}

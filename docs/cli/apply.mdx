@@ -166,11 +166,16 @@ When using File Mode (`--file`), the apply command generates a plan internally u
 </ParamField>
 
 <ParamField path="--retry-count" type="int" default="0">
-  Number of times to retry a statement that fails to acquire a lock within `--lock-timeout`
+  Number of times to retry a group of statements that fails to acquire a lock within `--lock-timeout`
 
   Requires `--lock-timeout` to be set. Combining a short lock timeout with retries lets a
   migration back off and try again instead of queuing behind (and blocking) other queries
   on a busy table. Defaults to `0`, which disables retries.
+
+  Retries apply only to statements that run together in an implicit transaction (so a
+  retry either applies the whole group or none of it). Statements executed individually
+  outside a transaction — such as `CREATE INDEX CONCURRENTLY`, which is not retried to
+  avoid masking a partially built index behind `IF NOT EXISTS` — are not retried.
 </ParamField>
 
 <ParamField path="--retry-interval" type="string" default="1s">

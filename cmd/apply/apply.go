@@ -488,8 +488,10 @@ func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, 
 		// No directives - concatenate all SQL and execute in implicit transaction
 		return executeGroupConcatenated(ctx, conn, group, groupNum, quiet, retryCount, retryInterval)
 	} else {
-		// Has directives - execute statements individually
-		return executeGroupIndividually(ctx, conn, group, groupNum, quiet, retryCount, retryInterval)
+		// Has directives (e.g. waiting for a concurrent index build to finish) -
+		// execute statements individually. These are status-check queries, not
+		// DDL, so lock-timeout retries don't apply here.
+		return executeGroupIndividually(ctx, conn, group, groupNum, quiet)
 	}
 }
 
@@ -511,8 +513,18 @@ func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.Exec
 
 	// Execute all statements in a single call (implicit transaction). Since the
 	// statements run as one implicit transaction, either all of them apply or
-	// none do, so it is safe to retry the whole batch on a lock timeout.
-	_, err := execWithLockTimeoutRetry(ctx, conn, concatenatedSQL, fmt.Sprintf("execute %d statements in group %d", len(sqlStatements), groupNum), retryCount, retryInterval, quiet)
+	// none do, so it is safe to retry the whole batch on a lock timeout - unless
+	// the batch contains a CONCURRENTLY statement (e.g. CREATE INDEX CONCURRENTLY).
+	// Such statements build in multiple internal sub-transactions and can leave
+	// partial catalog state (e.g. an invalid index) behind on failure; retrying
+	// the same "IF NOT EXISTS" statement could silently skip over that partial
+	// state instead of surfacing the failure, so those are never retried.
+	effectiveRetryCount := retryCount
+	if containsConcurrentStatement(sqlStatements) {
+		effectiveRetryCount = 0
+	}
+
+	_, err := execWithLockTimeoutRetry(ctx, conn, concatenatedSQL, fmt.Sprintf("execute %d statements in group %d", len(sqlStatements), groupNum), effectiveRetryCount, retryInterval, quiet)
 	if err != nil {
 		return fmt.Errorf("failed to execute concatenated statements in group %d: %w", groupNum, err)
 	}
@@ -521,7 +533,7 @@ func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.Exec
 }
 
 // executeGroupIndividually executes statements individually without transactions
-func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool, retryCount int, retryInterval time.Duration) error {
+func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool) error {
 	for stepIdx, step := range group.Steps {
 		if step.Directive != nil {
 			// Handle directive execution
@@ -535,7 +547,7 @@ func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.Exec
 				fmt.Printf("  Executing: %s\n", truncateSQL(step.SQL, 80))
 			}
 
-			_, err := execWithLockTimeoutRetry(ctx, conn, step.SQL, fmt.Sprintf("execute statement in group %d, step %d", groupNum, stepIdx+1), retryCount, retryInterval, quiet)
+			_, err := util.ExecContextWithLogging(ctx, conn, step.SQL, fmt.Sprintf("execute statement in group %d, step %d", groupNum, stepIdx+1))
 			if err != nil {
 				return fmt.Errorf("failed to execute statement in group %d, step %d: %w", groupNum, stepIdx+1, err)
 			}
@@ -566,6 +578,18 @@ func execWithLockTimeoutRetry(ctx context.Context, conn *sql.DB, sqlStmt, descri
 		result, err = util.ExecContextWithLogging(ctx, conn, sqlStmt, description)
 	}
 	return result, err
+}
+
+// containsConcurrentStatement reports whether any statement uses CONCURRENTLY
+// (e.g. CREATE INDEX CONCURRENTLY), which builds across multiple internal
+// sub-transactions and is not safe to blindly retry as a whole on failure.
+func containsConcurrentStatement(statements []string) bool {
+	for _, stmt := range statements {
+		if strings.Contains(strings.ToUpper(stmt), "CONCURRENTLY") {
+			return true
+		}
+	}
+	return false
 }
 
 // isLockNotAvailableError reports whether err is a PostgreSQL error raised
