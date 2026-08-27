@@ -132,3 +132,43 @@ func TestExecWithLockRetry_ContextCancelledDuringBackoff(t *testing.T) {
 		t.Errorf("expected exactly 1 call before cancellation, got %d", fe.calls)
 	}
 }
+
+// TestApplyMigration_ValidatesLockRetryConfig verifies that ApplyMigration itself
+// rejects inconsistent lock retry settings, not just the RunApply CLI entry point.
+// This matters for callers that build an ApplyConfig directly and skip RunApply's
+// flag validation entirely.
+func TestApplyMigration_ValidatesLockRetryConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *ApplyConfig
+		wantErr string
+	}{
+		{
+			name:    "negative retries",
+			config:  &ApplyConfig{LockRetries: -1},
+			wantErr: "lock timeout retries must be non-negative",
+		},
+		{
+			name:    "retries without lock timeout",
+			config:  &ApplyConfig{LockRetries: 3, LockRetryWait: time.Second},
+			wantErr: "lock timeout retries require a lock timeout",
+		},
+		{
+			name:    "retries with non-positive retry wait",
+			config:  &ApplyConfig{LockRetries: 3, LockTimeout: "5s", LockRetryWait: 0},
+			wantErr: "lock timeout retry wait must be greater than zero",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ApplyMigration(tt.config, nil)
+			if err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			if err.Error() != tt.wantErr {
+				t.Errorf("expected error %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}

@@ -228,6 +228,7 @@ func TestApplyCommandFlagValidation(t *testing.T) {
 	origPlan := applyPlan
 	origLockTimeout := applyLockTimeout
 	origLockRetries := applyLockRetries
+	origLockRetryWait := applyLockRetryWait
 	defer func() {
 		applyDB = origDB
 		applyUser = origUser
@@ -235,6 +236,7 @@ func TestApplyCommandFlagValidation(t *testing.T) {
 		applyPlan = origPlan
 		applyLockTimeout = origLockTimeout
 		applyLockRetries = origLockRetries
+		applyLockRetryWait = origLockRetryWait
 	}()
 
 	t.Run("neither file nor plan specified", func(t *testing.T) {
@@ -267,6 +269,41 @@ func TestApplyCommandFlagValidation(t *testing.T) {
 			t.Error("Expected error when --lock-timeout-retries is set without --lock-timeout")
 		}
 		if err != nil && err.Error() != "--lock-timeout-retries requires --lock-timeout to be set" {
+			t.Errorf("Expected specific error message, got: %v", err)
+		}
+	})
+
+	t.Run("negative lock timeout retries", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = "schema.sql"
+		applyPlan = ""
+		applyLockTimeout = "5s"
+		applyLockRetries = -1
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil {
+			t.Error("Expected error when --lock-timeout-retries is negative")
+		}
+		if err != nil && err.Error() != "--lock-timeout-retries must be non-negative" {
+			t.Errorf("Expected specific error message, got: %v", err)
+		}
+	})
+
+	t.Run("non-positive lock timeout retry wait", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = "schema.sql"
+		applyPlan = ""
+		applyLockTimeout = "5s"
+		applyLockRetries = 3
+		applyLockRetryWait = 0
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil {
+			t.Error("Expected error when --lock-timeout-retry-wait is non-positive")
+		}
+		if err != nil && err.Error() != "--lock-timeout-retry-wait must be greater than zero" {
 			t.Errorf("Expected specific error message, got: %v", err)
 		}
 	})

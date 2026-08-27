@@ -134,6 +134,19 @@ type ApplyConfig struct {
 // If config.File is provided, provider is used to generate the plan.
 // The caller is responsible for managing the provider lifecycle (creation and cleanup).
 func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider) error {
+	// Validate lock retry settings here too, not just in RunApply: a direct
+	// caller of ApplyMigration could otherwise set LockRetries without a
+	// LockTimeout and block indefinitely instead of getting a retryable error.
+	if config.LockRetries < 0 {
+		return fmt.Errorf("lock timeout retries must be non-negative")
+	}
+	if config.LockRetries > 0 && config.LockTimeout == "" {
+		return fmt.Errorf("lock timeout retries require a lock timeout")
+	}
+	if config.LockRetries > 0 && config.LockRetryWait <= 0 {
+		return fmt.Errorf("lock timeout retry wait must be greater than zero")
+	}
+
 	var migrationPlan *plan.Plan
 	var err error
 
@@ -336,8 +349,14 @@ func RunApply(cmd *cobra.Command, args []string) error {
 
 	// Lock timeout retries only make sense alongside a lock timeout: without one,
 	// statements block indefinitely instead of failing with a retryable error.
+	if applyLockRetries < 0 {
+		return fmt.Errorf("--lock-timeout-retries must be non-negative")
+	}
 	if applyLockRetries > 0 && applyLockTimeout == "" {
 		return fmt.Errorf("--lock-timeout-retries requires --lock-timeout to be set")
+	}
+	if applyLockRetries > 0 && applyLockRetryWait <= 0 {
+		return fmt.Errorf("--lock-timeout-retry-wait must be greater than zero")
 	}
 
 	// Build configuration
@@ -574,7 +593,7 @@ func execWithLockRetry(ctx context.Context, conn sqlExecer, sqlStmt, description
 		}
 
 		if !quiet {
-			fmt.Printf("  Lock not available, retrying in %s (attempt %d/%d)...\n", backoff, attempt+1, retry.MaxRetries)
+			fmt.Printf("  Lock not available, retrying in %s (retry %d/%d)...\n", backoff, attempt+1, retry.MaxRetries)
 		}
 
 		select {
