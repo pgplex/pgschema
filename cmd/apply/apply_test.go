@@ -402,6 +402,36 @@ func TestApplyCommandRetryFlagValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("zero retry-interval is rejected", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+		applyLockTimeout = "30s"
+		applyRetryCount = 3
+		applyRetryInterval = "0s"
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil || err.Error() != "--retry-interval must be positive when --retry-count is set" {
+			t.Errorf("Expected retry-interval must be positive error, got: %v", err)
+		}
+	})
+
+	t.Run("negative retry-interval is rejected", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+		applyLockTimeout = "30s"
+		applyRetryCount = 3
+		applyRetryInterval = "-1s"
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil || err.Error() != "--retry-interval must be positive when --retry-count is set" {
+			t.Errorf("Expected retry-interval must be positive error, got: %v", err)
+		}
+	})
+
 	t.Run("zero retry-count does not require lock-timeout", func(t *testing.T) {
 		applyDB = "testdb"
 		applyUser = "testuser"

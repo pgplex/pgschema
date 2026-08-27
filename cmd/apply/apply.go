@@ -340,6 +340,9 @@ func RunApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid --retry-interval: %w", err)
 	}
+	if applyRetryCount > 0 && retryInterval <= 0 {
+		return fmt.Errorf("--retry-interval must be positive when --retry-count is set")
+	}
 
 	// Build configuration
 	config := &ApplyConfig{
@@ -552,10 +555,12 @@ func execWithLockTimeoutRetry(ctx context.Context, conn *sql.DB, sqlStmt, descri
 			fmt.Printf("  Lock not available, retrying in %s (attempt %d/%d)...\n", retryInterval, attempt, retryCount)
 		}
 
+		timer := time.NewTimer(retryInterval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, ctx.Err()
-		case <-time.After(retryInterval):
+		case <-timer.C:
 		}
 
 		result, err = util.ExecContextWithLogging(ctx, conn, sqlStmt, description)
