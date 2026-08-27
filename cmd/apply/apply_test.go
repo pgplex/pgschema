@@ -101,6 +101,24 @@ func TestApplyCommand(t *testing.T) {
 		t.Errorf("Expected default lock-timeout to be empty, got '%s'", lockTimeoutFlag.DefValue)
 	}
 
+	// Test retry-count flag
+	retryCountFlag := flags.Lookup("retry-count")
+	if retryCountFlag == nil {
+		t.Error("Expected --retry-count flag to be defined")
+	}
+	if retryCountFlag.DefValue != "0" {
+		t.Errorf("Expected default retry-count to be '0', got '%s'", retryCountFlag.DefValue)
+	}
+
+	// Test retry-interval flag
+	retryIntervalFlag := flags.Lookup("retry-interval")
+	if retryIntervalFlag == nil {
+		t.Error("Expected --retry-interval flag to be defined")
+	}
+	if retryIntervalFlag.DefValue != "1s" {
+		t.Errorf("Expected default retry-interval to be '1s', got '%s'", retryIntervalFlag.DefValue)
+	}
+
 	// Test application-name flag
 	applicationNameFlag := flags.Lookup("application-name")
 	if applicationNameFlag == nil {
@@ -308,6 +326,96 @@ func TestApplyCommandFlagValidation(t *testing.T) {
 		// Should NOT be a flag validation error
 		if strings.Contains(err.Error(), "either --file or --plan must be specified") {
 			t.Errorf("Should not get flag validation error when --plan is specified: %v", err)
+		}
+	})
+}
+
+func TestApplyCommandRetryFlagValidation(t *testing.T) {
+	// Save original values
+	origDB := applyDB
+	origUser := applyUser
+	origFile := applyFile
+	origPlan := applyPlan
+	origLockTimeout := applyLockTimeout
+	origRetryCount := applyRetryCount
+	origRetryInterval := applyRetryInterval
+	defer func() {
+		applyDB = origDB
+		applyUser = origUser
+		applyFile = origFile
+		applyPlan = origPlan
+		applyLockTimeout = origLockTimeout
+		applyRetryCount = origRetryCount
+		applyRetryInterval = origRetryInterval
+	}()
+
+	// Use a plan file so validation is reached without requiring a database connection
+	tmpDir := t.TempDir()
+	planPath := filepath.Join(tmpDir, "plan.json")
+	planJSON := `{"version":"1.0.0","pgschema_version":"test","created_at":"2024-01-01T00:00:00Z","transaction":true,"summary":{"total":0,"add":0,"change":0,"destroy":0,"by_type":{}},"diffs":[]}`
+	if err := os.WriteFile(planPath, []byte(planJSON), 0644); err != nil {
+		t.Fatalf("Failed to write plan file: %v", err)
+	}
+
+	t.Run("negative retry-count is rejected", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+		applyLockTimeout = ""
+		applyRetryCount = -1
+		applyRetryInterval = "1s"
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil || err.Error() != "--retry-count must be zero or positive" {
+			t.Errorf("Expected retry-count validation error, got: %v", err)
+		}
+	})
+
+	t.Run("retry-count without lock-timeout is rejected", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+		applyLockTimeout = ""
+		applyRetryCount = 3
+		applyRetryInterval = "1s"
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil || err.Error() != "--retry-count requires --lock-timeout to be set" {
+			t.Errorf("Expected retry-count/lock-timeout validation error, got: %v", err)
+		}
+	})
+
+	t.Run("invalid retry-interval is rejected", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+		applyLockTimeout = "30s"
+		applyRetryCount = 3
+		applyRetryInterval = "not-a-duration"
+
+		err := RunApply(ApplyCmd, []string{})
+		if err == nil || !strings.Contains(err.Error(), "invalid --retry-interval") {
+			t.Errorf("Expected retry-interval validation error, got: %v", err)
+		}
+	})
+
+	t.Run("zero retry-count does not require lock-timeout", func(t *testing.T) {
+		applyDB = "testdb"
+		applyUser = "testuser"
+		applyFile = ""
+		applyPlan = planPath
+		applyLockTimeout = ""
+		applyRetryCount = 0
+		applyRetryInterval = "1s"
+
+		// Should pass retry validation and fail later (plan version mismatch),
+		// not on a retry-count/lock-timeout validation error.
+		err := RunApply(ApplyCmd, []string{})
+		if err != nil && strings.Contains(err.Error(), "retry-count") {
+			t.Errorf("Should not get retry-count validation error when retry-count is 0: %v", err)
 		}
 	})
 }
@@ -618,11 +726,11 @@ func TestApplyFileExtensionValidation(t *testing.T) {
 
 func TestValidateFileExtension(t *testing.T) {
 	tests := []struct {
-		name     string
-		file     string
-		plan     string
-		wantErr  bool
-		errMsg   string
+		name    string
+		file    string
+		plan    string
+		wantErr bool
+		errMsg  string
 	}{
 		{"file with json", "plan.json", "", true, "--file expects a SQL schema file"},
 		{"file with JSON uppercase", "plan.JSON", "", true, "--file expects a SQL schema file"},
