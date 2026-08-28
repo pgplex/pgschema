@@ -164,9 +164,9 @@ When using File Mode (`--file`), the apply command generates a plan internally u
   If not specified, uses PostgreSQL's default behavior (wait indefinitely). 
   See [PostgreSQL lock_timeout documentation](https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT).
 
-  When set, a statement that fails to acquire a lock is automatically retried with
-  exponential backoff instead of failing immediately. `CREATE INDEX CONCURRENTLY` is
-  never retried.
+  When set, a group of statements executed together in an implicit transaction that fails to
+  acquire a lock is automatically retried with exponential backoff instead of failing immediately.
+  Statements executed outside a transaction (including `CREATE INDEX CONCURRENTLY`) are never retried.
 </ParamField>
 
 <ParamField path="--application-name" type="string" default="pgschema">
