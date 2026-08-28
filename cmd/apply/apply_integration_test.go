@@ -1346,15 +1346,32 @@ CREATE TABLE users (
 	assert.Equal(t, "users", tableName, "table should be created")
 }
 
+// withLockRetryTuning shrinks the package-level lock retry defaults for the
+// duration of a test so integration tests don't have to wait out the real
+// production backoff schedule (up to lockRetryMaxBackoff between retries).
+func withLockRetryTuning(t *testing.T, maxAttempts int, initialBackoff time.Duration) {
+	t.Helper()
+	origMaxAttempts := lockRetryMaxAttempts
+	origInitialBackoff := lockRetryInitialBackoff
+	lockRetryMaxAttempts = maxAttempts
+	lockRetryInitialBackoff = initialBackoff
+	t.Cleanup(func() {
+		lockRetryMaxAttempts = origMaxAttempts
+		lockRetryInitialBackoff = origInitialBackoff
+	})
+}
+
 // TestApplyCommand_LockTimeoutRetrySucceeds verifies that a statement blocked
-// by a lock held by another session eventually succeeds when --retry-count
-// gives it enough attempts to outlast the blocker, per the zero-downtime
+// by a lock held by another session eventually succeeds once the automatic
+// lock-timeout retry (exponential backoff, enabled whenever --lock-timeout is
+// set) gives it enough attempts to outlast the blocker, per the zero-downtime
 // migration pattern of a short --lock-timeout combined with retries (see
 // https://github.com/pgplex/pgschema/issues/557).
 func TestApplyCommand_LockTimeoutRetrySucceeds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	withLockRetryTuning(t, 10, 100*time.Millisecond)
 
 	ctx := context.Background()
 
@@ -1421,8 +1438,6 @@ func TestApplyCommand_LockTimeoutRetrySucceeds(t *testing.T) {
 		AutoApprove:     true,
 		Quiet:           true,
 		LockTimeout:     "200ms",
-		RetryCount:      10,
-		RetryInterval:   200 * time.Millisecond,
 		ApplicationName: "pgschema",
 	}
 
@@ -1440,13 +1455,14 @@ func TestApplyCommand_LockTimeoutRetrySucceeds(t *testing.T) {
 	assert.True(t, priceColumnExists, "price column should exist once the retried apply succeeds")
 }
 
-// TestApplyCommand_LockTimeoutRetryExhausted verifies that once the configured
-// number of retries is exhausted without acquiring the lock, ApplyMigration
-// surfaces the lock timeout error and does not apply any change.
+// TestApplyCommand_LockTimeoutRetryExhausted verifies that once the automatic
+// retries are exhausted without acquiring the lock, ApplyMigration surfaces
+// the lock timeout error and does not apply any change.
 func TestApplyCommand_LockTimeoutRetryExhausted(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	withLockRetryTuning(t, 2, 50*time.Millisecond)
 
 	ctx := context.Background()
 
@@ -1502,8 +1518,6 @@ func TestApplyCommand_LockTimeoutRetryExhausted(t *testing.T) {
 		AutoApprove:     true,
 		Quiet:           true,
 		LockTimeout:     "150ms",
-		RetryCount:      2,
-		RetryInterval:   150 * time.Millisecond,
 		ApplicationName: "pgschema",
 	}
 
@@ -1533,6 +1547,10 @@ func TestApplyCommand_LockTimeoutRetryNotAppliedToConcurrentIndex(t *testing.T) 
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	// A large backoff: if this statement were mistakenly retried, the test
+	// would blow past the elapsed-time assertion below instead of passing
+	// vacuously.
+	withLockRetryTuning(t, 5, 5*time.Second)
 
 	ctx := context.Background()
 
@@ -1592,8 +1610,6 @@ func TestApplyCommand_LockTimeoutRetryNotAppliedToConcurrentIndex(t *testing.T) 
 		AutoApprove:     true,
 		Quiet:           true,
 		LockTimeout:     "150ms",
-		RetryCount:      5,
-		RetryInterval:   2 * time.Second,
 		ApplicationName: "pgschema",
 	}
 
