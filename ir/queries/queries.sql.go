@@ -1983,6 +1983,14 @@ WITH index_base AS (
             FROM generate_series(1, idx.indnkeyatts) k
         ) as column_directions,
         ARRAY(
+            SELECT
+                CASE
+                    WHEN (idx.indoption[k-1] & 2) = 2 THEN 'NULLS FIRST'
+                    ELSE 'NULLS LAST'
+                END
+            FROM generate_series(1, idx.indnkeyatts) k
+        ) as column_null_orderings,
+        ARRAY(
             SELECT CASE
                 WHEN opc.opcdefault THEN ''  -- Omit default operator classes
                 ELSE COALESCE(opc.opcname, '')
@@ -2030,6 +2038,7 @@ SELECT
     ib.num_columns,
     ib.column_definitions,
     ib.column_directions,
+    ib.column_null_orderings,
     ib.column_opclasses,
     ib.include_columns
 FROM index_base ib
@@ -2059,10 +2068,11 @@ type GetIndexesForSchemaRow struct {
 	Reloptions        []string       `db:"reloptions" json:"reloptions"`
 	NumKeyColumns     int16          `db:"num_key_columns" json:"num_key_columns"`
 	NumColumns        int16          `db:"num_columns" json:"num_columns"`
-	ColumnDefinitions []string       `db:"column_definitions" json:"column_definitions"`
-	ColumnDirections  []string       `db:"column_directions" json:"column_directions"`
-	ColumnOpclasses   []string       `db:"column_opclasses" json:"column_opclasses"`
-	IncludeColumns    []string       `db:"include_columns" json:"include_columns"`
+	ColumnDefinitions  []string       `db:"column_definitions" json:"column_definitions"`
+	ColumnDirections   []string       `db:"column_directions" json:"column_directions"`
+	ColumnNullOrderings []string      `db:"column_null_orderings" json:"column_null_orderings"`
+	ColumnOpclasses    []string       `db:"column_opclasses" json:"column_opclasses"`
+	IncludeColumns     []string       `db:"include_columns" json:"include_columns"`
 }
 
 // GetIndexesForSchema retrieves all indexes for a specific schema
@@ -2095,6 +2105,7 @@ func (q *Queries) GetIndexesForSchema(ctx context.Context, dollar_1 sql.NullStri
 			&i.NumColumns,
 			pq.Array(&i.ColumnDefinitions),
 			pq.Array(&i.ColumnDirections),
+			pq.Array(&i.ColumnNullOrderings),
 			pq.Array(&i.ColumnOpclasses),
 			pq.Array(&i.IncludeColumns),
 		); err != nil {

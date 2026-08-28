@@ -272,8 +272,9 @@ type Index struct {
 type IndexColumn struct {
 	Name      string `json:"name"`
 	Position  int    `json:"position"`
-	Direction string `json:"direction,omitempty"` // ASC, DESC
-	Operator  string `json:"operator,omitempty"`  // operator class
+	Direction string `json:"direction,omitempty"`   // ASC, DESC
+	NullOrder string `json:"null_order,omitempty"`  // NULLS FIRST, NULLS LAST (only when non-default)
+	Operator  string `json:"operator,omitempty"`    // operator class
 }
 
 // IndexType represents different types of database indexes

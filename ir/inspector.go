@@ -831,6 +831,17 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 				direction = indexRow.ColumnDirections[idx]
 			}
 
+			// Get null ordering from the ColumnNullOrderings array.
+			// Only store non-default orderings: ASC defaults to NULLS LAST,
+			// DESC defaults to NULLS FIRST.
+			nullOrder := ""
+			if idx < len(indexRow.ColumnNullOrderings) {
+				no := indexRow.ColumnNullOrderings[idx]
+				if (direction == "ASC" && no == "NULLS FIRST") || (direction == "DESC" && no == "NULLS LAST") {
+					nullOrder = no
+				}
+			}
+
 			// Get operator class from the ColumnOpclasses array
 			operatorClass := ""
 			if idx < len(indexRow.ColumnOpclasses) {
@@ -841,6 +852,7 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 				Name:      columnName,
 				Position:  idx + 1,
 				Direction: direction,
+				NullOrder: nullOrder,
 				Operator:  operatorClass,
 			}
 
