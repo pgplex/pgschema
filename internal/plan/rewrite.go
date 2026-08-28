@@ -446,6 +446,9 @@ func generateIndexSQL(index *ir.Index, isConcurrent bool) string {
 		if col.Direction != "" && col.Direction != "ASC" {
 			part += " " + col.Direction
 		}
+		if col.NullOrder != "" {
+			part += " " + col.NullOrder
+		}
 		columnParts = append(columnParts, part)
 	}
 

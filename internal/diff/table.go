@@ -1968,6 +1968,7 @@ func indexesStructurallyEqual(oldIndex, newIndex *ir.Index) bool {
 		if oldCol.Name != newCol.Name ||
 			oldCol.Position != newCol.Position ||
 			oldCol.Direction != newCol.Direction ||
+			oldCol.NullOrder != newCol.NullOrder ||
 			oldCol.Operator != newCol.Operator {
 			return false
 		}

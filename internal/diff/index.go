@@ -130,6 +130,12 @@ func generateIndexSQLWithNameMode(index *ir.Index, indexName string, targetSchem
 			builder.WriteString(" ")
 			builder.WriteString(col.Direction)
 		}
+
+		// Add null ordering if non-default
+		if col.NullOrder != "" {
+			builder.WriteString(" ")
+			builder.WriteString(col.NullOrder)
+		}
 	}
 	builder.WriteString(")")
 

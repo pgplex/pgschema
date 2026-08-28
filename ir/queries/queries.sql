@@ -466,6 +466,14 @@ WITH index_base AS (
             FROM generate_series(1, idx.indnkeyatts) k
         ) as column_directions,
         ARRAY(
+            SELECT
+                CASE
+                    WHEN (idx.indoption[k-1] & 2) = 2 THEN 'NULLS FIRST'
+                    ELSE 'NULLS LAST'
+                END
+            FROM generate_series(1, idx.indnkeyatts) k
+        ) as column_null_orderings,
+        ARRAY(
             SELECT CASE
                 WHEN opc.opcdefault THEN ''  -- Omit default operator classes
                 ELSE COALESCE(opc.opcname, '')
@@ -513,6 +521,7 @@ SELECT
     ib.num_columns,
     ib.column_definitions,
     ib.column_directions,
+    ib.column_null_orderings,
     ib.column_opclasses,
     ib.include_columns
 FROM index_base ib
