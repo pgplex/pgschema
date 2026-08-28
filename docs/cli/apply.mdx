@@ -289,9 +289,7 @@ pgschema apply \
   --lock-timeout "5s"
 ```
 
-This applies the zero-downtime migration pattern described in
-[Zero-downtime Postgres schema migrations, lock timeout and retries](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries):
-a short `lock_timeout` prevents a DDL statement from queuing behind (and blocking) other
+A short `lock_timeout` prevents a DDL statement from queuing behind (and blocking) other
 queries, and setting `--lock-timeout` automatically enables retries with exponential
 backoff, giving the statement repeated chances to acquire the lock during a gap in traffic
 on the table.
