@@ -81,7 +81,7 @@ func init() {
 	ApplyCmd.Flags().BoolVar(&applyAutoApprove, "auto-approve", false, "Apply changes without prompting for approval")
 	ApplyCmd.Flags().BoolVar(&applyNoColor, "no-color", false, "Disable colored output")
 	ApplyCmd.Flags().StringVar(&applyLockTimeout, "lock-timeout", "", "Maximum time to wait for database locks (e.g., 30s, 5m, 1h)")
-	ApplyCmd.Flags().IntVar(&applyRetryCount, "retry-count", 0, "Number of times to retry a statement that fails to acquire a lock within --lock-timeout (default 0 disables retries)")
+	ApplyCmd.Flags().IntVar(&applyRetryCount, "retry-count", 0, "Number of times to retry a group of statements that fails to acquire a lock within --lock-timeout (default 0 disables retries; not applied to CREATE INDEX CONCURRENTLY)")
 	ApplyCmd.Flags().StringVar(&applyRetryInterval, "retry-interval", "1s", "Time to wait between retries after a lock timeout (e.g., 1s, 500ms)")
 	ApplyCmd.Flags().StringVar(&applyApplicationName, "application-name", "pgschema", "Application name for database connection (visible in pg_stat_activity) (env: PGAPPNAME)")
 
