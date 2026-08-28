@@ -32,7 +32,7 @@ const lockNotAvailableSQLState = "55P03"
 // are declared as vars rather than consts purely so tests can shrink them
 // for fast execution; production code never overrides them.
 var (
-	lockRetryMaxAttempts    = 5
+	lockRetryMaxAttempts    = 3
 	lockRetryInitialBackoff = 1 * time.Second
 )
 
