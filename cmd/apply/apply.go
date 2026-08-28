@@ -493,8 +493,9 @@ func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, 
 		return executeGroupConcatenated(ctx, conn, group, groupNum, quiet, retry)
 	} else {
 		// Has directives (e.g. waiting for a concurrent index build to finish) -
-		// execute statements individually. These are status-check queries, not
-		// DDL, so lock-timeout retries don't apply here.
+		// execute statements individually rather than batched in one implicit
+		// transaction, so lock-timeout retries (safe only when a retry can
+		// re-apply the whole batch atomically) don't apply here.
 		return executeGroupIndividually(ctx, conn, group, groupNum, quiet)
 	}
 }
