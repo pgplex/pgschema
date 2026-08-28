@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	planCmd "github.com/pgplex/pgschema/cmd/plan"
 	"github.com/pgplex/pgschema/cmd/util"
@@ -1343,4 +1344,279 @@ CREATE TABLE users (
 	err = targetConn.QueryRow("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'users'").Scan(&tableName)
 	require.NoError(t, err, "should find users table")
 	assert.Equal(t, "users", tableName, "table should be created")
+}
+
+// withLockRetryTuning shrinks the package-level lock retry defaults for the
+// duration of a test so integration tests don't have to wait out the real
+// production backoff schedule (up to lockRetryMaxBackoff between retries).
+func withLockRetryTuning(t *testing.T, maxAttempts int, initialBackoff time.Duration) {
+	t.Helper()
+	origMaxAttempts := lockRetryMaxAttempts
+	origInitialBackoff := lockRetryInitialBackoff
+	lockRetryMaxAttempts = maxAttempts
+	lockRetryInitialBackoff = initialBackoff
+	t.Cleanup(func() {
+		lockRetryMaxAttempts = origMaxAttempts
+		lockRetryInitialBackoff = origInitialBackoff
+	})
+}
+
+// TestApplyCommand_LockTimeoutRetrySucceeds verifies that a statement blocked
+// by a lock held by another session eventually succeeds once the automatic
+// lock-timeout retry (exponential backoff, enabled whenever --lock-timeout is
+// set) gives it enough attempts to outlast the blocker, per the zero-downtime
+// migration pattern of a short --lock-timeout combined with retries (see
+// https://github.com/pgplex/pgschema/issues/557).
+func TestApplyCommand_LockTimeoutRetrySucceeds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	withLockRetryTuning(t, 10, 100*time.Millisecond)
+
+	ctx := context.Background()
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	_, err := conn.ExecContext(ctx, `CREATE TABLE items (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL)`)
+	require.NoError(t, err, "should create initial schema")
+
+	tmpDir := t.TempDir()
+	desiredStateFile := filepath.Join(tmpDir, "desired_state.sql")
+	desiredStateSQL := `
+		CREATE TABLE items (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			price DECIMAL(10, 2)
+		);
+	`
+	require.NoError(t, os.WriteFile(desiredStateFile, []byte(desiredStateSQL), 0644))
+
+	planConfig := &planCmd.PlanConfig{
+		Host:            host,
+		Port:            port,
+		DB:              dbname,
+		User:            user,
+		Password:        password,
+		Schema:          "public",
+		File:            desiredStateFile,
+		ApplicationName: "pgschema",
+	}
+	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	require.NoError(t, err, "should generate migration plan")
+	require.Contains(t, migrationPlan.ToSQL(plan.SQLFormatRaw), "ALTER TABLE items ADD COLUMN price")
+
+	// Open a second connection and hold a conflicting lock on items so the
+	// upcoming ALTER TABLE (which needs ACCESS EXCLUSIVE) cannot proceed
+	// immediately.
+	blockerConn, err := util.Connect(&util.ConnectionConfig{
+		Host: host, Port: port, Database: dbname, User: user, Password: password,
+		SSLMode: "prefer", ApplicationName: "pgschema-test-blocker",
+	})
+	require.NoError(t, err)
+	defer blockerConn.Close()
+
+	blockerTx, err := blockerConn.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = blockerTx.ExecContext(ctx, `SELECT * FROM items`)
+	require.NoError(t, err, "should acquire a lock on items via the blocking transaction")
+
+	// Release the lock partway through the retry budget so the first attempt
+	// (and possibly a few retries) fail, but a later retry succeeds.
+	releaseAfter := 700 * time.Millisecond
+	go func() {
+		time.Sleep(releaseAfter)
+		_ = blockerTx.Commit()
+	}()
+
+	applyConfig := &ApplyConfig{
+		Host: host, Port: port, DB: dbname, User: user, Password: password,
+		Schema:          "public",
+		Plan:            migrationPlan,
+		AutoApprove:     true,
+		Quiet:           true,
+		LockTimeout:     "200ms",
+		ApplicationName: "pgschema",
+	}
+
+	err = ApplyMigration(applyConfig, nil)
+	require.NoError(t, err, "apply should retry past the lock timeout and eventually succeed")
+
+	var priceColumnExists bool
+	err = conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'items' AND column_name = 'price'
+		)
+	`).Scan(&priceColumnExists)
+	require.NoError(t, err)
+	assert.True(t, priceColumnExists, "price column should exist once the retried apply succeeds")
+}
+
+// TestApplyCommand_LockTimeoutRetryExhausted verifies that once the automatic
+// retries are exhausted without acquiring the lock, ApplyMigration surfaces
+// the lock timeout error and does not apply any change.
+func TestApplyCommand_LockTimeoutRetryExhausted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	withLockRetryTuning(t, 2, 50*time.Millisecond)
+
+	ctx := context.Background()
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	_, err := conn.ExecContext(ctx, `CREATE TABLE items (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL)`)
+	require.NoError(t, err, "should create initial schema")
+
+	tmpDir := t.TempDir()
+	desiredStateFile := filepath.Join(tmpDir, "desired_state.sql")
+	desiredStateSQL := `
+		CREATE TABLE items (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			price DECIMAL(10, 2)
+		);
+	`
+	require.NoError(t, os.WriteFile(desiredStateFile, []byte(desiredStateSQL), 0644))
+
+	planConfig := &planCmd.PlanConfig{
+		Host:            host,
+		Port:            port,
+		DB:              dbname,
+		User:            user,
+		Password:        password,
+		Schema:          "public",
+		File:            desiredStateFile,
+		ApplicationName: "pgschema",
+	}
+	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	require.NoError(t, err, "should generate migration plan")
+
+	blockerConn, err := util.Connect(&util.ConnectionConfig{
+		Host: host, Port: port, Database: dbname, User: user, Password: password,
+		SSLMode: "prefer", ApplicationName: "pgschema-test-blocker",
+	})
+	require.NoError(t, err)
+	defer blockerConn.Close()
+
+	blockerTx, err := blockerConn.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = blockerTx.ExecContext(ctx, `SELECT * FROM items`)
+	require.NoError(t, err, "should acquire a lock on items via the blocking transaction")
+	defer blockerTx.Rollback()
+
+	applyConfig := &ApplyConfig{
+		Host: host, Port: port, DB: dbname, User: user, Password: password,
+		Schema:          "public",
+		Plan:            migrationPlan,
+		AutoApprove:     true,
+		Quiet:           true,
+		LockTimeout:     "150ms",
+		ApplicationName: "pgschema",
+	}
+
+	err = ApplyMigration(applyConfig, nil)
+	require.Error(t, err, "apply should fail once retries are exhausted while the lock is still held")
+	assert.Contains(t, err.Error(), "lock", "error should mention the lock timeout")
+
+	var priceColumnExists bool
+	scanErr := conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'items' AND column_name = 'price'
+		)
+	`).Scan(&priceColumnExists)
+	require.NoError(t, scanErr)
+	assert.False(t, priceColumnExists, "price column should not exist after the apply failed")
+}
+
+// TestApplyCommand_LockTimeoutRetryNotAppliedToConcurrentIndex verifies that
+// lock-timeout retries are NOT applied to statements executed individually
+// outside a transaction, such as CREATE INDEX CONCURRENTLY. Those statements
+// run with "IF NOT EXISTS", so blindly retrying after a partial failure could
+// silently skip rebuilding a leftover invalid index instead of surfacing the
+// failure. The apply should fail after a single lock-timeout attempt rather
+// than retrying.
+func TestApplyCommand_LockTimeoutRetryNotAppliedToConcurrentIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	// A large backoff: if this statement were mistakenly retried, the test
+	// would blow past the elapsed-time assertion below instead of passing
+	// vacuously.
+	withLockRetryTuning(t, 5, 5*time.Second)
+
+	ctx := context.Background()
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	_, err := conn.ExecContext(ctx, `CREATE TABLE items (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL)`)
+	require.NoError(t, err, "should create initial schema")
+
+	tmpDir := t.TempDir()
+	desiredStateFile := filepath.Join(tmpDir, "desired_state.sql")
+	desiredStateSQL := `
+		CREATE TABLE items (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL
+		);
+
+		CREATE INDEX idx_items_name ON public.items USING btree (name);
+	`
+	require.NoError(t, os.WriteFile(desiredStateFile, []byte(desiredStateSQL), 0644))
+
+	planConfig := &planCmd.PlanConfig{
+		Host:            host,
+		Port:            port,
+		DB:              dbname,
+		User:            user,
+		Password:        password,
+		Schema:          "public",
+		File:            desiredStateFile,
+		ApplicationName: "pgschema",
+	}
+	migrationPlan, err := planCmd.GeneratePlan(planConfig, sharedEmbeddedPG)
+	require.NoError(t, err, "should generate migration plan")
+	require.Contains(t, migrationPlan.ToSQL(plan.SQLFormatRaw), "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_items_name")
+
+	// Hold a lock strong enough to block CREATE INDEX CONCURRENTLY's initial
+	// lock acquisition, and never release it during the test.
+	blockerConn, err := util.Connect(&util.ConnectionConfig{
+		Host: host, Port: port, Database: dbname, User: user, Password: password,
+		SSLMode: "prefer", ApplicationName: "pgschema-test-blocker",
+	})
+	require.NoError(t, err)
+	defer blockerConn.Close()
+
+	blockerTx, err := blockerConn.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = blockerTx.ExecContext(ctx, `LOCK TABLE items IN SHARE UPDATE EXCLUSIVE MODE`)
+	require.NoError(t, err, "should acquire a conflicting lock on items")
+	defer blockerTx.Rollback()
+
+	applyConfig := &ApplyConfig{
+		Host: host, Port: port, DB: dbname, User: user, Password: password,
+		Schema:          "public",
+		Plan:            migrationPlan,
+		AutoApprove:     true,
+		Quiet:           true,
+		LockTimeout:     "150ms",
+		ApplicationName: "pgschema",
+	}
+
+	start := time.Now()
+	err = ApplyMigration(applyConfig, nil)
+	elapsed := time.Since(start)
+
+	require.Error(t, err, "apply should fail since the lock is never released")
+	assert.Less(t, elapsed, 1*time.Second, "apply should fail after a single lock-timeout attempt, not after waiting out any retry-interval")
 }

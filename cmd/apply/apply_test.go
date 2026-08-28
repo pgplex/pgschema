@@ -101,6 +101,15 @@ func TestApplyCommand(t *testing.T) {
 		t.Errorf("Expected default lock-timeout to be empty, got '%s'", lockTimeoutFlag.DefValue)
 	}
 
+	// Retry flags are intentionally not exposed: lock timeout retries are
+	// automatic (exponential backoff) whenever --lock-timeout is set.
+	if flags.Lookup("retry-count") != nil {
+		t.Error("Expected --retry-count flag NOT to be defined; retries are automatic")
+	}
+	if flags.Lookup("retry-interval") != nil {
+		t.Error("Expected --retry-interval flag NOT to be defined; retries are automatic")
+	}
+
 	// Test application-name flag
 	applicationNameFlag := flags.Lookup("application-name")
 	if applicationNameFlag == nil {
@@ -618,11 +627,11 @@ func TestApplyFileExtensionValidation(t *testing.T) {
 
 func TestValidateFileExtension(t *testing.T) {
 	tests := []struct {
-		name     string
-		file     string
-		plan     string
-		wantErr  bool
-		errMsg   string
+		name    string
+		file    string
+		plan    string
+		wantErr bool
+		errMsg  string
 	}{
 		{"file with json", "plan.json", "", true, "--file expects a SQL schema file"},
 		{"file with JSON uppercase", "plan.JSON", "", true, "--file expects a SQL schema file"},

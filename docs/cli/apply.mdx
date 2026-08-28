@@ -163,6 +163,9 @@ When using File Mode (`--file`), the apply command generates a plan internally u
   
   If not specified, uses PostgreSQL's default behavior (wait indefinitely). 
   See [PostgreSQL lock_timeout documentation](https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT).
+
+  When set, a failed attempt to acquire a lock is automatically retried with exponential
+  backoff instead of failing immediately. `CREATE INDEX CONCURRENTLY` is never retried.
 </ParamField>
 
 <ParamField path="--application-name" type="string" default="pgschema">
@@ -257,7 +260,7 @@ pgschema apply \
 ### With Lock Timeout
 
 ```bash
-# Prevent blocking on long-running locks
+# Avoid blocking busy tables: wait at most 30s for a lock before backing off and retrying
 pgschema apply \
   --host localhost \
   --db myapp \
