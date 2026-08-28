@@ -90,7 +90,7 @@ func init() {
 	// Apply behavior flags
 	ApplyCmd.Flags().BoolVar(&applyAutoApprove, "auto-approve", false, "Apply changes without prompting for approval")
 	ApplyCmd.Flags().BoolVar(&applyNoColor, "no-color", false, "Disable colored output")
-	ApplyCmd.Flags().StringVar(&applyLockTimeout, "lock-timeout", "", "Maximum time to wait for database locks (e.g., 30s, 5m, 1h). When set, a statement that fails to acquire a lock is automatically retried with exponential backoff")
+	ApplyCmd.Flags().StringVar(&applyLockTimeout, "lock-timeout", "", "Maximum time to wait for database locks (e.g., 30s, 5m, 1h). When set, a group of statements that fails to acquire a lock is automatically retried with exponential backoff (not applied to CREATE INDEX CONCURRENTLY)")
 	ApplyCmd.Flags().StringVar(&applyApplicationName, "application-name", "pgschema", "Application name for database connection (visible in pg_stat_activity) (env: PGAPPNAME)")
 
 	// Plan database connection flags (optional - for using external database instead of embedded postgres when using --file)
