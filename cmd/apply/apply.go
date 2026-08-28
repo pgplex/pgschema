@@ -271,7 +271,13 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 	// with a retryable error.
 	var retry lockRetryConfig
 	if config.LockTimeout != "" {
-		retry = lockRetryConfig{MaxRetries: lockRetryMaxAttempts, Backoff: lockRetryInitialBackoff}
+		// lockRetryMaxAttempts counts the first attempt too, but MaxRetries
+		// counts only the retries after it, so convert between the two.
+		maxRetries := lockRetryMaxAttempts - 1
+		if maxRetries < 0 {
+			maxRetries = 0
+		}
+		retry = lockRetryConfig{MaxRetries: maxRetries, Backoff: lockRetryInitialBackoff}
 	}
 
 	// Execute by groups with wait directive support
