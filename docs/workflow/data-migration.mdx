@@ -1,0 +1,91 @@
+---
+title: "Data Migration"
+mode: "wide"
+---
+
+pgschema manages schema state, not data. When a schema change requires touching existing data (e.g. backfilling a new column), declare the end state in your schema file, then edit the generated plan to insert the data migration steps.
+
+This works because the plan's `source_fingerprint` pins the **database state** the plan was generated against, not the plan's SQL. You can freely edit the steps; `pgschema apply` still detects if the database has drifted since planning.
+
+## Example: add a NOT NULL column with backfill
+
+Desired state in `schema.sql`:
+
+```sql
+CREATE TABLE users (
+    id bigint PRIMARY KEY,
+    email text NOT NULL,
+    email_domain text NOT NULL
+);
+```
+
+<Steps>
+  <Step title="Generate Plan">
+    ```bash
+    pgschema plan --host localhost --db myapp --user postgres \
+      --file schema.sql --output-json plan.json
+    ```
+
+    The generated plan adds the column directly, which would fail on a non-empty table:
+
+    ```json
+    {
+      "groups": [
+        {
+          "steps": [
+            {
+              "sql": "ALTER TABLE users ADD COLUMN email_domain text NOT NULL;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.users.email_domain"
+            }
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="Edit Plan">
+    Rewrite the step to add the column as nullable first, insert a backfill step, then enforce the constraint. Only the `sql` field is required for hand-added steps:
+
+    ```json
+    {
+      "groups": [
+        {
+          "steps": [
+            {
+              "sql": "ALTER TABLE users ADD COLUMN email_domain text;",
+              "type": "table.column",
+              "operation": "create",
+              "path": "public.users.email_domain"
+            },
+            {
+              "sql": "UPDATE users SET email_domain = split_part(email, '@', 2);"
+            },
+            {
+              "sql": "ALTER TABLE users ALTER COLUMN email_domain SET NOT NULL;"
+            }
+          ]
+        }
+      ]
+    }
+    ```
+
+    Steps within a group execute in a single transaction, so the backfill and constraint either all succeed or roll back together.
+  </Step>
+
+  <Step title="Apply Plan">
+    ```bash
+    pgschema apply --host localhost --db myapp --user postgres --plan plan.json
+    ```
+
+    After apply, the database matches `schema.sql`, so subsequent plans are empty — the data migration naturally runs only once.
+  </Step>
+</Steps>
+
+<Tip>
+For large tables, run the backfill in batches outside the transaction to avoid long locks. Put `ADD COLUMN` in one plan, batch the `UPDATE` with your own tooling, then run a second plan for `SET NOT NULL`. See [Online DDL](/workflow/online-ddl) for lock-aware patterns.
+</Tip>
+
+The same technique applies to any change the diff engine cannot infer, such as rewriting a rename from `DROP` + `ADD` into `ALTER TABLE ... RENAME`, or seeding lookup-table rows alongside a new table.

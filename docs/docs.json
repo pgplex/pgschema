@@ -38,6 +38,7 @@
               "workflow/tenant-schema",
               "workflow/online-ddl",
               "workflow/rollback",
+              "workflow/data-migration",
               "workflow/modular-schema-files",
               "workflow/gitops",
               "workflow/orm"
