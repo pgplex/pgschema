@@ -21,8 +21,11 @@ type RewriteStep struct {
 	RequiresIsolation bool `json:"-"`
 }
 
-// generateRewrite generates rewrite steps for a diff if online operations are enabled
-func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool) []RewriteStep {
+// generateRewrite generates rewrite steps for a diff if online operations are enabled.
+// targetMajorVersion is the target database's PostgreSQL major version (0 if unknown);
+// version-gated rewrites fall back to the portable pattern when it is below the
+// required version or unknown.
+func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool, targetMajorVersion int) []RewriteStep {
 	// Dispatch to specific rewrite generators based on diff type and source
 	switch d.Type {
 	case diff.DiffTypeTableIndex:
@@ -91,7 +94,7 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 					// Verify this diff's SQL actually contains SET NOT NULL
 					for _, stmt := range d.Statements {
 						if strings.Contains(stmt.SQL, "SET NOT NULL") {
-							return generateColumnNotNullRewrite(columnDiff, d.Path)
+							return generateColumnNotNullRewrite(columnDiff, d.Path, targetMajorVersion)
 						}
 					}
 				}
@@ -332,7 +335,7 @@ func generateForeignKeyRewrite(constraint *ir.Constraint) []RewriteStep {
 }
 
 // generateColumnNotNullRewrite generates rewrite steps for SET NOT NULL operations
-func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string) []RewriteStep {
+func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string, targetMajorVersion int) []RewriteStep {
 	// Parse path (schema.table.column) to extract schema, table, and column names
 	parts := strings.Split(path, ".")
 	if len(parts) != 3 {
@@ -345,9 +348,36 @@ func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string) []RewriteStep
 	column := parts[2]
 
 	tableName := getTableNameWithSchema(schema, table)
-	constraintName := fmt.Sprintf("%s_not_null", column)
-
 	quotedColumn := ir.QuoteIdentifier(column)
+
+	// PostgreSQL 18+ supports invalid NOT NULL constraints natively, replacing
+	// the four-step CHECK constraint dance with two statements and a single
+	// ACCESS EXCLUSIVE acquisition. The constraint name matches what PostgreSQL
+	// auto-generates for a NOT NULL column in CREATE TABLE, so the migrated
+	// table converges with a freshly created one. The constraint is invisible
+	// to the IR (the inspector tracks nullability via attnotnull and skips
+	// contype='n' rows), so it causes no drift either way.
+	if targetMajorVersion >= 18 {
+		nativeConstraintName := fmt.Sprintf("%s_%s_not_null", table, column)
+		addNotNullSQL := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s NOT NULL %s NOT VALID;",
+			tableName, ir.QuoteIdentifier(nativeConstraintName), quotedColumn)
+		validateSQL := fmt.Sprintf("ALTER TABLE %s VALIDATE CONSTRAINT %s;",
+			tableName, ir.QuoteIdentifier(nativeConstraintName))
+
+		return []RewriteStep{
+			{
+				SQL:                 addNotNullSQL,
+				CanRunInTransaction: true,
+			},
+			{
+				SQL:                 validateSQL,
+				CanRunInTransaction: true,
+				RequiresIsolation:   true,
+			},
+		}
+	}
+
+	constraintName := fmt.Sprintf("%s_not_null", column)
 
 	// Step 1: Add CHECK constraint with NOT VALID
 	addConstraintSQL := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s IS NOT NULL) NOT VALID;",

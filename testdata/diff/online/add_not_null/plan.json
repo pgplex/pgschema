@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "ALTER TABLE users ADD CONSTRAINT email_not_null CHECK (email IS NOT NULL) NOT VALID;",
+          "sql": "ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"
@@ -19,23 +19,7 @@
     {
       "steps": [
         {
-          "sql": "ALTER TABLE users VALIDATE CONSTRAINT email_not_null;",
-          "type": "table.column",
-          "operation": "alter",
-          "path": "public.users.email"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "ALTER TABLE users ALTER COLUMN email SET NOT NULL;",
-          "type": "table.column",
-          "operation": "alter",
-          "path": "public.users.email"
-        },
-        {
-          "sql": "ALTER TABLE users DROP CONSTRAINT email_not_null;",
+          "sql": "ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"

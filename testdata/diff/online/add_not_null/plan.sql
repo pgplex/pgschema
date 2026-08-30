@@ -1,7 +1,3 @@
-ALTER TABLE users ADD CONSTRAINT email_not_null CHECK (email IS NOT NULL) NOT VALID;
+ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;
 
-ALTER TABLE users VALIDATE CONSTRAINT email_not_null;
-
-ALTER TABLE users ALTER COLUMN email SET NOT NULL;
-
-ALTER TABLE users DROP CONSTRAINT email_not_null;
+ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;

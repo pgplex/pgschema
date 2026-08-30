@@ -143,8 +143,9 @@ func getObjectOrder() []Type {
 
 // ========== PUBLIC METHODS ==========
 
-// groupDiffs groups diffs into execution groups with configurable online operations
-func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
+// groupDiffs groups diffs into execution groups with configurable online operations.
+// targetMajorVersion gates version-specific rewrites (0 if unknown).
+func groupDiffs(diffs []diff.Diff, targetMajorVersion int) []ExecutionGroup {
 	if len(diffs) == 0 {
 		return nil
 	}
@@ -168,7 +169,7 @@ func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
 			newlyCreatedMaterializedViews[d.Path] = true
 		}
 		// Try to generate rewrites if online operations are enabled
-		rewriteSteps := generateRewrite(d, newlyCreatedTables, newlyCreatedMaterializedViews)
+		rewriteSteps := generateRewrite(d, newlyCreatedTables, newlyCreatedMaterializedViews, targetMajorVersion)
 
 		if len(rewriteSteps) > 0 {
 			// For operations with rewrites, create one step per rewrite statement
@@ -225,8 +226,11 @@ func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
 	return groups
 }
 
-// NewPlan creates a new plan from a list of diffs with online operations enabled
-func NewPlan(diffs []diff.Diff) *Plan {
+// NewPlan creates a new plan from a list of diffs with online operations enabled.
+// targetMajorVersion is the target database's PostgreSQL major version (0 if
+// unknown); it gates version-specific rewrites such as the PG18 native
+// NOT NULL ... NOT VALID pattern.
+func NewPlan(diffs []diff.Diff, targetMajorVersion int) *Plan {
 	// Use environment variable for timestamp if provided, otherwise use current time
 	createdAt := time.Now().Truncate(time.Second)
 	if testTime := os.Getenv("PGSCHEMA_TEST_TIME"); testTime != "" {
@@ -239,7 +243,7 @@ func NewPlan(diffs []diff.Diff) *Plan {
 		Version:         version.PlanFormat(),
 		PgschemaVersion: version.App(),
 		CreatedAt:       createdAt,
-		Groups:          groupDiffs(diffs),
+		Groups:          groupDiffs(diffs, targetMajorVersion),
 		SourceDiffs:     diffs,
 	}
 
@@ -247,8 +251,8 @@ func NewPlan(diffs []diff.Diff) *Plan {
 }
 
 // NewPlanWithFingerprint creates a new plan from diffs and includes source fingerprint
-func NewPlanWithFingerprint(diffs []diff.Diff, sourceFingerprint *fingerprint.SchemaFingerprint) *Plan {
-	plan := NewPlan(diffs)
+func NewPlanWithFingerprint(diffs []diff.Diff, sourceFingerprint *fingerprint.SchemaFingerprint, targetMajorVersion int) *Plan {
+	plan := NewPlan(diffs, targetMajorVersion)
 	plan.SourceFingerprint = sourceFingerprint
 	return plan
 }
