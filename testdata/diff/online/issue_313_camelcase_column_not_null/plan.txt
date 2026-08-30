@@ -10,10 +10,13 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TABLE "Planning" ADD CONSTRAINT "offersValidUntil_not_null" CHECK ("offersValidUntil" IS NOT NULL) NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE "Planning" VALIDATE CONSTRAINT "offersValidUntil_not_null";
 
+-- Transaction Group #3
 ALTER TABLE "Planning" ALTER COLUMN "offersValidUntil" SET NOT NULL;
 
 ALTER TABLE "Planning" DROP CONSTRAINT "offersValidUntil_not_null";

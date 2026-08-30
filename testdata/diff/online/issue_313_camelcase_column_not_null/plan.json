@@ -13,13 +13,21 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.Planning.offersValidUntil"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE \"Planning\" VALIDATE CONSTRAINT \"offersValidUntil_not_null\";",
           "type": "table.column",
           "operation": "alter",
           "path": "public.Planning.offersValidUntil"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE \"Planning\" ALTER COLUMN \"offersValidUntil\" SET NOT NULL;",
           "type": "table.column",

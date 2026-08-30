@@ -13,7 +13,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.parent_base.no_direct_insert"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE parent_base VALIDATE CONSTRAINT no_direct_insert;",
           "type": "table.constraint",

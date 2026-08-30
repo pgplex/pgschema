@@ -10,7 +10,9 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TABLE code
 ADD CONSTRAINT code_check CHECK (code > 0 AND code < 255) NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE code VALIDATE CONSTRAINT code_check;

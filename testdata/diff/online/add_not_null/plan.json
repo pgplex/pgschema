@@ -13,13 +13,21 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE users VALIDATE CONSTRAINT email_not_null;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE users ALTER COLUMN email SET NOT NULL;",
           "type": "table.column",

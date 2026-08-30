@@ -13,7 +13,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.code.code_check"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE code VALIDATE CONSTRAINT code_check;",
           "type": "table.constraint",

@@ -19,19 +19,31 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.a_employees.a_employees_company_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE a_employees VALIDATE CONSTRAINT a_employees_company_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.a_employees.a_employees_company_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE a_employees\nADD CONSTRAINT a_employees_company_name_fkey FOREIGN KEY (company_id, company_name) REFERENCES z_companies (company_id, company_name) ON UPDATE CASCADE ON DELETE RESTRICT DEFERRABLE NOT VALID;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.a_employees.a_employees_company_name_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE a_employees VALIDATE CONSTRAINT a_employees_company_name_fkey;",
           "type": "table.constraint",

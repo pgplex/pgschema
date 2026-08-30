@@ -19,7 +19,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.employees.employees_company_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE employees VALIDATE CONSTRAINT employees_company_fkey;",
           "type": "table.constraint",

@@ -11,12 +11,16 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TABLE orders
 ADD CONSTRAINT check_amount_positive CHECK (amount > 0::numeric) NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE orders VALIDATE CONSTRAINT check_amount_positive;
 
+-- Transaction Group #3
 ALTER TABLE orders
 ADD CONSTRAINT check_valid_status CHECK (status::text IN ('pending'::character varying, 'shipped'::character varying, 'delivered'::character varying)) NOT VALID;
 
+-- Transaction Group #4
 ALTER TABLE orders VALIDATE CONSTRAINT check_valid_status;

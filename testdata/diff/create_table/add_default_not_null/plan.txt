@@ -10,10 +10,13 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TABLE people ADD CONSTRAINT created_at_not_null CHECK (created_at IS NOT NULL) NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE people VALIDATE CONSTRAINT created_at_not_null;
 
+-- Transaction Group #3
 ALTER TABLE people ALTER COLUMN created_at SET NOT NULL;
 
 ALTER TABLE people DROP CONSTRAINT created_at_not_null;

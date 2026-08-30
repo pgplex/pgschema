@@ -13,6 +13,12 @@ type RewriteStep struct {
 	SQL                 string     `json:"sql,omitempty"`
 	CanRunInTransaction bool       `json:"can_run_in_transaction"`
 	Directive           *Directive `json:"directive,omitempty"`
+	// RequiresIsolation forces this step into its own execution group, i.e. its
+	// own implicit transaction. VALIDATE CONSTRAINT steps require this: the
+	// preceding ADD ... NOT VALID must commit before validation runs, otherwise
+	// the strong lock taken by ADD is held through the validation table scan
+	// and the rewrite loses its online property.
+	RequiresIsolation bool `json:"-"`
 }
 
 // generateRewrite generates rewrite steps for a diff if online operations are enabled
@@ -258,6 +264,7 @@ func generateConstraintRewrite(constraint *ir.Constraint) []RewriteStep {
 		{
 			SQL:                 validateSQL,
 			CanRunInTransaction: true,
+			RequiresIsolation:   true,
 		},
 	}
 }
@@ -319,6 +326,7 @@ func generateForeignKeyRewrite(constraint *ir.Constraint) []RewriteStep {
 		{
 			SQL:                 validateSQL,
 			CanRunInTransaction: true,
+			RequiresIsolation:   true,
 		},
 	}
 }
@@ -365,6 +373,7 @@ func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string) []RewriteStep
 		{
 			SQL:                 validateConstraintSQL,
 			CanRunInTransaction: true,
+			RequiresIsolation:   true,
 		},
 		{
 			SQL:                 setNotNullSQL,
