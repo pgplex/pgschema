@@ -25,7 +25,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.a.a_revision_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE a VALIDATE CONSTRAINT a_revision_fkey;",
           "type": "table.constraint",

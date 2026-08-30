@@ -181,8 +181,12 @@ func groupDiffs(diffs []diff.Diff) []ExecutionGroup {
 					Directive: rewriteStep.Directive,
 				}
 
-				// Check if this step needs isolation (has directive or cannot run in transaction)
-				needsIsolation := step.Directive != nil || !rewriteStep.CanRunInTransaction
+				// Check if this step needs isolation: it has a directive, cannot
+				// run in a transaction, or must run in its own transaction (e.g.
+				// VALIDATE CONSTRAINT after ADD ... NOT VALID - batching them into
+				// one transaction would hold ADD's strong lock through the
+				// validation scan, defeating the online rewrite)
+				needsIsolation := step.Directive != nil || !rewriteStep.CanRunInTransaction || rewriteStep.RequiresIsolation
 
 				if needsIsolation {
 					// Flush any pending transactional steps

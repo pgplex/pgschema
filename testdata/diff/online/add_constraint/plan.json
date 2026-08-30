@@ -13,19 +13,31 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.orders.check_amount_positive"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE orders VALIDATE CONSTRAINT check_amount_positive;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.orders.check_amount_positive"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE orders\nADD CONSTRAINT check_valid_status CHECK (status::text IN ('pending'::character varying, 'shipped'::character varying, 'delivered'::character varying)) NOT VALID;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.orders.check_valid_status"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE orders VALIDATE CONSTRAINT check_valid_status;",
           "type": "table.constraint",

@@ -10,7 +10,9 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TABLE parent_base
 ADD CONSTRAINT no_direct_insert CHECK (false) NO INHERIT NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE parent_base VALIDATE CONSTRAINT no_direct_insert;

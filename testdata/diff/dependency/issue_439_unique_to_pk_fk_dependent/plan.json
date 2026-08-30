@@ -49,13 +49,21 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.case_comments.case_comments_case_id_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE case_comments VALIDATE CONSTRAINT case_comments_case_id_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.case_comments.case_comments_case_id_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE case_files\nADD CONSTRAINT case_files_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id);",
           "type": "table.constraint",
@@ -67,19 +75,31 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.case_notes.case_notes_case_id_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE case_notes VALIDATE CONSTRAINT case_notes_case_id_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.case_notes.case_notes_case_id_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE case_tags\nADD CONSTRAINT case_tags_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE NOT VALID;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.case_tags.case_tags_case_id_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE case_tags VALIDATE CONSTRAINT case_tags_case_id_fkey;",
           "type": "table.constraint",

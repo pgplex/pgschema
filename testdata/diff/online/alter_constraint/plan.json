@@ -19,7 +19,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.orders.check_amount_positive"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE orders VALIDATE CONSTRAINT check_amount_positive;",
           "type": "table.constraint",

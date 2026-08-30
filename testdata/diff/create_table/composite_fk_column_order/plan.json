@@ -13,7 +13,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.order_items.fk_order_items_order"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE order_items VALIDATE CONSTRAINT fk_order_items_order;",
           "type": "table.constraint",

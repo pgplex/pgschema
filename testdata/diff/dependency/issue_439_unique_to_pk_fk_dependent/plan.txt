@@ -22,6 +22,7 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 CREATE TABLE IF NOT EXISTS case_files (
     id integer,
     case_id integer,
@@ -42,17 +43,22 @@ ADD CONSTRAINT cases_pkey PRIMARY KEY (id);
 ALTER TABLE case_comments
 ADD CONSTRAINT case_comments_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE case_comments VALIDATE CONSTRAINT case_comments_case_id_fkey;
 
+-- Transaction Group #3
 ALTER TABLE case_files
 ADD CONSTRAINT case_files_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id);
 
 ALTER TABLE case_notes
 ADD CONSTRAINT case_notes_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) NOT VALID;
 
+-- Transaction Group #4
 ALTER TABLE case_notes VALIDATE CONSTRAINT case_notes_case_id_fkey;
 
+-- Transaction Group #5
 ALTER TABLE case_tags
 ADD CONSTRAINT case_tags_case_id_fkey FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE NOT VALID;
 
+-- Transaction Group #6
 ALTER TABLE case_tags VALIDATE CONSTRAINT case_tags_case_id_fkey;

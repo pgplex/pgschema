@@ -72,6 +72,8 @@ This approach ensures:
 - **Foreign key constraints**: Referential integrity with full options
 - **NOT NULL constraints**: Column nullability (via check constraint pattern)
 
+For all constraint types below, pgschema executes the `ADD ... NOT VALID` and `VALIDATE CONSTRAINT` statements in **separate transactions**. This matters: the lock taken by `ADD CONSTRAINT` is released before validation starts, so the long table scan performed by `VALIDATE` runs under a weaker lock that does not block reads or writes.
+
 ### CHECK Constraints
 
 Constraints are added using PostgreSQL's `NOT VALID` pattern:

@@ -25,13 +25,21 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_emp.dept_emp_dept_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_emp VALIDATE CONSTRAINT dept_emp_dept_no_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_emp.dept_emp_dept_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_emp DROP CONSTRAINT dept_emp_emp_no_fkey;",
           "type": "table.constraint",
@@ -43,13 +51,21 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_emp.dept_emp_emp_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_emp VALIDATE CONSTRAINT dept_emp_emp_no_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_emp.dept_emp_emp_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_manager DROP CONSTRAINT dept_manager_dept_no_fkey;",
           "type": "table.constraint",
@@ -61,13 +77,21 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_manager.dept_manager_dept_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_manager VALIDATE CONSTRAINT dept_manager_dept_no_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_manager.dept_manager_dept_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_manager DROP CONSTRAINT dept_manager_emp_no_fkey;",
           "type": "table.constraint",
@@ -79,19 +103,31 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_manager.dept_manager_emp_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE dept_manager VALIDATE CONSTRAINT dept_manager_emp_no_fkey;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.dept_manager.dept_manager_emp_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE employee\nADD CONSTRAINT employee_gender_check CHECK (gender IN ('M'::text, 'F'::text)) NOT VALID;",
           "type": "table.constraint",
           "operation": "create",
           "path": "public.employee.employee_gender_check"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE employee VALIDATE CONSTRAINT employee_gender_check;",
           "type": "table.constraint",
@@ -137,7 +173,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.salary.salary_emp_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE salary VALIDATE CONSTRAINT salary_emp_no_fkey;",
           "type": "table.constraint",
@@ -183,7 +223,11 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.title.title_emp_no_fkey"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE title VALIDATE CONSTRAINT title_emp_no_fkey;",
           "type": "table.constraint",

@@ -328,8 +328,9 @@ Plans include version information to ensure compatibility:
 
 pgschema automatically determines whether changes can run in a transaction:
 
-- **Transactional mode** (default): All changes run in a single transaction with automatic rollback on failure
+- **Transactional mode** (default): Changes run in transaction groups with automatic rollback of the failing group
 - **Non-transactional mode**: Some operations (like `CREATE INDEX CONCURRENTLY`) run outside transactions
+- **Isolated steps**: Online rewrites split certain steps into their own transactions - for example, `VALIDATE CONSTRAINT` always commits separately from the preceding `ADD ... NOT VALID` so the validation scan doesn't run under the lock taken by `ADD`
 
 ```
 Transaction: true    # Changes will run in a transaction

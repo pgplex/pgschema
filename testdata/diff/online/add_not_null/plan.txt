@@ -10,10 +10,13 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TABLE users ADD CONSTRAINT email_not_null CHECK (email IS NOT NULL) NOT VALID;
 
+-- Transaction Group #2
 ALTER TABLE users VALIDATE CONSTRAINT email_not_null;
 
+-- Transaction Group #3
 ALTER TABLE users ALTER COLUMN email SET NOT NULL;
 
 ALTER TABLE users DROP CONSTRAINT email_not_null;
