@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The tool is written in Go 1.24.0 (toolchain go1.24.7) and uses:
 
 - Cobra for CLI commands
-- embedded-postgres v1.33.0 for plan command (temporary instances) and testing (no Docker required)
+- embedded-postgres v1.34.0 for plan command (temporary instances) and testing (no Docker required)
 - pgx/v5 v5.7.5 for database connections
 - BurntSushi/toml for TOML parsing (ignore config)
 - Supports PostgreSQL versions 14-18
@@ -138,7 +138,7 @@ PGAPPNAME=pgschema
 
 **Migration Planning**: The `diff` package compares IR representations to generate a sequence of migration steps with proper dependency ordering (topological sort).
 
-**Database Integration**: Uses `pgx/v5` for database connections and `embedded-postgres` (v1.33.0) for both the plan command (temporary instances) and integration testing (no Docker required).
+**Database Integration**: Uses `pgx/v5` for database connections and `embedded-postgres` (v1.34.0) for both the plan command (temporary instances) and integration testing (no Docker required).
 
 **Inspector-Only Approach**: Both desired state (from user SQL files) and current state (from target database) are obtained through database inspection. The plan command spins up an embedded PostgreSQL instance, applies user SQL files, then inspects it to get the desired state IR. This eliminates the need for SQL parsing and ensures consistency.
 
