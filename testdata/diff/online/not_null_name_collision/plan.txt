@@ -11,7 +11,7 @@ DDL to be executed:
 --------------------------------------------------
 
 -- Transaction Group #1
-ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;
+ALTER TABLE users ADD CONSTRAINT users_email_not_null1 NOT NULL email NOT VALID;
 
 -- Transaction Group #2
-ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;
+ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null1;

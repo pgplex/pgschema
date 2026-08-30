@@ -3,13 +3,13 @@
   "pgschema_version": "1.12.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "653938aaa4f39adc46e8b751c1d67ef7229a57a407833953c0b0176e33e70a58"
+    "hash": "633922ad6f9b6abff7170d0f8eba0468d56725df0d7ee57a81382025589d15ba"
   },
   "groups": [
     {
       "steps": [
         {
-          "sql": "ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;",
+          "sql": "ALTER TABLE users ADD CONSTRAINT users_email_not_null1 NOT NULL email NOT VALID;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"
@@ -19,7 +19,7 @@
     {
       "steps": [
         {
-          "sql": "ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;",
+          "sql": "ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null1;",
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"

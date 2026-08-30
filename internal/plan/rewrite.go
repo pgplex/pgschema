@@ -21,8 +21,13 @@ type RewriteStep struct {
 	RequiresIsolation bool `json:"-"`
 }
 
-// generateRewrite generates rewrite steps for a diff if online operations are enabled
-func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool) []RewriteStep {
+// generateRewrite generates rewrite steps for a diff if online operations are enabled.
+// targetMajorVersion is the target database's PostgreSQL major version (0 if unknown);
+// version-gated rewrites fall back to the portable pattern when it is below the
+// required version or unknown. currentIR is the target database's current state
+// (nil-safe); rewrites consult it to pick constraint names that don't collide
+// with existing constraints, including ones invisible to the IR.
+func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool, targetMajorVersion int, currentIR *ir.IR) []RewriteStep {
 	// Dispatch to specific rewrite generators based on diff type and source
 	switch d.Type {
 	case diff.DiffTypeTableIndex:
@@ -91,7 +96,7 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 					// Verify this diff's SQL actually contains SET NOT NULL
 					for _, stmt := range d.Statements {
 						if strings.Contains(stmt.SQL, "SET NOT NULL") {
-							return generateColumnNotNullRewrite(columnDiff, d.Path)
+							return generateColumnNotNullRewrite(columnDiff, d.Path, targetMajorVersion, currentIR)
 						}
 					}
 				}
@@ -332,7 +337,7 @@ func generateForeignKeyRewrite(constraint *ir.Constraint) []RewriteStep {
 }
 
 // generateColumnNotNullRewrite generates rewrite steps for SET NOT NULL operations
-func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string) []RewriteStep {
+func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string, targetMajorVersion int, currentIR *ir.IR) []RewriteStep {
 	// Parse path (schema.table.column) to extract schema, table, and column names
 	parts := strings.Split(path, ".")
 	if len(parts) != 3 {
@@ -345,9 +350,43 @@ func generateColumnNotNullRewrite(_ *diff.ColumnDiff, path string) []RewriteStep
 	column := parts[2]
 
 	tableName := getTableNameWithSchema(schema, table)
-	constraintName := fmt.Sprintf("%s_not_null", column)
-
 	quotedColumn := ir.QuoteIdentifier(column)
+
+	// Constraint names already present on the table, including ones invisible
+	// to the IR (e.g. a leftover CHECK (col IS NOT NULL) from a manual online
+	// migration, which the inspector deliberately skips). The ADD CONSTRAINT
+	// statements below must not reuse an occupied name or apply fails with
+	// SQLSTATE 42710.
+	takenNames := existingConstraintNames(currentIR, schema, table)
+
+	// PostgreSQL 18+ supports invalid NOT NULL constraints natively, replacing
+	// the four-step CHECK constraint dance with two statements and a single
+	// ACCESS EXCLUSIVE acquisition. The constraint name matches what PostgreSQL
+	// auto-generates for a NOT NULL column in CREATE TABLE, so the migrated
+	// table converges with a freshly created one. The constraint is invisible
+	// to the IR (the inspector tracks nullability via attnotnull and skips
+	// contype='n' rows), so it causes no drift either way.
+	if targetMajorVersion >= 18 {
+		nativeConstraintName := chooseConstraintName(fmt.Sprintf("%s_%s_not_null", table, column), takenNames)
+		addNotNullSQL := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s NOT NULL %s NOT VALID;",
+			tableName, ir.QuoteIdentifier(nativeConstraintName), quotedColumn)
+		validateSQL := fmt.Sprintf("ALTER TABLE %s VALIDATE CONSTRAINT %s;",
+			tableName, ir.QuoteIdentifier(nativeConstraintName))
+
+		return []RewriteStep{
+			{
+				SQL:                 addNotNullSQL,
+				CanRunInTransaction: true,
+			},
+			{
+				SQL:                 validateSQL,
+				CanRunInTransaction: true,
+				RequiresIsolation:   true,
+			},
+		}
+	}
+
+	constraintName := chooseConstraintName(fmt.Sprintf("%s_not_null", column), takenNames)
 
 	// Step 1: Add CHECK constraint with NOT VALID
 	addConstraintSQL := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s IS NOT NULL) NOT VALID;",
@@ -504,6 +543,39 @@ WHERE c.relname = '%s';`, indexName)
 }
 
 // Helper functions
+
+// existingConstraintNames returns the set of constraint names present on the
+// given table in the current database state, including constraints invisible
+// to the IR. Returns an empty set when the IR, schema, or table is unknown.
+func existingConstraintNames(currentIR *ir.IR, schema, table string) map[string]bool {
+	if currentIR == nil {
+		return nil
+	}
+	dbSchema, ok := currentIR.Schemas[schema]
+	if !ok {
+		return nil
+	}
+	t, ok := dbSchema.Tables[table]
+	if !ok {
+		return nil
+	}
+	return t.AllConstraintNames
+}
+
+// chooseConstraintName returns base if it is not taken on the table, otherwise
+// base with the smallest positive integer suffix that is free (base1, base2,
+// ...), mirroring PostgreSQL's own ChooseConstraintName collision handling.
+func chooseConstraintName(base string, taken map[string]bool) string {
+	if !taken[base] {
+		return base
+	}
+	for n := 1; ; n++ {
+		candidate := fmt.Sprintf("%s%d", base, n)
+		if !taken[candidate] {
+			return candidate
+		}
+	}
+}
 
 func getTableNameWithSchema(schema, table string) string {
 	quotedTable := ir.QuoteIdentifier(table)

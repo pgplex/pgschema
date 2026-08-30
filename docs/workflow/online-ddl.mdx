@@ -103,7 +103,19 @@ ALTER TABLE employees VALIDATE CONSTRAINT employees_company_fkey;
 
 ### NOT NULL Constraints
 
-Adding `NOT NULL` constraints uses a three-step process:
+On PostgreSQL 18+, pgschema uses the native invalid `NOT NULL` constraint support:
+
+```sql
+-- 1. Add NOT NULL constraint without validation (fast; new writes are enforced immediately)
+ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;
+
+-- 2. Validate existing data (may take time, but non-blocking)
+ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;
+```
+
+The constraint name matches what PostgreSQL generates for a `NOT NULL` column in `CREATE TABLE`, so the migrated table converges with a freshly created one.
+
+On PostgreSQL 14-17, adding `NOT NULL` uses a check constraint based process:
 
 ```sql
 -- 1. Add check constraint (non-blocking)
@@ -114,6 +126,9 @@ ALTER TABLE users VALIDATE CONSTRAINT email_not_null;
 
 -- 3. Set NOT NULL (fast, since data is already validated)
 ALTER TABLE users ALTER COLUMN email SET NOT NULL;
+
+-- 4. Drop the temporary check constraint
+ALTER TABLE users DROP CONSTRAINT email_not_null;
 ```
 
 ## Examples
