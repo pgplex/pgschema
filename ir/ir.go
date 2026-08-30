@@ -67,6 +67,14 @@ type Table struct {
 	PartitionBound    string                 `json:"partition_bound,omitempty"`    // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
 	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`       // LIKE clauses in CREATE TABLE
 	Unlogged          bool                   `json:"unlogged,omitempty"`           // True for UNLOGGED tables
+	// AllConstraintNames records every constraint name present on the table in
+	// the database, including constraints not represented in the IR (NOT NULL
+	// constraints on PG18+, redundant CHECK (col IS NOT NULL) constraints,
+	// ignored constraints). Online rewrites consult it to pick collision-free
+	// names for the constraints they create. Derived state, not part of the
+	// schema definition, so it is excluded from serialization (and thereby
+	// from fingerprints and plan JSON).
+	AllConstraintNames map[string]bool `json:"-"`
 }
 
 // Column represents a table column

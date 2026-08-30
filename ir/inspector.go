@@ -445,6 +445,17 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 		tableName := constraint.TableName
 		constraintName := constraint.ConstraintName
 
+		// Record every constraint name present on the table - including rows
+		// skipped below (ignored constraints, NOT NULL constraints on PG18+,
+		// redundant CHECK (col IS NOT NULL) constraints) - so online rewrites
+		// can pick collision-free names for the constraints they create.
+		if table, exists := schema.getOrCreateSchema(schemaName).Tables[tableName]; exists {
+			if table.AllConstraintNames == nil {
+				table.AllConstraintNames = make(map[string]bool)
+			}
+			table.AllConstraintNames[constraintName] = true
+		}
+
 		// Skip ignored constraints early to avoid the per-column position
 		// queries below for constraints that would be discarded anyway.
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraint(constraintName) {

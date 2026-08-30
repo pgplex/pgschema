@@ -75,7 +75,7 @@ func TestPlanSummary(t *testing.T) {
 	newIR := parseSQL(t, newSQL)
 	diffs := diff.GenerateMigration(oldIR, newIR, "public")
 
-	plan := NewPlan(diffs, 18)
+	plan := NewPlan(diffs, 18, nil)
 	summary := plan.HumanColored(false)
 
 	// Debug: print the summary to see what it looks like
@@ -187,7 +187,7 @@ func TestPlanNoChanges(t *testing.T) {
 	newIR := parseSQL(t, sql)
 	diffs := diff.GenerateMigration(oldIR, newIR, "public")
 
-	plan := NewPlan(diffs, 18)
+	plan := NewPlan(diffs, 18, nil)
 	summary := strings.TrimSpace(plan.HumanColored(false))
 
 	if summary != "No changes detected." {
@@ -282,7 +282,7 @@ func TestPlanDebugJSONRoundTrip(t *testing.T) {
 	newIR := parseSQL(t, newSQL)
 	diffs := diff.GenerateMigration(oldIR, newIR, "public")
 
-	p := NewPlan(diffs, 18)
+	p := NewPlan(diffs, 18, nil)
 
 	// Serialize with debug mode (includes SourceDiffs; Diff.Source is excluded via json:"-")
 	debugJSON, err := p.ToJSONWithDebug(true)

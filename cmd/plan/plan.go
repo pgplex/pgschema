@@ -385,7 +385,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	}
 
 	// Create plan from diffs with fingerprint
-	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint, targetMajorVersion)
+	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint, targetMajorVersion, currentStateIR)
 
 	return migrationPlan, nil
 }

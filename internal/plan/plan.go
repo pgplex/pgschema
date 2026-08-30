@@ -12,6 +12,7 @@ import (
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/fingerprint"
 	"github.com/pgplex/pgschema/internal/version"
+	"github.com/pgplex/pgschema/ir"
 )
 
 // DirectiveType represents the different types of directives
@@ -144,8 +145,10 @@ func getObjectOrder() []Type {
 // ========== PUBLIC METHODS ==========
 
 // groupDiffs groups diffs into execution groups with configurable online operations.
-// targetMajorVersion gates version-specific rewrites (0 if unknown).
-func groupDiffs(diffs []diff.Diff, targetMajorVersion int) []ExecutionGroup {
+// targetMajorVersion gates version-specific rewrites (0 if unknown); currentIR is
+// the target database's current state (nil-safe), used by rewrites to avoid
+// constraint name collisions.
+func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []ExecutionGroup {
 	if len(diffs) == 0 {
 		return nil
 	}
@@ -169,7 +172,7 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int) []ExecutionGroup {
 			newlyCreatedMaterializedViews[d.Path] = true
 		}
 		// Try to generate rewrites if online operations are enabled
-		rewriteSteps := generateRewrite(d, newlyCreatedTables, newlyCreatedMaterializedViews, targetMajorVersion)
+		rewriteSteps := generateRewrite(d, newlyCreatedTables, newlyCreatedMaterializedViews, targetMajorVersion, currentIR)
 
 		if len(rewriteSteps) > 0 {
 			// For operations with rewrites, create one step per rewrite statement
@@ -229,8 +232,9 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int) []ExecutionGroup {
 // NewPlan creates a new plan from a list of diffs with online operations enabled.
 // targetMajorVersion is the target database's PostgreSQL major version (0 if
 // unknown); it gates version-specific rewrites such as the PG18 native
-// NOT NULL ... NOT VALID pattern.
-func NewPlan(diffs []diff.Diff, targetMajorVersion int) *Plan {
+// NOT NULL ... NOT VALID pattern. currentIR is the target database's current
+// state (nil-safe), used by rewrites to avoid constraint name collisions.
+func NewPlan(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) *Plan {
 	// Use environment variable for timestamp if provided, otherwise use current time
 	createdAt := time.Now().Truncate(time.Second)
 	if testTime := os.Getenv("PGSCHEMA_TEST_TIME"); testTime != "" {
@@ -243,7 +247,7 @@ func NewPlan(diffs []diff.Diff, targetMajorVersion int) *Plan {
 		Version:         version.PlanFormat(),
 		PgschemaVersion: version.App(),
 		CreatedAt:       createdAt,
-		Groups:          groupDiffs(diffs, targetMajorVersion),
+		Groups:          groupDiffs(diffs, targetMajorVersion, currentIR),
 		SourceDiffs:     diffs,
 	}
 
@@ -251,8 +255,8 @@ func NewPlan(diffs []diff.Diff, targetMajorVersion int) *Plan {
 }
 
 // NewPlanWithFingerprint creates a new plan from diffs and includes source fingerprint
-func NewPlanWithFingerprint(diffs []diff.Diff, sourceFingerprint *fingerprint.SchemaFingerprint, targetMajorVersion int) *Plan {
-	plan := NewPlan(diffs, targetMajorVersion)
+func NewPlanWithFingerprint(diffs []diff.Diff, sourceFingerprint *fingerprint.SchemaFingerprint, targetMajorVersion int, currentIR *ir.IR) *Plan {
+	plan := NewPlan(diffs, targetMajorVersion, currentIR)
 	plan.SourceFingerprint = sourceFingerprint
 	return plan
 }
