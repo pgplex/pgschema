@@ -6,7 +6,7 @@ toolchain go1.24.7
 
 require (
 	github.com/BurntSushi/toml v1.5.0
-	github.com/fergusstrange/embedded-postgres v1.33.0
+	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/google/go-cmp v0.7.0
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/joho/godotenv v1.5.1

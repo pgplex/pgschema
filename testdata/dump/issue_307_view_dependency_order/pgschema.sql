@@ -2,7 +2,7 @@
 -- pgschema database dump
 --
 
--- Dumped from database version PostgreSQL 18.0
+-- Dumped from database version PostgreSQL 18.3
 -- Dumped by pgschema version 1.7.2
 
 
