@@ -1,0 +1,30 @@
+Plan: 2 to add.
+
+Summary by type:
+  functions: 1 to add
+  tables: 1 to add
+
+Functions:
+  + MyFunc
+
+Tables:
+  + widgets
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE OR REPLACE FUNCTION "MyFunc"()
+RETURNS integer
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+BEGIN
+    RETURN 42;
+END;
+$$;
+
+CREATE TABLE IF NOT EXISTS widgets (
+    id SERIAL,
+    code integer DEFAULT public."MyFunc"(),
+    CONSTRAINT widgets_pkey PRIMARY KEY (id)
+);

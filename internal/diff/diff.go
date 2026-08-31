@@ -2618,7 +2618,25 @@ func typeMatchesLookup(typeName, defaultSchema string, lookup map[string]struct{
 	return false
 }
 
-var functionCallRegex = regexp.MustCompile(`(?i)([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)\s*\(`)
+var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"[^"]+")(?:\.(?:[a-z_][a-z0-9_$]*|"[^"]+"))*)\s*\(`)
+
+// functionIdentAtomRegex matches a single identifier segment of a (possibly
+// schema-qualified) function name, either unquoted or double-quoted.
+var functionIdentAtomRegex = regexp.MustCompile(`(?i)"[^"]+"|[a-z_][a-z0-9_$]*`)
+
+// normalizeFunctionIdentifier strips double-quotes from each dot-separated
+// segment of a function identifier and lowercases it, matching the lookup
+// keys built by buildFunctionLookup.
+func normalizeFunctionIdentifier(raw string) string {
+	atoms := functionIdentAtomRegex.FindAllString(raw, -1)
+	for i, atom := range atoms {
+		if len(atom) >= 2 && atom[0] == '"' && atom[len(atom)-1] == '"' {
+			atom = atom[1 : len(atom)-1]
+		}
+		atoms[i] = strings.ToLower(atom)
+	}
+	return strings.Join(atoms, ".")
+}
 
 // tableReferencesNewFunction determines if a table references any newly added functions
 // in column defaults, generated columns, or CHECK constraints.
@@ -2774,7 +2792,7 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 		if len(match) < 2 {
 			continue
 		}
-		identifier := strings.ToLower(match[1])
+		identifier := normalizeFunctionIdentifier(match[1])
 		if identifier == "" {
 			continue
 		}
