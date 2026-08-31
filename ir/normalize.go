@@ -425,7 +425,7 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 
 // isIdentChar returns true if the byte is a valid SQL identifier character.
 func isIdentChar(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '$'
 }
 
 // normalizeProcedure normalizes procedure representation

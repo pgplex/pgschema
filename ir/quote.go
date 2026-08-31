@@ -153,7 +153,7 @@ func needsQuoting(identifier string) bool {
 		if i == 0 && !unicode.IsLetter(r) && r != '_' {
 			return true
 		}
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '$' {
 			return true
 		}
 	}
