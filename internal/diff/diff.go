@@ -2652,6 +2652,17 @@ func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{
 		}
 	}
 
+	// Check expression index columns
+	for _, index := range table.Indexes {
+		if index.IsExpression {
+			for _, col := range index.Columns {
+				if referencesNewFunction(col.Name, table.Schema, newFunctions) {
+					return true
+				}
+			}
+		}
+	}
+
 	return false
 }
 

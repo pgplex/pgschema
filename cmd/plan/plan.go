@@ -567,6 +567,11 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 					index.Schema = toSchema
 				}
 				index.Where = replaceString(index.Where)
+				if index.IsExpression {
+					for _, col := range index.Columns {
+						col.Name = stripQualifiers(replaceString(col.Name))
+					}
+				}
 			}
 
 			// Normalize schema names in triggers
