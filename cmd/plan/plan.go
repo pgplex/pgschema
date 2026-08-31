@@ -566,7 +566,7 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 				if index.Schema == fromSchema {
 					index.Schema = toSchema
 				}
-				index.Where = replaceString(index.Where)
+				index.Where = stripQualifiers(replaceString(index.Where))
 				if index.IsExpression {
 					for _, col := range index.Columns {
 						col.Name = stripQualifiers(replaceString(col.Name))
@@ -603,7 +603,7 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 				if index.Schema == fromSchema {
 					index.Schema = toSchema
 				}
-				index.Where = replaceString(index.Where)
+				index.Where = stripQualifiers(replaceString(index.Where))
 				if index.IsExpression {
 					for _, col := range index.Columns {
 						col.Name = stripQualifiers(replaceString(col.Name))

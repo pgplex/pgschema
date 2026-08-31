@@ -21,7 +21,7 @@
           "path": "public.accounts"
         },
         {
-          "sql": "CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts (id) WHERE (public.is_active(active, expires_at));",
+          "sql": "CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts (id) WHERE (is_active(active, expires_at));",
           "type": "table.index",
           "operation": "create",
           "path": "public.accounts.idx_accounts_active"

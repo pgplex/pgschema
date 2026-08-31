@@ -792,6 +792,9 @@ func normalizeIndex(index *Index) {
 	// Normalize WHERE clause for partial indexes
 	if index.IsPartial && index.Where != "" {
 		index.Where = normalizeIndexWhereClause(index.Where)
+		if index.Schema != "" {
+			index.Where = StripSchemaPrefixFromBody(index.Where, index.Schema)
+		}
 	}
 
 	// Strip same-schema qualifiers from expression index column names

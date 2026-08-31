@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT accounts_pkey PRIMARY KEY (id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts (id) WHERE (public.is_active(active, expires_at));
+CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts (id) WHERE (is_active(active, expires_at));
