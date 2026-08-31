@@ -2446,13 +2446,41 @@ func buildSchemaNameLookup(names []struct{ schema, name string }) map[string]str
 	return lookup
 }
 
-// buildFunctionLookup returns case-insensitive lookup keys for newly added functions.
+// buildFunctionLookup returns lookup keys for newly added functions. Unlike
+// buildSchemaNameLookup, this is not purely case-insensitive: PostgreSQL only
+// folds unquoted identifiers to lowercase, so a name that requires quoting
+// (mixed case, reserved word, special characters) keeps its exact case here,
+// matching functionLookupKeyPart used when normalizing scanned expressions.
 func buildFunctionLookup(functions []*ir.Function) map[string]struct{} {
-	names := make([]struct{ schema, name string }, len(functions))
-	for i, fn := range functions {
-		names[i] = struct{ schema, name string }{fn.Schema, fn.Name}
+	if len(functions) == 0 {
+		return nil
 	}
-	return buildSchemaNameLookup(names)
+
+	lookup := make(map[string]struct{}, len(functions)*2)
+	for _, fn := range functions {
+		name := functionLookupKeyPart(fn.Name)
+		if name == "" {
+			continue
+		}
+		lookup[name] = struct{}{}
+
+		if fn.Schema != "" {
+			lookup[functionLookupKeyPart(fn.Schema)+"."+name] = struct{}{}
+		}
+	}
+	return lookup
+}
+
+// functionLookupKeyPart normalizes a single schema or function name segment
+// for lookup. PostgreSQL folds an unquoted identifier to lowercase, so a name
+// that doesn't require quoting is safely case-folded here; a name that does
+// require quoting is kept as-is since it can only ever be referenced quoted,
+// with its exact case intact.
+func functionLookupKeyPart(name string) string {
+	if ir.NeedsQuoting(name) {
+		return name
+	}
+	return strings.ToLower(name)
 }
 
 // buildViewLookup returns case-insensitive lookup keys for newly added views.
@@ -2625,14 +2653,17 @@ var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"
 // embedded double-quotes escaped as "").
 var functionIdentAtomRegex = regexp.MustCompile(`(?i)"(?:[^"]|"")*"|[a-z_][a-z0-9_$]*`)
 
-// normalizeFunctionIdentifier strips double-quotes from each dot-separated
-// segment of a function identifier (unescaping "" to ") and lowercases it,
-// matching the lookup keys built by buildFunctionLookup.
+// normalizeFunctionIdentifier normalizes each dot-separated segment of a
+// function identifier to match the lookup keys built by functionLookupKeyPart:
+// a quoted segment is unescaped ("" to ") and kept exactly as written (a quoted
+// reference is case-sensitive), while a bare segment is lowercased (PostgreSQL
+// folds unquoted identifiers to lowercase).
 func normalizeFunctionIdentifier(raw string) string {
 	atoms := functionIdentAtomRegex.FindAllString(raw, -1)
 	for i, atom := range atoms {
 		if len(atom) >= 2 && atom[0] == '"' && atom[len(atom)-1] == '"' {
-			atom = strings.ReplaceAll(atom[1:len(atom)-1], `""`, `"`)
+			atoms[i] = strings.ReplaceAll(atom[1:len(atom)-1], `""`, `"`)
+			continue
 		}
 		atoms[i] = strings.ToLower(atom)
 	}
@@ -2803,7 +2834,7 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 		}
 
 		if !strings.Contains(identifier, ".") && defaultSchema != "" {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(defaultSchema), identifier)
+			qualified := fmt.Sprintf("%s.%s", functionLookupKeyPart(defaultSchema), identifier)
 			if _, ok := newFunctions[qualified]; ok {
 				return true
 			}

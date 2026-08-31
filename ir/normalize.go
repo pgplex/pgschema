@@ -401,7 +401,7 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 					identEnd++
 				}
 				ident := body[afterPrefix:identEnd]
-				if needsQuoting(ident) {
+				if NeedsQuoting(ident) {
 					result.WriteString(QuoteIdentifier(ident))
 					i = identEnd - 1
 					continue

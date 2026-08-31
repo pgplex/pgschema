@@ -897,14 +897,14 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 
 	for _, fn := range functions {
 		key := fn.Schema + "." + fn.Name + "(" + fn.GetArguments() + ")"
-		name := strings.ToLower(fn.Name)
+		name := functionLookupKeyPart(fn.Name)
 
 		// Store under unqualified name
 		functionLookup[name] = funcInfo{fn: fn, key: key}
 
 		// Store under qualified name
 		if fn.Schema != "" {
-			qualified := strings.ToLower(fn.Schema) + "." + name
+			qualified := functionLookupKeyPart(fn.Schema) + "." + name
 			functionLookup[qualified] = funcInfo{fn: fn, key: key}
 		}
 	}
@@ -934,7 +934,7 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 			if info, found = functionLookup[identifier]; !found {
 				// Try with schema prefix if identifier is unqualified
 				if !strings.Contains(identifier, ".") && fn.Schema != "" {
-					qualified := strings.ToLower(fn.Schema) + "." + identifier
+					qualified := functionLookupKeyPart(fn.Schema) + "." + identifier
 					info, found = functionLookup[qualified]
 				}
 			}
