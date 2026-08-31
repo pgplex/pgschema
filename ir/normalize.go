@@ -287,6 +287,11 @@ func normalizeView(view *View) {
 	for _, trigger := range view.Triggers {
 		normalizeTrigger(trigger)
 	}
+
+	// Normalize indexes on materialized views
+	for _, index := range view.Indexes {
+		normalizeIndex(index)
+	}
 }
 
 // normalizeFunction normalizes function signature and definition
