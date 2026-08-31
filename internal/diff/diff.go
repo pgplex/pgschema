@@ -2652,13 +2652,18 @@ func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{
 		}
 	}
 
-	// Check expression index columns
+	// Check expression index columns and partial index predicates
 	for _, index := range table.Indexes {
 		if index.IsExpression {
 			for _, col := range index.Columns {
 				if referencesNewFunction(col.Name, table.Schema, newFunctions) {
 					return true
 				}
+			}
+		}
+		if index.IsPartial && index.Where != "" {
+			if referencesNewFunction(index.Where, table.Schema, newFunctions) {
+				return true
 			}
 		}
 	}
