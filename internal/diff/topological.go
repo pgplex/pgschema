@@ -922,7 +922,7 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 			if len(match) < 2 {
 				continue
 			}
-			identifier := strings.ToLower(match[1])
+			identifier := normalizeFunctionIdentifier(match[1])
 			if identifier == "" {
 				continue
 			}
