@@ -794,7 +794,7 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 		return func(s string) string { return s }
 	}
 	prefix := schema + "."
-	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)\(`)
+	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
 	typePattern := regexp.MustCompile(`::` + regexp.QuoteMeta(prefix))
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
