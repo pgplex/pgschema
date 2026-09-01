@@ -1122,6 +1122,12 @@ LEFT JOIN (
     WHERE col.table_schema = $1
       AND col.column_default LIKE '%nextval%'
 ) col_table ON col_table.sequence_name = s.sequencename
+    -- Only trust the column-default fallback when the sequence follows
+    -- PostgreSQL's implicit naming convention for this exact column
+    -- (<table>_<column>_seq). A shared/central sequence referenced via an
+    -- explicit DEFAULT nextval(...) is not "owned" by the column and must
+    -- not be treated as if it were created by SERIAL (issue #573, #574).
+    AND col_table.sequence_name = col_table.table_name || '_' || col_table.column_name || '_seq'
 WHERE s.schemaname = $1
 ORDER BY s.schemaname, s.sequencename;
 
