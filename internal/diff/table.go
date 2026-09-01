@@ -2,7 +2,6 @@ package diff
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -188,7 +187,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified columns
 	for name, newColumn := range newColumns {
 		if oldColumn, exists := oldColumns[name]; exists {
-			if !columnsEqual(oldColumn, newColumn, newTable.Name, targetSchema) {
+			if !columnsEqual(oldColumn, newColumn, targetSchema) {
 				diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{
 					Old: oldColumn,
 					New: newColumn,
@@ -1152,12 +1151,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		}
 
 		// Build column type and strip schema prefix if it matches target schema
-		columnType := formatColumnDataType(column, td.Table.Name)
+		columnType := formatColumnDataType(column)
 		columnType = stripSchemaPrefix(columnType, targetSchema)
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 
 		// Build and append all column clauses
-		clauses := buildColumnClauses(column, isPartOfAnyPK, td.Table.Schema, td.Table.Name, targetSchema)
+		clauses := buildColumnClauses(column, isPartOfAnyPK, td.Table.Schema, targetSchema)
 
 		// Check for single-column constraints that can be added inline
 		var inlineConstraint string
@@ -1787,7 +1786,7 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 	builder.WriteString(" ")
 
 	// Data type - handle array types and precision/scale for appropriate types
-	dataType := formatColumnDataTypeForCreate(column, table.Name)
+	dataType := formatColumnDataTypeForCreate(column)
 
 	// Strip schema prefix if it matches the target schema (unless forced qualification
 	// is on, in which case the schema-qualified type name is preserved).
@@ -1812,14 +1811,14 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 	}
 
 	// Build and append all column clauses
-	clauses := buildColumnClauses(column, isPartOfAnyPK, table.Schema, table.Name, targetSchema)
+	clauses := buildColumnClauses(column, isPartOfAnyPK, table.Schema, targetSchema)
 	builder.WriteString(clauses)
 }
 
 // buildColumnClauses builds the SQL clauses for a column definition (works for both CREATE TABLE and ALTER TABLE)
 // Returns the clauses as a string to be appended to the column name and type
 // Order follows PostgreSQL documentation: https://www.postgresql.org/docs/current/sql-altertable.html
-func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema string, tableName string, targetSchema string) string {
+func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema string, targetSchema string) string {
 	var parts []string
 
 	// 1. Identity columns (must come early, before DEFAULT)
@@ -1833,7 +1832,7 @@ func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema strin
 	}
 
 	// 2. DEFAULT (skip for SERIAL, identity, or generated columns)
-	if column.DefaultValue != nil && column.Identity == nil && !column.IsGenerated && !isSerialColumn(column, tableName) {
+	if column.DefaultValue != nil && column.Identity == nil && !column.IsGenerated && !isSerialColumn(column) {
 		// DefaultValue is already normalized by ir.normalizeColumn
 		// (schema qualifiers and sequence references are handled there)
 		parts = append(parts, fmt.Sprintf("DEFAULT %s", *column.DefaultValue))
@@ -1849,7 +1848,7 @@ func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema strin
 	}
 
 	// 4. NOT NULL (skip for PK including multi-column PKs, identity, and SERIAL)
-	if !column.IsNullable && column.Identity == nil && !isSerialColumn(column, tableName) && !isPartOfAnyPK {
+	if !column.IsNullable && column.Identity == nil && !isSerialColumn(column) && !isPartOfAnyPK {
 		parts = append(parts, "NOT NULL")
 	}
 
@@ -1865,46 +1864,16 @@ func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema strin
 	return result
 }
 
-// nextvalDefaultRegexp extracts the bare sequence name from a normalized
-// nextval() column default, e.g. "nextval('orders_id_seq'::regclass)" -> "orders_id_seq".
-var nextvalDefaultRegexp = regexp.MustCompile(`^nextval\('([^']+)'::regclass\)$`)
-
-// sequenceNameFromDefault returns the sequence name referenced by a nextval()
-// column default, unquoting it if necessary. It returns false if the default
-// is not a nextval() call.
-func sequenceNameFromDefault(defaultValue string) (string, bool) {
-	m := nextvalDefaultRegexp.FindStringSubmatch(strings.TrimSpace(defaultValue))
-	if m == nil {
-		return "", false
-	}
-	name := m[1]
-	if len(name) >= 2 && strings.HasPrefix(name, `"`) && strings.HasSuffix(name, `"`) {
-		name = strings.ReplaceAll(name[1:len(name)-1], `""`, `"`)
-	}
-	return name, true
-}
-
-// serialSequenceName returns the sequence name PostgreSQL implicitly creates
-// for a SERIAL/SMALLSERIAL/BIGSERIAL column: "<table>_<column>_seq".
-func serialSequenceName(tableName, columnName string) string {
-	return tableName + "_" + columnName + "_seq"
-}
-
 // isSerialColumn checks if a column is a SERIAL column: an integer-typed
-// column whose default is nextval() on the sequence PostgreSQL implicitly
-// creates for that exact column. A nextval() default alone is not enough -
-// it may reference a shared/central sequence that isn't actually "owned" by
-// this column (see issue #574), so the sequence name must also match
-// PostgreSQL's own naming convention for implicit SERIAL sequences.
-func isSerialColumn(column *ir.Column, tableName string) bool {
-	if column.DefaultValue == nil {
-		return false
-	}
-	seqName, ok := sequenceNameFromDefault(*column.DefaultValue)
-	if !ok {
-		return false
-	}
-	if seqName != serialSequenceName(tableName, column.Name) {
+// column whose nextval() default sequence is genuinely owned by (created
+// for) this exact column, per IR.IsSerial. A nextval() default alone is not
+// enough - it may reference a shared/central sequence used by other columns
+// too (see issue #574), so ownership is derived from dependency-based
+// inspection (ir.markSerialColumns) rather than guessed from the sequence
+// name, which also correctly handles PostgreSQL's implicit truncation of
+// long identifiers.
+func isSerialColumn(column *ir.Column) bool {
+	if !column.IsSerial {
 		return false
 	}
 
@@ -1918,11 +1887,11 @@ func isSerialColumn(column *ir.Column, tableName string) bool {
 }
 
 // formatColumnDataType formats a column's data type with appropriate modifiers for ALTER TABLE statements
-func formatColumnDataType(column *ir.Column, tableName string) string {
+func formatColumnDataType(column *ir.Column) string {
 	dataType := column.DataType
 
 	// Handle SERIAL types
-	if isSerialColumn(column, tableName) {
+	if isSerialColumn(column) {
 		switch column.DataType {
 		case "smallint", "int2":
 			return "smallserial"
@@ -1950,11 +1919,11 @@ func formatColumnDataType(column *ir.Column, tableName string) string {
 }
 
 // formatColumnDataTypeForCreate formats a column's data type with appropriate modifiers for CREATE TABLE statements
-func formatColumnDataTypeForCreate(column *ir.Column, tableName string) string {
+func formatColumnDataTypeForCreate(column *ir.Column) string {
 	dataType := column.DataType
 
 	// Handle SERIAL types (uppercase for CREATE TABLE)
-	if isSerialColumn(column, tableName) {
+	if isSerialColumn(column) {
 		switch column.DataType {
 		case "smallint", "int2":
 			return "SMALLSERIAL"

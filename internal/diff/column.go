@@ -19,8 +19,8 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	// numeric(18,6) -> numeric(20,6) change would be invisible here.
 	oldBaseType := stripSchemaPrefix(cd.Old.DataType, targetSchema)
 	newBaseType := stripSchemaPrefix(cd.New.DataType, targetSchema)
-	oldType := stripSchemaPrefix(comparableColumnType(cd.Old, tableName), targetSchema)
-	newType := stripSchemaPrefix(comparableColumnType(cd.New, tableName), targetSchema)
+	oldType := stripSchemaPrefix(comparableColumnType(cd.Old), targetSchema)
+	newType := stripSchemaPrefix(comparableColumnType(cd.New), targetSchema)
 
 	// Check if there's a type change AND the column has a default value
 	// When a USING clause is needed, we must: DROP DEFAULT -> ALTER TYPE -> SET DEFAULT
@@ -148,16 +148,16 @@ func normalizeBaseTypeName(typeName string) string {
 // not expand SERIAL: serial is integer + sequence-default sugar, and
 // serial<->integer/identity transitions are handled by the sequence and
 // identity machinery rather than a TYPE change.
-func comparableColumnType(column *ir.Column, tableName string) string {
-	if isSerialColumn(column, tableName) {
+func comparableColumnType(column *ir.Column) string {
+	if isSerialColumn(column) {
 		return column.DataType
 	}
-	return formatColumnDataType(column, tableName)
+	return formatColumnDataType(column)
 }
 
 // columnsEqual compares two columns for equality
-// tableName is used for SERIAL detection; targetSchema is used to normalize type names before comparison
-func columnsEqual(old, new *ir.Column, tableName string, targetSchema string) bool {
+// targetSchema is used to normalize type names before comparison
+func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 	if old.Name != new.Name {
 		return false
 	}
@@ -165,8 +165,8 @@ func columnsEqual(old, new *ir.Column, tableName string, targetSchema string) bo
 	// Use comparableColumnType so type modifiers (numeric precision/scale,
 	// varchar length) are included - DataType alone is just "numeric" for
 	// both numeric(18,6) and numeric(20,6).
-	oldType := stripSchemaPrefix(comparableColumnType(old, tableName), targetSchema)
-	newType := stripSchemaPrefix(comparableColumnType(new, tableName), targetSchema)
+	oldType := stripSchemaPrefix(comparableColumnType(old), targetSchema)
+	newType := stripSchemaPrefix(comparableColumnType(new), targetSchema)
 	if oldType != newType {
 		return false
 	}

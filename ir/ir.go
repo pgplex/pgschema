@@ -92,6 +92,14 @@ type Column struct {
 	GeneratedExpr *string   `json:"generated_expr,omitempty"` // Expression for generated columns
 	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
 	GeneratedKind string    `json:"generated_kind,omitempty"` // "s" for STORED, "v" for VIRTUAL (PG18+)
+
+	// IsSerial is true when this column's nextval() default sequence is
+	// genuinely owned by (created for) this exact column - i.e. SERIAL/
+	// SMALLSERIAL/BIGSERIAL sugar - as opposed to an explicit DEFAULT
+	// nextval(...) referencing a shared/central sequence used by other
+	// columns too. Computed from dependency-based sequence ownership
+	// (see markSerialColumns in inspector.go); not part of the persisted IR.
+	IsSerial bool `json:"-"`
 }
 
 // Identity represents PostgreSQL identity column configuration

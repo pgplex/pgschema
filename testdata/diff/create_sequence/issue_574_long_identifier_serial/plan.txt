@@ -1,0 +1,16 @@
+Plan: 1 to add.
+
+Summary by type:
+  tables: 1 to add
+
+Tables:
+  + measurement_data_collected_hourly
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS measurement_data_collected_hourly (
+    reading_identifier_value_number BIGSERIAL,
+    label text,
+    CONSTRAINT measurement_data_collected_hourly_pkey PRIMARY KEY (reading_identifier_value_number)
+);

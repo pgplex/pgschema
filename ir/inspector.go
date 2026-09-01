@@ -127,6 +127,10 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, err
 	}
 
+	// Flag genuinely SERIAL-owned columns now that both columns and
+	// sequences (group 1 and group 2) have loaded.
+	markSerialColumns(schema)
+
 	// Build function dependencies after functions are loaded
 	if err := i.buildFunctionDependencies(ctx, schema, targetSchema); err != nil {
 		return nil, err
@@ -887,6 +891,36 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 	}
 
 	return nil
+}
+
+// markSerialColumns flags columns whose nextval() default sequence is
+// genuinely owned by that exact column (SERIAL/SMALLSERIAL/BIGSERIAL sugar),
+// using the dependency-based ownership already resolved on each Sequence
+// (see GetSequencesForSchema). Deriving this from real ownership - rather
+// than guessing from the sequence name - handles PostgreSQL's implicit
+// identifier truncation for long table/column names correctly, and avoids
+// misclassifying a shared/central sequence referenced by an explicit
+// DEFAULT nextval(...) as if it were created by SERIAL (issue #573, #574).
+//
+// Must run after both the columns and sequences query groups have loaded.
+func markSerialColumns(schema *IR) {
+	for _, dbSchema := range schema.Schemas {
+		for _, seq := range dbSchema.Sequences {
+			if seq.OwnedByTable == "" || seq.OwnedByColumn == "" {
+				continue
+			}
+			table, ok := dbSchema.Tables[seq.OwnedByTable]
+			if !ok {
+				continue
+			}
+			for _, column := range table.Columns {
+				if column.Name == seq.OwnedByColumn {
+					column.IsSerial = true
+					break
+				}
+			}
+		}
+	}
 }
 
 func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema string) error {
