@@ -466,6 +466,38 @@ func TestBuildFunctionBodyDependencies(t *testing.T) {
 			},
 		},
 		{
+			// Regression test: an unqualified call must resolve to the function
+			// in the caller's own schema before falling back to the bare name,
+			// which is one slot shared across schemas (last writer wins). Here
+			// public."ZHelper" is listed last so it would otherwise claim the
+			// bare "ZHelper" slot and steal the dependency from other."ZHelper".
+			name: "unqualified call prefers the caller's schema over a same-named function elsewhere",
+			funcs: []*ir.Function{
+				{
+					Schema:     "other",
+					Name:       "AWrapper",
+					Definition: `SELECT "ZHelper"()`,
+					Language:   "sql",
+				},
+				{
+					Schema:     "other",
+					Name:       "ZHelper",
+					Definition: "SELECT 1",
+					Language:   "sql",
+				},
+				{
+					Schema:     "public",
+					Name:       "ZHelper",
+					Definition: "SELECT 2",
+					Language:   "sql",
+				},
+			},
+			expected: map[string][]string{
+				"AWrapper": {"other.ZHelper()"},
+				"ZHelper":  nil,
+			},
+		},
+		{
 			// Regression test: an unquoted call in a function body still
 			// resolves to the same function regardless of how it's spelled,
 			// since PostgreSQL folds every unquoted identifier to lowercase.

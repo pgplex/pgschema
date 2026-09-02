@@ -926,15 +926,23 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 				continue
 			}
 
-			// Try to find the referenced function
+			// Resolve the referenced function. A schema-qualified call is looked
+			// up directly. An unqualified call is resolved against the caller's
+			// own schema first (the closest approximation of its search_path);
+			// only then against the bare name, which is a single slot shared by
+			// every schema and would otherwise let a same-named function in
+			// another schema win over the caller's own.
 			var info funcInfo
 			var found bool
 
-			if info, found = functionLookup[identifier]; !found {
-				// Try with schema prefix if identifier is unqualified
-				if !strings.Contains(identifier, "\x00") && fn.Schema != "" {
-					qualified := functionGraphKey(fn.Schema, identifier)
-					info, found = functionLookup[qualified]
+			if strings.Contains(identifier, "\x00") {
+				info, found = functionLookup[identifier]
+			} else {
+				if fn.Schema != "" {
+					info, found = functionLookup[functionGraphKey(fn.Schema, identifier)]
+				}
+				if !found {
+					info, found = functionLookup[identifier]
 				}
 			}
 
