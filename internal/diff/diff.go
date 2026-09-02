@@ -1102,11 +1102,15 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
-			// Skip sequences owned by table columns (created by SERIAL) for structural changes,
-			// but allow comment-only changes through so COMMENT ON SEQUENCE can be deployed.
+			// Skip sequences owned by table columns (created by SERIAL) for structural
+			// changes, but allow comment-only changes through so COMMENT ON SEQUENCE
+			// can be deployed - unless ownership itself changed (e.g. a column's
+			// default was dropped while the sequence stays, or vice versa), which
+			// must still be applied via ALTER SEQUENCE ... OWNED BY [NONE].
+			ownershipChanged := oldSeq.OwnedByTable != newSeq.OwnedByTable || oldSeq.OwnedByColumn != newSeq.OwnedByColumn
 			isOwned := (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
 				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "")
-			if isOwned {
+			if isOwned && !ownershipChanged {
 				if oldSeq.Comment != newSeq.Comment {
 					diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
 						Old: oldSeq,

@@ -1,0 +1,25 @@
+Plan: 2 to add, 1 to modify.
+
+Summary by type:
+  sequences: 1 to add, 1 to modify
+  tables: 1 to add
+
+Sequences:
+  + custom_seq
+  ~ custom_seq
+
+Tables:
+  + orders
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE SEQUENCE IF NOT EXISTS custom_seq INCREMENT BY 5;
+
+CREATE TABLE IF NOT EXISTS orders (
+    id bigint DEFAULT nextval('custom_seq'::regclass),
+    label text,
+    CONSTRAINT orders_pkey PRIMARY KEY (id)
+);
+
+ALTER SEQUENCE custom_seq OWNED BY orders.id;

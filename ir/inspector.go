@@ -907,7 +907,14 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 // ownership edge across ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT, and
 // (in principle) the owned sequence can differ from whatever the column's
 // current default references. So a column is only flagged IsSerial when its
-// default is actually a nextval() call on the sequence that owns it.
+// default is actually a nextval() call on the sequence that owns it, AND
+// SERIAL/BIGSERIAL/SMALLSERIAL syntax is guaranteed to recreate that exact
+// sequence: same implicit name (when unambiguous - see
+// serialSequenceNameMatches) and default properties (increment/cache/cycle/
+// start/min/max). A sequence that was explicitly created (or renamed) with
+// a custom name, or has any non-default setting, is NOT reproduced by
+// SERIAL sugar - a plain `id BIGSERIAL` would silently create a different,
+// auto-named sequence with default settings instead.
 //
 // Must run after both the columns and sequences query groups have loaded.
 func markSerialColumns(schema *IR) {
@@ -924,13 +931,56 @@ func markSerialColumns(schema *IR) {
 				if column.Name != seq.OwnedByColumn {
 					continue
 				}
-				if columnDefaultReferencesSequence(column.DefaultValue, seq.Schema, seq.Name) {
+				if columnDefaultReferencesSequence(column.DefaultValue, seq.Schema, seq.Name) &&
+					serialSequenceNameMatches(seq.Name, table.Name, column.Name) &&
+					isDefaultSerialSequence(seq) {
 					column.IsSerial = true
 				}
 				break
 			}
 		}
 	}
+}
+
+// serialSequenceNameMatches reports whether sequenceName is consistent with
+// PostgreSQL's implicit SERIAL naming convention ("<table>_<column>_seq")
+// for tableName/columnName. When the unabbreviated form fits within
+// PostgreSQL's identifier limit (NAMEDATALEN - 1 = 63 bytes), the name must
+// match it exactly. Beyond that, PostgreSQL truncates non-trivially
+// (trimming table/column proportionally, not a simple suffix cut of the
+// concatenation), so replicating it isn't attempted - any name is accepted
+// and isDefaultSerialSequence carries the remaining burden of proof.
+func serialSequenceNameMatches(sequenceName, tableName, columnName string) bool {
+	expected := tableName + "_" + columnName + "_seq"
+	if len(expected) <= 63 {
+		return sequenceName == expected
+	}
+	return true
+}
+
+// isDefaultSerialSequence reports whether seq has exactly the properties
+// PostgreSQL assigns a sequence it creates implicitly for a SERIAL column:
+// increment 1, no cycling, cache 1, start 1, and no explicit min/max
+// (ir.Sequence only sets MinValue/MaxValue when they differ from the
+// column type's default range - see buildSequences). Any customization
+// means SERIAL syntax would not reproduce this sequence.
+func isDefaultSerialSequence(seq *Sequence) bool {
+	if seq.Increment != 1 {
+		return false
+	}
+	if seq.CycleOption {
+		return false
+	}
+	if seq.Cache != nil && *seq.Cache != 1 {
+		return false
+	}
+	if seq.StartValue != 1 {
+		return false
+	}
+	if seq.MinValue != nil || seq.MaxValue != nil {
+		return false
+	}
+	return true
 }
 
 // nextvalCallRegexp extracts the (optional) schema qualifier and sequence

@@ -1,7 +1,11 @@
-Plan: 1 to modify.
+Plan: 2 to modify.
 
 Summary by type:
+  sequences: 1 to modify
   tables: 1 to modify
+
+Sequences:
+  ~ orders_id_seq
 
 Tables:
   ~ orders
@@ -9,5 +13,7 @@ Tables:
 
 DDL to be executed:
 --------------------------------------------------
+
+ALTER SEQUENCE orders_id_seq OWNED BY NONE;
 
 ALTER TABLE orders ALTER COLUMN id DROP DEFAULT;

@@ -9,6 +9,12 @@
     {
       "steps": [
         {
+          "sql": "ALTER SEQUENCE orders_id_seq OWNED BY NONE;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.orders_id_seq"
+        },
+        {
           "sql": "ALTER TABLE orders ALTER COLUMN id DROP DEFAULT;",
           "type": "table.column",
           "operation": "alter",

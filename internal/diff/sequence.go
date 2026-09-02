@@ -248,7 +248,18 @@ func (d *sequenceDiff) generateAlterSequenceStatements(targetSchema string) []st
 		statements = append(statements, fmt.Sprintf("ALTER SEQUENCE %s %s;", seqName, strings.Join(alterParts, " ")))
 	}
 
-	// Owner is tracked by OwnedByTable/OwnedByColumn, not directly
+	// Ownership changes (e.g. a column's default was dropped while the
+	// sequence stays, or a previously-standalone sequence was assigned to a
+	// column) must be applied explicitly - PostgreSQL doesn't infer this
+	// from anything else.
+	if d.Old.OwnedByTable != d.New.OwnedByTable || d.Old.OwnedByColumn != d.New.OwnedByColumn {
+		if d.New.OwnedByTable != "" && d.New.OwnedByColumn != "" {
+			ownerTable := ir.QualifyEntityNameWithQuotesMode(d.New.Schema, d.New.OwnedByTable, targetSchema, false)
+			statements = append(statements, fmt.Sprintf("ALTER SEQUENCE %s OWNED BY %s.%s;", seqName, ownerTable, ir.QuoteIdentifier(d.New.OwnedByColumn)))
+		} else {
+			statements = append(statements, fmt.Sprintf("ALTER SEQUENCE %s OWNED BY NONE;", seqName))
+		}
+	}
 
 	return statements
 }
