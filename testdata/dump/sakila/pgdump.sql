@@ -1863,6 +1863,98 @@ ALTER TABLE ONLY public.store
 
 
 --
+-- Name: customer_customer_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.customer_customer_id_seq OWNED BY public.customer.customer_id;
+
+
+--
+-- Name: actor_actor_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.actor_actor_id_seq OWNED BY public.actor.actor_id;
+
+
+--
+-- Name: category_category_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.category_category_id_seq OWNED BY public.category.category_id;
+
+
+--
+-- Name: film_film_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.film_film_id_seq OWNED BY public.film.film_id;
+
+
+--
+-- Name: address_address_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.address_address_id_seq OWNED BY public.address.address_id;
+
+
+--
+-- Name: city_city_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.city_city_id_seq OWNED BY public.city.city_id;
+
+
+--
+-- Name: country_country_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.country_country_id_seq OWNED BY public.country.country_id;
+
+
+--
+-- Name: inventory_inventory_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inventory_inventory_id_seq OWNED BY public.inventory.inventory_id;
+
+
+--
+-- Name: language_language_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.language_language_id_seq OWNED BY public.language.language_id;
+
+
+--
+-- Name: payment_payment_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.payment_payment_id_seq OWNED BY public.payment.payment_id;
+
+
+--
+-- Name: rental_rental_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.rental_rental_id_seq OWNED BY public.rental.rental_id;
+
+
+--
+-- Name: staff_staff_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.staff_staff_id_seq OWNED BY public.staff.staff_id;
+
+
+--
+-- Name: store_store_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.store_store_id_seq OWNED BY public.store.store_id;
+
+
+
+--
 -- PostgreSQL database dump complete
 --
 

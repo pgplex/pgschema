@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -902,6 +903,12 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 // misclassifying a shared/central sequence referenced by an explicit
 // DEFAULT nextval(...) as if it were created by SERIAL (issue #573, #574).
 //
+// Ownership alone is not sufficient: PostgreSQL preserves the pg_depend
+// ownership edge across ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT, and
+// (in principle) the owned sequence can differ from whatever the column's
+// current default references. So a column is only flagged IsSerial when its
+// default is actually a nextval() call on the sequence that owns it.
+//
 // Must run after both the columns and sequences query groups have loaded.
 func markSerialColumns(schema *IR) {
 	for _, dbSchema := range schema.Schemas {
@@ -914,13 +921,40 @@ func markSerialColumns(schema *IR) {
 				continue
 			}
 			for _, column := range table.Columns {
-				if column.Name == seq.OwnedByColumn {
-					column.IsSerial = true
-					break
+				if column.Name != seq.OwnedByColumn {
+					continue
 				}
+				if columnDefaultReferencesSequence(column.DefaultValue, seq.Name) {
+					column.IsSerial = true
+				}
+				break
 			}
 		}
 	}
+}
+
+// nextvalCallRegexp extracts the sequence name referenced by a nextval()
+// column default, e.g. "nextval('orders_id_seq'::regclass)" -> "orders_id_seq",
+// or "nextval('myschema.orders_id_seq'::regclass)" -> "orders_id_seq" (the
+// schema qualifier, if present, is discarded - same-schema is the overwhelming
+// common case for SERIAL-owned sequences).
+var nextvalCallRegexp = regexp.MustCompile(`^nextval\('(?:[^'.]+\.)?([^']+)'::regclass\)$`)
+
+// columnDefaultReferencesSequence reports whether defaultValue is a nextval()
+// call on the sequence named sequenceName.
+func columnDefaultReferencesSequence(defaultValue *string, sequenceName string) bool {
+	if defaultValue == nil {
+		return false
+	}
+	m := nextvalCallRegexp.FindStringSubmatch(strings.TrimSpace(*defaultValue))
+	if m == nil {
+		return false
+	}
+	name := m[1]
+	if len(name) >= 2 && strings.HasPrefix(name, `"`) && strings.HasSuffix(name, `"`) {
+		name = strings.ReplaceAll(name[1:len(name)-1], `""`, `"`)
+	}
+	return name == sequenceName
 }
 
 func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema string) error {
@@ -935,6 +969,14 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 
 		// Check if sequence should be ignored
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreSequence(sequenceName) {
+			continue
+		}
+
+		// A sequence owned by an ignored table is part of that table and must
+		// be excluded too - otherwise it leaks into the dump as an orphaned
+		// standalone CREATE SEQUENCE once its owning column no longer exists
+		// in the IR to absorb it as SERIAL sugar.
+		if i.ignoreConfig != nil && seq.OwnedByTable.Valid && i.ignoreConfig.ShouldIgnoreTable(seq.OwnedByTable.String) {
 			continue
 		}
 

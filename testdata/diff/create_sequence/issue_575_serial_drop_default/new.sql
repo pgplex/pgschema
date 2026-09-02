@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    label text
+);
+
+ALTER TABLE orders ALTER COLUMN id DROP DEFAULT;

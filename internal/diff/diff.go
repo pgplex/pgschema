@@ -1065,9 +1065,15 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		seq := newSequences[key]
 		if _, exists := oldSequences[key]; !exists {
 			// Skip sequences owned by table columns only if the column is also new
-			// (created by SERIAL in CREATE TABLE). If the column already exists,
-			// we need to create the sequence explicitly for ALTER COLUMN to use.
-			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+			// (created by SERIAL in CREATE TABLE) AND is actually rendered as SERIAL
+			// sugar - ownership can persist after ALTER TABLE ... ALTER COLUMN ...
+			// DROP DEFAULT, in which case the column no longer implicitly creates
+			// the sequence and it must be created explicitly. If the column already
+			// existed, we also need to create the sequence explicitly for ALTER
+			// COLUMN to use.
+			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" &&
+				!columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) &&
+				columnIsSerialInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
 				// Sequence is created implicitly by CREATE TABLE (SERIAL). Emit its
 				// comment separately after all tables are created.
 				if seq.Comment != "" {
@@ -1825,8 +1831,26 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
 	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
 
+	// An explicitly-created sequence whose OWNED BY references a table created
+	// in this same diff can't be created yet - the table doesn't exist. This
+	// happens when a column keeps genuine pg_depend ownership without being
+	// rendered as SERIAL sugar (e.g. ALTER TABLE ... ALTER COLUMN ... DROP
+	// DEFAULT right after creation, see issue #575). Defer those until after
+	// all tables exist; everything else can be created now.
+	var sequencesToCreateNow, sequencesOwnedByNewTable []*ir.Sequence
+	for _, seq := range d.addedSequences {
+		if seq.OwnedByTable != "" {
+			qualified := strings.ToLower(seq.Schema + "." + seq.OwnedByTable)
+			if _, isNewTable := newTableNameLookup[qualified]; isNewTable {
+				sequencesOwnedByNewTable = append(sequencesOwnedByNewTable, seq)
+				continue
+			}
+		}
+		sequencesToCreateNow = append(sequencesToCreateNow, seq)
+	}
+
 	// Create sequences
-	generateCreateSequencesSQL(d.addedSequences, targetSchema, collector)
+	generateCreateSequencesSQL(sequencesToCreateNow, targetSchema, collector)
 
 	// Build map of existing tables (tables being modified, so they already exist)
 	existingTables := make(map[string]bool, len(d.modifiedTables))
@@ -1984,6 +2008,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	for _, seq := range d.addedSerialSeqComments {
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
+
+	// Now that all tables exist, create sequences deferred above because their
+	// OWNED BY clause references a table created in this same diff.
+	generateCreateSequencesSQL(sequencesOwnedByNewTable, targetSchema, collector)
 
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
 	// This ensures FK references to tables in any batch work correctly
@@ -2418,6 +2446,24 @@ func columnExistsInTables(tables map[string]*ir.Table, schema, tableName, column
 		for _, col := range table.Columns {
 			if col.Name == columnName {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+// columnIsSerialInTables reports whether the given column is rendered as
+// SERIAL/SMALLSERIAL/BIGSERIAL sugar (ir.Column.IsSerial) in the given tables
+// map. A sequence can remain genuinely owned by a column (pg_depend) after
+// e.g. ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT, in which case the
+// column no longer implicitly (re-)creates the sequence via SERIAL syntax -
+// ownership alone is not enough to assume that.
+func columnIsSerialInTables(tables map[string]*ir.Table, schema, tableName, columnName string) bool {
+	tableKey := schema + "." + tableName
+	if table, exists := tables[tableKey]; exists {
+		for _, col := range table.Columns {
+			if col.Name == columnName {
+				return col.IsSerial
 			}
 		}
 	}

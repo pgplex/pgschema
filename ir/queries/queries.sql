@@ -1083,7 +1083,17 @@ ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum;
 
 -- GetSequencesForSchema retrieves all sequences for a specific schema
 -- name: GetSequencesForSchema :many
-SELECT 
+-- Sequence ownership (owned_by_table/owned_by_column) comes only from
+-- PostgreSQL's own dependency graph (pg_depend, populated by ALTER SEQUENCE
+-- ... OWNED BY / implicit SERIAL creation) - never guessed from a column's
+-- default expression or from naming conventions. A shared/central sequence
+-- referenced via an explicit DEFAULT nextval(...), or one that merely
+-- happens to be named like an implicit SERIAL sequence, is not "owned" by
+-- that column and must not be treated as if it were created by SERIAL
+-- (issue #573, #574; see PR #575 review discussion on why a naming-based
+-- fallback is unsound - it can misattribute ownership and cause the
+-- sequence to be silently dropped along with an unrelated table).
+SELECT
     s.schemaname AS sequence_schema,
     s.sequencename AS sequence_name,
     s.data_type,
@@ -1093,41 +1103,15 @@ SELECT
     s.increment_by AS increment,
     s.cycle AS cycle_option,
     s.cache_size,
-    COALESCE(dep_table.relname, col_table.table_name) AS owned_by_table,
-    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column,
+    dep_table.relname AS owned_by_table,
+    dep_col.attname AS owned_by_column,
     COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = n.oid
--- Method 1: Try to find dependency relationship (for proper SERIAL columns)
 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
 LEFT JOIN pg_class dep_table ON d.refobjid = dep_table.oid
 LEFT JOIN pg_attribute dep_col ON dep_col.attrelid = dep_table.oid AND dep_col.attnum = d.refobjsubid
--- Method 2: Find sequences used in column defaults (for nextval() patterns)
-LEFT JOIN (
-    SELECT
-        col.table_name,
-        col.column_name,
-        REPLACE(
-            REGEXP_REPLACE(
-                REGEXP_REPLACE(
-                    REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
-                    '^("([^"]|"")*"\.|[^.]*\.)', ''
-                ),
-                '^"(.*)"$', '\1'
-            ),
-            '""', '"'
-        ) AS sequence_name
-    FROM information_schema.columns col
-    WHERE col.table_schema = $1
-      AND col.column_default LIKE '%nextval%'
-) col_table ON col_table.sequence_name = s.sequencename
-    -- Only trust the column-default fallback when the sequence follows
-    -- PostgreSQL's implicit naming convention for this exact column
-    -- (<table>_<column>_seq). A shared/central sequence referenced via an
-    -- explicit DEFAULT nextval(...) is not "owned" by the column and must
-    -- not be treated as if it were created by SERIAL (issue #573, #574).
-    AND col_table.sequence_name = col_table.table_name || '_' || col_table.column_name || '_seq'
 WHERE s.schemaname = $1
 ORDER BY s.schemaname, s.sequencename;
 
