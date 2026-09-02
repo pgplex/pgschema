@@ -80,10 +80,15 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 			statements = append(statements, sql)
 		}
 	} else {
-		// Normal default value change handling (no USING clause involved)
-		// We only drop default values when they are not sequences
-		// Sequences are automatically handled by the DROP CASCADE statement
-		if oldDefault != nil && newDefault == nil && !strings.HasPrefix(*oldDefault, "nextval(") {
+		// Normal default value change handling (no USING clause involved).
+		// Always emit DROP DEFAULT when the new state has none, even for a
+		// nextval(...) default: if the owning sequence is also being dropped
+		// via CASCADE elsewhere in this migration, DROP DEFAULT on a column
+		// that already has none is a harmless no-op; if the sequence isn't
+		// being dropped (e.g. ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT
+		// while the sequence stays, see issue #575), this is the only
+		// statement that actually removes the default.
+		if oldDefault != nil && newDefault == nil {
 			sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;",
 				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name))
 			statements = append(statements, sql)

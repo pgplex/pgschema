@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ orders
+    ~ id (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE orders ALTER COLUMN id DROP DEFAULT;

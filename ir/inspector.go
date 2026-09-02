@@ -924,7 +924,7 @@ func markSerialColumns(schema *IR) {
 				if column.Name != seq.OwnedByColumn {
 					continue
 				}
-				if columnDefaultReferencesSequence(column.DefaultValue, seq.Name) {
+				if columnDefaultReferencesSequence(column.DefaultValue, seq.Schema, seq.Name) {
 					column.IsSerial = true
 				}
 				break
@@ -933,16 +933,28 @@ func markSerialColumns(schema *IR) {
 	}
 }
 
-// nextvalCallRegexp extracts the sequence name referenced by a nextval()
-// column default, e.g. "nextval('orders_id_seq'::regclass)" -> "orders_id_seq",
-// or "nextval('myschema.orders_id_seq'::regclass)" -> "orders_id_seq" (the
-// schema qualifier, if present, is discarded - same-schema is the overwhelming
-// common case for SERIAL-owned sequences).
-var nextvalCallRegexp = regexp.MustCompile(`^nextval\('(?:[^'.]+\.)?([^']+)'::regclass\)$`)
+// nextvalCallRegexp extracts the (optional) schema qualifier and sequence
+// name referenced by a nextval() column default, e.g.
+// "nextval('orders_id_seq'::regclass)" -> ("", "orders_id_seq"), or
+// "nextval('myschema.orders_id_seq'::regclass)" -> ("myschema", "orders_id_seq").
+var nextvalCallRegexp = regexp.MustCompile(`^nextval\('(?:([^'.]+)\.)?([^']+)'::regclass\)$`)
+
+// unquotePgIdentifierPart strips a double-quoted PostgreSQL identifier's
+// surrounding quotes and unescapes doubled internal quotes.
+func unquotePgIdentifierPart(part string) string {
+	if len(part) >= 2 && strings.HasPrefix(part, `"`) && strings.HasSuffix(part, `"`) {
+		return strings.ReplaceAll(part[1:len(part)-1], `""`, `"`)
+	}
+	return part
+}
 
 // columnDefaultReferencesSequence reports whether defaultValue is a nextval()
-// call on the sequence named sequenceName.
-func columnDefaultReferencesSequence(defaultValue *string, sequenceName string) bool {
+// call on the sequence identified by sequenceSchema/sequenceName. A schema
+// qualifier in the default, if present, must match sequenceSchema exactly -
+// otherwise a default that was repointed at a same-named sequence in a
+// different schema would be wrongly treated as still referencing the
+// original (owned) one.
+func columnDefaultReferencesSequence(defaultValue *string, sequenceSchema, sequenceName string) bool {
 	if defaultValue == nil {
 		return false
 	}
@@ -950,11 +962,10 @@ func columnDefaultReferencesSequence(defaultValue *string, sequenceName string) 
 	if m == nil {
 		return false
 	}
-	name := m[1]
-	if len(name) >= 2 && strings.HasPrefix(name, `"`) && strings.HasSuffix(name, `"`) {
-		name = strings.ReplaceAll(name[1:len(name)-1], `""`, `"`)
+	if schemaQualifier := unquotePgIdentifierPart(m[1]); schemaQualifier != "" && schemaQualifier != sequenceSchema {
+		return false
 	}
-	return name == sequenceName
+	return unquotePgIdentifierPart(m[2]) == sequenceName
 }
 
 func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema string) error {

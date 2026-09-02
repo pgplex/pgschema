@@ -4,6 +4,8 @@ CREATE SEQUENCE IF NOT EXISTS table1_c1_seq AS integer OWNED BY table1.c1;
 
 ALTER TABLE table1 ALTER COLUMN c1 SET DEFAULT nextval('table1_c1_seq'::regclass);
 
+ALTER TABLE table1 ALTER COLUMN c2 DROP DEFAULT;
+
 ALTER TABLE table1 ALTER COLUMN c2 ADD GENERATED ALWAYS AS IDENTITY;
 
 SELECT setval(pg_get_serial_sequence('table1', 'c2'), COALESCE(MAX(c2), 0) + 1) FROM table1;

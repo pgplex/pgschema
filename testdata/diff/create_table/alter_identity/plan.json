@@ -27,6 +27,12 @@
           "path": "public.table1.c1"
         },
         {
+          "sql": "ALTER TABLE table1 ALTER COLUMN c2 DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.table1.c2"
+        },
+        {
           "sql": "ALTER TABLE table1 ALTER COLUMN c2 ADD GENERATED ALWAYS AS IDENTITY;",
           "type": "table.column",
           "operation": "alter",

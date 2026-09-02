@@ -39,6 +39,31 @@ func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, c
 	}
 }
 
+// generateEstablishSequenceOwnershipSQL emits a standalone ALTER SEQUENCE
+// ... OWNED BY statement for each sequence. Used for sequences that had to
+// be created early (without OWNED BY) because their owning table's own
+// column DEFAULT references them, before that table existed - ownership is
+// applied here once all tables exist (see issue #575).
+func generateEstablishSequenceOwnershipSQL(sequences []*ir.Sequence, targetSchema string, collector *diffCollector) {
+	for _, seq := range sequences {
+		if seq.OwnedByTable == "" || seq.OwnedByColumn == "" {
+			continue
+		}
+		seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, collector.qualifySchema)
+		ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, collector.qualifySchema)
+		sql := fmt.Sprintf("ALTER SEQUENCE %s OWNED BY %s.%s;", seqName, ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn))
+
+		context := &diffContext{
+			Type:                DiffTypeSequence,
+			Operation:           DiffOperationAlter,
+			Path:                fmt.Sprintf("%s.%s", seq.Schema, seq.Name),
+			Source:              seq,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, sql)
+	}
+}
+
 // generateSequenceComment emits a COMMENT ON SEQUENCE statement
 func generateSequenceComment(seq *ir.Sequence, targetSchema string, operation DiffOperation, collector *diffCollector) {
 	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, collector.qualifySchema)

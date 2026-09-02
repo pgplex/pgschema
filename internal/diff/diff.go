@@ -1832,17 +1832,25 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
 
 	// An explicitly-created sequence whose OWNED BY references a table created
-	// in this same diff can't be created yet - the table doesn't exist. This
-	// happens when a column keeps genuine pg_depend ownership without being
-	// rendered as SERIAL sugar (e.g. ALTER TABLE ... ALTER COLUMN ... DROP
-	// DEFAULT right after creation, see issue #575). Defer those until after
-	// all tables exist; everything else can be created now.
+	// in this same diff can't have that OWNED BY clause applied yet - the
+	// table doesn't exist. This happens when a column keeps genuine pg_depend
+	// ownership without being rendered as SERIAL sugar (e.g. ALTER TABLE ...
+	// ALTER COLUMN ... DROP DEFAULT right after creation, see issue #575).
+	// The sequence itself must still be created now, without OWNED BY,
+	// because the table's own column DEFAULT can reference it via a plain
+	// (non-SERIAL) nextval() call, which needs the sequence to already
+	// exist. Ownership is established afterward via a separate ALTER
+	// SEQUENCE once all tables exist.
 	var sequencesToCreateNow, sequencesOwnedByNewTable []*ir.Sequence
 	for _, seq := range d.addedSequences {
 		if seq.OwnedByTable != "" {
 			qualified := strings.ToLower(seq.Schema + "." + seq.OwnedByTable)
 			if _, isNewTable := newTableNameLookup[qualified]; isNewTable {
 				sequencesOwnedByNewTable = append(sequencesOwnedByNewTable, seq)
+				unowned := *seq
+				unowned.OwnedByTable = ""
+				unowned.OwnedByColumn = ""
+				sequencesToCreateNow = append(sequencesToCreateNow, &unowned)
 				continue
 			}
 		}
@@ -2009,9 +2017,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
 
-	// Now that all tables exist, create sequences deferred above because their
-	// OWNED BY clause references a table created in this same diff.
-	generateCreateSequencesSQL(sequencesOwnedByNewTable, targetSchema, collector)
+	// Now that all tables exist, establish ownership on sequences that were
+	// created earlier without it because their OWNED BY clause references a
+	// table created in this same diff.
+	generateEstablishSequenceOwnershipSQL(sequencesOwnedByNewTable, targetSchema, collector)
 
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
 	// This ensures FK references to tables in any batch work correctly

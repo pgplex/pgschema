@@ -9,13 +9,13 @@
     {
       "steps": [
         {
-          "sql": "CREATE SEQUENCE IF NOT EXISTS orders_id_seq AS integer;",
+          "sql": "CREATE SEQUENCE IF NOT EXISTS orders_id_seq;",
           "type": "sequence",
           "operation": "create",
           "path": "public.orders_id_seq"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS orders (\n    id integer,\n    label text,\n    CONSTRAINT orders_pkey PRIMARY KEY (id)\n);",
+          "sql": "CREATE TABLE IF NOT EXISTS orders (\n    id bigint DEFAULT (nextval('orders_id_seq'::regclass) + 100),\n    label text,\n    CONSTRAINT orders_pkey PRIMARY KEY (id)\n);",
           "type": "table",
           "operation": "create",
           "path": "public.orders"
