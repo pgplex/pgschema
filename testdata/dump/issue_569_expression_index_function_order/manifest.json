@@ -1,0 +1,9 @@
+{
+  "name": "issue_569_expression_index_function_order",
+  "description": "Test case for expression indexes being dumped after the functions they reference (GitHub issue #569)",
+  "source": "https://github.com/pgplex/pgschema/issues/569",
+  "notes": [
+    "Tests that expression indexes referencing user-defined functions are emitted after the functions",
+    "Without the fix, the table with its expression index would be dumped before the function"
+  ]
+}

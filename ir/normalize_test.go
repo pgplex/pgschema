@@ -89,6 +89,18 @@ func TestStripSchemaPrefixFromBody(t *testing.T) {
 			schema:   "public",
 			expected: "\nBEGIN\n    RETURN (SELECT count(*)::integer FROM users);\nEND;\n",
 		},
+		{
+			name:     "identifier with dollar sign",
+			body:     "public.user$1(full_name)",
+			schema:   "public",
+			expected: "user$1(full_name)",
+		},
+		{
+			name:     "dollar-quoted function name in expression",
+			body:     "(public.my_func$2(x) + public.other$fn(y))",
+			schema:   "public",
+			expected: "(my_func$2(x) + other$fn(y))",
+		},
 	}
 
 	for _, tt := range tests {

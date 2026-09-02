@@ -1,1 +1,1 @@
-CREATE INDEX IF NOT EXISTS idx_active_orders_customer_date ON orders (customer_id, order_date DESC, total_amount) WHERE (status IN ('pending'::public.order_status, 'processing'::public.order_status, 'confirmed'::public.order_status)) AND (is_active IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_active_orders_customer_date ON orders (customer_id, order_date DESC, total_amount) WHERE (status IN ('pending'::order_status, 'processing'::order_status, 'confirmed'::order_status)) AND (is_active IS NOT NULL);

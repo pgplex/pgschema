@@ -187,6 +187,13 @@ func TestDumpCommand_Issue422QuotedCustomType(t *testing.T) {
 	runExactMatchTest(t, "issue_422_quoted_custom_type")
 }
 
+func TestDumpCommand_Issue569ExpressionIndexFunctionOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_569_expression_index_function_order")
+}
+
 // Reproduces a bug where a column declared as `name` is dumped as `char[]`.
 // The inspector classifies any base type with pg_type.typelem <> 0 as an array,
 // but the `name` type has typelem = 18 (the OID of "char") despite not being an array.

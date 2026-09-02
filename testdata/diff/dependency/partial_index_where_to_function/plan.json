@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.5",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION is_active(\n    boolean,\n    timestamp with time zone\n)\nRETURNS boolean\nLANGUAGE plpgsql\nIMMUTABLE\nAS $_$\nBEGIN\n    RETURN $1 AND ($2 IS NULL OR $2 > now());\nEND;\n$_$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.is_active"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS accounts (\n    id SERIAL,\n    active boolean DEFAULT true NOT NULL,\n    expires_at timestamptz,\n    CONSTRAINT accounts_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.accounts"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts (id) WHERE (is_active(active, expires_at));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.accounts.idx_accounts_active"
+        }
+      ]
+    }
+  ]
+}

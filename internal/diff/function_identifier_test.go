@@ -165,8 +165,9 @@ func TestTableReferencesNewFunctionIndexes(t *testing.T) {
 				Schema: "public",
 				Indexes: map[string]*ir.Index{
 					"idx_partial": {
-						Columns: []*ir.IndexColumn{{Name: "id", Position: 1}},
-						Where:   `"MyFunc"() > 0`,
+						IsPartial: true,
+						Columns:   []*ir.IndexColumn{{Name: "id", Position: 1}},
+						Where:     `"MyFunc"() > 0`,
 					},
 				},
 			},

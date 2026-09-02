@@ -9,7 +9,7 @@
     {
       "steps": [
         {
-          "sql": "CREATE OR REPLACE FUNCTION \"MyFunc\"()\nRETURNS integer\nLANGUAGE plpgsql\nVOLATILE\nAS $$\nBEGIN\n    RETURN 42;\nEND;\n$$;",
+          "sql": "CREATE OR REPLACE FUNCTION \"MyFunc\"(\n    val integer DEFAULT 0\n)\nRETURNS integer\nLANGUAGE plpgsql\nIMMUTABLE\nAS $$\nBEGIN\n    RETURN val * 2;\nEND;\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.MyFunc"
@@ -31,6 +31,18 @@
           "type": "table",
           "operation": "create",
           "path": "public.widgets"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS widgets_active_partial_idx ON widgets (id) WHERE (\"MyFunc\"(code) > 0);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.widgets.widgets_active_partial_idx"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS widgets_code_myfunc_idx ON widgets (\"MyFunc\"(code));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.widgets.widgets_code_myfunc_idx"
         }
       ]
     }

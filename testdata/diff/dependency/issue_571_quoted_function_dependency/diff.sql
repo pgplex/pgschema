@@ -1,10 +1,12 @@
-CREATE OR REPLACE FUNCTION "MyFunc"()
+CREATE OR REPLACE FUNCTION "MyFunc"(
+    val integer DEFAULT 0
+)
 RETURNS integer
 LANGUAGE plpgsql
-VOLATILE
+IMMUTABLE
 AS $$
 BEGIN
-    RETURN 42;
+    RETURN val * 2;
 END;
 $$;
 
@@ -31,3 +33,7 @@ CREATE TABLE IF NOT EXISTS widgets (
     code integer DEFAULT public."MyFunc"(),
     CONSTRAINT widgets_pkey PRIMARY KEY (id)
 );
+
+CREATE INDEX IF NOT EXISTS widgets_active_partial_idx ON widgets (id) WHERE ("MyFunc"(code) > 0);
+
+CREATE INDEX IF NOT EXISTS widgets_code_myfunc_idx ON widgets ("MyFunc"(code));
