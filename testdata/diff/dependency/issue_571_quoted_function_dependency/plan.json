@@ -15,6 +15,18 @@
           "path": "public.MyFunc"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION \"ZHelper\"(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT upper(input)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.ZHelper"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION \"AWrapper\"(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT \"ZHelper\"(input)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.AWrapper"
+        },
+        {
           "sql": "CREATE TABLE IF NOT EXISTS widgets (\n    id SERIAL,\n    code integer DEFAULT public.\"MyFunc\"(),\n    CONSTRAINT widgets_pkey PRIMARY KEY (id)\n);",
           "type": "table",
           "operation": "create",

@@ -1,11 +1,13 @@
-Plan: 2 to add.
+Plan: 4 to add.
 
 Summary by type:
-  functions: 1 to add
+  functions: 3 to add
   tables: 1 to add
 
 Functions:
+  + AWrapper
   + MyFunc
+  + ZHelper
 
 Tables:
   + widgets
@@ -21,6 +23,24 @@ AS $$
 BEGIN
     RETURN 42;
 END;
+$$;
+
+CREATE OR REPLACE FUNCTION "ZHelper"(
+    input text
+)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT upper(input)
+$$;
+
+CREATE OR REPLACE FUNCTION "AWrapper"(
+    input text
+)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT "ZHelper"(input)
 $$;
 
 CREATE TABLE IF NOT EXISTS widgets (
