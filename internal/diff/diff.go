@@ -2693,7 +2693,11 @@ func normalizeFunctionIdentifier(raw string) string {
 }
 
 // tableReferencesNewFunction determines if a table references any newly added functions
-// in column defaults, generated columns, or CHECK constraints.
+// in column defaults, generated columns, CHECK constraints, or its indexes (expression/
+// functional index columns and partial index WHERE predicates). Indexes are emitted
+// immediately alongside their table by generateCreateTablesSQL, so a table whose index
+// depends on a new function must also be deferred - not just the table's own columns
+// and constraints.
 func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{}) bool {
 	if len(newFunctions) == 0 || table == nil {
 		return false
@@ -2720,6 +2724,20 @@ func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{
 		if constraint.Type == ir.ConstraintTypeCheck && constraint.CheckClause != "" {
 			if referencesNewFunction(constraint.CheckClause, table.Schema, newFunctions) {
 				return true
+			}
+		}
+	}
+
+	// Check indexes: partial index predicates and expression/functional index columns
+	for _, index := range table.Indexes {
+		if index.Where != "" && referencesNewFunction(index.Where, table.Schema, newFunctions) {
+			return true
+		}
+		if index.IsExpression {
+			for _, col := range index.Columns {
+				if referencesNewFunction(col.Name, table.Schema, newFunctions) {
+					return true
+				}
 			}
 		}
 	}

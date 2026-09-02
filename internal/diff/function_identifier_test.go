@@ -1,6 +1,10 @@
 package diff
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/pgplex/pgschema/ir"
+)
 
 // TestReferencesNewFunctionQuotedIdentifiers covers issue #571: functionCallRegex
 // previously only matched unquoted identifiers, so a case-sensitive, double-quoted
@@ -126,6 +130,69 @@ func TestNormalizeFunctionIdentifierNoCollision(t *testing.T) {
 	quotedName := normalizeFunctionIdentifier(`a."b.c"`)
 	if quotedSchema == quotedName {
 		t.Errorf("normalizeFunctionIdentifier(%q) and (%q) collided: both produced %q", `"a.b".c`, `a."b.c"`, quotedSchema)
+	}
+}
+
+// TestTableReferencesNewFunctionIndexes covers the follow-up review feedback that a
+// table's index (not just its columns/constraints) can depend on a new function: an
+// expression/functional index column, or a partial index's WHERE predicate. Indexes
+// are emitted immediately with their table, so missing this would let a CREATE INDEX
+// run before the function it calls exists.
+func TestTableReferencesNewFunctionIndexes(t *testing.T) {
+	newFunctions := map[string]struct{}{functionGraphKey("public", "MyFunc"): {}}
+
+	tests := []struct {
+		name  string
+		table *ir.Table
+		want  bool
+	}{
+		{
+			name: "expression index column calls new function",
+			table: &ir.Table{
+				Schema: "public",
+				Indexes: map[string]*ir.Index{
+					"idx_expr": {
+						IsExpression: true,
+						Columns:      []*ir.IndexColumn{{Name: `"MyFunc"(id)`, Position: 1}},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "partial index predicate calls new function",
+			table: &ir.Table{
+				Schema: "public",
+				Indexes: map[string]*ir.Index{
+					"idx_partial": {
+						Columns: []*ir.IndexColumn{{Name: "id", Position: 1}},
+						Where:   `"MyFunc"() > 0`,
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "plain index on unrelated column",
+			table: &ir.Table{
+				Schema: "public",
+				Indexes: map[string]*ir.Index{
+					"idx_plain": {
+						Columns: []*ir.IndexColumn{{Name: "id", Position: 1}},
+					},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tableReferencesNewFunction(tt.table, newFunctions)
+			if got != tt.want {
+				t.Errorf("tableReferencesNewFunction(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
 	}
 }
 
