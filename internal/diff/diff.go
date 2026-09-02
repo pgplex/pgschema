@@ -2657,7 +2657,7 @@ func typeMatchesLookup(typeName, defaultSchema string, lookup map[string]struct{
 	return false
 }
 
-var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\.(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)\s*\(`)
+var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)\s*\(`)
 
 // normalizeIdentSegment folds a single raw identifier segment as captured by
 // functionCallRegex to lookup form. Whether to fold must be decided from the
@@ -2666,8 +2666,10 @@ var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"
 // regardless of how it's spelled, so an unquoted call like MYFUNC() still
 // resolves to the same function as myfunc() and must fold to "myfunc" - it
 // cannot be told apart from a genuinely quoted "MYFUNC"() once the quotes
-// are already stripped.
+// are already stripped. The segment is trimmed first since functionCallRegex
+// allows (PostgreSQL-legal) whitespace around the separating dot.
 func normalizeIdentSegment(raw string) string {
+	raw = strings.TrimSpace(raw)
 	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
 		return unquoteIdent(raw)
 	}

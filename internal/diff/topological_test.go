@@ -434,6 +434,38 @@ func TestBuildFunctionBodyDependencies(t *testing.T) {
 			},
 		},
 		{
+			// Regression test: PostgreSQL allows whitespace around the `.`
+			// separator in a qualified name, so a call like `other . helper()`
+			// must still resolve to schema "other"'s helper, not fall through
+			// to an unqualified lookup that could match a same-named function
+			// in the wrong schema.
+			name: "qualified call with whitespace around the dot",
+			funcs: []*ir.Function{
+				{
+					Schema:     "public",
+					Name:       "caller",
+					Definition: "SELECT other . helper()",
+					Language:   "sql",
+				},
+				{
+					Schema:     "other",
+					Name:       "helper",
+					Definition: "SELECT 1",
+					Language:   "sql",
+				},
+				{
+					Schema:     "public",
+					Name:       "helper",
+					Definition: "SELECT 2",
+					Language:   "sql",
+				},
+			},
+			expected: map[string][]string{
+				"caller": {"other.helper()"},
+				"helper": nil,
+			},
+		},
+		{
 			// Regression test: an unquoted call in a function body still
 			// resolves to the same function regardless of how it's spelled,
 			// since PostgreSQL folds every unquoted identifier to lowercase.
