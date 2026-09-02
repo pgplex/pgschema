@@ -2659,6 +2659,21 @@ func typeMatchesLookup(typeName, defaultSchema string, lookup map[string]struct{
 
 var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\.(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)\s*\(`)
 
+// normalizeIdentSegment folds a single raw identifier segment as captured by
+// functionCallRegex to lookup form. Whether to fold must be decided from the
+// segment's own quote characters, not from ir.NeedsQuoting on its unquoted
+// content: PostgreSQL folds every *unquoted* identifier to lowercase
+// regardless of how it's spelled, so an unquoted call like MYFUNC() still
+// resolves to the same function as myfunc() and must fold to "myfunc" - it
+// cannot be told apart from a genuinely quoted "MYFUNC"() once the quotes
+// are already stripped.
+func normalizeIdentSegment(raw string) string {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		return unquoteIdent(raw)
+	}
+	return strings.ToLower(raw)
+}
+
 // normalizeFunctionIdentifier converts a (possibly schema-qualified) function
 // identifier captured by functionCallRegex into the same key format used by
 // buildFunctionLookup: the bare (case-folded) name if unqualified, or a
@@ -2670,9 +2685,9 @@ var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"
 // `b.c`, which would otherwise flatten to the same "a.b.c" key.
 func normalizeFunctionIdentifier(raw string) string {
 	if idx := findLastUnquotedDot(raw); idx != -1 {
-		return functionGraphKey(unquoteIdent(raw[:idx]), unquoteIdent(raw[idx+1:]))
+		return functionGraphKey(normalizeIdentSegment(raw[:idx]), normalizeIdentSegment(raw[idx+1:]))
 	}
-	return functionLookupKeyPart(unquoteIdent(raw))
+	return normalizeIdentSegment(raw)
 }
 
 // tableReferencesNewFunction determines if a table references any newly added functions

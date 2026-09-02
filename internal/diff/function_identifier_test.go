@@ -103,6 +103,8 @@ func TestNormalizeFunctionIdentifier(t *testing.T) {
 		{`"My""Func"`, `My"Func`},
 		{`"a.b".c`, functionGraphKey("a.b", "c")},
 		{`a."b.c"`, functionGraphKey("a", "b.c")},
+		{`MYFUNC`, "myfunc"},
+		{`MySchema.MYFUNC`, functionGraphKey("myschema", "myfunc")},
 	}
 
 	for _, tt := range tests {
