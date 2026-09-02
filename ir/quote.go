@@ -161,10 +161,11 @@ func NeedsQuoting(identifier string) bool {
 	return false
 }
 
-// QuoteIdentifier adds quotes to an identifier if needed
+// QuoteIdentifier adds quotes to an identifier if needed, escaping any
+// embedded double quote as "" per PostgreSQL's quote_ident rules.
 func QuoteIdentifier(identifier string) string {
 	if NeedsQuoting(identifier) {
-		return `"` + identifier + `"`
+		return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 	}
 	return identifier
 }

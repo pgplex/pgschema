@@ -904,8 +904,7 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 
 		// Store under qualified name
 		if fn.Schema != "" {
-			qualified := functionLookupKeyPart(fn.Schema) + "." + name
-			functionLookup[qualified] = funcInfo{fn: fn, key: key}
+			functionLookup[functionGraphKey(fn.Schema, fn.Name)] = funcInfo{fn: fn, key: key}
 		}
 	}
 
@@ -933,8 +932,8 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 
 			if info, found = functionLookup[identifier]; !found {
 				// Try with schema prefix if identifier is unqualified
-				if !strings.Contains(identifier, ".") && fn.Schema != "" {
-					qualified := functionLookupKeyPart(fn.Schema) + "." + identifier
+				if !strings.Contains(identifier, "\x00") && fn.Schema != "" {
+					qualified := functionGraphKey(fn.Schema, identifier)
 					info, found = functionLookup[qualified]
 				}
 			}

@@ -20,56 +20,63 @@ func TestReferencesNewFunctionQuotedIdentifiers(t *testing.T) {
 			name:          "unquoted call",
 			expr:          "myfunc()",
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"public.myfunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("public", "myfunc"): {}},
 			want:          true,
 		},
 		{
 			name:          "quoted case-sensitive call",
 			expr:          `"MyFunc"()`,
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"public.MyFunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("public", "MyFunc"): {}},
 			want:          true,
 		},
 		{
 			name:          "quoted schema and quoted function",
 			expr:          `"MySchema"."MyFunc"()`,
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"MySchema.MyFunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("MySchema", "MyFunc"): {}},
 			want:          true,
 		},
 		{
 			name:          "unquoted schema, quoted function",
 			expr:          `myschema."MyFunc"()`,
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"myschema.MyFunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("myschema", "MyFunc"): {}},
 			want:          true,
 		},
 		{
 			name:          "quoted identifier with escaped quote",
 			expr:          `"My""Func"()`,
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{`public.My"Func`: {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("public", `My"Func`): {}},
 			want:          true,
 		},
 		{
 			name:          "quoted call to unrelated function",
 			expr:          `"OtherFunc"()`,
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"public.MyFunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("public", "MyFunc"): {}},
 			want:          false,
 		},
 		{
 			name:          "unquoted call does not match a quoted mixed-case function of the same letters",
 			expr:          "myfunc()",
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"public.MyFunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("public", "MyFunc"): {}},
 			want:          false,
 		},
 		{
 			name:          "quoted call does not match an unquoted lowercase function of the same letters",
 			expr:          `"MyFunc"()`,
 			defaultSchema: "public",
-			newFunctions:  map[string]struct{}{"public.myfunc": {}},
+			newFunctions:  map[string]struct{}{functionGraphKey("public", "myfunc"): {}},
+			want:          false,
+		},
+		{
+			name:          "quoted schema containing a literal dot does not collide with a different qualified split",
+			expr:          `"a.b".c()`,
+			defaultSchema: "public",
+			newFunctions:  map[string]struct{}{functionGraphKey("a", "b.c"): {}},
 			want:          false,
 		},
 	}
@@ -91,9 +98,11 @@ func TestNormalizeFunctionIdentifier(t *testing.T) {
 	}{
 		{`myfunc`, "myfunc"},
 		{`"MyFunc"`, "MyFunc"},
-		{`"MySchema"."MyFunc"`, "MySchema.MyFunc"},
-		{`myschema."MyFunc"`, "myschema.MyFunc"},
+		{`"MySchema"."MyFunc"`, functionGraphKey("MySchema", "MyFunc")},
+		{`myschema."MyFunc"`, functionGraphKey("myschema", "MyFunc")},
 		{`"My""Func"`, `My"Func`},
+		{`"a.b".c`, functionGraphKey("a.b", "c")},
+		{`a."b.c"`, functionGraphKey("a", "b.c")},
 	}
 
 	for _, tt := range tests {
@@ -103,6 +112,16 @@ func TestNormalizeFunctionIdentifier(t *testing.T) {
 				t.Errorf("normalizeFunctionIdentifier(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeFunctionIdentifierNoCollision(t *testing.T) {
+	// A plain "."-joined key would flatten both of these to "a.b.c"; the
+	// NUL-separated functionGraphKey must keep them distinct.
+	quotedSchema := normalizeFunctionIdentifier(`"a.b".c`)
+	quotedName := normalizeFunctionIdentifier(`a."b.c"`)
+	if quotedSchema == quotedName {
+		t.Errorf("normalizeFunctionIdentifier(%q) and (%q) collided: both produced %q", `"a.b".c`, `a."b.c"`, quotedSchema)
 	}
 }
 

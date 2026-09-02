@@ -2465,10 +2465,21 @@ func buildFunctionLookup(functions []*ir.Function) map[string]struct{} {
 		lookup[name] = struct{}{}
 
 		if fn.Schema != "" {
-			lookup[functionLookupKeyPart(fn.Schema)+"."+name] = struct{}{}
+			lookup[functionGraphKey(fn.Schema, fn.Name)] = struct{}{}
 		}
 	}
 	return lookup
+}
+
+// functionGraphKey builds the lookup key for a schema-qualified function
+// name, case-folding each part via functionLookupKeyPart and joining with a
+// NUL byte, which cannot appear in a PostgreSQL identifier. This ensures
+// distinct (schema, name) pairs never collide even when a name legally
+// contains a '.' (e.g. schema `a.b` function `c` vs schema `a` function
+// `b.c`, which a plain "."-joined string would flatten to the same key).
+// Same pattern as typeGraphKey in topological.go.
+func functionGraphKey(schema, name string) string {
+	return functionLookupKeyPart(schema) + "\x00" + functionLookupKeyPart(name)
 }
 
 // functionLookupKeyPart normalizes a single schema or function name segment
@@ -2648,26 +2659,20 @@ func typeMatchesLookup(typeName, defaultSchema string, lookup map[string]struct{
 
 var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\.(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)\s*\(`)
 
-// functionIdentAtomRegex matches a single identifier segment of a (possibly
-// schema-qualified) function name, either unquoted or double-quoted (with
-// embedded double-quotes escaped as "").
-var functionIdentAtomRegex = regexp.MustCompile(`(?i)"(?:[^"]|"")*"|[a-z_][a-z0-9_$]*`)
-
-// normalizeFunctionIdentifier normalizes each dot-separated segment of a
-// function identifier to match the lookup keys built by functionLookupKeyPart:
-// a quoted segment is unescaped ("" to ") and kept exactly as written (a quoted
-// reference is case-sensitive), while a bare segment is lowercased (PostgreSQL
-// folds unquoted identifiers to lowercase).
+// normalizeFunctionIdentifier converts a (possibly schema-qualified) function
+// identifier captured by functionCallRegex into the same key format used by
+// buildFunctionLookup: the bare (case-folded) name if unqualified, or a
+// functionGraphKey(schema, name) if schema-qualified. Splitting on the last
+// unquoted dot (via findLastUnquotedDot, shared with topological.go's
+// typeGraphKey) and keying schema/name separately - rather than lowercasing
+// and rejoining every dot-separated segment into one string - avoids
+// collisions between e.g. schema `a.b` function `c` and schema `a` function
+// `b.c`, which would otherwise flatten to the same "a.b.c" key.
 func normalizeFunctionIdentifier(raw string) string {
-	atoms := functionIdentAtomRegex.FindAllString(raw, -1)
-	for i, atom := range atoms {
-		if len(atom) >= 2 && atom[0] == '"' && atom[len(atom)-1] == '"' {
-			atoms[i] = strings.ReplaceAll(atom[1:len(atom)-1], `""`, `"`)
-			continue
-		}
-		atoms[i] = strings.ToLower(atom)
+	if idx := findLastUnquotedDot(raw); idx != -1 {
+		return functionGraphKey(unquoteIdent(raw[:idx]), unquoteIdent(raw[idx+1:]))
 	}
-	return strings.Join(atoms, ".")
+	return functionLookupKeyPart(unquoteIdent(raw))
 }
 
 // tableReferencesNewFunction determines if a table references any newly added functions
@@ -2833,8 +2838,8 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 			return true
 		}
 
-		if !strings.Contains(identifier, ".") && defaultSchema != "" {
-			qualified := fmt.Sprintf("%s.%s", functionLookupKeyPart(defaultSchema), identifier)
+		if !strings.Contains(identifier, "\x00") && defaultSchema != "" {
+			qualified := functionGraphKey(defaultSchema, identifier)
 			if _, ok := newFunctions[qualified]; ok {
 				return true
 			}
