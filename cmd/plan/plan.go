@@ -566,7 +566,12 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 				if index.Schema == fromSchema {
 					index.Schema = toSchema
 				}
-				index.Where = replaceString(index.Where)
+				index.Where = stripQualifiers(replaceString(index.Where))
+				if index.IsExpression {
+					for _, col := range index.Columns {
+						col.Name = stripQualifiers(replaceString(col.Name))
+					}
+				}
 			}
 
 			// Normalize schema names in triggers
@@ -598,7 +603,12 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 				if index.Schema == fromSchema {
 					index.Schema = toSchema
 				}
-				index.Where = replaceString(index.Where)
+				index.Where = stripQualifiers(replaceString(index.Where))
+				if index.IsExpression {
+					for _, col := range index.Columns {
+						col.Name = stripQualifiers(replaceString(col.Name))
+					}
+				}
 			}
 
 			// Normalize schema names in view triggers (e.g., INSTEAD OF triggers)
@@ -784,7 +794,7 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 		return func(s string) string { return s }
 	}
 	prefix := schema + "."
-	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)\(`)
+	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
 	typePattern := regexp.MustCompile(`::` + regexp.QuoteMeta(prefix))
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)

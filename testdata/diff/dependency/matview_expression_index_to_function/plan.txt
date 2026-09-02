@@ -1,0 +1,44 @@
+Plan: 3 to add.
+
+Summary by type:
+  functions: 1 to add
+  tables: 1 to add
+  materialized views: 1 to add
+
+Functions:
+  + normalize_name
+
+Tables:
+  + users
+
+Materialized views:
+  + user_directory
+    + idx_user_dir_normalized (index)
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL,
+    full_name text NOT NULL,
+    CONSTRAINT users_pkey PRIMARY KEY (id)
+);
+
+CREATE OR REPLACE FUNCTION normalize_name(
+    text
+)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+AS $_$
+BEGIN
+    RETURN lower(trim($1));
+END;
+$_$;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS user_directory AS
+ SELECT id,
+    full_name
+   FROM users;
+
+CREATE INDEX IF NOT EXISTS idx_user_dir_normalized ON user_directory (normalize_name(full_name));

@@ -287,6 +287,11 @@ func normalizeView(view *View) {
 	for _, trigger := range view.Triggers {
 		normalizeTrigger(trigger)
 	}
+
+	// Normalize indexes on materialized views
+	for _, index := range view.Indexes {
+		normalizeIndex(index)
+	}
 }
 
 // normalizeFunction normalizes function signature and definition
@@ -420,7 +425,7 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 
 // isIdentChar returns true if the byte is a valid SQL identifier character.
 func isIdentChar(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '$'
 }
 
 // normalizeProcedure normalizes procedure representation
@@ -787,6 +792,16 @@ func normalizeIndex(index *Index) {
 	// Normalize WHERE clause for partial indexes
 	if index.IsPartial && index.Where != "" {
 		index.Where = normalizeIndexWhereClause(index.Where)
+		if index.Schema != "" {
+			index.Where = StripSchemaPrefixFromBody(index.Where, index.Schema)
+		}
+	}
+
+	// Strip same-schema qualifiers from expression index column names
+	if index.IsExpression && index.Schema != "" {
+		for _, col := range index.Columns {
+			col.Name = StripSchemaPrefixFromBody(col.Name, index.Schema)
+		}
 	}
 }
 
