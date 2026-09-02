@@ -1,9 +1,9 @@
 -- Quoted, case-sensitive function names must be recognized as dependencies
 -- in every place a table or function can reference one:
 --   * a column default ("MyFunc" before widgets)
---   * an expression index column and a partial index WHERE predicate
---     (indexes are emitted immediately with their table, so widgets must
---     still be deferred even if no column referenced "MyFunc")
+--   * an expression index column, a partial index WHERE predicate, and an
+--     EXCLUDE constraint element (all emitted immediately with their table,
+--     so widgets must still be deferred even if no column referenced "MyFunc")
 --   * a function body ("ZHelper" before "AWrapper", which calls it)
 -- Without quote-aware dependency scanning, alphabetical order would create
 -- "AWrapper" and widgets first and fail.
@@ -29,7 +29,8 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE TABLE public.widgets (
     id serial PRIMARY KEY,
-    code integer DEFAULT public."MyFunc"()
+    code integer DEFAULT public."MyFunc"(),
+    CONSTRAINT widgets_code_excl EXCLUDE USING btree ("MyFunc"(code) WITH =)
 );
 
 CREATE INDEX widgets_code_myfunc_idx ON public.widgets ("MyFunc"(code));

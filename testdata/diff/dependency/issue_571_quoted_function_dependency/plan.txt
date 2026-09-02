@@ -50,7 +50,8 @@ $$;
 CREATE TABLE IF NOT EXISTS widgets (
     id SERIAL,
     code integer DEFAULT public."MyFunc"(),
-    CONSTRAINT widgets_pkey PRIMARY KEY (id)
+    CONSTRAINT widgets_pkey PRIMARY KEY (id),
+    CONSTRAINT widgets_code_excl EXCLUDE USING btree ("MyFunc"(code) WITH =)
 );
 
 CREATE INDEX IF NOT EXISTS widgets_active_partial_idx ON widgets (id) WHERE ("MyFunc"(code) > 0);

@@ -2693,11 +2693,11 @@ func normalizeFunctionIdentifier(raw string) string {
 }
 
 // tableReferencesNewFunction determines if a table references any newly added functions
-// in column defaults, generated columns, CHECK constraints, or its indexes (expression/
-// functional index columns and partial index WHERE predicates). Indexes are emitted
-// immediately alongside their table by generateCreateTablesSQL, so a table whose index
-// depends on a new function must also be deferred - not just the table's own columns
-// and constraints.
+// in any expression emitted at create time: column defaults, generated columns, CHECK
+// and EXCLUDE constraints, the partition key, and its indexes (expression/functional
+// index columns and partial index WHERE predicates). All of these are emitted
+// immediately alongside their table by generateCreateTablesSQL, so a table whose only
+// tie to a new function is one of them must still be deferred until after the function.
 func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{}) bool {
 	if len(newFunctions) == 0 || table == nil {
 		return false
@@ -2719,13 +2719,24 @@ func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{
 		}
 	}
 
-	// Check CHECK constraints
+	// Check CHECK constraints and EXCLUDE constraints (whose index elements and
+	// WHERE predicate may call functions)
 	for _, constraint := range table.Constraints {
-		if constraint.Type == ir.ConstraintTypeCheck && constraint.CheckClause != "" {
-			if referencesNewFunction(constraint.CheckClause, table.Schema, newFunctions) {
+		switch constraint.Type {
+		case ir.ConstraintTypeCheck:
+			if constraint.CheckClause != "" && referencesNewFunction(constraint.CheckClause, table.Schema, newFunctions) {
+				return true
+			}
+		case ir.ConstraintTypeExclusion:
+			if constraint.ExclusionDefinition != "" && referencesNewFunction(constraint.ExclusionDefinition, table.Schema, newFunctions) {
 				return true
 			}
 		}
+	}
+
+	// Check the partition key expression (e.g. PARTITION BY RANGE (fn(col)))
+	if table.PartitionKey != "" && referencesNewFunction(table.PartitionKey, table.Schema, newFunctions) {
+		return true
 	}
 
 	// Check expression index columns and partial index predicates

@@ -27,7 +27,7 @@
           "path": "public.AWrapper"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS widgets (\n    id SERIAL,\n    code integer DEFAULT public.\"MyFunc\"(),\n    CONSTRAINT widgets_pkey PRIMARY KEY (id)\n);",
+          "sql": "CREATE TABLE IF NOT EXISTS widgets (\n    id SERIAL,\n    code integer DEFAULT public.\"MyFunc\"(),\n    CONSTRAINT widgets_pkey PRIMARY KEY (id),\n    CONSTRAINT widgets_code_excl EXCLUDE USING btree (\"MyFunc\"(code) WITH =)\n);",
           "type": "table",
           "operation": "create",
           "path": "public.widgets"

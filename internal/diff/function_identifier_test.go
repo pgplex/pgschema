@@ -174,6 +174,29 @@ func TestTableReferencesNewFunctionIndexes(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "exclusion constraint element calls new function",
+			table: &ir.Table{
+				Schema: "public",
+				Constraints: map[string]*ir.Constraint{
+					"widgets_excl": {
+						Type:                ir.ConstraintTypeExclusion,
+						ExclusionDefinition: `EXCLUDE USING btree ("MyFunc"(code) WITH =)`,
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "partition key expression calls new function",
+			table: &ir.Table{
+				Schema:            "public",
+				IsPartitioned:     true,
+				PartitionStrategy: "RANGE",
+				PartitionKey:      `"MyFunc"(code)`,
+			},
+			want: true,
+		},
+		{
 			name: "plain index on unrelated column",
 			table: &ir.Table{
 				Schema: "public",
