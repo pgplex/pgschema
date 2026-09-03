@@ -290,6 +290,7 @@ type ddlDiff struct {
 	modifiedTypes             []*typeDiff
 	addedSequences            []*ir.Sequence
 	addedSerialSeqComments    []*ir.Sequence // SERIAL-owned sequences skipped from addedSequences but with comments to emit
+	deferredSequenceOwners    []*ir.Sequence // added sequences whose OWNED BY column is created in this migration; ownership is set after tables
 	droppedSequences          []*ir.Sequence
 	modifiedSequences         []*sequenceDiff
 	addedDefaultPrivileges    []*ir.DefaultPrivilege
@@ -503,6 +504,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		modifiedTypes:              []*typeDiff{},
 		addedSequences:             []*ir.Sequence{},
 		addedSerialSeqComments:     []*ir.Sequence{},
+		deferredSequenceOwners:     []*ir.Sequence{},
 		droppedSequences:           []*ir.Sequence{},
 		modifiedSequences:          []*sequenceDiff{},
 		addedDefaultPrivileges:     []*ir.DefaultPrivilege{},
@@ -1064,10 +1066,10 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range seqKeys {
 		seq := newSequences[key]
 		if _, exists := oldSequences[key]; !exists {
-			// Skip sequences owned by table columns only if the column is also new
-			// (created by SERIAL in CREATE TABLE). If the column already exists,
-			// we need to create the sequence explicitly for ALTER COLUMN to use.
-			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+			// Skip sequences created implicitly by a new SERIAL column
+			// (CREATE TABLE ... SERIAL). If the column already exists, we need
+			// to create the sequence explicitly for ALTER COLUMN to use.
+			if isSerialSequence(newTables, seq) && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
 				// Sequence is created implicitly by CREATE TABLE (SERIAL). Emit its
 				// comment separately after all tables are created.
 				if seq.Comment != "" {
@@ -1076,6 +1078,12 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 				continue
 			}
 			diff.addedSequences = append(diff.addedSequences, seq)
+			// An explicitly created sequence can only be OWNED BY a column that
+			// already exists; if the column is created by this migration, apply
+			// the ownership after the tables (pg_dump orders it the same way).
+			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+				diff.deferredSequenceOwners = append(diff.deferredSequenceOwners, seq)
+			}
 		}
 	}
 
@@ -1084,8 +1092,8 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range oldSeqKeys {
 		seq := oldSequences[key]
 		if _, exists := newSequences[key]; !exists {
-			// Skip sequences owned by table columns (created by SERIAL)
-			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+			// Skip sequences dropped implicitly with their SERIAL column
+			if isSerialSequence(oldTables, seq) && !columnExistsInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
 				continue
 			}
 			diff.droppedSequences = append(diff.droppedSequences, seq)
@@ -1096,11 +1104,9 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
-			// Skip sequences owned by table columns (created by SERIAL) for structural changes,
-			// but allow comment-only changes through so COMMENT ON SEQUENCE can be deployed.
-			isOwned := (oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "") ||
-				(newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "")
-			if isOwned {
+			// Skip SERIAL-backed sequences for structural changes, but allow
+			// comment-only changes through so COMMENT ON SEQUENCE can be deployed.
+			if isSerialSequence(oldTables, oldSeq) || isSerialSequence(newTables, newSeq) {
 				if oldSeq.Comment != newSeq.Comment {
 					diff.modifiedSequences = append(diff.modifiedSequences, &sequenceDiff{
 						Old: oldSeq,
@@ -1826,7 +1832,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
 
 	// Create sequences
-	generateCreateSequencesSQL(d.addedSequences, targetSchema, collector)
+	generateCreateSequencesSQL(d.addedSequences, d.deferredSequenceOwners, targetSchema, collector)
 
 	// Build map of existing tables (tables being modified, so they already exist)
 	existingTables := make(map[string]bool, len(d.modifiedTables))
@@ -1983,6 +1989,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// These were skipped from addedSequences but their comments must still be deployed.
 	for _, seq := range d.addedSerialSeqComments {
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
+	}
+
+	// Attach OWNED BY for explicitly created sequences whose owning column was
+	// created above (the sequence itself was created before the tables).
+	for _, seq := range d.deferredSequenceOwners {
+		generateSequenceOwnedBySQL(seq, targetSchema, collector)
 	}
 
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
@@ -2409,6 +2421,25 @@ func sortedKeys[T any](m map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// isSerialSequence reports whether seq is the implicit sequence behind a
+// SERIAL column in tables, i.e. it is created and dropped together with that
+// column rather than by explicit CREATE/DROP SEQUENCE statements.
+func isSerialSequence(tables map[string]*ir.Table, seq *ir.Sequence) bool {
+	if seq.OwnedByTable == "" || seq.OwnedByColumn == "" {
+		return false
+	}
+	table, exists := tables[seq.Schema+"."+seq.OwnedByTable]
+	if !exists {
+		return false
+	}
+	for _, col := range table.Columns {
+		if col.Name == seq.OwnedByColumn {
+			return col.IsSerial
+		}
+	}
+	return false
 }
 
 // columnExistsInTables checks if a column exists in the given tables map

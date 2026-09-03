@@ -32,11 +32,89 @@ CREATE DOMAIN year AS integer
   CONSTRAINT year_check CHECK (VALUE >= 1901 AND VALUE <= 2155);
 
 --
+-- Name: actor_actor_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS actor_actor_id_seq;
+
+--
+-- Name: address_address_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS address_address_id_seq;
+
+--
+-- Name: category_category_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS category_category_id_seq;
+
+--
+-- Name: city_city_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS city_city_id_seq;
+
+--
+-- Name: country_country_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS country_country_id_seq;
+
+--
+-- Name: customer_customer_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS customer_customer_id_seq;
+
+--
+-- Name: film_film_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS film_film_id_seq;
+
+--
+-- Name: inventory_inventory_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS inventory_inventory_id_seq;
+
+--
+-- Name: language_language_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS language_language_id_seq;
+
+--
+-- Name: payment_payment_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS payment_payment_id_seq;
+
+--
+-- Name: rental_rental_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS rental_rental_id_seq;
+
+--
+-- Name: staff_staff_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS staff_staff_id_seq;
+
+--
+-- Name: store_store_id_seq; Type: SEQUENCE; Schema: -; Owner: -
+--
+
+CREATE SEQUENCE IF NOT EXISTS store_store_id_seq;
+
+--
 -- Name: actor; Type: TABLE; Schema: -; Owner: -
 --
 
 CREATE TABLE IF NOT EXISTS actor (
-    actor_id SERIAL,
+    actor_id integer DEFAULT nextval('actor_actor_id_seq'::regclass),
     first_name text NOT NULL,
     last_name text NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
@@ -54,7 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_actor_last_name ON actor (last_name);
 --
 
 CREATE TABLE IF NOT EXISTS category (
-    category_id SERIAL,
+    category_id integer DEFAULT nextval('category_category_id_seq'::regclass),
     name text NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
     CONSTRAINT category_pkey PRIMARY KEY (category_id)
@@ -65,7 +143,7 @@ CREATE TABLE IF NOT EXISTS category (
 --
 
 CREATE TABLE IF NOT EXISTS country (
-    country_id SERIAL,
+    country_id integer DEFAULT nextval('country_country_id_seq'::regclass),
     country text NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
     CONSTRAINT country_pkey PRIMARY KEY (country_id)
@@ -76,7 +154,7 @@ CREATE TABLE IF NOT EXISTS country (
 --
 
 CREATE TABLE IF NOT EXISTS city (
-    city_id SERIAL,
+    city_id integer DEFAULT nextval('city_city_id_seq'::regclass),
     city text NOT NULL,
     country_id integer NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
@@ -95,7 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_fk_country_id ON city (country_id);
 --
 
 CREATE TABLE IF NOT EXISTS address (
-    address_id SERIAL,
+    address_id integer DEFAULT nextval('address_address_id_seq'::regclass),
     address text NOT NULL,
     address2 text,
     district text NOT NULL,
@@ -118,7 +196,7 @@ CREATE INDEX IF NOT EXISTS idx_fk_city_id ON address (city_id);
 --
 
 CREATE TABLE IF NOT EXISTS language (
-    language_id SERIAL,
+    language_id integer DEFAULT nextval('language_language_id_seq'::regclass),
     name character(20) NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
     CONSTRAINT language_pkey PRIMARY KEY (language_id)
@@ -129,7 +207,7 @@ CREATE TABLE IF NOT EXISTS language (
 --
 
 CREATE TABLE IF NOT EXISTS film (
-    film_id SERIAL,
+    film_id integer DEFAULT nextval('film_film_id_seq'::regclass),
     title text NOT NULL,
     description text,
     release_year year,
@@ -209,7 +287,7 @@ CREATE TABLE IF NOT EXISTS film_category (
 --
 
 CREATE TABLE IF NOT EXISTS payment (
-    payment_id SERIAL,
+    payment_id integer DEFAULT nextval('payment_payment_id_seq'::regclass),
     customer_id integer NOT NULL,
     staff_id integer NOT NULL,
     rental_id integer NOT NULL,
@@ -223,7 +301,7 @@ CREATE TABLE IF NOT EXISTS payment (
 --
 
 CREATE TABLE IF NOT EXISTS store (
-    store_id SERIAL,
+    store_id integer DEFAULT nextval('store_store_id_seq'::regclass),
     manager_staff_id integer NOT NULL,
     address_id integer NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
@@ -242,7 +320,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_unq_manager_staff_id ON store (manager_sta
 --
 
 CREATE TABLE IF NOT EXISTS customer (
-    customer_id SERIAL,
+    customer_id integer DEFAULT nextval('customer_customer_id_seq'::regclass),
     store_id integer NOT NULL,
     first_name text NOT NULL,
     last_name text NOT NULL,
@@ -280,7 +358,7 @@ CREATE INDEX IF NOT EXISTS idx_last_name ON customer (last_name);
 --
 
 CREATE TABLE IF NOT EXISTS inventory (
-    inventory_id SERIAL,
+    inventory_id integer DEFAULT nextval('inventory_inventory_id_seq'::regclass),
     film_id integer NOT NULL,
     store_id integer NOT NULL,
     last_update timestamptz DEFAULT now() NOT NULL,
@@ -300,7 +378,7 @@ CREATE INDEX IF NOT EXISTS idx_store_id_film_id ON inventory (store_id, film_id)
 --
 
 CREATE TABLE IF NOT EXISTS staff (
-    staff_id SERIAL,
+    staff_id integer DEFAULT nextval('staff_staff_id_seq'::regclass),
     first_name text NOT NULL,
     last_name text NOT NULL,
     address_id integer NOT NULL,
@@ -321,7 +399,7 @@ CREATE TABLE IF NOT EXISTS staff (
 --
 
 CREATE TABLE IF NOT EXISTS rental (
-    rental_id SERIAL,
+    rental_id integer DEFAULT nextval('rental_rental_id_seq'::regclass),
     rental_date timestamptz NOT NULL,
     inventory_id integer NOT NULL,
     customer_id integer NOT NULL,

@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -593,5 +594,78 @@ func TestStripRedundantTextCast(t *testing.T) {
 				t.Errorf("stripRedundantTextCast(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSerialSequenceName(t *testing.T) {
+	long := strings.Repeat("t", 40)
+	tests := []struct {
+		table, column, want string
+	}{
+		{"users", "id", "users_id_seq"},
+		// Longer part is trimmed first until the name fits in 63 bytes
+		{long, strings.Repeat("c", 30), strings.Repeat("t", 29) + "_" + strings.Repeat("c", 29) + "_seq"},
+		{long, "id", strings.Repeat("t", 40) + "_id_seq"},
+	}
+	for _, tt := range tests {
+		if got := serialSequenceName(tt.table, tt.column); got != tt.want {
+			t.Errorf("serialSequenceName(%q, %q) = %q, want %q", tt.table, tt.column, got, tt.want)
+		}
+		if len(serialSequenceName(tt.table, tt.column)) > 63 {
+			t.Errorf("serialSequenceName(%q, %q) exceeds 63 bytes", tt.table, tt.column)
+		}
+	}
+}
+
+func TestNextvalSequenceName(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"nextval('users_id_seq'::regclass)", "users_id_seq"},
+		{"nextval('public.users_id_seq'::regclass)", "users_id_seq"},
+		{`nextval('"MySeq"'::regclass)`, "MySeq"},
+		{`nextval('"my schema"."My""Seq"'::regclass)`, `My"Seq`},
+		{"nextval('shared_seq'::regclass) + 1", ""},
+		{"42", ""},
+	}
+	for _, tt := range tests {
+		if got := nextvalSequenceName(tt.in); got != tt.want {
+			t.Errorf("nextvalSequenceName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestMarkSerialColumns(t *testing.T) {
+	def := func(s string) *string { return &s }
+	col := func(name, typ, defVal string) *Column {
+		return &Column{Name: name, DataType: typ, DefaultValue: def(defVal)}
+	}
+	schema := &Schema{
+		Name: "public",
+		Tables: map[string]*Table{
+			"users":  {Name: "users", Columns: []*Column{col("id", "integer", "nextval('users_id_seq'::regclass)")}},
+			"orders": {Name: "orders", Columns: []*Column{col("id", "integer", "nextval('shared_seq'::regclass)")}},
+			"widget": {Name: "widget", Columns: []*Column{col("id", "integer", "nextval('widget_custom_seq'::regclass)")}},
+			"notes":  {Name: "notes", Columns: []*Column{col("id", "text", "nextval('notes_id_seq'::regclass)")}},
+		},
+		Sequences: map[string]*Sequence{
+			"users_id_seq":      {Name: "users_id_seq", OwnedByTable: "users", OwnedByColumn: "id"},
+			"shared_seq":        {Name: "shared_seq"},
+			"widget_custom_seq": {Name: "widget_custom_seq", OwnedByTable: "widget", OwnedByColumn: "id"},
+			"notes_id_seq":      {Name: "notes_id_seq", OwnedByTable: "notes", OwnedByColumn: "id"},
+		},
+	}
+	markSerialColumns(schema)
+
+	want := map[string]bool{
+		"users":  true,  // owned + default name + nextval default
+		"orders": false, // shared, unowned sequence (issue #573)
+		"widget": false, // owned but custom-named
+		"notes":  false, // non-integer column
+	}
+	for table, wantSerial := range want {
+		if got := schema.Tables[table].Columns[0].IsSerial; got != wantSerial {
+			t.Errorf("%s.id IsSerial = %v, want %v", table, got, wantSerial)
+		}
 	}
 }

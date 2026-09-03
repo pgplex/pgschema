@@ -2054,25 +2054,25 @@ ORDER BY ib.schemaname, ib.tablename, ib.indexname
 `
 
 type GetIndexesForSchemaRow struct {
-	Schemaname        string         `db:"schemaname" json:"schemaname"`
-	Tablename         string         `db:"tablename" json:"tablename"`
-	Indexname         string         `db:"indexname" json:"indexname"`
-	IsUnique          bool           `db:"is_unique" json:"is_unique"`
-	IsPrimary         bool           `db:"is_primary" json:"is_primary"`
-	IsPartial         sql.NullBool   `db:"is_partial" json:"is_partial"`
-	Method            string         `db:"method" json:"method"`
-	Indexdef          sql.NullString `db:"indexdef" json:"indexdef"`
-	PartialPredicate  sql.NullString `db:"partial_predicate" json:"partial_predicate"`
-	HasExpressions    sql.NullBool   `db:"has_expressions" json:"has_expressions"`
-	IndexComment      sql.NullString `db:"index_comment" json:"index_comment"`
-	Reloptions        []string       `db:"reloptions" json:"reloptions"`
-	NumKeyColumns     int16          `db:"num_key_columns" json:"num_key_columns"`
-	NumColumns        int16          `db:"num_columns" json:"num_columns"`
-	ColumnDefinitions  []string       `db:"column_definitions" json:"column_definitions"`
-	ColumnDirections   []string       `db:"column_directions" json:"column_directions"`
-	ColumnNullOrderings []string      `db:"column_null_orderings" json:"column_null_orderings"`
-	ColumnOpclasses    []string       `db:"column_opclasses" json:"column_opclasses"`
-	IncludeColumns     []string       `db:"include_columns" json:"include_columns"`
+	Schemaname          string         `db:"schemaname" json:"schemaname"`
+	Tablename           string         `db:"tablename" json:"tablename"`
+	Indexname           string         `db:"indexname" json:"indexname"`
+	IsUnique            bool           `db:"is_unique" json:"is_unique"`
+	IsPrimary           bool           `db:"is_primary" json:"is_primary"`
+	IsPartial           sql.NullBool   `db:"is_partial" json:"is_partial"`
+	Method              string         `db:"method" json:"method"`
+	Indexdef            sql.NullString `db:"indexdef" json:"indexdef"`
+	PartialPredicate    sql.NullString `db:"partial_predicate" json:"partial_predicate"`
+	HasExpressions      sql.NullBool   `db:"has_expressions" json:"has_expressions"`
+	IndexComment        sql.NullString `db:"index_comment" json:"index_comment"`
+	Reloptions          []string       `db:"reloptions" json:"reloptions"`
+	NumKeyColumns       int16          `db:"num_key_columns" json:"num_key_columns"`
+	NumColumns          int16          `db:"num_columns" json:"num_columns"`
+	ColumnDefinitions   []string       `db:"column_definitions" json:"column_definitions"`
+	ColumnDirections    []string       `db:"column_directions" json:"column_directions"`
+	ColumnNullOrderings []string       `db:"column_null_orderings" json:"column_null_orderings"`
+	ColumnOpclasses     []string       `db:"column_opclasses" json:"column_opclasses"`
+	IncludeColumns      []string       `db:"include_columns" json:"include_columns"`
 }
 
 // GetIndexesForSchema retrieves all indexes for a specific schema
@@ -2994,8 +2994,8 @@ SELECT
     s.increment_by AS increment,
     s.cycle AS cycle_option,
     s.cache_size,
-    COALESCE(dep_table.relname, col_table.table_name) AS owned_by_table,
-    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column,
+    COALESCE(dep_table.relname, '') AS owned_by_table,
+    COALESCE(dep_col.attname, '') AS owned_by_column,
     COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
@@ -3003,24 +3003,6 @@ LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = n.oid
 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
 LEFT JOIN pg_class dep_table ON d.refobjid = dep_table.oid
 LEFT JOIN pg_attribute dep_col ON dep_col.attrelid = dep_table.oid AND dep_col.attnum = d.refobjsubid
-LEFT JOIN (
-    SELECT
-        col.table_name,
-        col.column_name,
-        REPLACE(
-            REGEXP_REPLACE(
-                REGEXP_REPLACE(
-                    REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
-                    '^("([^"]|"")*"\.|[^.]*\.)', ''
-                ),
-                '^"(.*)"$', '\1'
-            ),
-            '""', '"'
-        ) AS sequence_name
-    FROM information_schema.columns col
-    WHERE col.table_schema = $1
-      AND col.column_default LIKE '%nextval%'
-) col_table ON col_table.sequence_name = s.sequencename
 WHERE s.schemaname = $1
 ORDER BY s.schemaname, s.sequencename
 `
@@ -3041,8 +3023,9 @@ type GetSequencesForSchemaRow struct {
 }
 
 // GetSequencesForSchema retrieves all sequences for a specific schema
-// Method 1: Try to find dependency relationship (for proper SERIAL columns)
-// Method 2: Find sequences used in column defaults (for nextval() patterns)
+// Ownership comes only from pg_depend (SERIAL / OWNED BY / identity). A
+// sequence merely referenced by a column DEFAULT nextval() is not owned by
+// that column and must be dumped and created explicitly (issue #573).
 func (q *Queries) GetSequencesForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetSequencesForSchemaRow, error) {
 	rows, err := q.db.QueryContext(ctx, getSequencesForSchema, dollar_1)
 	if err != nil {
