@@ -1,0 +1,50 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.5",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION \"MyFunc\"(\n    val integer DEFAULT 0\n)\nRETURNS integer\nLANGUAGE plpgsql\nIMMUTABLE\nAS $$\nBEGIN\n    RETURN val * 2;\nEND;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.MyFunc"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION \"ZHelper\"(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT upper(input)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.ZHelper"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION \"AWrapper\"(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT \"ZHelper\"(input)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.AWrapper"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS widgets (\n    id SERIAL,\n    code integer DEFAULT public.\"MyFunc\"(),\n    CONSTRAINT widgets_pkey PRIMARY KEY (id),\n    CONSTRAINT widgets_code_excl EXCLUDE USING btree (\"MyFunc\"(code) WITH =)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.widgets"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS widgets_active_partial_idx ON widgets (id) WHERE (\"MyFunc\"(code) > 0);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.widgets.widgets_active_partial_idx"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS widgets_code_myfunc_idx ON widgets (\"MyFunc\"(code));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.widgets.widgets_code_myfunc_idx"
+        }
+      ]
+    }
+  ]
+}

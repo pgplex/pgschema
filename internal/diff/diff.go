@@ -2446,13 +2446,52 @@ func buildSchemaNameLookup(names []struct{ schema, name string }) map[string]str
 	return lookup
 }
 
-// buildFunctionLookup returns case-insensitive lookup keys for newly added functions.
+// buildFunctionLookup returns lookup keys for newly added functions. Unlike
+// buildSchemaNameLookup, this is not purely case-insensitive: PostgreSQL only
+// folds unquoted identifiers to lowercase, so a name that requires quoting
+// (mixed case, reserved word, special characters) keeps its exact case here,
+// matching functionLookupKeyPart used when normalizing scanned expressions.
 func buildFunctionLookup(functions []*ir.Function) map[string]struct{} {
-	names := make([]struct{ schema, name string }, len(functions))
-	for i, fn := range functions {
-		names[i] = struct{ schema, name string }{fn.Schema, fn.Name}
+	if len(functions) == 0 {
+		return nil
 	}
-	return buildSchemaNameLookup(names)
+
+	lookup := make(map[string]struct{}, len(functions)*2)
+	for _, fn := range functions {
+		name := functionLookupKeyPart(fn.Name)
+		if name == "" {
+			continue
+		}
+		lookup[name] = struct{}{}
+
+		if fn.Schema != "" {
+			lookup[functionGraphKey(fn.Schema, fn.Name)] = struct{}{}
+		}
+	}
+	return lookup
+}
+
+// functionGraphKey builds the lookup key for a schema-qualified function
+// name, case-folding each part via functionLookupKeyPart and joining with a
+// NUL byte, which cannot appear in a PostgreSQL identifier. This ensures
+// distinct (schema, name) pairs never collide even when a name legally
+// contains a '.' (e.g. schema `a.b` function `c` vs schema `a` function
+// `b.c`, which a plain "."-joined string would flatten to the same key).
+// Same pattern as typeGraphKey in topological.go.
+func functionGraphKey(schema, name string) string {
+	return functionLookupKeyPart(schema) + "\x00" + functionLookupKeyPart(name)
+}
+
+// functionLookupKeyPart normalizes a single schema or function name segment
+// for lookup. PostgreSQL folds an unquoted identifier to lowercase, so a name
+// that doesn't require quoting is safely case-folded here; a name that does
+// require quoting is kept as-is since it can only ever be referenced quoted,
+// with its exact case intact.
+func functionLookupKeyPart(name string) string {
+	if ir.NeedsQuoting(name) {
+		return name
+	}
+	return strings.ToLower(name)
 }
 
 // buildViewLookup returns case-insensitive lookup keys for newly added views.
@@ -2618,10 +2657,47 @@ func typeMatchesLookup(typeName, defaultSchema string, lookup map[string]struct{
 	return false
 }
 
-var functionCallRegex = regexp.MustCompile(`(?i)([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)\s*\(`)
+var functionCallRegex = regexp.MustCompile(`(?i)((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)\s*\(`)
+
+// normalizeIdentSegment folds a single raw identifier segment as captured by
+// functionCallRegex to lookup form. Whether to fold must be decided from the
+// segment's own quote characters, not from ir.NeedsQuoting on its unquoted
+// content: PostgreSQL folds every *unquoted* identifier to lowercase
+// regardless of how it's spelled, so an unquoted call like MYFUNC() still
+// resolves to the same function as myfunc() and must fold to "myfunc" - it
+// cannot be told apart from a genuinely quoted "MYFUNC"() once the quotes
+// are already stripped. The segment is trimmed first since functionCallRegex
+// allows (PostgreSQL-legal) whitespace around the separating dot.
+func normalizeIdentSegment(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		return unquoteIdent(raw)
+	}
+	return strings.ToLower(raw)
+}
+
+// normalizeFunctionIdentifier converts a (possibly schema-qualified) function
+// identifier captured by functionCallRegex into the same key format used by
+// buildFunctionLookup: the bare (case-folded) name if unqualified, or a
+// functionGraphKey(schema, name) if schema-qualified. Splitting on the last
+// unquoted dot (via findLastUnquotedDot, shared with topological.go's
+// typeGraphKey) and keying schema/name separately - rather than lowercasing
+// and rejoining every dot-separated segment into one string - avoids
+// collisions between e.g. schema `a.b` function `c` and schema `a` function
+// `b.c`, which would otherwise flatten to the same "a.b.c" key.
+func normalizeFunctionIdentifier(raw string) string {
+	if idx := findLastUnquotedDot(raw); idx != -1 {
+		return functionGraphKey(normalizeIdentSegment(raw[:idx]), normalizeIdentSegment(raw[idx+1:]))
+	}
+	return normalizeIdentSegment(raw)
+}
 
 // tableReferencesNewFunction determines if a table references any newly added functions
-// in column defaults, generated columns, or CHECK constraints.
+// in any expression emitted at create time: column defaults, generated columns, CHECK
+// and EXCLUDE constraints, the partition key, and its indexes (expression/functional
+// index columns and partial index WHERE predicates). All of these are emitted
+// immediately alongside their table by generateCreateTablesSQL, so a table whose only
+// tie to a new function is one of them must still be deferred until after the function.
 func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{}) bool {
 	if len(newFunctions) == 0 || table == nil {
 		return false
@@ -2643,13 +2719,24 @@ func tableReferencesNewFunction(table *ir.Table, newFunctions map[string]struct{
 		}
 	}
 
-	// Check CHECK constraints
+	// Check CHECK constraints and EXCLUDE constraints (whose index elements and
+	// WHERE predicate may call functions)
 	for _, constraint := range table.Constraints {
-		if constraint.Type == ir.ConstraintTypeCheck && constraint.CheckClause != "" {
-			if referencesNewFunction(constraint.CheckClause, table.Schema, newFunctions) {
+		switch constraint.Type {
+		case ir.ConstraintTypeCheck:
+			if constraint.CheckClause != "" && referencesNewFunction(constraint.CheckClause, table.Schema, newFunctions) {
+				return true
+			}
+		case ir.ConstraintTypeExclusion:
+			if constraint.ExclusionDefinition != "" && referencesNewFunction(constraint.ExclusionDefinition, table.Schema, newFunctions) {
 				return true
 			}
 		}
+	}
+
+	// Check the partition key expression (e.g. PARTITION BY RANGE (fn(col)))
+	if table.PartitionKey != "" && referencesNewFunction(table.PartitionKey, table.Schema, newFunctions) {
+		return true
 	}
 
 	// Check expression index columns and partial index predicates
@@ -2790,7 +2877,7 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 		if len(match) < 2 {
 			continue
 		}
-		identifier := strings.ToLower(match[1])
+		identifier := normalizeFunctionIdentifier(match[1])
 		if identifier == "" {
 			continue
 		}
@@ -2799,8 +2886,8 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 			return true
 		}
 
-		if !strings.Contains(identifier, ".") && defaultSchema != "" {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(defaultSchema), identifier)
+		if !strings.Contains(identifier, "\x00") && defaultSchema != "" {
+			qualified := functionGraphKey(defaultSchema, identifier)
 			if _, ok := newFunctions[qualified]; ok {
 				return true
 			}

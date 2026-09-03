@@ -130,8 +130,8 @@ var reservedWords = map[string]bool{
 	"within":      true,
 }
 
-// needsQuoting checks if an identifier needs to be quoted
-func needsQuoting(identifier string) bool {
+// NeedsQuoting checks if an identifier needs to be quoted
+func NeedsQuoting(identifier string) bool {
 	if identifier == "" {
 		return false
 	}
@@ -161,10 +161,11 @@ func needsQuoting(identifier string) bool {
 	return false
 }
 
-// QuoteIdentifier adds quotes to an identifier if needed
+// QuoteIdentifier adds quotes to an identifier if needed, escaping any
+// embedded double quote as "" per PostgreSQL's quote_ident rules.
 func QuoteIdentifier(identifier string) string {
-	if needsQuoting(identifier) {
-		return `"` + identifier + `"`
+	if NeedsQuoting(identifier) {
+		return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 	}
 	return identifier
 }

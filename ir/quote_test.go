@@ -21,6 +21,7 @@ func TestQuoteIdentifier(t *testing.T) {
 		{"starts with underscore", "_private", "_private"},
 		{"starts with number", "1table", `"1table"`},
 		{"contains dash", "user-table", `"user-table"`},
+		{"embedded double quote", `My"Func`, `"My""Func"`},
 		{"empty string", "", ""},
 	}
 

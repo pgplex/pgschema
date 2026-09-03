@@ -192,16 +192,16 @@ func TestExtractTypeNameNormalizesQuoting(t *testing.T) {
 	// quote_ident (schema-qualified). extractTypeName must normalize them to the
 	// same delimiter-safe key that typeGraphKey builds for typeMap entries.
 	cases := []struct{ in, schema, wantSchema, wantName string }{
-		{"user_kind", "public", "public", "user_kind"},           // bare -> default schema
-		{"public.user_kind", "public", "public", "user_kind"},    // already qualified
-		{`public."user"`, "public", "public", "user"},            // quoted reserved-word name
-		{`"MySchema"."MyType"`, "public", "MySchema", "MyType"},   // quoted schema + name
-		{"public.user_kind[]", "public", "public", "user_kind"},  // array notation stripped
-		{`other."odd.name"`, "public", "other", "odd.name"},      // dot inside quotes is not a separator
-		{`"a.b".c`, "public", "a.b", "c"},                        // dotted schema, bare type
-		{"public.vector(384)", "public", "public", "vector"},     // typmod suffix stripped
-		{"s.num(10, 2)", "public", "s", "num"},                   // typmod with comma/space stripped
-		{`a."b"".c"`, "public", "a", `b".c`},                     // escaped quote ("") + dot inside a quoted ident
+		{"user_kind", "public", "public", "user_kind"},          // bare -> default schema
+		{"public.user_kind", "public", "public", "user_kind"},   // already qualified
+		{`public."user"`, "public", "public", "user"},           // quoted reserved-word name
+		{`"MySchema"."MyType"`, "public", "MySchema", "MyType"}, // quoted schema + name
+		{"public.user_kind[]", "public", "public", "user_kind"}, // array notation stripped
+		{`other."odd.name"`, "public", "other", "odd.name"},     // dot inside quotes is not a separator
+		{`"a.b".c`, "public", "a.b", "c"},                       // dotted schema, bare type
+		{"public.vector(384)", "public", "public", "vector"},    // typmod suffix stripped
+		{"s.num(10, 2)", "public", "s", "num"},                  // typmod with comma/space stripped
+		{`a."b"".c"`, "public", "a", `b".c`},                    // escaped quote ("") + dot inside a quoted ident
 	}
 	for _, c := range cases {
 		want := typeGraphKey(c.wantSchema, c.wantName)
@@ -433,6 +433,94 @@ func TestBuildFunctionBodyDependencies(t *testing.T) {
 				"my_func": nil, // external functions not in our list
 			},
 		},
+		{
+			// Regression test: PostgreSQL allows whitespace around the `.`
+			// separator in a qualified name, so a call like `other . helper()`
+			// must still resolve to schema "other"'s helper, not fall through
+			// to an unqualified lookup that could match a same-named function
+			// in the wrong schema.
+			name: "qualified call with whitespace around the dot",
+			funcs: []*ir.Function{
+				{
+					Schema:     "public",
+					Name:       "caller",
+					Definition: "SELECT other . helper()",
+					Language:   "sql",
+				},
+				{
+					Schema:     "other",
+					Name:       "helper",
+					Definition: "SELECT 1",
+					Language:   "sql",
+				},
+				{
+					Schema:     "public",
+					Name:       "helper",
+					Definition: "SELECT 2",
+					Language:   "sql",
+				},
+			},
+			expected: map[string][]string{
+				"caller": {"other.helper()"},
+				"helper": nil,
+			},
+		},
+		{
+			// Regression test: an unqualified call must resolve to the function
+			// in the caller's own schema before falling back to the bare name,
+			// which is one slot shared across schemas (last writer wins). Here
+			// public."ZHelper" is listed last so it would otherwise claim the
+			// bare "ZHelper" slot and steal the dependency from other."ZHelper".
+			name: "unqualified call prefers the caller's schema over a same-named function elsewhere",
+			funcs: []*ir.Function{
+				{
+					Schema:     "other",
+					Name:       "AWrapper",
+					Definition: `SELECT "ZHelper"()`,
+					Language:   "sql",
+				},
+				{
+					Schema:     "other",
+					Name:       "ZHelper",
+					Definition: "SELECT 1",
+					Language:   "sql",
+				},
+				{
+					Schema:     "public",
+					Name:       "ZHelper",
+					Definition: "SELECT 2",
+					Language:   "sql",
+				},
+			},
+			expected: map[string][]string{
+				"AWrapper": {"other.ZHelper()"},
+				"ZHelper":  nil,
+			},
+		},
+		{
+			// Regression test: an unquoted call in a function body still
+			// resolves to the same function regardless of how it's spelled,
+			// since PostgreSQL folds every unquoted identifier to lowercase.
+			name: "unquoted uppercase call still folds to lowercase function",
+			funcs: []*ir.Function{
+				{
+					Schema:     "public",
+					Name:       "wrapper",
+					Definition: "SELECT HELPER()",
+					Language:   "sql",
+				},
+				{
+					Schema:     "public",
+					Name:       "helper",
+					Definition: "SELECT 1",
+					Language:   "sql",
+				},
+			},
+			expected: map[string][]string{
+				"wrapper": {"public.helper()"},
+				"helper":  nil,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -519,7 +607,7 @@ func TestTopologicallySortDeferredConstraints_SimpleChain(t *testing.T) {
 			table: &ir.Table{Schema: "public", Name: "c"},
 			constraint: &ir.Constraint{
 				Schema: "public", Table: "c", Name: "fk_c_to_b",
-				Type: ir.ConstraintTypeForeignKey,
+				Type:             ir.ConstraintTypeForeignKey,
 				ReferencedSchema: "public", ReferencedTable: "b",
 			},
 		},
@@ -527,7 +615,7 @@ func TestTopologicallySortDeferredConstraints_SimpleChain(t *testing.T) {
 			table: &ir.Table{Schema: "public", Name: "b"},
 			constraint: &ir.Constraint{
 				Schema: "public", Table: "b", Name: "fk_b_to_a",
-				Type: ir.ConstraintTypeForeignKey,
+				Type:             ir.ConstraintTypeForeignKey,
 				ReferencedSchema: "public", ReferencedTable: "a",
 			},
 		},
@@ -553,7 +641,7 @@ func TestTopologicallySortDeferredConstraints_NoDependency(t *testing.T) {
 			table: &ir.Table{Schema: "public", Name: "z"},
 			constraint: &ir.Constraint{
 				Schema: "public", Table: "z", Name: "fk_z",
-				Type: ir.ConstraintTypeForeignKey,
+				Type:             ir.ConstraintTypeForeignKey,
 				ReferencedSchema: "public", ReferencedTable: "unrelated",
 			},
 		},
@@ -561,7 +649,7 @@ func TestTopologicallySortDeferredConstraints_NoDependency(t *testing.T) {
 			table: &ir.Table{Schema: "public", Name: "a"},
 			constraint: &ir.Constraint{
 				Schema: "public", Table: "a", Name: "fk_a",
-				Type: ir.ConstraintTypeForeignKey,
+				Type:             ir.ConstraintTypeForeignKey,
 				ReferencedSchema: "public", ReferencedTable: "other",
 			},
 		},
