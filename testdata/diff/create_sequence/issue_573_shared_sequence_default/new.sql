@@ -54,3 +54,16 @@ CREATE TABLE audit_log (
     message text,
     CONSTRAINT audit_log_pkey PRIMARY KEY (id)
 );
+
+-- Existing table gains a column whose default is a custom-named sequence that
+-- is OWNED BY the new column: the sequence must be created before the column
+-- default references it, and the OWNED BY applied after ALTER TABLE ADD COLUMN.
+CREATE SEQUENCE legacy_code_custom_seq;
+
+CREATE TABLE legacy (
+    id bigint NOT NULL,
+    code integer DEFAULT nextval('legacy_code_custom_seq'::regclass) NOT NULL,
+    CONSTRAINT legacy_pkey PRIMARY KEY (id)
+);
+
+ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;

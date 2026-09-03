@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.5",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+    "hash": "a44dd50da2d4bd05b38e2c7bb4dc0e7cfac0908ce57e4c5766fa72e31f866d54"
   },
   "groups": [
     {
@@ -13,6 +13,12 @@
           "type": "sequence",
           "operation": "create",
           "path": "public.hibernate_sequence"
+        },
+        {
+          "sql": "CREATE SEQUENCE IF NOT EXISTS legacy_code_custom_seq;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.legacy_code_custom_seq"
         },
         {
           "sql": "CREATE SEQUENCE IF NOT EXISTS nsl_global_seq;",
@@ -55,6 +61,18 @@
           "type": "table",
           "operation": "create",
           "path": "public.widget"
+        },
+        {
+          "sql": "ALTER TABLE legacy ADD COLUMN code integer DEFAULT nextval('legacy_code_custom_seq'::regclass) NOT NULL;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.legacy.code"
+        },
+        {
+          "sql": "ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.legacy_code_custom_seq"
         },
         {
           "sql": "ALTER SEQUENCE widget_custom_seq OWNED BY widget.id;",

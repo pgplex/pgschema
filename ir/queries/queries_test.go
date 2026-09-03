@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func TestGetSequencesForSchemaDetectsMixedCaseSequenceInColumnDefault(t *testing.T) {
+func TestGetSequencesForSchemaOwnershipComesFromPgDepend(t *testing.T) {
 	conn, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedTestPostgres)
 	defer conn.Close()
 
@@ -30,36 +30,40 @@ func TestGetSequencesForSchemaDetectsMixedCaseSequenceInColumnDefault(t *testing
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE orders ("orderId" SERIAL PRIMARY KEY)`); err != nil {
 		t.Fatalf("failed to create test table: %v", err)
 	}
-	// Drop the pg_depend ownership edge that SERIAL creates automatically.
-	// GetSequencesForSchema detects ownership via two paths: pg_depend (primary)
-	// and column_default parsing (fallback). Without this, pg_depend resolves
-	// ownership before the column_default regex is ever reached, so the test
-	// would pass even with the broken regex. OWNED BY NONE forces the fallback
-	// path — the one that was broken for mixed-case identifiers before this fix.
+
+	findSeq := func() queries.GetSequencesForSchemaRow {
+		rows, err := queries.New(conn).GetSequencesForSchema(ctx, sql.NullString{String: "public", Valid: true})
+		if err != nil {
+			t.Fatalf("failed to get sequences for schema: %v", err)
+		}
+		for _, row := range rows {
+			if row.SequenceName.String == "orders_orderId_seq" {
+				return row
+			}
+		}
+		t.Fatalf("sequence %q not found; got sequences: %s", "orders_orderId_seq", sequenceNames(rows))
+		return queries.GetSequencesForSchemaRow{}
+	}
+
+	// SERIAL records ownership in pg_depend, including mixed-case column names.
+	row := findSeq()
+	if row.OwnedByTable.String != "orders" {
+		t.Fatalf("OwnedByTable = %q, want %q", row.OwnedByTable.String, "orders")
+	}
+	if row.OwnedByColumn.String != "orderId" {
+		t.Fatalf("OwnedByColumn = %q, want %q", row.OwnedByColumn.String, "orderId")
+	}
+
+	// Once the pg_depend edge is gone, the sequence is unowned even though the
+	// column default still references it. Ownership must not be inferred from
+	// column defaults (issue #573).
 	if _, err := conn.ExecContext(ctx, `ALTER SEQUENCE "orders_orderId_seq" OWNED BY NONE`); err != nil {
 		t.Fatalf("failed to remove sequence ownership dependency: %v", err)
 	}
-
-	rows, err := queries.New(conn).GetSequencesForSchema(ctx, sql.NullString{String: "public", Valid: true})
-	if err != nil {
-		t.Fatalf("failed to get sequences for schema: %v", err)
+	row = findSeq()
+	if row.OwnedByTable.String != "" || row.OwnedByColumn.String != "" {
+		t.Fatalf("expected no ownership after OWNED BY NONE, got table=%q column=%q", row.OwnedByTable.String, row.OwnedByColumn.String)
 	}
-
-	for _, row := range rows {
-		if row.SequenceName.String != "orders_orderId_seq" {
-			continue
-		}
-
-		if !row.OwnedByTable.Valid || row.OwnedByTable.String != "orders" {
-			t.Fatalf("OwnedByTable = %q, want %q", row.OwnedByTable.String, "orders")
-		}
-		if !row.OwnedByColumn.Valid || row.OwnedByColumn.String != "orderId" {
-			t.Fatalf("OwnedByColumn = %q, want %q", row.OwnedByColumn.String, "orderId")
-		}
-		return
-	}
-
-	t.Fatalf("sequence %q not found; got sequences: %s", "orders_orderId_seq", sequenceNames(rows))
 }
 
 func sequenceNames(rows []queries.GetSequencesForSchemaRow) string {

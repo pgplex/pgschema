@@ -1,4 +1,5 @@
 CREATE SEQUENCE IF NOT EXISTS hibernate_sequence;
+CREATE SEQUENCE IF NOT EXISTS legacy_code_custom_seq;
 CREATE SEQUENCE IF NOT EXISTS nsl_global_seq;
 CREATE SEQUENCE IF NOT EXISTS widget_custom_seq;
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -26,4 +27,6 @@ CREATE TABLE IF NOT EXISTS widget (
     label text,
     CONSTRAINT widget_pkey PRIMARY KEY (id)
 );
+ALTER TABLE legacy ADD COLUMN code integer DEFAULT nextval('legacy_code_custom_seq'::regclass) NOT NULL;
+ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;
 ALTER SEQUENCE widget_custom_seq OWNED BY widget.id;

@@ -1077,10 +1077,16 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 				}
 				continue
 			}
+			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(newTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
+				// Owner column is not part of the desired state (ignored table or
+				// a table in another schema): the sequence cannot be created with
+				// its OWNED BY, so leave it to whoever manages that table.
+				continue
+			}
 			diff.addedSequences = append(diff.addedSequences, seq)
 			// An explicitly created sequence can only be OWNED BY a column that
 			// already exists; if the column is created by this migration, apply
-			// the ownership after the tables (pg_dump orders it the same way).
+			// the ownership after all tables and columns are in place.
 			if seq.OwnedByTable != "" && seq.OwnedByColumn != "" && !columnExistsInTables(oldTables, seq.Schema, seq.OwnedByTable, seq.OwnedByColumn) {
 				diff.deferredSequenceOwners = append(diff.deferredSequenceOwners, seq)
 			}
@@ -1991,12 +1997,6 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
 
-	// Attach OWNED BY for explicitly created sequences whose owning column was
-	// created above (the sequence itself was created before the tables).
-	for _, seq := range d.deferredSequenceOwners {
-		generateSequenceOwnedBySQL(seq, targetSchema, collector)
-	}
-
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
 	// This ensures FK references to tables in any batch work correctly
 	allDeferredConstraints := append(append(deferredConstraints1, deferredConstraints2...), deferredConstraints3...)
@@ -2111,6 +2111,14 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Modify tables
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, targetSchema, collector)
+
+	// Attach OWNED BY for explicitly created sequences whose owning column was
+	// created by this migration, either with a new table (create phase) or by
+	// ALTER TABLE ... ADD COLUMN just above. The sequence itself was created
+	// before the tables so column defaults could reference it.
+	for _, seq := range d.deferredSequenceOwners {
+		generateSequenceOwnedBySQL(seq, targetSchema, collector)
+	}
 
 	// (Re)create the dependent foreign keys now that the replacement constraints exist
 	generateDeferredConstraintsSQL(d.fkPostAdds, targetSchema, collector)
