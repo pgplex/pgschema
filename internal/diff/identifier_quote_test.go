@@ -380,7 +380,7 @@ func TestGenerateSequenceSQL_OwnedByQuoting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := generateSequenceSQL(tt.seq, tt.targetSchema, false)
+			got := generateSequenceSQL(tt.seq, tt.targetSchema, false, true)
 			if got != tt.want {
 				t.Errorf("generateSequenceSQL() = %q, want %q", got, tt.want)
 			}

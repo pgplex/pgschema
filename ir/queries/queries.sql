@@ -1093,35 +1093,18 @@ SELECT
     s.increment_by AS increment,
     s.cycle AS cycle_option,
     s.cache_size,
-    COALESCE(dep_table.relname, col_table.table_name) AS owned_by_table,
-    COALESCE(dep_col.attname, col_table.column_name) AS owned_by_column,
+    COALESCE(dep_table.relname, '') AS owned_by_table,
+    COALESCE(dep_col.attname, '') AS owned_by_column,
     COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = n.oid
--- Method 1: Try to find dependency relationship (for proper SERIAL columns)
+-- Ownership comes only from pg_depend (SERIAL / OWNED BY / identity). A
+-- sequence merely referenced by a column DEFAULT nextval() is not owned by
+-- that column and must be dumped and created explicitly (issue #573).
 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
 LEFT JOIN pg_class dep_table ON d.refobjid = dep_table.oid
 LEFT JOIN pg_attribute dep_col ON dep_col.attrelid = dep_table.oid AND dep_col.attnum = d.refobjsubid
--- Method 2: Find sequences used in column defaults (for nextval() patterns)
-LEFT JOIN (
-    SELECT
-        col.table_name,
-        col.column_name,
-        REPLACE(
-            REGEXP_REPLACE(
-                REGEXP_REPLACE(
-                    REGEXP_REPLACE(col.column_default, 'nextval\(''([^'']+)''.*\)', '\1'),
-                    '^("([^"]|"")*"\.|[^.]*\.)', ''
-                ),
-                '^"(.*)"$', '\1'
-            ),
-            '""', '"'
-        ) AS sequence_name
-    FROM information_schema.columns col
-    WHERE col.table_schema = $1
-      AND col.column_default LIKE '%nextval%'
-) col_table ON col_table.sequence_name = s.sequencename
 WHERE s.schemaname = $1
 ORDER BY s.schemaname, s.sequencename;
 

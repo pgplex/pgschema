@@ -1864,20 +1864,12 @@ func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema strin
 	return result
 }
 
-// isSerialColumn checks if a column is a SERIAL column (integer type with nextval default)
+// isSerialColumn reports whether a column was created with the SERIAL
+// shorthand. The IR flags this only when the default's sequence is owned by
+// the column and named <table>_<column>_seq; a column that references a
+// shared or custom-named sequence keeps its explicit DEFAULT (issue #573).
 func isSerialColumn(column *ir.Column) bool {
-	// Check if column has nextval default
-	if column.DefaultValue == nil || !strings.Contains(*column.DefaultValue, "nextval") {
-		return false
-	}
-
-	// Check if column is an integer type
-	switch column.DataType {
-	case "integer", "int4", "smallint", "int2", "bigint", "int8":
-		return true
-	default:
-		return false
-	}
+	return column.IsSerial
 }
 
 // formatColumnDataType formats a column's data type with appropriate modifiers for ALTER TABLE statements

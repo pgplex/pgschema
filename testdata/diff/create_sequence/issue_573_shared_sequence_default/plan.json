@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.5",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "a44dd50da2d4bd05b38e2c7bb4dc0e7cfac0908ce57e4c5766fa72e31f866d54"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE SEQUENCE IF NOT EXISTS hibernate_sequence;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.hibernate_sequence"
+        },
+        {
+          "sql": "CREATE SEQUENCE IF NOT EXISTS legacy_code_custom_seq;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.legacy_code_custom_seq"
+        },
+        {
+          "sql": "CREATE SEQUENCE IF NOT EXISTS nsl_global_seq;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.nsl_global_seq"
+        },
+        {
+          "sql": "CREATE SEQUENCE IF NOT EXISTS widget_custom_seq;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.widget_custom_seq"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS audit_log (\n    id BIGSERIAL,\n    message text,\n    CONSTRAINT audit_log_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.audit_log"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS instance (\n    id bigint DEFAULT nextval('nsl_global_seq'::regclass),\n    name text,\n    CONSTRAINT instance_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.instance"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS reference (\n    id bigint DEFAULT nextval('nsl_global_seq'::regclass),\n    title text,\n    CONSTRAINT reference_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.reference"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS shard_config (\n    id bigint DEFAULT nextval('hibernate_sequence'::regclass),\n    name varchar(255) NOT NULL,\n    CONSTRAINT shard_config_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.shard_config"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS widget (\n    id integer DEFAULT nextval('widget_custom_seq'::regclass),\n    label text,\n    CONSTRAINT widget_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.widget"
+        },
+        {
+          "sql": "ALTER TABLE legacy ADD COLUMN code integer DEFAULT nextval('legacy_code_custom_seq'::regclass) NOT NULL;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.legacy.code"
+        },
+        {
+          "sql": "ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.legacy_code_custom_seq"
+        },
+        {
+          "sql": "ALTER SEQUENCE widget_custom_seq OWNED BY widget.id;",
+          "type": "sequence",
+          "operation": "create",
+          "path": "public.widget_custom_seq"
+        }
+      ]
+    }
+  ]
+}

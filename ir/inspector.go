@@ -972,6 +972,11 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 			sequence.OwnedByColumn = seq.OwnedByColumn.String
 		}
 
+		// Skip sequences owned by an ignored table; they live and die with it
+		if i.ignoreConfig != nil && sequence.OwnedByTable != "" && i.ignoreConfig.ShouldIgnoreTable(sequence.OwnedByTable) {
+			continue
+		}
+
 		// Skip sequences that are owned by identity columns
 		// Identity sequences should be managed through the identity column, not as separate sequences
 		if sequence.OwnedByTable != "" && sequence.OwnedByColumn != "" {

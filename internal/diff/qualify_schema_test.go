@@ -137,12 +137,12 @@ func TestQualifySchema_Sequence(t *testing.T) {
 		OwnedByColumn: "id",
 	}
 
-	def := generateSequenceSQL(seq, "public", false)
+	def := generateSequenceSQL(seq, "public", false, true)
 	if strings.Contains(def, "public.users_id_seq") || strings.Contains(def, "public.users") {
 		t.Errorf("default should not qualify the target schema: %q", def)
 	}
 
-	qualified := generateSequenceSQL(seq, "public", true)
+	qualified := generateSequenceSQL(seq, "public", true, true)
 	if !strings.Contains(qualified, "public.users_id_seq") {
 		t.Errorf("forced qualification should qualify the sequence name: %q", qualified)
 	}

@@ -92,6 +92,13 @@ type Column struct {
 	GeneratedExpr *string   `json:"generated_expr,omitempty"` // Expression for generated columns
 	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
 	GeneratedKind string    `json:"generated_kind,omitempty"` // "s" for STORED, "v" for VIRTUAL (PG18+)
+	// IsSerial is true when the column was created with the SERIAL shorthand:
+	// its default is nextval() on a sequence that is owned by this column
+	// (pg_depend) and that carries PostgreSQL's default <table>_<column>_seq
+	// name. Only such columns may be rendered back as SERIAL; a column that
+	// merely references a shared or custom-named sequence keeps its explicit
+	// DEFAULT (issue #573). Derived during normalization, not serialized.
+	IsSerial bool `json:"-"`
 }
 
 // Identity represents PostgreSQL identity column configuration

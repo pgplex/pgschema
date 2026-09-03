@@ -402,6 +402,20 @@ func FromJSON(jsonData []byte) (*Plan, error) {
 
 // ========== PRIVATE METHODS ==========
 
+// sameChangeKey identifies create steps that together add one object: same
+// type and path, emitted from the same source object (e.g. CREATE SEQUENCE
+// plus a deferred ALTER SEQUENCE ... OWNED BY). Such steps are counted as a
+// single addition. Alter and drop steps, and steps without a source (plans
+// loaded from JSON), get no key and are counted individually as before.
+// Keying on the source keeps distinct objects that share a path, such as
+// overloaded functions, counted separately.
+func sameChangeKey(objType, path, operation string, source diff.DiffSource) string {
+	if source == nil || operation != "create" {
+		return ""
+	}
+	return fmt.Sprintf("%s.%s.%s.%p", objType, path, operation, source)
+}
+
 // calculateSummaryFromSteps calculates summary statistics from the plan diffs
 func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 	summary := PlanSummary{
@@ -437,8 +451,11 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 	// These should be counted as modifications, not adds
 	materializedViewsRecreating := make(map[string]bool) // materialized_view_path -> true
 
-	// Track non-table/non-view/non-materialized-view operations
+	// Track non-table/non-view/non-materialized-view operations. A single
+	// object change may span several steps (e.g. CREATE SEQUENCE plus a
+	// deferred ALTER SEQUENCE ... OWNED BY); count those once.
 	nonTableOperations := make(map[string][]string) // objType -> []operations
+	seenNonTableOperations := make(map[string]bool) // sameChangeKey -> true
 
 	// Use source diffs for summary calculation if available,
 	// otherwise use steps metadata (for plans loaded from JSON)
@@ -446,19 +463,22 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 		Type      string
 		Operation string
 		Path      string
+		Source    diff.DiffSource
 	}
 
 	if len(p.SourceDiffs) > 0 {
 		// Use SourceDiffs (for freshly generated plans)
-		for _, diff := range p.SourceDiffs {
+		for _, srcDiff := range p.SourceDiffs {
 			dataToProcess = append(dataToProcess, struct {
 				Type      string
 				Operation string
 				Path      string
+				Source    diff.DiffSource
 			}{
-				Type:      diff.Type.String(),
-				Operation: diff.Operation.String(),
-				Path:      diff.Path,
+				Type:      srcDiff.Type.String(),
+				Operation: srcDiff.Operation.String(),
+				Path:      srcDiff.Path,
+				Source:    srcDiff.Source,
 			})
 		}
 	} else {
@@ -470,6 +490,7 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 						Type      string
 						Operation string
 						Path      string
+						Source    diff.DiffSource
 					}{
 						Type:      step.Type,
 						Operation: step.Operation,
@@ -523,7 +544,14 @@ func (p *Plan) calculateSummaryFromSteps() PlanSummary {
 				}
 			}
 		} else {
-			// For non-table/non-view objects, track each operation
+			// For non-table/non-view objects, track each operation once per source object
+			key := sameChangeKey(stepObjTypeStr, step.Path, step.Operation, step.Source)
+			if key != "" && seenNonTableOperations[key] {
+				continue
+			}
+			if key != "" {
+				seenNonTableOperations[key] = true
+			}
 			nonTableOperations[stepObjTypeStr] = append(nonTableOperations[stepObjTypeStr], step.Operation)
 		}
 	}
@@ -1087,6 +1115,9 @@ func (p *Plan) writeNonTableChanges(summary *strings.Builder, objType string, c 
 		path      string
 	}
 
+	// List a change once even when it spans several steps for the same object
+	seen := make(map[string]bool)
+
 	// Use source diffs for summary calculation
 	for _, step := range p.SourceDiffs {
 		// Normalize object type
@@ -1098,6 +1129,13 @@ func (p *Plan) writeNonTableChanges(summary *strings.Builder, objType string, c 
 		stepObjTypeStr = strings.ReplaceAll(stepObjTypeStr, "_", " ")
 
 		if stepObjTypeStr == objType {
+			key := sameChangeKey(stepObjTypeStr, step.Path, step.Operation.String(), step.Source)
+			if key != "" && seen[key] {
+				continue
+			}
+			if key != "" {
+				seen[key] = true
+			}
 			changes = append(changes, struct {
 				operation string
 				path      string

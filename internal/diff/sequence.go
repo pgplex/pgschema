@@ -16,10 +16,16 @@ const (
 	integerMaxValue         int64 = math.MaxInt32 // integer max
 )
 
-// generateCreateSequencesSQL generates CREATE SEQUENCE statements
-func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, collector *diffCollector) {
+// generateCreateSequencesSQL generates CREATE SEQUENCE statements. Sequences in
+// deferredOwners are created without their OWNED BY clause because the owning
+// column does not exist yet; see generateSequenceOwnedBySQL.
+func generateCreateSequencesSQL(sequences []*ir.Sequence, deferredOwners []*ir.Sequence, targetSchema string, collector *diffCollector) {
+	deferOwner := make(map[*ir.Sequence]bool, len(deferredOwners))
+	for _, seq := range deferredOwners {
+		deferOwner[seq] = true
+	}
 	for _, seq := range sequences {
-		sql := generateSequenceSQL(seq, targetSchema, collector.qualifySchema)
+		sql := generateSequenceSQL(seq, targetSchema, collector.qualifySchema, !deferOwner[seq])
 
 		// Create context for this statement
 		context := &diffContext{
@@ -37,6 +43,22 @@ func generateCreateSequencesSQL(sequences []*ir.Sequence, targetSchema string, c
 			generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 		}
 	}
+}
+
+// generateSequenceOwnedBySQL emits ALTER SEQUENCE ... OWNED BY for a sequence
+// created earlier without its owner (the owning column was created after it).
+func generateSequenceOwnedBySQL(seq *ir.Sequence, targetSchema string, collector *diffCollector) {
+	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, collector.qualifySchema)
+	ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, collector.qualifySchema)
+	sql := fmt.Sprintf("ALTER SEQUENCE %s OWNED BY %s.%s;", seqName, ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn))
+	context := &diffContext{
+		Type:                DiffTypeSequence,
+		Operation:           DiffOperationCreate,
+		Path:                fmt.Sprintf("%s.%s", seq.Schema, seq.Name),
+		Source:              seq,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
 }
 
 // generateSequenceComment emits a COMMENT ON SEQUENCE statement
@@ -103,8 +125,9 @@ func generateModifySequencesSQL(diffs []*sequenceDiff, targetSchema string, coll
 	}
 }
 
-// generateSequenceSQL generates CREATE SEQUENCE statement
-func generateSequenceSQL(seq *ir.Sequence, targetSchema string, qualifySchema bool) string {
+// generateSequenceSQL generates CREATE SEQUENCE statement. includeOwner controls
+// whether the OWNED BY clause is emitted inline.
+func generateSequenceSQL(seq *ir.Sequence, targetSchema string, qualifySchema bool, includeOwner bool) string {
 	var parts []string
 
 	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, qualifySchema)
@@ -143,7 +166,7 @@ func generateSequenceSQL(seq *ir.Sequence, targetSchema string, qualifySchema bo
 	}
 
 	// Add sequence owner
-	if seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
+	if includeOwner && seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
 		ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, qualifySchema)
 		parts = append(parts, fmt.Sprintf("OWNED BY %s.%s", ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn)))
 	}

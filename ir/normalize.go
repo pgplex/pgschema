@@ -38,6 +38,9 @@ func normalizeSchema(schema *Schema) {
 		normalizeTable(table)
 	}
 
+	// Mark SERIAL columns once column defaults and sequences are normalized
+	markSerialColumns(schema)
+
 	// Normalize views
 	for _, view := range schema.Views {
 		normalizeView(view)
@@ -69,6 +72,83 @@ func normalizeSchema(schema *Schema) {
 			revoked.ObjectName = normalizePrivilegeObjectName(revoked.ObjectName, schema.Name)
 		}
 	}
+}
+
+// markSerialColumns flags columns that PostgreSQL would have created via the
+// SERIAL shorthand. A column qualifies only when its default is nextval() on a
+// sequence that is owned by the column (pg_depend deptype 'a') and whose name
+// is the one CREATE TABLE ... SERIAL would pick (<table>_<column>_seq,
+// truncated to NAMEDATALEN-1). Anything else, such as a shared sequence used by
+// several tables or a custom-named owned sequence, must keep its explicit
+// DEFAULT and explicit CREATE SEQUENCE (issue #573).
+func markSerialColumns(schema *Schema) {
+	for _, seq := range schema.Sequences {
+		if seq.OwnedByTable == "" || seq.OwnedByColumn == "" {
+			continue
+		}
+		table, ok := schema.Tables[seq.OwnedByTable]
+		if !ok {
+			continue
+		}
+		var column *Column
+		for _, col := range table.Columns {
+			if col.Name == seq.OwnedByColumn {
+				column = col
+				break
+			}
+		}
+		if column == nil || column.DefaultValue == nil || column.Identity != nil {
+			continue
+		}
+		switch column.DataType {
+		case "integer", "int4", "smallint", "int2", "bigint", "int8":
+		default:
+			continue
+		}
+		if seq.Name != serialSequenceName(table.Name, column.Name) {
+			continue
+		}
+		if nextvalSequenceName(*column.DefaultValue) != seq.Name {
+			continue
+		}
+		column.IsSerial = true
+	}
+}
+
+// nextvalRegexp matches a normalized nextval() default and captures the
+// sequence name, optionally schema-qualified and/or double-quoted.
+var nextvalRegexp = regexp.MustCompile(`^nextval\('(?:"(?:[^"]|"")*"\.|[^.'"]+\.)?("(?:[^"]|"")*"|[^'".]+)'::regclass\)$`)
+
+// nextvalSequenceName returns the sequence referenced by a nextval() default,
+// or "" if the default is not a plain nextval() call.
+func nextvalSequenceName(defaultValue string) string {
+	m := nextvalRegexp.FindStringSubmatch(strings.TrimSpace(defaultValue))
+	if m == nil {
+		return ""
+	}
+	name := m[1]
+	if strings.HasPrefix(name, "\"") {
+		name = strings.ReplaceAll(name[1:len(name)-1], "\"\"", "\"")
+	}
+	return name
+}
+
+// serialSequenceName mirrors PostgreSQL's makeObjectName(table, column, "seq"):
+// when the combined name exceeds NAMEDATALEN-1 bytes, the longer of the two
+// parts is trimmed first, one byte at a time, until it fits.
+func serialSequenceName(tableName, columnName string) string {
+	const maxNameLen = 63
+	name1 := []byte(tableName)
+	name2 := []byte(columnName)
+	overhead := len("seq") + 2 // two underscores
+	for len(name1)+len(name2)+overhead > maxNameLen {
+		if len(name1) > len(name2) {
+			name1 = name1[:len(name1)-1]
+		} else {
+			name2 = name2[:len(name2)-1]
+		}
+	}
+	return string(name1) + "_" + string(name2) + "_seq"
 }
 
 // normalizeTable normalizes table-related objects
