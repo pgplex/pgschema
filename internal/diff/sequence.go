@@ -46,14 +46,21 @@ func generateCreateSequencesSQL(sequences []*ir.Sequence, deferredOwners []*ir.S
 }
 
 // generateSequenceOwnedBySQL emits ALTER SEQUENCE ... OWNED BY for a sequence
-// created earlier without its owner (the owning column was created after it).
-func generateSequenceOwnedBySQL(seq *ir.Sequence, targetSchema string, collector *diffCollector) {
+// whose ownership must be set apart from its CREATE: either the sequence was
+// created before its owning column existed (operation create), or an existing
+// sequence's owner changed, including being released with OWNED BY NONE
+// (operation alter).
+func generateSequenceOwnedBySQL(seq *ir.Sequence, targetSchema string, operation DiffOperation, collector *diffCollector) {
 	seqName := qualifyEntityNameMode(seq.Schema, seq.Name, targetSchema, collector.qualifySchema)
-	ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, collector.qualifySchema)
-	sql := fmt.Sprintf("ALTER SEQUENCE %s OWNED BY %s.%s;", seqName, ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn))
+	owner := "NONE"
+	if seq.OwnedByTable != "" && seq.OwnedByColumn != "" {
+		ownerTable := ir.QualifyEntityNameWithQuotesMode(seq.Schema, seq.OwnedByTable, targetSchema, collector.qualifySchema)
+		owner = fmt.Sprintf("%s.%s", ownerTable, ir.QuoteIdentifier(seq.OwnedByColumn))
+	}
+	sql := fmt.Sprintf("ALTER SEQUENCE %s OWNED BY %s;", seqName, owner)
 	context := &diffContext{
 		Type:                DiffTypeSequence,
-		Operation:           DiffOperationCreate,
+		Operation:           operation,
 		Path:                fmt.Sprintf("%s.%s", seq.Schema, seq.Name),
 		Source:              seq,
 		CanRunInTransaction: true,
@@ -246,7 +253,8 @@ func (d *sequenceDiff) generateAlterSequenceStatements(targetSchema string) []st
 		statements = append(statements, fmt.Sprintf("ALTER SEQUENCE %s %s;", seqName, strings.Join(alterParts, " ")))
 	}
 
-	// Owner is tracked by OwnedByTable/OwnedByColumn, not directly
+	// Ownership changes are emitted separately via generateSequenceOwnedBySQL,
+	// after any column they point at has been added.
 
 	return statements
 }

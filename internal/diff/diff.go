@@ -291,6 +291,7 @@ type ddlDiff struct {
 	addedSequences            []*ir.Sequence
 	addedSerialSeqComments    []*ir.Sequence // SERIAL-owned sequences skipped from addedSequences but with comments to emit
 	deferredSequenceOwners    []*ir.Sequence // added sequences whose OWNED BY column is created in this migration; ownership is set after tables
+	changedSequenceOwners     []*ir.Sequence // existing sequences whose OWNED BY differs; re-pointed (or released) after tables
 	droppedSequences          []*ir.Sequence
 	modifiedSequences         []*sequenceDiff
 	addedDefaultPrivileges    []*ir.DefaultPrivilege
@@ -505,6 +506,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		addedSequences:             []*ir.Sequence{},
 		addedSerialSeqComments:     []*ir.Sequence{},
 		deferredSequenceOwners:     []*ir.Sequence{},
+		changedSequenceOwners:      []*ir.Sequence{},
 		droppedSequences:           []*ir.Sequence{},
 		modifiedSequences:          []*sequenceDiff{},
 		addedDefaultPrivileges:     []*ir.DefaultPrivilege{},
@@ -1110,6 +1112,13 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
+			// Ownership is not part of ALTER SEQUENCE parameter changes; emit it
+			// separately once the owning column exists. This also covers a column
+			// switching between SERIAL and an explicit same-named sequence, where
+			// the only difference is whether the sequence is owned (issue #573).
+			if oldSeq.OwnedByTable != newSeq.OwnedByTable || oldSeq.OwnedByColumn != newSeq.OwnedByColumn {
+				diff.changedSequenceOwners = append(diff.changedSequenceOwners, newSeq)
+			}
 			// Skip SERIAL-backed sequences for structural changes, but allow
 			// comment-only changes through so COMMENT ON SEQUENCE can be deployed.
 			if isSerialSequence(oldTables, oldSeq) || isSerialSequence(newTables, newSeq) {
@@ -2117,7 +2126,10 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// ALTER TABLE ... ADD COLUMN just above. The sequence itself was created
 	// before the tables so column defaults could reference it.
 	for _, seq := range d.deferredSequenceOwners {
-		generateSequenceOwnedBySQL(seq, targetSchema, collector)
+		generateSequenceOwnedBySQL(seq, targetSchema, DiffOperationCreate, collector)
+	}
+	for _, seq := range d.changedSequenceOwners {
+		generateSequenceOwnedBySQL(seq, targetSchema, DiffOperationAlter, collector)
 	}
 
 	// (Re)create the dependent foreign keys now that the replacement constraints exist

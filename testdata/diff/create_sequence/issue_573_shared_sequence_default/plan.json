@@ -3,7 +3,7 @@
   "pgschema_version": "1.12.5",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "a44dd50da2d4bd05b38e2c7bb4dc0e7cfac0908ce57e4c5766fa72e31f866d54"
+    "hash": "cd2ed16b5d4ba0cd19cc61302939499e8f631e64206952b4dccbddc6b5c21c29"
   },
   "groups": [
     {
@@ -79,6 +79,24 @@
           "type": "sequence",
           "operation": "create",
           "path": "public.widget_custom_seq"
+        },
+        {
+          "sql": "ALTER SEQUENCE adopt_id_seq OWNED BY adopt.id;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.adopt_id_seq"
+        },
+        {
+          "sql": "ALTER SEQUENCE release_id_seq OWNED BY NONE;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.release_id_seq"
+        },
+        {
+          "sql": "ALTER SEQUENCE tracker_custom_seq OWNED BY NONE;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.tracker_custom_seq"
         }
       ]
     }

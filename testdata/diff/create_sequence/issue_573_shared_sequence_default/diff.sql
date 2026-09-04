@@ -30,3 +30,6 @@ CREATE TABLE IF NOT EXISTS widget (
 ALTER TABLE legacy ADD COLUMN code integer DEFAULT nextval('legacy_code_custom_seq'::regclass) NOT NULL;
 ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;
 ALTER SEQUENCE widget_custom_seq OWNED BY widget.id;
+ALTER SEQUENCE adopt_id_seq OWNED BY adopt.id;
+ALTER SEQUENCE release_id_seq OWNED BY NONE;
+ALTER SEQUENCE tracker_custom_seq OWNED BY NONE;

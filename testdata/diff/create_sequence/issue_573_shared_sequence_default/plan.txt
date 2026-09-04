@@ -1,13 +1,16 @@
-Plan: 9 to add, 1 to modify.
+Plan: 9 to add, 4 to modify.
 
 Summary by type:
-  sequences: 4 to add
+  sequences: 4 to add, 3 to modify
   tables: 5 to add, 1 to modify
 
 Sequences:
+  ~ adopt_id_seq
   + hibernate_sequence
   + legacy_code_custom_seq
   + nsl_global_seq
+  ~ release_id_seq
+  ~ tracker_custom_seq
   + widget_custom_seq
 
 Tables:
@@ -65,3 +68,9 @@ ALTER TABLE legacy ADD COLUMN code integer DEFAULT nextval('legacy_code_custom_s
 ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;
 
 ALTER SEQUENCE widget_custom_seq OWNED BY widget.id;
+
+ALTER SEQUENCE adopt_id_seq OWNED BY adopt.id;
+
+ALTER SEQUENCE release_id_seq OWNED BY NONE;
+
+ALTER SEQUENCE tracker_custom_seq OWNED BY NONE;

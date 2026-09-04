@@ -67,3 +67,26 @@ CREATE TABLE legacy (
 );
 
 ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;
+
+-- Ownership-only transitions against old.sql (see comments there)
+CREATE TABLE adopt (
+    id serial NOT NULL,
+    note text,
+    CONSTRAINT adopt_pkey PRIMARY KEY (id)
+);
+
+CREATE SEQUENCE release_id_seq AS integer;
+
+CREATE TABLE release (
+    id integer DEFAULT nextval('release_id_seq'::regclass) NOT NULL,
+    note text,
+    CONSTRAINT release_pkey PRIMARY KEY (id)
+);
+
+CREATE SEQUENCE tracker_custom_seq;
+
+CREATE TABLE tracker (
+    n integer DEFAULT nextval('tracker_custom_seq'::regclass) NOT NULL,
+    note text,
+    CONSTRAINT tracker_pkey PRIMARY KEY (n)
+);
