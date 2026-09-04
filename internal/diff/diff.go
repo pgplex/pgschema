@@ -292,6 +292,7 @@ type ddlDiff struct {
 	addedSerialSeqComments    []*ir.Sequence // SERIAL-owned sequences skipped from addedSequences but with comments to emit
 	deferredSequenceOwners    []*ir.Sequence // added sequences whose OWNED BY column is created in this migration; ownership is set after tables
 	changedSequenceOwners     []*ir.Sequence // existing sequences whose OWNED BY differs; re-pointed (or released) after tables
+	releasedSequenceOwners    []*ir.Sequence // existing sequences released (OWNED BY NONE) before drops, because their old owner column is dropped
 	droppedSequences          []*ir.Sequence
 	modifiedSequences         []*sequenceDiff
 	addedDefaultPrivileges    []*ir.DefaultPrivilege
@@ -507,6 +508,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		addedSerialSeqComments:     []*ir.Sequence{},
 		deferredSequenceOwners:     []*ir.Sequence{},
 		changedSequenceOwners:      []*ir.Sequence{},
+		releasedSequenceOwners:     []*ir.Sequence{},
 		droppedSequences:           []*ir.Sequence{},
 		modifiedSequences:          []*sequenceDiff{},
 		addedDefaultPrivileges:     []*ir.DefaultPrivilege{},
@@ -1117,7 +1119,27 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 			// switching between SERIAL and an explicit same-named sequence, where
 			// the only difference is whether the sequence is owned (issue #573).
 			if oldSeq.OwnedByTable != newSeq.OwnedByTable || oldSeq.OwnedByColumn != newSeq.OwnedByColumn {
-				diff.changedSequenceOwners = append(diff.changedSequenceOwners, newSeq)
+				// If the old owner column is dropped by this migration, release the
+				// sequence first: dropping an owning column or table cascades to
+				// the sequence, which must survive.
+				released := false
+				if oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "" && !columnExistsInTables(newTables, oldSeq.Schema, oldSeq.OwnedByTable, oldSeq.OwnedByColumn) {
+					unowned := *oldSeq
+					unowned.OwnedByTable = ""
+					unowned.OwnedByColumn = ""
+					diff.releasedSequenceOwners = append(diff.releasedSequenceOwners, &unowned)
+					released = true
+				}
+				switch {
+				case newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "":
+					// Only re-point at a column that is part of the desired state
+					// (an ignored table or another schema's column cannot be used).
+					if columnExistsInTables(newTables, newSeq.Schema, newSeq.OwnedByTable, newSeq.OwnedByColumn) {
+						diff.changedSequenceOwners = append(diff.changedSequenceOwners, newSeq)
+					}
+				case !released:
+					diff.changedSequenceOwners = append(diff.changedSequenceOwners, newSeq)
+				}
 			}
 			// Skip SERIAL-backed sequences for structural changes, but allow
 			// comment-only changes through so COMMENT ON SEQUENCE can be deployed.
@@ -1546,6 +1568,12 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
 	preDroppedViews := d.generatePreDropMaterializedViewsSQL(targetSchema, collector)
+
+	// Release sequences whose owning column is about to be dropped, so the
+	// drop does not cascade to a sequence the desired state still needs.
+	for _, seq := range d.releasedSequenceOwners {
+		generateSequenceOwnedBySQL(seq, targetSchema, DiffOperationAlter, collector)
+	}
 
 	// First: Drop operations (in reverse dependency order)
 	d.generateDropSQL(targetSchema, collector, preDroppedViews)

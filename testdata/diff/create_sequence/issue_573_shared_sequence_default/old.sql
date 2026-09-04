@@ -32,3 +32,26 @@ CREATE TABLE tracker (
 );
 
 ALTER SEQUENCE tracker_custom_seq OWNED BY tracker.n;
+
+-- Owned sequence whose owning table is dropped while the sequence is kept:
+-- it must be released before the DROP TABLE cascades to it.
+CREATE SEQUENCE keep_seq;
+
+CREATE TABLE doomed (
+    id integer DEFAULT nextval('keep_seq'::regclass) NOT NULL,
+    CONSTRAINT doomed_pkey PRIMARY KEY (id)
+);
+
+ALTER SEQUENCE keep_seq OWNED BY doomed.id;
+
+-- Owned sequence re-pointed to another column while its old owning column is
+-- dropped: release first, re-point after the column changes.
+CREATE SEQUENCE move_seq;
+
+CREATE TABLE mover (
+    a integer DEFAULT nextval('move_seq'::regclass) NOT NULL,
+    b integer NOT NULL,
+    CONSTRAINT mover_pkey PRIMARY KEY (b)
+);
+
+ALTER SEQUENCE move_seq OWNED BY mover.a;

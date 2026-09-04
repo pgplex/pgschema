@@ -90,3 +90,15 @@ CREATE TABLE tracker (
     note text,
     CONSTRAINT tracker_pkey PRIMARY KEY (n)
 );
+
+-- Owner drops against old.sql (see comments there)
+CREATE SEQUENCE keep_seq;
+
+CREATE SEQUENCE move_seq;
+
+CREATE TABLE mover (
+    b integer DEFAULT nextval('move_seq'::regclass) NOT NULL,
+    CONSTRAINT mover_pkey PRIMARY KEY (b)
+);
+
+ALTER SEQUENCE move_seq OWNED BY mover.b;

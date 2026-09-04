@@ -3,11 +3,29 @@
   "pgschema_version": "1.12.5",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "cd2ed16b5d4ba0cd19cc61302939499e8f631e64206952b4dccbddc6b5c21c29"
+    "hash": "fb1e4df8361f8f149f5dd7681b643b1161d504ded867ec224ad3bae8b60aff87"
   },
   "groups": [
     {
       "steps": [
+        {
+          "sql": "ALTER SEQUENCE keep_seq OWNED BY NONE;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.keep_seq"
+        },
+        {
+          "sql": "ALTER SEQUENCE move_seq OWNED BY NONE;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.move_seq"
+        },
+        {
+          "sql": "DROP TABLE IF EXISTS doomed CASCADE;",
+          "type": "table",
+          "operation": "drop",
+          "path": "public.doomed"
+        },
         {
           "sql": "CREATE SEQUENCE IF NOT EXISTS hibernate_sequence;",
           "type": "sequence",
@@ -69,6 +87,18 @@
           "path": "public.legacy.code"
         },
         {
+          "sql": "ALTER TABLE mover DROP COLUMN a;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.mover.a"
+        },
+        {
+          "sql": "ALTER TABLE mover ALTER COLUMN b SET DEFAULT nextval('move_seq'::regclass);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.mover.b"
+        },
+        {
           "sql": "ALTER SEQUENCE legacy_code_custom_seq OWNED BY legacy.code;",
           "type": "sequence",
           "operation": "create",
@@ -85,6 +115,12 @@
           "type": "sequence",
           "operation": "alter",
           "path": "public.adopt_id_seq"
+        },
+        {
+          "sql": "ALTER SEQUENCE move_seq OWNED BY mover.b;",
+          "type": "sequence",
+          "operation": "alter",
+          "path": "public.move_seq"
         },
         {
           "sql": "ALTER SEQUENCE release_id_seq OWNED BY NONE;",
