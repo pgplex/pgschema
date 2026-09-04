@@ -608,11 +608,11 @@ func TestSerialSequenceName(t *testing.T) {
 		{long, "id", strings.Repeat("t", 40) + "_id_seq"},
 	}
 	for _, tt := range tests {
-		if got := serialSequenceName(tt.table, tt.column); got != tt.want {
-			t.Errorf("serialSequenceName(%q, %q) = %q, want %q", tt.table, tt.column, got, tt.want)
+		if got := SerialSequenceName(tt.table, tt.column); got != tt.want {
+			t.Errorf("SerialSequenceName(%q, %q) = %q, want %q", tt.table, tt.column, got, tt.want)
 		}
-		if len(serialSequenceName(tt.table, tt.column)) > 63 {
-			t.Errorf("serialSequenceName(%q, %q) exceeds 63 bytes", tt.table, tt.column)
+		if len(SerialSequenceName(tt.table, tt.column)) > 63 {
+			t.Errorf("SerialSequenceName(%q, %q) exceeds 63 bytes", tt.table, tt.column)
 		}
 	}
 }

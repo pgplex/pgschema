@@ -291,6 +291,8 @@ type ddlDiff struct {
 	addedSequences            []*ir.Sequence
 	addedSerialSeqComments    []*ir.Sequence // SERIAL-owned sequences skipped from addedSequences but with comments to emit
 	deferredSequenceOwners    []*ir.Sequence // added sequences whose OWNED BY column is created in this migration; ownership is set after tables
+	changedSequenceOwners     []*ir.Sequence // existing sequences whose OWNED BY differs; re-pointed (or released) after tables
+	releasedSequenceOwners    []*ir.Sequence // existing sequences released (OWNED BY NONE) before drops, because their old owner column is dropped
 	droppedSequences          []*ir.Sequence
 	modifiedSequences         []*sequenceDiff
 	addedDefaultPrivileges    []*ir.DefaultPrivilege
@@ -505,6 +507,8 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 		addedSequences:             []*ir.Sequence{},
 		addedSerialSeqComments:     []*ir.Sequence{},
 		deferredSequenceOwners:     []*ir.Sequence{},
+		changedSequenceOwners:      []*ir.Sequence{},
+		releasedSequenceOwners:     []*ir.Sequence{},
 		droppedSequences:           []*ir.Sequence{},
 		modifiedSequences:          []*sequenceDiff{},
 		addedDefaultPrivileges:     []*ir.DefaultPrivilege{},
@@ -1110,6 +1114,33 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	for _, key := range seqKeys {
 		newSeq := newSequences[key]
 		if oldSeq, exists := oldSequences[key]; exists {
+			// Ownership is not part of ALTER SEQUENCE parameter changes; emit it
+			// separately once the owning column exists. This also covers a column
+			// switching between SERIAL and an explicit same-named sequence, where
+			// the only difference is whether the sequence is owned (issue #573).
+			if oldSeq.OwnedByTable != newSeq.OwnedByTable || oldSeq.OwnedByColumn != newSeq.OwnedByColumn {
+				// If the old owner column is dropped by this migration, release the
+				// sequence first: dropping an owning column or table cascades to
+				// the sequence, which must survive.
+				released := false
+				if oldSeq.OwnedByTable != "" && oldSeq.OwnedByColumn != "" && !columnExistsInTables(newTables, oldSeq.Schema, oldSeq.OwnedByTable, oldSeq.OwnedByColumn) {
+					unowned := *oldSeq
+					unowned.OwnedByTable = ""
+					unowned.OwnedByColumn = ""
+					diff.releasedSequenceOwners = append(diff.releasedSequenceOwners, &unowned)
+					released = true
+				}
+				switch {
+				case newSeq.OwnedByTable != "" && newSeq.OwnedByColumn != "":
+					// Only re-point at a column that is part of the desired state
+					// (an ignored table or another schema's column cannot be used).
+					if columnExistsInTables(newTables, newSeq.Schema, newSeq.OwnedByTable, newSeq.OwnedByColumn) {
+						diff.changedSequenceOwners = append(diff.changedSequenceOwners, newSeq)
+					}
+				case !released:
+					diff.changedSequenceOwners = append(diff.changedSequenceOwners, newSeq)
+				}
+			}
 			// Skip SERIAL-backed sequences for structural changes, but allow
 			// comment-only changes through so COMMENT ON SEQUENCE can be deployed.
 			if isSerialSequence(oldTables, oldSeq) || isSerialSequence(newTables, newSeq) {
@@ -1524,6 +1555,14 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	// must be dropped before and recreated after the replacement (issue #439)
 	diff.fkPreDrops, diff.fkPostAdds, diff.suppressedInlineFKs = planFKRecreationForReplacedConstraints(diff.modifiedTables, diff.addedTables, oldTables, newTables)
 
+	// A brand new SERIAL column/table can be adopting a sequence that already
+	// exists in the old state (issue #573): PostgreSQL's SERIAL shorthand
+	// issues its own CREATE SEQUENCE, which fails with "relation already
+	// exists" when that sequence is already there. Render those columns with
+	// their underlying type and explicit DEFAULT nextval(...) instead; the
+	// modified-sequence pass above already attaches OWNED BY afterwards.
+	downgradeCollidingSerialColumns(diff, oldSequences)
+
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
 	collector.qualifySchema = qualifySchema
@@ -1537,6 +1576,12 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
 	preDroppedViews := d.generatePreDropMaterializedViewsSQL(targetSchema, collector)
+
+	// Release sequences whose owning column is about to be dropped, so the
+	// drop does not cascade to a sequence the desired state still needs.
+	for _, seq := range d.releasedSequenceOwners {
+		generateSequenceOwnedBySQL(seq, targetSchema, DiffOperationAlter, collector)
+	}
 
 	// First: Drop operations (in reverse dependency order)
 	d.generateDropSQL(targetSchema, collector, preDroppedViews)
@@ -2117,7 +2162,10 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// ALTER TABLE ... ADD COLUMN just above. The sequence itself was created
 	// before the tables so column defaults could reference it.
 	for _, seq := range d.deferredSequenceOwners {
-		generateSequenceOwnedBySQL(seq, targetSchema, collector)
+		generateSequenceOwnedBySQL(seq, targetSchema, DiffOperationCreate, collector)
+	}
+	for _, seq := range d.changedSequenceOwners {
+		generateSequenceOwnedBySQL(seq, targetSchema, DiffOperationAlter, collector)
 	}
 
 	// (Re)create the dependent foreign keys now that the replacement constraints exist
@@ -2448,6 +2496,55 @@ func isSerialSequence(tables map[string]*ir.Table, seq *ir.Sequence) bool {
 		}
 	}
 	return false
+}
+
+// downgradeCollidingSerialColumns rewrites newly added SERIAL columns (via
+// CREATE TABLE or ALTER TABLE ADD COLUMN) whose implicit sequence name is
+// already taken by a sequence from the old state. PostgreSQL's SERIAL
+// shorthand always issues its own CREATE SEQUENCE for the deterministic
+// <table>_<column>_seq name, which fails with "relation already exists" in
+// that case, even though the sequence is meant to be adopted rather than
+// recreated. The column is rendered with its underlying type and an
+// explicit DEFAULT nextval(...) instead; ownership is attached separately
+// by the modified-sequence pass. The name is derived the same way
+// regardless of how many sequences the column owns (PostgreSQL allows more
+// than one), rather than by looking one up among them.
+func downgradeCollidingSerialColumns(diff *ddlDiff, oldSequences map[string]*ir.Sequence) {
+	collides := func(schema, table, column string) bool {
+		_, exists := oldSequences[schema+"."+ir.SerialSequenceName(table, column)]
+		return exists
+	}
+
+	downgrade := func(column *ir.Column) *ir.Column {
+		downgraded := *column
+		downgraded.IsSerial = false
+		return &downgraded
+	}
+
+	for i, table := range diff.addedTables {
+		var cloned bool
+		for j, column := range table.Columns {
+			if !column.IsSerial || !collides(table.Schema, table.Name, column.Name) {
+				continue
+			}
+			if !cloned {
+				clone := *table
+				clone.Columns = append([]*ir.Column{}, table.Columns...)
+				table = &clone
+				diff.addedTables[i] = table
+				cloned = true
+			}
+			table.Columns[j] = downgrade(column)
+		}
+	}
+
+	for _, td := range diff.modifiedTables {
+		for i, column := range td.AddedColumns {
+			if column.IsSerial && collides(td.Table.Schema, td.Table.Name, column.Name) {
+				td.AddedColumns[i] = downgrade(column)
+			}
+		}
+	}
 }
 
 // columnExistsInTables checks if a column exists in the given tables map

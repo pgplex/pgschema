@@ -105,7 +105,7 @@ func markSerialColumns(schema *Schema) {
 		default:
 			continue
 		}
-		if seq.Name != serialSequenceName(table.Name, column.Name) {
+		if seq.Name != SerialSequenceName(table.Name, column.Name) {
 			continue
 		}
 		if nextvalSequenceName(*column.DefaultValue) != seq.Name {
@@ -133,10 +133,10 @@ func nextvalSequenceName(defaultValue string) string {
 	return name
 }
 
-// serialSequenceName mirrors PostgreSQL's makeObjectName(table, column, "seq"):
+// SerialSequenceName mirrors PostgreSQL's makeObjectName(table, column, "seq"):
 // when the combined name exceeds NAMEDATALEN-1 bytes, the longer of the two
 // parts is trimmed first, one byte at a time, until it fits.
-func serialSequenceName(tableName, columnName string) string {
+func SerialSequenceName(tableName, columnName string) string {
 	const maxNameLen = 63
 	name1 := []byte(tableName)
 	name2 := []byte(columnName)
