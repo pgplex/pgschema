@@ -1561,7 +1561,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	// exists" when that sequence is already there. Render those columns with
 	// their underlying type and explicit DEFAULT nextval(...) instead; the
 	// modified-sequence pass above already attaches OWNED BY afterwards.
-	downgradeCollidingSerialColumns(diff, oldSequences, newSequences)
+	downgradeCollidingSerialColumns(diff, oldSequences)
 
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
@@ -2501,27 +2501,17 @@ func isSerialSequence(tables map[string]*ir.Table, seq *ir.Sequence) bool {
 // downgradeCollidingSerialColumns rewrites newly added SERIAL columns (via
 // CREATE TABLE or ALTER TABLE ADD COLUMN) whose implicit sequence name is
 // already taken by a sequence from the old state. PostgreSQL's SERIAL
-// shorthand always issues its own CREATE SEQUENCE, which fails with
-// "relation already exists" in that case, even though the sequence is meant
-// to be adopted rather than recreated. The column is rendered with its
-// underlying type and an explicit DEFAULT nextval(...) instead; ownership is
-// attached separately by the modified-sequence pass.
-func downgradeCollidingSerialColumns(diff *ddlDiff, oldSequences, newSequences map[string]*ir.Sequence) {
-	// "schema.table.column" -> sequence name, for every owned sequence in the desired state
-	ownedSeqNames := make(map[string]string, len(newSequences))
-	for _, seq := range newSequences {
-		if seq.OwnedByTable == "" || seq.OwnedByColumn == "" {
-			continue
-		}
-		ownedSeqNames[seq.Schema+"."+seq.OwnedByTable+"."+seq.OwnedByColumn] = seq.Name
-	}
-
+// shorthand always issues its own CREATE SEQUENCE for the deterministic
+// <table>_<column>_seq name, which fails with "relation already exists" in
+// that case, even though the sequence is meant to be adopted rather than
+// recreated. The column is rendered with its underlying type and an
+// explicit DEFAULT nextval(...) instead; ownership is attached separately
+// by the modified-sequence pass. The name is derived the same way
+// regardless of how many sequences the column owns (PostgreSQL allows more
+// than one), rather than by looking one up among them.
+func downgradeCollidingSerialColumns(diff *ddlDiff, oldSequences map[string]*ir.Sequence) {
 	collides := func(schema, table, column string) bool {
-		seqName, ok := ownedSeqNames[schema+"."+table+"."+column]
-		if !ok {
-			return false
-		}
-		_, exists := oldSequences[schema+"."+seqName]
+		_, exists := oldSequences[schema+"."+ir.SerialSequenceName(table, column)]
 		return exists
 	}
 
