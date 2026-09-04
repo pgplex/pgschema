@@ -1555,6 +1555,14 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	// must be dropped before and recreated after the replacement (issue #439)
 	diff.fkPreDrops, diff.fkPostAdds, diff.suppressedInlineFKs = planFKRecreationForReplacedConstraints(diff.modifiedTables, diff.addedTables, oldTables, newTables)
 
+	// A brand new SERIAL column/table can be adopting a sequence that already
+	// exists in the old state (issue #573): PostgreSQL's SERIAL shorthand
+	// issues its own CREATE SEQUENCE, which fails with "relation already
+	// exists" when that sequence is already there. Render those columns with
+	// their underlying type and explicit DEFAULT nextval(...) instead; the
+	// modified-sequence pass above already attaches OWNED BY afterwards.
+	downgradeCollidingSerialColumns(diff, oldSequences, newSequences)
+
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
 	collector.qualifySchema = qualifySchema
@@ -2488,6 +2496,65 @@ func isSerialSequence(tables map[string]*ir.Table, seq *ir.Sequence) bool {
 		}
 	}
 	return false
+}
+
+// downgradeCollidingSerialColumns rewrites newly added SERIAL columns (via
+// CREATE TABLE or ALTER TABLE ADD COLUMN) whose implicit sequence name is
+// already taken by a sequence from the old state. PostgreSQL's SERIAL
+// shorthand always issues its own CREATE SEQUENCE, which fails with
+// "relation already exists" in that case, even though the sequence is meant
+// to be adopted rather than recreated. The column is rendered with its
+// underlying type and an explicit DEFAULT nextval(...) instead; ownership is
+// attached separately by the modified-sequence pass.
+func downgradeCollidingSerialColumns(diff *ddlDiff, oldSequences, newSequences map[string]*ir.Sequence) {
+	// "schema.table.column" -> sequence name, for every owned sequence in the desired state
+	ownedSeqNames := make(map[string]string, len(newSequences))
+	for _, seq := range newSequences {
+		if seq.OwnedByTable == "" || seq.OwnedByColumn == "" {
+			continue
+		}
+		ownedSeqNames[seq.Schema+"."+seq.OwnedByTable+"."+seq.OwnedByColumn] = seq.Name
+	}
+
+	collides := func(schema, table, column string) bool {
+		seqName, ok := ownedSeqNames[schema+"."+table+"."+column]
+		if !ok {
+			return false
+		}
+		_, exists := oldSequences[schema+"."+seqName]
+		return exists
+	}
+
+	downgrade := func(column *ir.Column) *ir.Column {
+		downgraded := *column
+		downgraded.IsSerial = false
+		return &downgraded
+	}
+
+	for i, table := range diff.addedTables {
+		var cloned bool
+		for j, column := range table.Columns {
+			if !column.IsSerial || !collides(table.Schema, table.Name, column.Name) {
+				continue
+			}
+			if !cloned {
+				clone := *table
+				clone.Columns = append([]*ir.Column{}, table.Columns...)
+				table = &clone
+				diff.addedTables[i] = table
+				cloned = true
+			}
+			table.Columns[j] = downgrade(column)
+		}
+	}
+
+	for _, td := range diff.modifiedTables {
+		for i, column := range td.AddedColumns {
+			if column.IsSerial && collides(td.Table.Schema, td.Table.Name, column.Name) {
+				td.AddedColumns[i] = downgrade(column)
+			}
+		}
+	}
 }
 
 // columnExistsInTables checks if a column exists in the given tables map

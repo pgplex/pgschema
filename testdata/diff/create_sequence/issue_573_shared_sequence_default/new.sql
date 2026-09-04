@@ -75,6 +75,14 @@ CREATE TABLE adopt (
     CONSTRAINT adopt_pkey PRIMARY KEY (id)
 );
 
+-- Brand new table adopting a sequence that already exists in the old state
+-- (see comments there): the SERIAL column must not try to recreate it.
+CREATE TABLE adopt_new (
+    id serial NOT NULL,
+    note text,
+    CONSTRAINT adopt_new_pkey PRIMARY KEY (id)
+);
+
 CREATE SEQUENCE release_id_seq AS integer;
 
 CREATE TABLE release (

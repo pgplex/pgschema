@@ -4,6 +4,11 @@ CREATE TABLE legacy (
     CONSTRAINT legacy_pkey PRIMARY KEY (id)
 );
 
+-- Explicit, unowned sequence pre-created for a table that doesn't exist yet:
+-- the desired state adds the table with a SERIAL column of the same name, so
+-- the plan must adopt the sequence instead of letting SERIAL recreate it.
+CREATE SEQUENCE adopt_new_id_seq AS integer;
+
 -- Explicit, unowned sequence that the desired state turns into a SERIAL column:
 -- only the ownership differs, so the plan must attach it.
 CREATE SEQUENCE adopt_id_seq AS integer;
