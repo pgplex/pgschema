@@ -1,12 +1,12 @@
 ---
-title: "Data Migration"
+title: "Custom Migration Steps"
 mode: "wide"
 ---
 
-pgschema manages schema state, not user data. When a schema change requires touching existing data (e.g. backfilling a new column), declare the end state in your schema file, then edit the generated plan to insert the data migration steps.
+pgschema generates the plan from the diff between your schema files and the database, but the diff engine cannot infer everything. The most common case is a schema change that requires touching existing user data, such as backfilling a new column. Declare the end state in your schema file, then edit the generated plan to add the steps by hand.
 
 <Note>
-Config tables (lookups, settings, feature flags) are the exception: list them in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy), and pgschema plans the row changes for you. See [Config Data](/workflow/config-data). This page covers one-off changes to data that pgschema does not own.
+Rows of config tables (lookups, settings, feature flags) do not need this: list them in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy), and pgschema plans the row changes for you. See [Config Data](/workflow/config-data). This page covers one-off changes to data that pgschema does not own, and any other step the diff cannot produce.
 </Note>
 
 This works because the plan's `source_fingerprint` pins the **database state** the plan was generated against, not the plan's SQL. You can freely edit the steps; `pgschema apply` still detects if the database has drifted since planning.

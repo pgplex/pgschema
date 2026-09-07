@@ -99,7 +99,7 @@ pgschema uses fingerprinting to detect if the database schema has changed since 
 
 ### Can pgschema manage table data?
 
-Only for config tables. List the table under `[data]` in [`pgschema.toml`](/cli/config), run `dump` to export its rows to a CSV file loaded by a [`\copy`](/syntax/copy) directive, and from then on `plan` generates the `INSERT`, `UPDATE`, and `DELETE` statements needed to match the file. Tables that are not listed are never touched, and `INSERT` statements for them are discarded while building the desired state, as before. See [Config Data](/workflow/config-data). For backfills and other one-off changes to user data, see [Data Migration](/workflow/data-migration).
+Only for config tables. List the table under `[data]` in [`pgschema.toml`](/cli/config), run `dump` to export its rows to a CSV file loaded by a [`\copy`](/syntax/copy) directive, and from then on `plan` generates the `INSERT`, `UPDATE`, and `DELETE` statements needed to match the file. Tables that are not listed are never touched, and `INSERT` statements for them are discarded while building the desired state, as before. See [Config Data](/workflow/config-data). For backfills and other one-off changes to user data, see [Custom Migration Steps](/workflow/custom-migration-steps).
 
 ### Can I use pgschema for database comparisons?
 

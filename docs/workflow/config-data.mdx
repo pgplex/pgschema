@@ -7,7 +7,7 @@ Most applications keep a handful of small tables whose rows are part of the appl
 pgschema manages these rows the same way it manages schema objects. You list the tables in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy) directives, `plan` diffs them against the target database, and `apply` runs the resulting `INSERT`, `UPDATE`, and `DELETE` statements in the same transaction as the DDL.
 
 <Note>
-This is for **config data**: small tables that the application reads and the deployment owns. For backfills and other one-off changes to user data, see [Data Migration](/workflow/data-migration).
+This is for **config data**: small tables that the application reads and the deployment owns. For backfills and other one-off changes to user data, see [Custom Migration Steps](/workflow/custom-migration-steps).
 </Note>
 
 ## Workflow
@@ -151,7 +151,7 @@ Data steps run after the schema steps that create or alter tables and constraint
 2. `INSERT` statements run next, parent tables before child tables
 3. `UPDATE` statements run last
 
-Foreign keys between managed tables are satisfied by this order. A `DELETE` blocked by a foreign key from an unmanaged table fails the transaction, which is the intended outcome: resolve it by editing the plan, as described in [Data Migration](/workflow/data-migration).
+Foreign keys between managed tables are satisfied by this order. A `DELETE` blocked by a foreign key from an unmanaged table fails the transaction, which is the intended outcome: resolve it by editing the plan, as described in [Custom Migration Steps](/workflow/custom-migration-steps).
 
 ## Guardrails
 
