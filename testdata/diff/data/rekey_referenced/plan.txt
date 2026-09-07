@@ -1,0 +1,20 @@
+Plan: 2 to modify.
+
+Summary by type:
+  tables: 2 to modify
+
+Tables:
+  ~ city
+    ~ Austin (row)
+  ~ country
+    - US (row)
+    + USA (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+INSERT INTO country (code, name) VALUES ('USA', 'United States');
+
+UPDATE city SET country_code = 'USA' WHERE name = 'Austin';
+
+DELETE FROM country WHERE code = 'US';

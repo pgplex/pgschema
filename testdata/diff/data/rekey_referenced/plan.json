@@ -3,28 +3,28 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "1cc8969fca297987b1382556beadbffedfeeabaa3dbd6a380cbc9f68a536c8be"
+    "hash": "aa9e77df9da5888201c611a56157ec9193c566eaa6d8ed32e97b6e4ef86ece14"
   },
   "groups": [
     {
       "steps": [
         {
-          "sql": "INSERT INTO country (code, name, active) VALUES ('FR', 'France', true);",
+          "sql": "INSERT INTO country (code, name) VALUES ('USA', 'United States');",
           "type": "table.data",
           "operation": "create",
-          "path": "public.country.FR"
+          "path": "public.country.USA"
         },
         {
-          "sql": "UPDATE country SET name = 'State of Israel' WHERE code = 'IL';",
+          "sql": "UPDATE city SET country_code = 'USA' WHERE name = 'Austin';",
           "type": "table.data",
           "operation": "alter",
-          "path": "public.country.IL"
+          "path": "public.city.Austin"
         },
         {
-          "sql": "DELETE FROM country WHERE code = 'XX';",
+          "sql": "DELETE FROM country WHERE code = 'US';",
           "type": "table.data",
           "operation": "drop",
-          "path": "public.country.XX"
+          "path": "public.country.US"
         }
       ]
     }

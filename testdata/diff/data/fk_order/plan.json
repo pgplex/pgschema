@@ -9,18 +9,6 @@
     {
       "steps": [
         {
-          "sql": "DELETE FROM feature_flag WHERE key = 'old_flag' AND tier = 'legacy';",
-          "type": "table.data",
-          "operation": "drop",
-          "path": "public.feature_flag.old_flag,legacy"
-        },
-        {
-          "sql": "DELETE FROM plan_tier WHERE id = 'legacy';",
-          "type": "table.data",
-          "operation": "drop",
-          "path": "public.plan_tier.legacy"
-        },
-        {
           "sql": "INSERT INTO plan_tier (id, name, seat_limit) VALUES ('enterprise', 'Enterprise', NULL);",
           "type": "table.data",
           "operation": "create",
@@ -37,6 +25,18 @@
           "type": "table.data",
           "operation": "alter",
           "path": "public.plan_tier.team"
+        },
+        {
+          "sql": "DELETE FROM feature_flag WHERE key = 'old_flag' AND tier = 'legacy';",
+          "type": "table.data",
+          "operation": "drop",
+          "path": "public.feature_flag.old_flag,legacy"
+        },
+        {
+          "sql": "DELETE FROM plan_tier WHERE id = 'legacy';",
+          "type": "table.data",
+          "operation": "drop",
+          "path": "public.plan_tier.legacy"
         }
       ]
     }

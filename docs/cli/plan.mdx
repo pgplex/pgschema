@@ -367,11 +367,11 @@ Tables:
 DDL to be executed:
 --------------------------------------------------
 
-DELETE FROM country WHERE code = 'XX';
-
 INSERT INTO country (code, name) VALUES ('FR', 'France');
 
 UPDATE country SET name = 'State of Israel' WHERE code = 'IL';
+
+DELETE FROM country WHERE code = 'XX';
 ```
 
 See [Config Data](/workflow/config-data) for details.

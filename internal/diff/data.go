@@ -215,9 +215,18 @@ func equalValue(a, b *string) bool {
 	return *a == *b
 }
 
-// generateDataSQL emits one statement per row change. Deletes run first,
-// child tables before parents; then inserts, parents before children; then
-// updates. Every statement runs inside the migration transaction.
+// generateDataSQL emits one statement per row change, in an order that keeps
+// foreign keys between managed tables satisfied at every step:
+//
+//  1. full reloads (DELETE FROM) of tables whose rows could not be matched,
+//     children before parents, so the inserts below start from empty tables;
+//  2. inserts, parents before children;
+//  3. updates, parents before children, so a child re-pointed at a new parent
+//     row finds it;
+//  4. per-row deletes, children before parents, after the updates that moved
+//     any remaining references away from the deleted rows.
+//
+// Every statement runs inside the migration transaction.
 func generateDataSQL(diffs []*tableDataDiff, targetSchema string, collector *diffCollector) {
 	if len(diffs) == 0 {
 		return
@@ -239,19 +248,6 @@ func generateDataSQL(diffs []*tableDataDiff, targetSchema string, collector *dif
 	for _, d := range reverseSlice(ordered) {
 		if d.DeleteAll {
 			collector.collect(d.context(DiffOperationDrop, allRowsKey), fmt.Sprintf("DELETE FROM %s;", name(d)))
-			continue
-		}
-		for _, del := range d.Deletes {
-			where := make([]string, len(del.PKColumns))
-			for i, col := range del.PKColumns {
-				var column *ir.Column
-				if ci, ok := d.colIdx[col]; ok {
-					column = d.Columns[ci]
-				}
-				where[i] = fmt.Sprintf("%s = %s", ir.QuoteIdentifier(col), formatDataLiteral(column, del.PKValues[i]))
-			}
-			sql := fmt.Sprintf("DELETE FROM %s WHERE %s;", name(d), strings.Join(where, " AND "))
-			collector.collect(d.context(DiffOperationDrop, del.Key), sql)
 		}
 	}
 
@@ -288,6 +284,21 @@ func generateDataSQL(diffs []*tableDataDiff, targetSchema string, collector *dif
 			}
 			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s;", name(d), strings.Join(sets, ", "), strings.Join(where, " AND "))
 			collector.collect(d.context(DiffOperationAlter, upd.Key), sql)
+		}
+	}
+
+	for _, d := range reverseSlice(ordered) {
+		for _, del := range d.Deletes {
+			where := make([]string, len(del.PKColumns))
+			for i, col := range del.PKColumns {
+				var column *ir.Column
+				if ci, ok := d.colIdx[col]; ok {
+					column = d.Columns[ci]
+				}
+				where[i] = fmt.Sprintf("%s = %s", ir.QuoteIdentifier(col), formatDataLiteral(column, del.PKValues[i]))
+			}
+			sql := fmt.Sprintf("DELETE FROM %s WHERE %s;", name(d), strings.Join(where, " AND "))
+			collector.collect(d.context(DiffOperationDrop, del.Key), sql)
 		}
 	}
 }
