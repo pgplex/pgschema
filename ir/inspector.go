@@ -1409,10 +1409,13 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 
 		dbSchema := schema.getOrCreateSchema(schemaName)
 
-		// Argument, state, and return types may come back schema-qualified when the
-		// type is a relation's row type outside the search_path (e.g. "public.v").
-		// Strip the aggregate's own schema so both sides of a plan compare equal,
-		// mirroring what function parameters do via stripSameSchemaPrefix.
+		// Identity args, signature, and return type come from pg_get_function_*
+		// and format_type, which qualify a type only when it is outside the
+		// search_path, so the same aggregate can inspect as sum_v(v) on one side
+		// of a plan and sum_v(public.v) on the other. Strip the aggregate's own
+		// schema from those, mirroring function parameters. The state types are
+		// qualified explicitly by the query and stripped (or kept for
+		// --qualify-schema) by the diff layer, so they are left as is.
 		aggregate := &Aggregate{
 			Schema:     schemaName,
 			Name:       aggregateName,
@@ -1423,7 +1426,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 			Parallel:   i.safeInterfaceToString(agg.Parallel),
 
 			TransitionFunction: i.safeInterfaceToString(agg.TransitionFunction),
-			StateType:          i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.StateType), schemaName),
+			StateType:          i.safeInterfaceToString(agg.StateType),
 			StateSpace:         int(agg.StateSpace),
 			InitialCondition:   initialCondition,
 
@@ -1437,7 +1440,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 
 			MTransitionFunction:    i.safeInterfaceToString(agg.MtransitionFunction),
 			MInvTransitionFunction: i.safeInterfaceToString(agg.MinvTransitionFunction),
-			MStateType:             i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.MstateType), schemaName),
+			MStateType:             i.safeInterfaceToString(agg.MstateType),
 			MStateSpace:            int(agg.MstateSpace),
 			MFinalFunction:         i.safeInterfaceToString(agg.MfinalFunction),
 			MFinalFuncExtra:        agg.MfinalFuncExtra,
