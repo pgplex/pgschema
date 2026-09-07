@@ -93,6 +93,12 @@
           "path": "public.sum_with_v"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION total_v()\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT sum_v(v.*) FROM v\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.total_v"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW v_total AS\n SELECT sum_v(v.*) AS total\n   FROM v;",
           "type": "view",
           "operation": "create",

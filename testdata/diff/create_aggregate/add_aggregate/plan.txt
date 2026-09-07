@@ -1,10 +1,11 @@
-Plan: 3 to add.
+Plan: 4 to add.
 
 Summary by type:
-  functions: 2 to add
+  functions: 3 to add
   aggregates: 1 to add
 
 Functions:
+  + first_of
   + numeric_accum
   + numeric_first
 
@@ -39,3 +40,12 @@ CREATE AGGREGATE my_agg(numeric) (
     FINALFUNC = numeric_first,
     INITCOND = '{}'
 );
+
+CREATE OR REPLACE FUNCTION first_of(
+    vals numeric[]
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT my_agg(x) FROM unnest(vals) AS u(x)
+$$;

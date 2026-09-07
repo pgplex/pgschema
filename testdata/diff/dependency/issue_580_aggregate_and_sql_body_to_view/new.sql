@@ -93,3 +93,10 @@ CREATE FUNCTION count_only_v()
 RETURNS bigint
 LANGUAGE sql
 AS $$ SELECT count(*) FROM ONLY v $$;
+
+-- SQL-language function calling the view-dependent aggregate: it must follow
+-- the aggregate even though both are in the view-dependent batch.
+CREATE FUNCTION total_v()
+RETURNS integer
+LANGUAGE sql
+AS $$ SELECT sum_v(v.*) FROM v $$;

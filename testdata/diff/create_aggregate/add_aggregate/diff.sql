@@ -23,3 +23,12 @@ CREATE AGGREGATE my_agg(numeric) (
     FINALFUNC = numeric_first,
     INITCOND = '{}'
 );
+
+CREATE OR REPLACE FUNCTION first_of(
+    vals numeric[]
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT my_agg(x) FROM unnest(vals) AS u(x)
+$$;

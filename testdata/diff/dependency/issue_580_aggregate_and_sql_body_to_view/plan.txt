@@ -1,7 +1,7 @@
-Plan: 15 to add.
+Plan: 16 to add.
 
 Summary by type:
-  functions: 7 to add
+  functions: 8 to add
   aggregates: 4 to add
   tables: 1 to add
   views: 3 to add
@@ -12,6 +12,7 @@ Functions:
   + count_only_v
   + count_v
   + get_total
+  + total_v
   + touch_t
   + v_sfunc
 
@@ -126,6 +127,13 @@ CREATE AGGREGATE sum_with_v(integer) (
     STYPE = bigint,
     INITCOND = '0'
 );
+
+CREATE OR REPLACE FUNCTION total_v()
+RETURNS integer
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT sum_v(v.*) FROM v
+$$;
 
 CREATE OR REPLACE VIEW v_total AS
  SELECT sum_v(v.*) AS total

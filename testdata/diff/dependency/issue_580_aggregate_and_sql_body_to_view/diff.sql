@@ -92,6 +92,13 @@ CREATE AGGREGATE sum_with_v(integer) (
     INITCOND = '0'
 );
 
+CREATE OR REPLACE FUNCTION total_v()
+RETURNS integer
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT sum_v(v.*) FROM v
+$$;
+
 CREATE OR REPLACE VIEW v_total AS
  SELECT sum_v(v.*) AS total
    FROM v;

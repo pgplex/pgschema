@@ -25,6 +25,12 @@
           "type": "aggregate",
           "operation": "create",
           "path": "public.my_agg"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION first_of(\n    vals numeric[]\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT my_agg(x) FROM unnest(vals) AS u(x)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.first_of"
         }
       ]
     }

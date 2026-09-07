@@ -1977,6 +1977,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithViewDeps = deferRecreated(functionsWithViewDeps)
 	}
 
+	// SQL-language functions whose body calls a new aggregate are validated
+	// against it at creation, so they are created after the aggregates instead
+	// of in the table-relative batches below (#580).
+	var functionsCallingAggregates []*ir.Function
+	functionsWithoutViewDeps, functionsCallingAggregates = splitFunctionsCallingAggregates(functionsWithoutViewDeps, d.addedAggregates)
+
 	// Separate functions WITHOUT view deps into those that reference deferred
 	// tables and those that don't. Functions that query new tables must be
 	// created after those tables (issue #530). Functions referencing tables in
@@ -2065,6 +2071,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	aggregatesToCreateNow, d.aggregatesAwaitingRecreatedViews = splitAggregatesByViewDeps(d.addedAggregates, recreatedViewLookup, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
 	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(aggregatesToCreateNow, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
 	generateCreateAggregatesSQL(aggregatesToCreateNow, targetSchema, collector)
+
+	// SQL-language functions that call one of the aggregates above.
+	generateCreateFunctionsSQL(functionsCallingAggregates, targetSchema, collector)
 
 	// Merge deferred policies from all batches
 	allDeferredPolicies := append(append(deferredPolicies1, deferredPolicies2...), deferredPolicies3...)
@@ -2761,6 +2770,45 @@ func splitFunctionsByViewDeps(functions []*ir.Function, views map[string]struct{
 	return now, later
 }
 
+// splitFunctionsCallingAggregates partitions functions into those that can be
+// created before the given aggregates and those whose SQL-language body calls
+// one of them, directly or through another such function. PostgreSQL resolves
+// a SQL body at creation, so the caller must follow the aggregate. Other
+// languages resolve calls at run time and are never held back. Order within
+// each partition is preserved.
+func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.Aggregate) (now, later []*ir.Function) {
+	if len(aggregates) == 0 {
+		return functions, nil
+	}
+	calls := func(fn *ir.Function, routines map[string]struct{}) bool {
+		return strings.EqualFold(fn.Language, "sql") && referencesNewFunction(fn.Definition, fn.Schema, routines)
+	}
+	aggregateLookup := buildRoutineLookup(nil, aggregates)
+	for _, fn := range functions {
+		if calls(fn, aggregateLookup) {
+			later = append(later, fn)
+		} else {
+			now = append(now, fn)
+		}
+	}
+	// Transitive closure: a function that calls a held-back function waits too.
+	for changed := len(later) > 0; changed; {
+		changed = false
+		lateLookup := buildFunctionLookup(later)
+		var still []*ir.Function
+		for _, fn := range now {
+			if calls(fn, lateLookup) {
+				later = append(later, fn)
+				changed = true
+			} else {
+				still = append(still, fn)
+			}
+		}
+		now = still
+	}
+	return now, later
+}
+
 // splitAggregatesByViewDeps partitions aggregates into those that can be
 // created now and those that depend on a view in the lookup, either through
 // their own argument, state, or return type or through a support function in
@@ -2789,13 +2837,19 @@ func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Func
 	lateViewLookup := buildViewLookup(viewsLater)
 	functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
 	aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
+	// Within each half, SQL-language functions that call one of the aggregates
+	// go after it; the aggregates' own support functions stay ahead of them.
+	functionsNow, functionsCallingNow := splitFunctionsCallingAggregates(functionsNow, aggregatesNow)
+	functionsLater, functionsCallingLater := splitFunctionsCallingAggregates(functionsLater, aggregatesLater)
 
 	generateCreateViewsSQL(viewsNow, targetSchema, collector)
 	generateCreateFunctionsSQL(functionsNow, targetSchema, collector)
 	generateCreateAggregatesSQL(aggregatesNow, targetSchema, collector)
+	generateCreateFunctionsSQL(functionsCallingNow, targetSchema, collector)
 	generateCreateViewsSQL(viewsLater, targetSchema, collector)
 	generateCreateFunctionsSQL(functionsLater, targetSchema, collector)
 	generateCreateAggregatesSQL(aggregatesLater, targetSchema, collector)
+	generateCreateFunctionsSQL(functionsCallingLater, targetSchema, collector)
 }
 
 // splitViewsReferencingRoutines partitions views into those that can be created
