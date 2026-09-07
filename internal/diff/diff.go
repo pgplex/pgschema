@@ -2562,6 +2562,27 @@ func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bo
 	return functionSignatureReferencesRelation(fn, newViews)
 }
 
+// RelationLookup builds a case-insensitive lookup of table and view names, keyed
+// both unqualified and schema-qualified, for use with
+// FunctionSignatureReferencesRelation.
+func RelationLookup(tables []*ir.Table, views []*ir.View) map[string]struct{} {
+	names := make([]struct{ schema, name string }, 0, len(tables)+len(views))
+	for _, t := range tables {
+		names = append(names, struct{ schema, name string }{t.Schema, t.Name})
+	}
+	for _, v := range views {
+		names = append(names, struct{ schema, name string }{v.Schema, v.Name})
+	}
+	return buildSchemaNameLookup(names)
+}
+
+// FunctionSignatureReferencesRelation reports whether a function's return type
+// or parameter types name a relation in the lookup (see RelationLookup). Such a
+// function must be created after that relation exists.
+func FunctionSignatureReferencesRelation(fn *ir.Function, relations map[string]struct{}) bool {
+	return functionSignatureReferencesRelation(fn, relations)
+}
+
 // functionSignatureReferencesRelation determines if a function's return type or
 // parameter types reference a relation in the lookup. PostgreSQL exposes both
 // tables and views as composite types, so a function using one in its signature

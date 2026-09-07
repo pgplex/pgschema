@@ -85,74 +85,80 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Organization by object type
-	filesByType := make(map[string]map[string][]diff.Diff)
-	// Track insertion order per directory to preserve dependency ordering from the diff package.
-	// The diff package topologically sorts views, functions, tables, and types, so preserving
-	// the order in which each object first appears maintains correct dependency ordering.
-	orderByDir := make(map[string][]string)
-	includes := []string{}
+	// Group diffs into one file per object. Each file is keyed by its directory
+	// and object name; the file order records the first appearance of each file
+	// in the diff sequence.
+	type fileKey struct{ dir, name string }
+	stepsByFile := make(map[fileKey][]diff.Diff)
+	var fileOrder []fileKey
+	var tables []*ir.Table
+	var views []*ir.View
 
-	// Group diffs by object type and name, tracking first-appearance order
 	for _, step := range diffs {
-		objType := step.Type.String()
-
-		// Determine directory and object name
 		var dir string
 		if step.Type == diff.DiffTypeComment {
 			// Special handling for comments - use parent directory
 			dir = f.getCommentParentDirectory(step)
 		} else {
-			dir = f.getObjectDirectory(objType)
+			dir = f.getObjectDirectory(step.Type.String())
 		}
-		objName := f.getGroupingName(step)
+		key := fileKey{dir: dir, name: f.getGroupingName(step)}
 
-		if filesByType[dir] == nil {
-			filesByType[dir] = make(map[string][]diff.Diff)
+		if _, exists := stepsByFile[key]; !exists {
+			fileOrder = append(fileOrder, key)
 		}
+		stepsByFile[key] = append(stepsByFile[key], step)
 
-		// Track first appearance of each object name per directory
-		if _, exists := filesByType[dir][objName]; !exists {
-			orderByDir[dir] = append(orderByDir[dir], objName)
+		switch src := step.Source.(type) {
+		case *ir.Table:
+			tables = append(tables, src)
+		case *ir.View:
+			views = append(views, src)
 		}
-
-		filesByType[dir][objName] = append(filesByType[dir][objName], step)
 	}
 
-	// Create files in dependency order
-	// Aggregates come after tables (an aggregate may reference a table's row type) and
-	// before views (which may reference the aggregate), matching the diff create order.
-	orderedDirs := []string{"types", "domains", "sequences", "functions", "procedures", "tables", "aggregates", "views", "materialized_views", "default_privileges", "privileges"}
-
-	for _, dir := range orderedDirs {
-		if objects, exists := filesByType[dir]; exists {
-			// Create directory
-			dirPath := filepath.Join(baseDir, dir)
-			if err := os.MkdirAll(dirPath, 0755); err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
-			}
-
-			// Use the order objects first appeared in the diffs.
-			// This preserves dependency ordering from the diff package (e.g., topological
-			// sort for views, tables, functions) instead of sorting alphabetically.
-			objNames := orderByDir[dir]
-
-			// Create files for each object
-			for _, objName := range objNames {
-				objSteps := objects[objName]
-				fileName := f.sanitizeFileName(objName) + ".sql"
-				filePath := filepath.Join(dirPath, fileName)
-				relativePath := filepath.Join(dir, fileName)
-
-				// Write object file
-				if err := f.writeObjectFile(filePath, objSteps); err != nil {
-					return fmt.Errorf("failed to write file %s: %w", filePath, err)
-				}
-
-				// Add include statement
-				includes = append(includes, fmt.Sprintf("\\i %s", relativePath))
-			}
+	// Compute the include order. The diff package already emits statements in
+	// dependency order, so the first appearance of each file is the baseline.
+	// One adjustment is needed because a table's triggers, policies, and
+	// deferred constraints are bundled into the table's file even though the
+	// diff emits them after functions: any function whose signature does not
+	// reference a table or view is hoisted ahead of the first table file so
+	// the bundled statements can resolve it. Functions that do use a relation's
+	// row type stay where the diff placed them, after that relation (#580).
+	firstTable := len(fileOrder)
+	for i, key := range fileOrder {
+		if key.dir == "tables" {
+			firstTable = i
+			break
 		}
+	}
+	relations := diff.RelationLookup(tables, views)
+	orderedFiles := make([]fileKey, 0, len(fileOrder))
+	orderedFiles = append(orderedFiles, fileOrder[:firstTable]...)
+	var rest []fileKey
+	for _, key := range fileOrder[firstTable:] {
+		if key.dir == "functions" && !f.functionFileReferencesRelation(stepsByFile[key], relations) {
+			orderedFiles = append(orderedFiles, key)
+		} else {
+			rest = append(rest, key)
+		}
+	}
+	orderedFiles = append(orderedFiles, rest...)
+
+	includes := make([]string, 0, len(orderedFiles))
+	for _, key := range orderedFiles {
+		dirPath := filepath.Join(baseDir, key.dir)
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
+		}
+
+		fileName := f.sanitizeFileName(key.name) + ".sql"
+		filePath := filepath.Join(dirPath, fileName)
+		if err := f.writeObjectFile(filePath, stepsByFile[key]); err != nil {
+			return fmt.Errorf("failed to write file %s: %w", filePath, err)
+		}
+
+		includes = append(includes, fmt.Sprintf("\\i %s", filepath.Join(key.dir, fileName)))
 	}
 
 	// Create main file with header and includes
@@ -236,6 +242,18 @@ func (f *DumpFormatter) writeObjectFile(filePath string, diffs []diff.Diff) erro
 	}
 
 	return nil
+}
+
+// functionFileReferencesRelation reports whether any function in a functions/
+// file uses a table's or view's row type in its signature. Such a file must be
+// included after that relation, so it is not hoisted ahead of the tables.
+func (f *DumpFormatter) functionFileReferencesRelation(steps []diff.Diff, relations map[string]struct{}) bool {
+	for _, step := range steps {
+		if fn, ok := step.Source.(*ir.Function); ok && diff.FunctionSignatureReferencesRelation(fn, relations) {
+			return true
+		}
+	}
+	return false
 }
 
 // getObjectDirectory returns the directory name for an object type
