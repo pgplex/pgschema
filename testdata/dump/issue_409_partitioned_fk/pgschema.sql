@@ -3,7 +3,7 @@
 --
 
 -- Dumped from database version PostgreSQL 17.6
--- Dumped by pgschema version 1.12.5
+-- Dumped by pgschema version 1.13.0
 
 
 --
