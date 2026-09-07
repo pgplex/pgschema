@@ -110,5 +110,5 @@ DELETE FROM country WHERE code = 'XX';
 - `UPDATE` sets only the columns that differ and matches on the primary key
 - `DELETE` matches on the primary key
 - A change to a primary key value is a `DELETE` followed by an `INSERT`
-- A change to the primary key columns themselves clears the table with a single `DELETE FROM` and inserts every row again, since the old key may no longer exist once the DDL has run
+- When the primary key columns themselves change, current rows are still matched by the new key as long as its columns already exist with distinct values, so promoting a natural key such as `code` to primary key needs no data changes. If a new key column has to be added, the table is cleared with a single `DELETE FROM` and every row inserted again
 - Numeric and boolean values are written bare; every other value is a quoted string literal that PostgreSQL casts to the column type; missing values are `NULL`

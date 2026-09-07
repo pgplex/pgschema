@@ -1,0 +1,64 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "29cd161b6a7beae020bff8995f2fdfcd4ab58246fe31c4f5cd868c18f8bbf183"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE city DROP CONSTRAINT city_country_code_fkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.city.city_country_code_fkey"
+        },
+        {
+          "sql": "ALTER TABLE country DROP CONSTRAINT country_code_key;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.country.country_code_key"
+        },
+        {
+          "sql": "ALTER TABLE country DROP COLUMN id;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.country.id"
+        },
+        {
+          "sql": "ALTER TABLE country\nADD CONSTRAINT country_pkey PRIMARY KEY (code);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.country.country_pkey"
+        },
+        {
+          "sql": "ALTER TABLE city\nADD CONSTRAINT city_country_code_fkey FOREIGN KEY (country_code) REFERENCES country (code) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.city.city_country_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE city VALIDATE CONSTRAINT city_country_code_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.city.city_country_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "UPDATE country SET name = 'State of Israel' WHERE code = 'IL';",
+          "type": "table.data",
+          "operation": "alter",
+          "path": "public.country.IL"
+        }
+      ]
+    }
+  ]
+}

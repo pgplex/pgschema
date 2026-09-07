@@ -151,7 +151,7 @@ Data steps run after the schema steps that create or alter tables and constraint
 2. `INSERT` statements run next, parent tables before child tables
 3. `UPDATE` statements run last
 
-If a migration changes the primary key columns of a managed table, its current rows can no longer be addressed by key, so the plan clears the table with one `DELETE FROM` and inserts every row again.
+If a migration changes the primary key columns of a managed table, current rows are matched by the new key whenever its columns already exist with distinct values, which is the usual case of promoting a natural key. Only when a key column is new does the plan clear the table with one `DELETE FROM` and insert every row again. That full reload is blocked by any foreign key from an unmanaged table; resolve it by editing the plan.
 
 Foreign keys between managed tables are satisfied by this order. A `DELETE` blocked by a foreign key from an unmanaged table fails the transaction, which is the intended outcome: resolve it by editing the plan, as described in [Custom Migration Steps](/workflow/custom-migration-steps).
 

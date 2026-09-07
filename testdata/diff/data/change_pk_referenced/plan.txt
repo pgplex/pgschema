@@ -1,0 +1,36 @@
+Plan: 2 to modify.
+
+Summary by type:
+  tables: 2 to modify
+
+Tables:
+  ~ city
+    - city_country_code_fkey (constraint)
+    + city_country_code_fkey (constraint)
+  ~ country
+    - id (column)
+    - country_code_key (constraint)
+    + country_pkey (constraint)
+    ~ IL (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+-- Transaction Group #1
+ALTER TABLE city DROP CONSTRAINT city_country_code_fkey;
+
+ALTER TABLE country DROP CONSTRAINT country_code_key;
+
+ALTER TABLE country DROP COLUMN id;
+
+ALTER TABLE country
+ADD CONSTRAINT country_pkey PRIMARY KEY (code);
+
+ALTER TABLE city
+ADD CONSTRAINT city_country_code_fkey FOREIGN KEY (country_code) REFERENCES country (code) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE city VALIDATE CONSTRAINT city_country_code_fkey;
+
+-- Transaction Group #3
+UPDATE country SET name = 'State of Israel' WHERE code = 'IL';

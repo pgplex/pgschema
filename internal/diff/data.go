@@ -3,7 +3,6 @@ package diff
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/pgplex/pgschema/ir"
@@ -18,9 +17,9 @@ type tableDataDiff struct {
 	Inserts []*ir.Row
 	Updates []*rowUpdate
 	Deletes []*rowDelete
-	// DeleteAll replaces Deletes when the primary key columns changed in this
-	// migration: current rows cannot be addressed by a key that the DDL may
-	// have already dropped, so the whole table is cleared before inserts.
+	// DeleteAll replaces Deletes when current rows cannot be matched by the
+	// desired primary key (a key column is new, or current values under it
+	// are null or duplicated): the whole table is cleared before inserts.
 	DeleteAll bool
 }
 
@@ -85,34 +84,45 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 		newOrder = append(newOrder, k)
 	}
 
-	// Current rows, keyed by the current table's primary key. Keys are only
-	// comparable when both tables have the same primary key columns; otherwise
-	// every current row is removed and every desired row inserted.
+	// Current rows are keyed by the desired primary key columns whenever the
+	// current table has them all with distinct non-null values, even if its
+	// own primary key was different: after the DDL those columns exist, so
+	// every row stays addressable and children referencing them stay valid.
+	// Otherwise the current rows cannot be matched and the table is cleared.
 	var oldKeys map[string]*ir.Row
 	var oldOrder []string
 	var oldColIdx map[string]int
-	var oldPK []string
-	sameKey := false
+	keyed := false
 	if oldTable != nil {
 		oldColIdx = columnIndex(oldTable.DataColumns())
-		oldPK = oldTable.PrimaryKeyColumns()
-		sameKey = slices.Equal(oldPK, newPK)
-		oldPKIdx := pkIndexes(oldColIdx, oldPK)
-		oldKeys = make(map[string]*ir.Row, len(oldTable.Rows))
-		for _, row := range oldTable.Rows {
-			k := rowKey(row, oldPKIdx)
-			oldKeys[k] = row
-			oldOrder = append(oldOrder, k)
+		keyed = true
+		for _, name := range newPK {
+			if _, ok := oldColIdx[name]; !ok {
+				keyed = false
+			}
 		}
-	}
-
-	if oldTable != nil && !sameKey && len(oldTable.Rows) > 0 {
-		d.DeleteAll = true
+		if keyed {
+			oldPKIdx := pkIndexes(oldColIdx, newPK)
+			oldKeys = make(map[string]*ir.Row, len(oldTable.Rows))
+			for _, row := range oldTable.Rows {
+				k, ok := completeRowKey(row, oldPKIdx)
+				if _, dup := oldKeys[k]; !ok || dup {
+					keyed = false
+					break
+				}
+				oldKeys[k] = row
+				oldOrder = append(oldOrder, k)
+			}
+		}
+		if !keyed && len(oldTable.Rows) > 0 {
+			d.DeleteAll = true
+			oldKeys, oldOrder = nil, nil
+		}
 	}
 
 	for _, k := range oldOrder {
 		oldRow := oldKeys[k]
-		if newRow, ok := newKeys[k]; ok && sameKey {
+		if newRow, ok := newKeys[k]; ok {
 			var changed []int
 			for i, col := range d.Columns {
 				var oldVal *string
@@ -128,17 +138,14 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 			}
 			continue
 		}
-		if d.DeleteAll {
-			continue
-		}
-		del := &rowDelete{Key: k, PKColumns: oldPK}
-		for _, name := range oldPK {
+		del := &rowDelete{Key: k, PKColumns: newPK}
+		for _, name := range newPK {
 			del.PKValues = append(del.PKValues, oldRow.Values[oldColIdx[name]])
 		}
 		d.Deletes = append(d.Deletes, del)
 	}
 	for _, k := range newOrder {
-		if _, ok := oldKeys[k]; ok && sameKey {
+		if _, ok := oldKeys[k]; ok {
 			continue
 		}
 		d.Inserts = append(d.Inserts, newKeys[k])
@@ -167,13 +174,22 @@ func pkIndexes(colIdx map[string]int, pk []string) []int {
 }
 
 func rowKey(row *ir.Row, pkIdx []int) string {
+	k, _ := completeRowKey(row, pkIdx)
+	return k
+}
+
+// completeRowKey is rowKey, also reporting whether every key value is non-null.
+func completeRowKey(row *ir.Row, pkIdx []int) (string, bool) {
 	parts := make([]string, len(pkIdx))
+	complete := true
 	for i, idx := range pkIdx {
 		if v := row.Values[idx]; v != nil {
 			parts[i] = *v
+		} else {
+			complete = false
 		}
 	}
-	return strings.Join(parts, keySeparator)
+	return strings.Join(parts, keySeparator), complete
 }
 
 // displayKey renders a key for paths and plan output. A composite key is

@@ -19,24 +19,6 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.country.country_pkey"
-        },
-        {
-          "sql": "DELETE FROM country;",
-          "type": "table.data",
-          "operation": "drop",
-          "path": "public.country.*"
-        },
-        {
-          "sql": "INSERT INTO country (code, name) VALUES ('IL', 'Israel');",
-          "type": "table.data",
-          "operation": "create",
-          "path": "public.country.IL"
-        },
-        {
-          "sql": "INSERT INTO country (code, name) VALUES ('US', 'United States');",
-          "type": "table.data",
-          "operation": "create",
-          "path": "public.country.US"
         }
       ]
     }
