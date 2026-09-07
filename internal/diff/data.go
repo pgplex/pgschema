@@ -236,13 +236,21 @@ type uniqueKey struct {
 // non-expression unique index of a table, except the primary key.
 func secondaryUniqueKeys(table *ir.Table, pk []string) []uniqueKey {
 	var keys []uniqueKey
-	seen := map[string]bool{strings.Join(pk, keySeparator): true}
+	pkKey := strings.Join(pk, keySeparator)
+	seen := make(map[string]int) // column set -> index in keys
 	add := func(cols []string, nullsNotDistinct bool) {
 		k := strings.Join(cols, keySeparator)
-		if len(cols) > 0 && !seen[k] {
-			seen[k] = true
-			keys = append(keys, uniqueKey{columns: cols, nullsNotDistinct: nullsNotDistinct})
+		if len(cols) == 0 || k == pkKey {
+			return
 		}
+		if i, ok := seen[k]; ok {
+			// Several definitions on the same columns: the strictest NULL
+			// semantics decides whether NULLs can collide.
+			keys[i].nullsNotDistinct = keys[i].nullsNotDistinct || nullsNotDistinct
+			return
+		}
+		seen[k] = len(keys)
+		keys = append(keys, uniqueKey{columns: cols, nullsNotDistinct: nullsNotDistinct})
 	}
 	for _, c := range table.Constraints {
 		if c.Type != ir.ConstraintTypeUnique {
