@@ -34,3 +34,21 @@ CREATE AGGREGATE agg_users_count(vw_users) (
     STYPE = bigint,
     INITCOND = '0'
 );
+
+-- Aggregate that depends on a new view AND (through its transition function)
+-- on the recreated view: it must still wait for the recreation.
+CREATE VIEW vw_active AS
+SELECT id FROM tb_users WHERE is_deleted = FALSE;
+
+CREATE FUNCTION fn_pair_step(state bigint, u vw_users, a vw_active)
+RETURNS bigint LANGUAGE sql IMMUTABLE AS $$ SELECT state + 1 $$;
+
+CREATE AGGREGATE agg_pair(vw_users, vw_active) (
+    SFUNC = fn_pair_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+-- New view calling an aggregate held for the recreation: created after it.
+CREATE VIEW vw_users_count AS
+SELECT agg_users_count(vw_users.*) AS n FROM vw_users;

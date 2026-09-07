@@ -15,6 +15,12 @@
           "path": "public.fn_create_user"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW vw_active AS\n SELECT id\n   FROM tb_users\n  WHERE is_deleted = false;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.vw_active"
+        },
+        {
           "sql": "ALTER TABLE tb_users ADD COLUMN role text DEFAULT 'member' NOT NULL;",
           "type": "table.column",
           "operation": "create",
@@ -39,16 +45,34 @@
           "path": "public.fn_create_user"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION fn_pair_step(\n    state bigint,\n    u vw_users,\n    a vw_active\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + 1\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.fn_pair_step"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION fn_users_step(\n    state bigint,\n    u vw_users\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + 1\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.fn_users_step"
         },
         {
+          "sql": "CREATE AGGREGATE agg_pair(vw_users, vw_active) (\n    SFUNC = fn_pair_step,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.agg_pair"
+        },
+        {
           "sql": "CREATE AGGREGATE agg_users_count(vw_users) (\n    SFUNC = fn_users_step,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
           "type": "aggregate",
           "operation": "create",
           "path": "public.agg_users_count"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW vw_users_count AS\n SELECT agg_users_count(vw_users.*) AS n\n   FROM vw_users;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.vw_users_count"
         }
       ]
     }

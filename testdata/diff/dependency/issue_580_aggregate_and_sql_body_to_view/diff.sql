@@ -42,6 +42,13 @@ VOLATILE
 AS $$ SELECT count(*) FROM "My View"
 $$;
 
+CREATE OR REPLACE FUNCTION count_only_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM ONLY v
+$$;
+
 CREATE OR REPLACE FUNCTION count_v()
 RETURNS bigint
 LANGUAGE sql
@@ -59,7 +66,21 @@ IMMUTABLE
 AS $$ SELECT state + r.id
 $$;
 
+CREATE AGGREGATE count_ordered_v(ORDER BY v) (
+    SFUNC = v_sfunc,
+    STYPE = integer,
+    FINALFUNC_MODIFY = READ_WRITE,
+    INITCOND = '0',
+    MFINALFUNC_MODIFY = READ_WRITE
+);
+
 CREATE AGGREGATE sum_v(v) (
+    SFUNC = v_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);
+
+CREATE AGGREGATE sum_v_named(r v) (
     SFUNC = v_sfunc,
     STYPE = integer,
     INITCOND = '0'

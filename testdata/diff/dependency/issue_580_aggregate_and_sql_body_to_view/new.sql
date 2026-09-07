@@ -73,3 +73,23 @@ CREATE FUNCTION count_my_view()
 RETURNS bigint
 LANGUAGE sql
 AS $$ SELECT count(*) FROM "My View" $$;
+
+-- Named argument and ordered-set forms of a view row-type argument. Identity
+-- args read "r v" and "ORDER BY v", and both must still count as view deps.
+CREATE AGGREGATE sum_v_named(r v) (
+    SFUNC = v_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);
+
+CREATE AGGREGATE count_ordered_v(ORDER BY v) (
+    SFUNC = v_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);
+
+-- FROM ONLY is valid syntax and must still be detected as a view reference.
+CREATE FUNCTION count_only_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM ONLY v $$;

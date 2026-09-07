@@ -1,17 +1,19 @@
-Plan: 3 to add, 2 to modify, 1 to drop.
+Plan: 7 to add, 2 to modify, 1 to drop.
 
 Summary by type:
-  functions: 2 to add, 1 to drop
-  aggregates: 1 to add
+  functions: 3 to add, 1 to drop
+  aggregates: 2 to add
   tables: 1 to modify
-  views: 1 to modify
+  views: 2 to add, 1 to modify
 
 Functions:
   - fn_create_user
   + fn_create_user
+  + fn_pair_step
   + fn_users_step
 
 Aggregates:
+  + agg_pair
   + agg_users_count
 
 Tables:
@@ -19,12 +21,19 @@ Tables:
     + role (column)
 
 Views:
+  + vw_active
   ~ vw_users
+  + vw_users_count
 
 DDL to be executed:
 --------------------------------------------------
 
 DROP FUNCTION IF EXISTS fn_create_user(text);
+
+CREATE OR REPLACE VIEW vw_active AS
+ SELECT id
+   FROM tb_users
+  WHERE is_deleted = false;
 
 ALTER TABLE tb_users ADD COLUMN role text DEFAULT 'member' NOT NULL;
 
@@ -57,6 +66,17 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION fn_pair_step(
+    state bigint,
+    u vw_users,
+    a vw_active
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + 1
+$$;
+
 CREATE OR REPLACE FUNCTION fn_users_step(
     state bigint,
     u vw_users
@@ -67,8 +87,18 @@ IMMUTABLE
 AS $$ SELECT state + 1
 $$;
 
+CREATE AGGREGATE agg_pair(vw_users, vw_active) (
+    SFUNC = fn_pair_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
 CREATE AGGREGATE agg_users_count(vw_users) (
     SFUNC = fn_users_step,
     STYPE = bigint,
     INITCOND = '0'
 );
+
+CREATE OR REPLACE VIEW vw_users_count AS
+ SELECT agg_users_count(vw_users.*) AS n
+   FROM vw_users;

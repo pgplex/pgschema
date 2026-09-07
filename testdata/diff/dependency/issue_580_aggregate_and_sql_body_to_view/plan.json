@@ -51,6 +51,12 @@
           "path": "public.count_my_view"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION count_only_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM ONLY v\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_only_v"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION count_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM v\n$$;",
           "type": "function",
           "operation": "create",
@@ -63,10 +69,22 @@
           "path": "public.v_sfunc"
         },
         {
+          "sql": "CREATE AGGREGATE count_ordered_v(ORDER BY v) (\n    SFUNC = v_sfunc,\n    STYPE = integer,\n    FINALFUNC_MODIFY = READ_WRITE,\n    INITCOND = '0',\n    MFINALFUNC_MODIFY = READ_WRITE\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.count_ordered_v"
+        },
+        {
           "sql": "CREATE AGGREGATE sum_v(v) (\n    SFUNC = v_sfunc,\n    STYPE = integer,\n    INITCOND = '0'\n);",
           "type": "aggregate",
           "operation": "create",
           "path": "public.sum_v"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_v_named(r v) (\n    SFUNC = v_sfunc,\n    STYPE = integer,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_v_named"
         },
         {
           "sql": "CREATE AGGREGATE sum_with_v(integer) (\n    SFUNC = acc_with_v,\n    STYPE = bigint,\n    INITCOND = '0'\n);",

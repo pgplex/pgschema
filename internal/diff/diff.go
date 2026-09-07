@@ -323,6 +323,7 @@ type ddlDiff struct {
 	// recreates the view (issue #480).
 	functionsAwaitingRecreatedViews  []*ir.Function
 	aggregatesAwaitingRecreatedViews []*ir.Aggregate
+	viewsAwaitingRecreatedViews      []*ir.View
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
 	// modifications (fkPreDrops) and desired-state ones are (re)created
@@ -2056,10 +2057,13 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Aggregates that depend on a new view, either through their own argument,
 	// state, or return type, or through a support function that does, are held
 	// back until the view and the view-dependent functions exist (#580).
-	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(d.addedAggregates, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
 	// Aggregates typed on a view being recreated, or built on a function that is,
 	// wait for the recreation in the modify phase, like those functions (issue #480).
-	aggregatesToCreateNow, d.aggregatesAwaitingRecreatedViews = splitAggregatesByViewDeps(aggregatesToCreateNow, recreatedViewLookup, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
+	// This split comes first so an aggregate that also depends on a new view is
+	// still held for the recreation, which happens after the whole create phase.
+	var aggregatesToCreateNow []*ir.Aggregate
+	aggregatesToCreateNow, d.aggregatesAwaitingRecreatedViews = splitAggregatesByViewDeps(d.addedAggregates, recreatedViewLookup, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
+	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(aggregatesToCreateNow, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
 	generateCreateAggregatesSQL(aggregatesToCreateNow, targetSchema, collector)
 
 	// Merge deferred policies from all batches
@@ -2119,6 +2123,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithViewDeps, d.functionsAwaitingDeferredViews = splitFunctionsByViewDeps(functionsWithViewDeps, deferredViewLookup)
 		aggregatesWithViewDeps, d.aggregatesAwaitingDeferredViews = splitAggregatesByViewDeps(aggregatesWithViewDeps, deferredViewLookup, buildFunctionLookup(d.functionsAwaitingDeferredViews))
 	}
+
+	// A new view that calls a routine held for a view recreation must wait for
+	// that routine too; it is created in the modify phase with that batch (#480).
+	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews))
 
 	// Create views, then the functions and aggregates that reference views in
 	// their signature or SQL body (issue #300, #580).
@@ -2197,9 +2205,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// type references a view just recreated above. Emitting them now (rather than in
 	// the create phase) keeps the recreated view free of dependents during its
 	// RESTRICT drop (issue #480).
-	// Aggregates built on those functions, or typed on the recreated view, follow.
-	generateCreateFunctionsSQL(d.functionsAwaitingRecreatedViews, targetSchema, collector)
-	generateCreateAggregatesSQL(d.aggregatesAwaitingRecreatedViews, targetSchema, collector)
+	// Aggregates built on those functions, or typed on the recreated view, and
+	// new views that call any of these routines, follow in dependency order.
+	generateViewsAndDependentRoutinesSQL(d.viewsAwaitingRecreatedViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews, targetSchema, collector)
 
 	// Modify functions
 	generateModifyFunctionsSQL(d.modifiedFunctions, targetSchema, collector)
@@ -2699,7 +2707,7 @@ func aggregateReferencesNewView(agg *ir.Aggregate, newViews map[string]struct{})
 	if agg == nil || len(newViews) == 0 {
 		return false
 	}
-	candidates := append([]string{agg.StateType, agg.MStateType, agg.ReturnType}, splitTopLevelCommas(agg.Arguments)...)
+	candidates := append([]string{agg.StateType, agg.MStateType, agg.ReturnType}, aggregateArgumentTypes(agg.Arguments)...)
 	for _, typ := range candidates {
 		if typeMatchesLookup(extractBaseTypeName(typ), agg.Schema, newViews) {
 			return true
@@ -2886,25 +2894,55 @@ func tableReturnColumnTypes(returnType string) []string {
 	inner := t[6 : len(t)-1]
 
 	var types []string
-	appendColType := func(col string) {
-		col = strings.TrimSpace(col)
-		// Strip the leading column name (possibly a quoted identifier
-		// containing spaces) to leave the type expression.
-		var typeExpr string
-		if strings.HasPrefix(col, `"`) {
-			if end := strings.Index(col[1:], `"`); end >= 0 {
-				typeExpr = col[end+2:]
-			}
-		} else if idx := strings.IndexByte(col, ' '); idx >= 0 {
-			typeExpr = col[idx+1:]
-		}
-		if typeExpr = strings.TrimSpace(typeExpr); typeExpr != "" {
+	for _, col := range splitTopLevelCommas(inner) {
+		// Each column is "name type"; drop the name to leave the type expression.
+		if typeExpr := stripLeadingIdentifier(strings.TrimSpace(col)); typeExpr != "" {
 			types = append(types, typeExpr)
 		}
 	}
+	return types
+}
 
-	for _, col := range splitTopLevelCommas(inner) {
-		appendColType(col)
+// stripLeadingIdentifier removes a leading identifier (bare, or quoted and
+// possibly containing spaces) from a declaration such as `name type` or
+// `"my col" numeric(10,2)` and returns the remainder, trimmed. It returns ""
+// when the declaration has no second part.
+func stripLeadingIdentifier(decl string) string {
+	var rest string
+	if strings.HasPrefix(decl, `"`) {
+		if end := strings.Index(decl[1:], `"`); end >= 0 {
+			rest = decl[end+2:]
+		}
+	} else if idx := strings.IndexByte(decl, ' '); idx >= 0 {
+		rest = decl[idx+1:]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// aggregateArgumentTypes extracts candidate type expressions from an
+// aggregate's identity argument list, which may carry argument names, a
+// VARIADIC marker, and the ORDER BY separator of ordered-set aggregates
+// (e.g. "r v", "ORDER BY v", "x integer ORDER BY v"). Each argument yields
+// both its whole declaration and the part after a leading name, so the type
+// is found whether or not the argument is named.
+func aggregateArgumentTypes(args string) []string {
+	var types []string
+	for _, arg := range splitTopLevelCommas(args) {
+		arg = strings.TrimSpace(arg)
+		if idx := strings.Index(strings.ToUpper(arg), "ORDER BY "); idx >= 0 {
+			types = append(types, aggregateArgumentTypes(arg[:idx])...)
+			arg = strings.TrimSpace(arg[idx+len("ORDER BY "):])
+		}
+		if len(arg) > 9 && strings.EqualFold(arg[:9], "VARIADIC ") {
+			arg = strings.TrimSpace(arg[9:])
+		}
+		if arg == "" {
+			continue
+		}
+		types = append(types, arg)
+		if rest := stripLeadingIdentifier(arg); rest != "" {
+			types = append(types, rest)
+		}
 	}
 	return types
 }
@@ -3220,7 +3258,7 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // INSERT INTO table, UPDATE [ONLY] table, DELETE FROM table, TABLE table.
 // Captures the table name (possibly schema-qualified) in group 1.
 var tableRefPattern = regexp.MustCompile(
-	`(?i)(?:FROM|JOIN|INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM|TABLE)\s+` +
+	`(?i)(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+(?:ONLY\s+)?` +
 		`((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\.(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)`,
 )
 
