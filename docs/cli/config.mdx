@@ -45,7 +45,7 @@ The config and the schema files must agree, so that reading the schema alone sho
 
 - **A table cannot be both managed and ignored.** A table that matches `[data]` here and `[tables]` in `.pgschemaignore` is an error.
 
-A managed table that must be empty is a directive whose CSV contains only the header line. Listing a table never implies emptiness on its own.
+A listed table that must be empty is a directive whose CSV contains only the header line. Listing a table never implies emptiness on its own.
 
 ## Relationship to `.pgschemaignore`
 

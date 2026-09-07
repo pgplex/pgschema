@@ -10,7 +10,7 @@ The plan command follows infrastructure-as-code principles similar to Terraform:
 1. Read the desired state from a SQL file (with include directive support)
 1. Apply the desired state SQL to a temporary PostgreSQL instance (embedded by default, or external via `--plan-*` flags)
 1. Connect to the target database and analyze current state of the specified schema
-1. Compare the two states, including the rows of tables declared with [`\copy`](/syntax/copy) directives
+1. Compare the two states, including the rows of reference tables declared with [`\copy`](/syntax/copy) directives
 1. Generate a detailed migration plan with proper dependency ordering
 1. Display the plan without making any changes
 

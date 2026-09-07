@@ -11,7 +11,7 @@ The apply command supports two execution modes:
 ### File Mode (Generate and Apply)
 1. Read the desired state from a SQL file (with include directive support)
 1. Apply the desired state SQL to a temporary PostgreSQL instance (embedded by default, or external via `--plan-*` flags)
-1. Compare it with the current database state of the target schema
+1. Compare it with the current database state of the target schema, including the rows of reference tables declared with [`\copy`](/syntax/copy) directives
 1. Generate a migration plan with proper dependency ordering
 1. Display the plan for review
 1. Apply the changes (with optional confirmation and safety checks)

@@ -6,7 +6,7 @@ mode: "wide"
 pgschema manages schema state, not user data. When a schema change requires touching existing data (e.g. backfilling a new column), declare the end state in your schema file, then edit the generated plan to insert the data migration steps.
 
 <Note>
-Small lookup and configuration tables are the exception: keep their rows in CSV files declared with [`\copy`](/syntax/copy) and pgschema plans the row changes for you. See [Reference Data](/workflow/reference-data). This page covers one-off changes to data that pgschema does not own.
+Reference tables (lookup and configuration data) are the exception: list them in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy), and pgschema plans the row changes for you. See [Reference Data](/workflow/reference-data). This page covers one-off changes to data that pgschema does not own.
 </Note>
 
 This works because the plan's `source_fingerprint` pins the **database state** the plan was generated against, not the plan's SQL. You can freely edit the steps; `pgschema apply` still detects if the database has drifted since planning.
