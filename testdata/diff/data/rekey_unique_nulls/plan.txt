@@ -1,0 +1,16 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ country
+    - 2 (row)
+    + 20 (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+DELETE FROM country WHERE id = 2;
+
+INSERT INTO country (id, code, region) VALUES (20, 'US', NULL);

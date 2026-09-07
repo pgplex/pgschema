@@ -175,7 +175,8 @@ func markEarlyDeletes(d *tableDataDiff, deletedRows []*ir.Row, oldColIdx map[str
 		return
 	}
 	pk := d.Table.PrimaryKeyColumns()
-	for _, cols := range secondaryUniqueKeys(d.Table, pk) {
+	for _, uk := range secondaryUniqueKeys(d.Table, pk) {
+		cols := uk.columns
 		newIdx := make([]int, len(cols))
 		oldIdx := make([]int, len(cols))
 		usable := true
@@ -191,30 +192,56 @@ func markEarlyDeletes(d *tableDataDiff, deletedRows []*ir.Row, oldColIdx map[str
 		if !usable {
 			continue
 		}
+		// A NULL never collides under a default unique key, but under
+		// NULLS NOT DISTINCT it is a value like any other.
+		keyOf := func(row *ir.Row, idx []int) (string, bool) {
+			if uk.nullsNotDistinct {
+				return nullAwareKey(row, idx), true
+			}
+			return completeRowKey(row, idx)
+		}
 		inserted := make(map[string]bool, len(d.Inserts))
 		for _, row := range d.Inserts {
-			if k, ok := completeRowKey(row, newIdx); ok {
+			if k, ok := keyOf(row, newIdx); ok {
 				inserted[k] = true
 			}
 		}
 		for i, row := range deletedRows {
-			if k, ok := completeRowKey(row, oldIdx); ok && inserted[k] {
+			if k, ok := keyOf(row, oldIdx); ok && inserted[k] {
 				d.Deletes[i].Early = true
 			}
 		}
 	}
 }
 
-// secondaryUniqueKeys lists the column sets of every UNIQUE constraint and
-// non-partial, non-expression unique index of a table, except the primary key.
-func secondaryUniqueKeys(table *ir.Table, pk []string) [][]string {
-	var keys [][]string
+// nullAwareKey joins key values, encoding NULL distinctly from any text.
+func nullAwareKey(row *ir.Row, idx []int) string {
+	parts := make([]string, len(idx))
+	for i, ci := range idx {
+		if v := row.Values[ci]; v != nil {
+			parts[i] = "v" + *v
+		} else {
+			parts[i] = "n"
+		}
+	}
+	return strings.Join(parts, keySeparator)
+}
+
+type uniqueKey struct {
+	columns          []string
+	nullsNotDistinct bool
+}
+
+// secondaryUniqueKeys lists every UNIQUE constraint and non-partial,
+// non-expression unique index of a table, except the primary key.
+func secondaryUniqueKeys(table *ir.Table, pk []string) []uniqueKey {
+	var keys []uniqueKey
 	seen := map[string]bool{strings.Join(pk, keySeparator): true}
-	add := func(cols []string) {
+	add := func(cols []string, nullsNotDistinct bool) {
 		k := strings.Join(cols, keySeparator)
 		if len(cols) > 0 && !seen[k] {
 			seen[k] = true
-			keys = append(keys, cols)
+			keys = append(keys, uniqueKey{columns: cols, nullsNotDistinct: nullsNotDistinct})
 		}
 	}
 	for _, c := range table.Constraints {
@@ -225,7 +252,7 @@ func secondaryUniqueKeys(table *ir.Table, pk []string) [][]string {
 		for i, cc := range c.Columns {
 			cols[i] = cc.Name
 		}
-		add(cols)
+		add(cols, c.NullsNotDistinct)
 	}
 	for _, idx := range table.Indexes {
 		if idx.Type != ir.IndexTypeUnique || idx.IsPartial || idx.IsExpression {
@@ -235,9 +262,11 @@ func secondaryUniqueKeys(table *ir.Table, pk []string) [][]string {
 		for i, ic := range idx.Columns {
 			cols[i] = ic.Name
 		}
-		add(cols)
+		add(cols, idx.NullsNotDistinct)
 	}
-	sort.Slice(keys, func(a, b int) bool { return strings.Join(keys[a], ",") < strings.Join(keys[b], ",") })
+	sort.Slice(keys, func(a, b int) bool {
+		return strings.Join(keys[a].columns, ",") < strings.Join(keys[b].columns, ",")
+	})
 	return keys
 }
 
