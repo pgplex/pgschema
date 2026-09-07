@@ -3,6 +3,7 @@ package diff
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/pgplex/pgschema/ir"
@@ -33,6 +34,9 @@ type rowDelete struct {
 	Key       string
 	PKColumns []string  // primary key column names of the current table
 	PKValues  []*string // their values in the current row
+	// Early is set when an inserted row reuses one of this row's secondary
+	// unique values, so the delete must precede the inserts.
+	Early bool
 }
 
 // dataRow is the DiffSource of one row change; the object name is the
@@ -120,6 +124,7 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 		}
 	}
 
+	var deletedRows []*ir.Row // current rows behind d.Deletes, same order
 	for _, k := range oldOrder {
 		oldRow := oldKeys[k]
 		if newRow, ok := newKeys[k]; ok {
@@ -143,6 +148,7 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 			del.PKValues = append(del.PKValues, oldRow.Values[oldColIdx[name]])
 		}
 		d.Deletes = append(d.Deletes, del)
+		deletedRows = append(deletedRows, oldRow)
 	}
 	for _, k := range newOrder {
 		if _, ok := oldKeys[k]; ok {
@@ -151,10 +157,88 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 		d.Inserts = append(d.Inserts, newKeys[k])
 	}
 
+	markEarlyDeletes(d, deletedRows, oldColIdx)
+
 	if len(d.Inserts) == 0 && len(d.Updates) == 0 && len(d.Deletes) == 0 && !d.DeleteAll {
 		return nil
 	}
 	return d
+}
+
+// markEarlyDeletes flags deletes whose row shares a secondary unique value
+// (a UNIQUE constraint or non-partial unique index other than the primary
+// key) with an inserted row. Such a delete has to run before the inserts or
+// the unique constraint rejects the insert. Deletes not flagged run after the
+// updates, so child rows re-pointed at new parent rows no longer block them.
+func markEarlyDeletes(d *tableDataDiff, deletedRows []*ir.Row, oldColIdx map[string]int) {
+	if len(d.Inserts) == 0 || len(d.Deletes) == 0 {
+		return
+	}
+	pk := d.Table.PrimaryKeyColumns()
+	for _, cols := range secondaryUniqueKeys(d.Table, pk) {
+		newIdx := make([]int, len(cols))
+		oldIdx := make([]int, len(cols))
+		usable := true
+		for i, name := range cols {
+			ni, okNew := d.colIdx[name]
+			oi, okOld := oldColIdx[name]
+			if !okNew || !okOld {
+				usable = false
+				break
+			}
+			newIdx[i], oldIdx[i] = ni, oi
+		}
+		if !usable {
+			continue
+		}
+		inserted := make(map[string]bool, len(d.Inserts))
+		for _, row := range d.Inserts {
+			if k, ok := completeRowKey(row, newIdx); ok {
+				inserted[k] = true
+			}
+		}
+		for i, row := range deletedRows {
+			if k, ok := completeRowKey(row, oldIdx); ok && inserted[k] {
+				d.Deletes[i].Early = true
+			}
+		}
+	}
+}
+
+// secondaryUniqueKeys lists the column sets of every UNIQUE constraint and
+// non-partial, non-expression unique index of a table, except the primary key.
+func secondaryUniqueKeys(table *ir.Table, pk []string) [][]string {
+	var keys [][]string
+	seen := map[string]bool{strings.Join(pk, keySeparator): true}
+	add := func(cols []string) {
+		k := strings.Join(cols, keySeparator)
+		if len(cols) > 0 && !seen[k] {
+			seen[k] = true
+			keys = append(keys, cols)
+		}
+	}
+	for _, c := range table.Constraints {
+		if c.Type != ir.ConstraintTypeUnique {
+			continue
+		}
+		cols := make([]string, len(c.Columns))
+		for i, cc := range c.Columns {
+			cols[i] = cc.Name
+		}
+		add(cols)
+	}
+	for _, idx := range table.Indexes {
+		if idx.Type != ir.IndexTypeUnique || idx.IsPartial || idx.IsExpression {
+			continue
+		}
+		cols := make([]string, len(idx.Columns))
+		for i, ic := range idx.Columns {
+			cols[i] = ic.Name
+		}
+		add(cols)
+	}
+	sort.Slice(keys, func(a, b int) bool { return strings.Join(keys[a], ",") < strings.Join(keys[b], ",") })
+	return keys
 }
 
 func columnIndex(cols []*ir.Column) map[string]int {
@@ -219,7 +303,8 @@ func equalValue(a, b *string) bool {
 // foreign keys between managed tables satisfied at every step:
 //
 //  1. full reloads (DELETE FROM) of tables whose rows could not be matched,
-//     children before parents, so the inserts below start from empty tables;
+//     and deletes of rows whose secondary unique values an inserted row
+//     reuses, children before parents, so the inserts below do not collide;
 //  2. inserts, parents before children;
 //  3. updates, parents before children, so a child re-pointed at a new parent
 //     row finds it;
@@ -249,6 +334,7 @@ func generateDataSQL(diffs []*tableDataDiff, targetSchema string, collector *dif
 		if d.DeleteAll {
 			collector.collect(d.context(DiffOperationDrop, allRowsKey), fmt.Sprintf("DELETE FROM %s;", name(d)))
 		}
+		d.emitDeletes(collector, name(d), true)
 	}
 
 	for _, d := range ordered {
@@ -288,18 +374,26 @@ func generateDataSQL(diffs []*tableDataDiff, targetSchema string, collector *dif
 	}
 
 	for _, d := range reverseSlice(ordered) {
-		for _, del := range d.Deletes {
-			where := make([]string, len(del.PKColumns))
-			for i, col := range del.PKColumns {
-				var column *ir.Column
-				if ci, ok := d.colIdx[col]; ok {
-					column = d.Columns[ci]
-				}
-				where[i] = fmt.Sprintf("%s = %s", ir.QuoteIdentifier(col), formatDataLiteral(column, del.PKValues[i]))
-			}
-			sql := fmt.Sprintf("DELETE FROM %s WHERE %s;", name(d), strings.Join(where, " AND "))
-			collector.collect(d.context(DiffOperationDrop, del.Key), sql)
+		d.emitDeletes(collector, name(d), false)
+	}
+}
+
+// emitDeletes collects the per-row deletes flagged Early, or the rest.
+func (d *tableDataDiff) emitDeletes(collector *diffCollector, name string, early bool) {
+	for _, del := range d.Deletes {
+		if del.Early != early {
+			continue
 		}
+		where := make([]string, len(del.PKColumns))
+		for i, col := range del.PKColumns {
+			var column *ir.Column
+			if ci, ok := d.colIdx[col]; ok {
+				column = d.Columns[ci]
+			}
+			where[i] = fmt.Sprintf("%s = %s", ir.QuoteIdentifier(col), formatDataLiteral(column, del.PKValues[i]))
+		}
+		sql := fmt.Sprintf("DELETE FROM %s WHERE %s;", name, strings.Join(where, " AND "))
+		collector.collect(d.context(DiffOperationDrop, del.Key), sql)
 	}
 }
 

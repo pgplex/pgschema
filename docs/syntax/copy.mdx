@@ -109,6 +109,6 @@ DELETE FROM country WHERE code = 'XX';
 - `INSERT` lists every non-generated column; `OVERRIDING SYSTEM VALUE` is added for `GENERATED ALWAYS AS IDENTITY` columns
 - `UPDATE` sets only the columns that differ and matches on the primary key
 - `DELETE` matches on the primary key
-- A change to a primary key value is an `INSERT` of the new row and a `DELETE` of the old one, with the delete ordered after any updates that re-point child rows
+- A change to a primary key value is an `INSERT` of the new row and a `DELETE` of the old one. The delete runs first when the new row reuses one of the old row's unique values, and otherwise after any updates that re-point child rows
 - When the primary key columns themselves change, current rows are still matched by the new key as long as its columns already exist with distinct values, so promoting a natural key such as `code` to primary key needs no data changes. If a new key column has to be added, the table is cleared with a single `DELETE FROM` and every row inserted again
 - Numeric and boolean values are written bare; every other value is a quoted string literal that PostgreSQL casts to the column type; missing values are `NULL`

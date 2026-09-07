@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "72058db3158182316284ccc88bc6d94566c6be954bcb66beef935ca782170aac"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DELETE FROM country WHERE id = 2;",
+          "type": "table.data",
+          "operation": "drop",
+          "path": "public.country.2"
+        },
+        {
+          "sql": "INSERT INTO country (id, code, name) VALUES (20, 'US', 'United States');",
+          "type": "table.data",
+          "operation": "create",
+          "path": "public.country.20"
+        }
+      ]
+    }
+  ]
+}
