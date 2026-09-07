@@ -2583,6 +2583,13 @@ func FunctionSignatureReferencesRelation(fn *ir.Function, relations map[string]s
 	return functionSignatureReferencesRelation(fn, relations)
 }
 
+// FunctionReferencesRelation reports whether a function's signature or body
+// references a relation in the lookup (see RelationLookup). This is the same
+// check the diff uses to order functions after the tables they query (#530).
+func FunctionReferencesRelation(fn *ir.Function, relations map[string]struct{}) bool {
+	return functionReferencesNewTable(fn, relations)
+}
+
 // functionSignatureReferencesRelation determines if a function's return type or
 // parameter types reference a relation in the lookup. PostgreSQL exposes both
 // tables and views as composite types, so a function using one in its signature

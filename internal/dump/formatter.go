@@ -245,11 +245,27 @@ func (f *DumpFormatter) writeObjectFile(filePath string, diffs []diff.Diff) erro
 }
 
 // functionFileReferencesRelation reports whether any function in a functions/
-// file uses a table's or view's row type in its signature. Such a file must be
-// included after that relation, so it is not hoisted ahead of the tables.
+// file depends on a table or view existing at creation time. Such a file must
+// keep the diff's placement after that relation rather than being hoisted
+// ahead of the tables.
+//
+// For SQL-language functions this is the diff's full check, signature plus
+// body, because PostgreSQL resolves a SQL body against the catalog when the
+// function is created. For other languages only the signature counts: a
+// plpgsql body is not validated against relations until it runs, and treating
+// its table mentions as dependencies would demote trigger functions that write
+// to other tables below the table file that bundles their trigger.
 func (f *DumpFormatter) functionFileReferencesRelation(steps []diff.Diff, relations map[string]struct{}) bool {
 	for _, step := range steps {
-		if fn, ok := step.Source.(*ir.Function); ok && diff.FunctionSignatureReferencesRelation(fn, relations) {
+		fn, ok := step.Source.(*ir.Function)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(fn.Language, "sql") {
+			if diff.FunctionReferencesRelation(fn, relations) {
+				return true
+			}
+		} else if diff.FunctionSignatureReferencesRelation(fn, relations) {
 			return true
 		}
 	}

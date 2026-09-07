@@ -54,6 +54,22 @@ CREATE POLICY docs_owner ON docs USING (owner = current_owner());
 
 CREATE TABLE uses_domain (v ok_text);
 
+-- plpgsql trigger function whose body writes to another table. Its body is
+-- not validated at creation, so it must still be included before the table
+-- that bundles its trigger, even though the body mentions audit_log.
+CREATE TABLE audit_log (id int, note text);
+CREATE FUNCTION log_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN INSERT INTO audit_log (note) VALUES ('changed'); RETURN NEW; END $$;
+CREATE TABLE watched (id int);
+CREATE TRIGGER watched_trg AFTER INSERT ON watched FOR EACH ROW EXECUTE FUNCTION log_change();
+
+-- SQL-language function whose body queries a table that the diff defers
+-- (its default calls a new function). PostgreSQL validates the SQL body at
+-- creation, so the diff's order helper -> table -> function must be kept.
+CREATE FUNCTION default_label() RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'x'::text $$;
+CREATE TABLE labeled (id int, label text DEFAULT default_label());
+CREATE FUNCTION count_labeled() RETURNS bigint LANGUAGE sql AS $$ SELECT count(*) FROM labeled $$;
+
 -- Issue #580 variant A: function taking a table's row type as a parameter.
 CREATE TABLE base_table (id int, label text);
 CREATE FUNCTION use_table_row(r base_table) RETURNS text LANGUAGE sql AS $$ SELECT r.label $$;
@@ -119,6 +135,10 @@ SELECT * FROM tnu_index_v WHERE name ~ tnu_name $$;
 	mustPrecede("functions/current_owner.sql", "tables/docs.sql")
 	mustPrecede("functions/is_ok.sql", "domains/ok_text.sql")
 	mustPrecede("domains/ok_text.sql", "tables/uses_domain.sql")
+	mustPrecede("functions/log_change.sql", "tables/watched.sql")
+	// Body-based dependency of a SQL-language function (#530 ordering).
+	mustPrecede("functions/default_label.sql", "tables/labeled.sql")
+	mustPrecede("tables/labeled.sql", "functions/count_labeled.sql")
 
 	// Replay the multi-file dump into an empty schema in include order.
 	if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
