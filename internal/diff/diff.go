@@ -312,8 +312,9 @@ type ddlDiff struct {
 	// Newly-added views that reference newly-added columns on modified tables.
 	// Created in the modify phase, AFTER generateModifyTablesSQL, so the columns
 	// exist when the view body is parsed (issue #414).
-	deferredAddedViews             []*ir.View
-	functionsAwaitingDeferredViews []*ir.Function
+	deferredAddedViews              []*ir.View
+	functionsAwaitingDeferredViews  []*ir.Function
+	aggregatesAwaitingDeferredViews []*ir.Aggregate
 	// Added functions whose return/parameter type references a view being recreated
 	// (DROP + CREATE) by this migration. For a function whose signature changed, its
 	// old definition is dropped in the drop phase; creating the new one in the create
@@ -2051,7 +2052,21 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create aggregates after their transition/final functions AND all tables exist
 	// (an aggregate may use a new table's row type as an argument or state type), and
 	// before views, which may reference the aggregates in their definitions.
-	generateCreateAggregatesSQL(d.addedAggregates, targetSchema, collector)
+	// Aggregates whose argument, state, or return type is a new view's row type
+	// are held back until the view and the view-dependent functions exist (#580).
+	aggregatesToCreateNow := d.addedAggregates
+	var aggregatesWithViewDeps []*ir.Aggregate
+	if len(newViewLookup) > 0 {
+		aggregatesToCreateNow = nil
+		for _, agg := range d.addedAggregates {
+			if aggregateReferencesNewView(agg, newViewLookup) {
+				aggregatesWithViewDeps = append(aggregatesWithViewDeps, agg)
+			} else {
+				aggregatesToCreateNow = append(aggregatesToCreateNow, agg)
+			}
+		}
+	}
+	generateCreateAggregatesSQL(aggregatesToCreateNow, targetSchema, collector)
 
 	// Merge deferred policies from all batches
 	allDeferredPolicies := append(append(deferredPolicies1, deferredPolicies2...), deferredPolicies3...)
@@ -2117,11 +2132,25 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 			}
 		}
 		functionsWithViewDeps = keepNow
+
+		var keepAggs []*ir.Aggregate
+		for _, agg := range aggregatesWithViewDeps {
+			if aggregateReferencesNewView(agg, deferredViewLookup) {
+				d.aggregatesAwaitingDeferredViews = append(d.aggregatesAwaitingDeferredViews, agg)
+			} else {
+				keepAggs = append(keepAggs, agg)
+			}
+		}
+		aggregatesWithViewDeps = keepAggs
 	}
 
 	// Create functions WITH view dependencies (now that views exist)
 	// These functions reference views in their return type or parameter types (issue #300)
 	generateCreateFunctionsSQL(functionsWithViewDeps, targetSchema, collector)
+
+	// Create aggregates that use a new view's row type, after the view and after
+	// any transition/final function that takes the row type as well (#580).
+	generateCreateAggregatesSQL(aggregatesWithViewDeps, targetSchema, collector)
 
 	// Revoke default grants on new tables that the user explicitly didn't include
 	// This must happen AFTER tables are created but BEFORE explicit grants
@@ -2179,6 +2208,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	}
 	if len(d.functionsAwaitingDeferredViews) > 0 {
 		generateCreateFunctionsSQL(d.functionsAwaitingDeferredViews, targetSchema, collector)
+	}
+	if len(d.aggregatesAwaitingDeferredViews) > 0 {
+		generateCreateAggregatesSQL(d.aggregatesAwaitingDeferredViews, targetSchema, collector)
 	}
 
 	// Find views that depend on views being recreated (issue #268, #308)
@@ -2656,7 +2688,48 @@ func buildRecreatedViewLookup(modifiedViews []*viewDiff) map[string]struct{} {
 // in its return type or parameter types. This handles cases where functions use
 // view composite types (e.g., RETURNS SETOF view_name or parameter of view_name type).
 func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bool {
-	return functionSignatureReferencesRelation(fn, newViews)
+	if functionSignatureReferencesRelation(fn, newViews) {
+		return true
+	}
+	// A SQL-language body is resolved against the catalog when the function is
+	// created, so querying a new view is a creation-time dependency. Other
+	// languages (plpgsql) resolve relations at run time; treating their body
+	// mentions as dependencies would push trigger functions past the triggers
+	// that reference them, since triggers are created before views (#580).
+	if fn == nil || !strings.EqualFold(fn.Language, "sql") || fn.Definition == "" {
+		return false
+	}
+	return bodyReferencesRelation(fn.Definition, newViews)
+}
+
+// bodyReferencesRelation scans a function body for FROM/JOIN/INTO/UPDATE/TABLE
+// references to a relation in the lookup.
+func bodyReferencesRelation(body string, relations map[string]struct{}) bool {
+	for _, match := range tableRefPattern.FindAllStringSubmatch(body, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		if _, ok := relations[strings.ToLower(match[1])]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// aggregateReferencesNewView reports whether an aggregate's argument, state,
+// moving-state, or return type is a new view's row type. Such an aggregate must
+// be created after the view (#580).
+func aggregateReferencesNewView(agg *ir.Aggregate, newViews map[string]struct{}) bool {
+	if agg == nil || len(newViews) == 0 {
+		return false
+	}
+	candidates := append([]string{agg.StateType, agg.MStateType, agg.ReturnType}, strings.Split(agg.Arguments, ",")...)
+	for _, typ := range candidates {
+		if typeMatchesLookup(extractBaseTypeName(typ), agg.Schema, newViews) {
+			return true
+		}
+	}
+	return false
 }
 
 // RelationLookup builds a case-insensitive lookup of table and view names, keyed
@@ -3090,19 +3163,9 @@ func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) 
 		return false
 	}
 
-	matches := tableRefPattern.FindAllStringSubmatch(fn.Definition, -1)
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		ref := strings.ToLower(match[1])
-		// The lookup contains both qualified (schema.table) and unqualified
-		// (table) keys for each table, so a single check covers both forms.
-		if _, ok := newTables[ref]; ok {
-			return true
-		}
-	}
-	return false
+	// The lookup contains both qualified (schema.table) and unqualified
+	// (table) keys for each table, so a single check covers both forms.
+	return bodyReferencesRelation(fn.Definition, newTables)
 }
 
 // GetObjectName implementations for DiffSource interface

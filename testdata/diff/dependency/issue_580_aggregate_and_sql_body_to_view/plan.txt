@@ -1,0 +1,71 @@
+Plan: 6 to add.
+
+Summary by type:
+  functions: 3 to add
+  aggregates: 1 to add
+  tables: 1 to add
+  views: 1 to add
+
+Functions:
+  + count_v
+  + touch_t
+  + v_sfunc
+
+Aggregates:
+  + sum_v
+
+Tables:
+  + t
+    + touch_trg (trigger)
+
+Views:
+  + v
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS t (
+    id integer,
+    name text,
+    CONSTRAINT t_pkey PRIMARY KEY (id)
+);
+
+CREATE OR REPLACE FUNCTION touch_t()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+AS $$ BEGIN PERFORM 1 FROM v; RETURN NEW; END
+$$;
+
+CREATE OR REPLACE TRIGGER touch_trg
+    BEFORE INSERT ON t
+    FOR EACH ROW
+    EXECUTE FUNCTION touch_t();
+
+CREATE OR REPLACE VIEW v AS
+ SELECT id,
+    name
+   FROM t;
+
+CREATE OR REPLACE FUNCTION count_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM v
+$$;
+
+CREATE OR REPLACE FUNCTION v_sfunc(
+    state integer,
+    r v
+)
+RETURNS integer
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + r.id
+$$;
+
+CREATE AGGREGATE sum_v(v) (
+    SFUNC = v_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);

@@ -1,0 +1,56 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.12.5",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS t (\n    id integer,\n    name text,\n    CONSTRAINT t_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.t"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION touch_t()\nRETURNS trigger\nLANGUAGE plpgsql\nVOLATILE\nAS $$ BEGIN PERFORM 1 FROM v; RETURN NEW; END\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.touch_t"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER touch_trg\n    BEFORE INSERT ON t\n    FOR EACH ROW\n    EXECUTE FUNCTION touch_t();",
+          "type": "table.trigger",
+          "operation": "create",
+          "path": "public.t.touch_trg"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW v AS\n SELECT id,\n    name\n   FROM t;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.v"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION count_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM v\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION v_sfunc(\n    state integer,\n    r v\n)\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + r.id\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.v_sfunc"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_v(v) (\n    SFUNC = v_sfunc,\n    STYPE = integer,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_v"
+        }
+      ]
+    }
+  ]
+}

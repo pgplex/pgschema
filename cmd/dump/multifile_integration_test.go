@@ -79,6 +79,13 @@ CREATE TABLE t (id int, name text);
 CREATE VIEW tnu_index_v AS SELECT id, name FROM t;
 CREATE FUNCTION gettnu(tnu_name text) RETURNS SETOF tnu_index_v LANGUAGE sql AS $$
 SELECT * FROM tnu_index_v WHERE name ~ tnu_name $$;
+
+-- Issue #580 follow-up: SQL-language function whose body queries a view, and
+-- an aggregate whose input type is a view's row type (with a transition
+-- function that takes the row type too). Both are ordered by the diff package.
+CREATE FUNCTION count_tnu() RETURNS bigint LANGUAGE sql AS $$ SELECT count(*) FROM tnu_index_v $$;
+CREATE FUNCTION tnu_sfunc(state int, r tnu_index_v) RETURNS int LANGUAGE sql IMMUTABLE AS $$ SELECT state + r.id $$;
+CREATE AGGREGATE sum_tnu(tnu_index_v) (SFUNC = tnu_sfunc, STYPE = int, INITCOND = '0');
 `
 	if _, err := conn.ExecContext(ctx, setup); err != nil {
 		t.Fatalf("Failed to set up schema: %v", err)
@@ -139,6 +146,10 @@ SELECT * FROM tnu_index_v WHERE name ~ tnu_name $$;
 	// Body-based dependency of a SQL-language function (#530 ordering).
 	mustPrecede("functions/default_label.sql", "tables/labeled.sql")
 	mustPrecede("tables/labeled.sql", "functions/count_labeled.sql")
+	// Diff-package ordering for view dependencies (#580 follow-up).
+	mustPrecede("views/tnu_index_v.sql", "functions/count_tnu.sql")
+	mustPrecede("views/tnu_index_v.sql", "functions/tnu_sfunc.sql")
+	mustPrecede("functions/tnu_sfunc.sql", "aggregates/sum_tnu.sql")
 
 	// Replay the multi-file dump into an empty schema in include order.
 	if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {

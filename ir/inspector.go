@@ -1408,17 +1408,21 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 
 		dbSchema := schema.getOrCreateSchema(schemaName)
 
+		// Argument, state, and return types may come back schema-qualified when the
+		// type is a relation's row type outside the search_path (e.g. "public.v").
+		// Strip the aggregate's own schema so both sides of a plan compare equal,
+		// mirroring what function parameters do via stripSameSchemaPrefix.
 		aggregate := &Aggregate{
 			Schema:     schemaName,
 			Name:       aggregateName,
-			Arguments:  identityArgs,
-			Signature:  i.safeInterfaceToString(agg.AggregateSignature),
+			Arguments:  StripSchemaPrefixFromBody(identityArgs, schemaName),
+			Signature:  StripSchemaPrefixFromBody(i.safeInterfaceToString(agg.AggregateSignature), schemaName),
 			Kind:       i.safeInterfaceToString(agg.AggregateKind),
-			ReturnType: i.safeInterfaceToString(agg.AggregateReturnType),
+			ReturnType: i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.AggregateReturnType), schemaName),
 			Parallel:   i.safeInterfaceToString(agg.Parallel),
 
 			TransitionFunction: i.safeInterfaceToString(agg.TransitionFunction),
-			StateType:          i.safeInterfaceToString(agg.StateType),
+			StateType:          i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.StateType), schemaName),
 			StateSpace:         int(agg.StateSpace),
 			InitialCondition:   initialCondition,
 
@@ -1432,7 +1436,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 
 			MTransitionFunction:    i.safeInterfaceToString(agg.MtransitionFunction),
 			MInvTransitionFunction: i.safeInterfaceToString(agg.MinvTransitionFunction),
-			MStateType:             i.safeInterfaceToString(agg.MstateType),
+			MStateType:             i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.MstateType), schemaName),
 			MStateSpace:            int(agg.MstateSpace),
 			MFinalFunction:         i.safeInterfaceToString(agg.MfinalFunction),
 			MFinalFuncExtra:        agg.MfinalFuncExtra,
