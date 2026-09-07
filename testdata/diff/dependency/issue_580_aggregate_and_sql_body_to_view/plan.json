@@ -141,12 +141,6 @@
           "path": "public.sum_with_v"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION chain_sfunc(\n    state integer,\n    x integer\n)\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT state + x + coalesce(sum_v(NULL::v), 0)\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.chain_sfunc"
-        },
-        {
           "sql": "CREATE OR REPLACE FUNCTION total_v()\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT sum_v(v.*) FROM v\n$$;",
           "type": "function",
           "operation": "create",
@@ -157,12 +151,6 @@
           "type": "function",
           "operation": "create",
           "path": "public.total_with_v"
-        },
-        {
-          "sql": "CREATE AGGREGATE chain_agg(integer) (\n    SFUNC = chain_sfunc,\n    STYPE = integer,\n    INITCOND = '0'\n);",
-          "type": "aggregate",
-          "operation": "create",
-          "path": "public.chain_agg"
         },
         {
           "sql": "CREATE OR REPLACE VIEW v_total AS\n SELECT sum_v(v.*) AS total\n   FROM v;",

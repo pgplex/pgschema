@@ -2072,30 +2072,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(aggregatesToCreateNow, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
 	// SQL-language functions that call an aggregate follow the batch that
 	// creates it: callers of the aggregates created here stay here, the rest
-	// join the view-dependent or recreated-view batch of their aggregate. A
-	// view-dependent function calling a recreated-batch aggregate moves too.
-	// Moving a caller can in turn move an aggregate that uses it as a support
-	// function, and moving that aggregate can move its callers, so iterate
-	// until the batches are stable.
-	for changed := true; changed; {
-		changed = false
-		lateAggregates := append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...)
-
-		var moved, toRecreated []*ir.Function
-		functionsCallingAggregates, moved = splitFunctionsCallingAggregates(functionsCallingAggregates, lateAggregates)
-		functionsWithViewDeps = append(functionsWithViewDeps, moved...)
-		functionsWithViewDeps, toRecreated = splitFunctionsCallingAggregates(functionsWithViewDeps, d.aggregatesAwaitingRecreatedViews)
-		d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, toRecreated...)
-		changed = changed || len(moved) > 0 || len(toRecreated) > 0
-
-		lateFunctions := buildFunctionLookup(append(append([]*ir.Function{}, functionsWithViewDeps...), d.functionsAwaitingRecreatedViews...))
-		var movedAggs, aggsToRecreated []*ir.Aggregate
-		aggregatesToCreateNow, movedAggs = splitAggregatesByViewDeps(aggregatesToCreateNow, nil, lateFunctions)
-		aggregatesWithViewDeps = append(aggregatesWithViewDeps, movedAggs...)
-		aggregatesWithViewDeps, aggsToRecreated = splitAggregatesByViewDeps(aggregatesWithViewDeps, nil, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
-		d.aggregatesAwaitingRecreatedViews = append(d.aggregatesAwaitingRecreatedViews, aggsToRecreated...)
-		changed = changed || len(movedAggs) > 0 || len(aggsToRecreated) > 0
-	}
+	// join the view-dependent or recreated-view batch of their aggregate.
+	var callersOfLateAggregates, callersOfRecreatedAggregates []*ir.Function
+	functionsCallingAggregates, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsCallingAggregates, append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...))
+	callersOfLateAggregates, callersOfRecreatedAggregates = splitFunctionsCallingAggregates(callersOfLateAggregates, d.aggregatesAwaitingRecreatedViews)
+	functionsWithViewDeps = append(functionsWithViewDeps, callersOfLateAggregates...)
+	d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...)
 
 	// Aggregates and their callers may chain (aggregate a -> SQL support
 	// function calling a -> aggregate b), so they are scheduled together.
@@ -2161,13 +2143,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// A new view that calls a routine held for a view recreation must wait for
 	// that routine too; it is created in the modify phase with that batch (#480).
-	recreatedRoutineLookup := buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews)
-	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, recreatedRoutineLookup)
-	// The same applies to views deferred for an added column (issue #414): the
-	// recreated-view batch runs after the column is added, so they can join it.
-	var deferredCallingRecreated []*ir.View
-	d.deferredAddedViews, deferredCallingRecreated = splitViewsReferencingRoutines(d.deferredAddedViews, recreatedRoutineLookup)
-	d.viewsAwaitingRecreatedViews = append(d.viewsAwaitingRecreatedViews, deferredCallingRecreated...)
+	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews))
 
 	// Create views, then the functions and aggregates that reference views in
 	// their signature or SQL body (issue #300, #580).

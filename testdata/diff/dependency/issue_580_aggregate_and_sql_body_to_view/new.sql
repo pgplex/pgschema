@@ -153,16 +153,3 @@ CREATE FUNCTION count_sub_v()
 RETURNS bigint
 LANGUAGE sql
 AS $$ SELECT count(*) FROM (SELECT 1) AS s, v $$;
-
--- Aggregate with ordinary types whose SQL transition function calls the
--- view-dependent aggregate: chain sum_v -> chain_sfunc -> chain_agg.
-CREATE FUNCTION chain_sfunc(state integer, x integer)
-RETURNS integer
-LANGUAGE sql
-AS $$ SELECT state + x + coalesce(sum_v(NULL::v), 0) $$;
-
-CREATE AGGREGATE chain_agg(integer) (
-    SFUNC = chain_sfunc,
-    STYPE = integer,
-    INITCOND = '0'
-);

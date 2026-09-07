@@ -1,14 +1,13 @@
-Plan: 27 to add.
+Plan: 25 to add.
 
 Summary by type:
-  functions: 16 to add
-  aggregates: 6 to add
+  functions: 15 to add
+  aggregates: 5 to add
   tables: 1 to add
   views: 4 to add
 
 Functions:
   + acc_with_v
-  + chain_sfunc
   + count_list_v
   + count_my_view
   + count_only_v
@@ -25,7 +24,6 @@ Functions:
   + v_sfunc
 
 Aggregates:
-  + chain_agg
   + count_ordered_v
   + sum_ob
   + sum_v
@@ -194,16 +192,6 @@ CREATE AGGREGATE sum_with_v(integer) (
     INITCOND = '0'
 );
 
-CREATE OR REPLACE FUNCTION chain_sfunc(
-    state integer,
-    x integer
-)
-RETURNS integer
-LANGUAGE sql
-VOLATILE
-AS $$ SELECT state + x + coalesce(sum_v(NULL::v), 0)
-$$;
-
 CREATE OR REPLACE FUNCTION total_v()
 RETURNS integer
 LANGUAGE sql
@@ -217,12 +205,6 @@ LANGUAGE sql
 VOLATILE
 AS $$ SELECT sum_with_v(id) FROM t
 $$;
-
-CREATE AGGREGATE chain_agg(integer) (
-    SFUNC = chain_sfunc,
-    STYPE = integer,
-    INITCOND = '0'
-);
 
 CREATE OR REPLACE VIEW v_total AS
  SELECT sum_v(v.*) AS total

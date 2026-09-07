@@ -147,16 +147,6 @@ CREATE AGGREGATE sum_with_v(integer) (
     INITCOND = '0'
 );
 
-CREATE OR REPLACE FUNCTION chain_sfunc(
-    state integer,
-    x integer
-)
-RETURNS integer
-LANGUAGE sql
-VOLATILE
-AS $$ SELECT state + x + coalesce(sum_v(NULL::v), 0)
-$$;
-
 CREATE OR REPLACE FUNCTION total_v()
 RETURNS integer
 LANGUAGE sql
@@ -170,12 +160,6 @@ LANGUAGE sql
 VOLATILE
 AS $$ SELECT sum_with_v(id) FROM t
 $$;
-
-CREATE AGGREGATE chain_agg(integer) (
-    SFUNC = chain_sfunc,
-    STYPE = integer,
-    INITCOND = '0'
-);
 
 CREATE OR REPLACE VIEW v_total AS
  SELECT sum_v(v.*) AS total

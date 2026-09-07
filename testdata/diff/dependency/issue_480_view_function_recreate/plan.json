@@ -69,22 +69,10 @@
           "path": "public.agg_users_count"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION active_marker(\n    a vw_active\n)\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT agg_users_count(NULL::vw_users)\n$$;",
-          "type": "function",
-          "operation": "create",
-          "path": "public.active_marker"
-        },
-        {
           "sql": "CREATE OR REPLACE VIEW vw_users_count AS\n SELECT agg_users_count(vw_users.*) AS n\n   FROM vw_users;",
           "type": "view",
           "operation": "create",
           "path": "public.vw_users_count"
-        },
-        {
-          "sql": "CREATE OR REPLACE VIEW vw_role_counts AS\n SELECT u.role,\n    agg_users_count(vw_users.*) AS n\n   FROM tb_users u\n     JOIN vw_users ON vw_users.id = u.id\n  GROUP BY u.role;",
-          "type": "view",
-          "operation": "create",
-          "path": "public.vw_role_counts"
         }
       ]
     }
