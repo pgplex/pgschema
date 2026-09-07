@@ -52,3 +52,10 @@ CREATE AGGREGATE agg_pair(vw_users, vw_active) (
 -- New view calling an aggregate held for the recreation: created after it.
 CREATE VIEW vw_users_count AS
 SELECT agg_users_count(vw_users.*) AS n FROM vw_users;
+
+-- View deferred for the added column (issue #414 path) that also calls an
+-- aggregate held for the recreation: it joins the recreated-view batch.
+CREATE VIEW vw_role_counts AS
+SELECT u.role, agg_users_count(vw_users.*) AS n
+FROM tb_users u JOIN vw_users ON vw_users.id = u.id
+GROUP BY u.role;

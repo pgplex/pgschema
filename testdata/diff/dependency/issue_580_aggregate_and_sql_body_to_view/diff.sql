@@ -20,6 +20,10 @@ CREATE OR REPLACE VIEW "My View" AS
  SELECT id
    FROM t;
 
+CREATE OR REPLACE VIEW "Order By V" AS
+ SELECT id
+   FROM t;
+
 CREATE OR REPLACE VIEW v AS
  SELECT id,
     name
@@ -49,11 +53,28 @@ VOLATILE
 AS $$ SELECT count(*) FROM ONLY v
 $$;
 
+CREATE OR REPLACE FUNCTION count_spaced_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM public . v
+$$;
+
 CREATE OR REPLACE FUNCTION count_v()
 RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT count(*) FROM v
+$$;
+
+CREATE OR REPLACE FUNCTION ob_sfunc(
+    state integer,
+    r "Order By V"
+)
+RETURNS integer
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + r.id
 $$;
 
 CREATE OR REPLACE FUNCTION v_sfunc(
@@ -72,6 +93,12 @@ CREATE AGGREGATE count_ordered_v(ORDER BY v) (
     FINALFUNC_MODIFY = READ_WRITE,
     INITCOND = '0',
     MFINALFUNC_MODIFY = READ_WRITE
+);
+
+CREATE AGGREGATE sum_ob("Order By V") (
+    SFUNC = ob_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
 );
 
 CREATE AGGREGATE sum_v(v) (
@@ -97,6 +124,13 @@ RETURNS integer
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT sum_v(v.*) FROM v
+$$;
+
+CREATE OR REPLACE FUNCTION total_with_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT sum_with_v(id) FROM t
 $$;
 
 CREATE OR REPLACE VIEW v_total AS

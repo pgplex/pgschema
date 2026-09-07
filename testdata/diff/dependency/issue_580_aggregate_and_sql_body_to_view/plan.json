@@ -33,6 +33,12 @@
           "path": "public.My View"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW \"Order By V\" AS\n SELECT id\n   FROM t;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.Order By V"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW v AS\n SELECT id,\n    name\n   FROM t;",
           "type": "view",
           "operation": "create",
@@ -57,10 +63,22 @@
           "path": "public.count_only_v"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION count_spaced_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM public . v\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_spaced_v"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION count_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM v\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.count_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION ob_sfunc(\n    state integer,\n    r \"Order By V\"\n)\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + r.id\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.ob_sfunc"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION v_sfunc(\n    state integer,\n    r v\n)\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + r.id\n$$;",
@@ -73,6 +91,12 @@
           "type": "aggregate",
           "operation": "create",
           "path": "public.count_ordered_v"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_ob(\"Order By V\") (\n    SFUNC = ob_sfunc,\n    STYPE = integer,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_ob"
         },
         {
           "sql": "CREATE AGGREGATE sum_v(v) (\n    SFUNC = v_sfunc,\n    STYPE = integer,\n    INITCOND = '0'\n);",
@@ -97,6 +121,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.total_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION total_with_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT sum_with_v(id) FROM t\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.total_with_v"
         },
         {
           "sql": "CREATE OR REPLACE VIEW v_total AS\n SELECT sum_v(v.*) AS total\n   FROM v;",

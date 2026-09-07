@@ -100,3 +100,33 @@ CREATE FUNCTION total_v()
 RETURNS integer
 LANGUAGE sql
 AS $$ SELECT sum_v(v.*) FROM v $$;
+
+-- SQL-language function calling an aggregate that is held for the view batch
+-- (sum_with_v's transition function queries v) without mentioning the view
+-- itself: it must still follow that aggregate.
+CREATE FUNCTION total_with_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT sum_with_v(id) FROM t $$;
+
+-- Whitespace around the qualification dot is valid and must still match.
+CREATE FUNCTION count_spaced_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM public . v $$;
+
+-- A quoted view name containing the ordered-set separator must not be split.
+CREATE VIEW "Order By V" AS
+SELECT id FROM t;
+
+CREATE FUNCTION ob_sfunc(state integer, r "Order By V")
+RETURNS integer
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + r.id $$;
+
+CREATE AGGREGATE sum_ob("Order By V") (
+    SFUNC = ob_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);

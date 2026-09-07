@@ -1,10 +1,10 @@
-Plan: 7 to add, 2 to modify, 1 to drop.
+Plan: 8 to add, 2 to modify, 1 to drop.
 
 Summary by type:
   functions: 3 to add, 1 to drop
   aggregates: 2 to add
   tables: 1 to modify
-  views: 2 to add, 1 to modify
+  views: 3 to add, 1 to modify
 
 Functions:
   - fn_create_user
@@ -22,6 +22,7 @@ Tables:
 
 Views:
   + vw_active
+  + vw_role_counts
   ~ vw_users
   + vw_users_count
 
@@ -102,3 +103,10 @@ CREATE AGGREGATE agg_users_count(vw_users) (
 CREATE OR REPLACE VIEW vw_users_count AS
  SELECT agg_users_count(vw_users.*) AS n
    FROM vw_users;
+
+CREATE OR REPLACE VIEW vw_role_counts AS
+ SELECT u.role,
+    agg_users_count(vw_users.*) AS n
+   FROM tb_users u
+     JOIN vw_users ON vw_users.id = u.id
+  GROUP BY u.role;

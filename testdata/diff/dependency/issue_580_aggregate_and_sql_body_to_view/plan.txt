@@ -1,23 +1,27 @@
-Plan: 16 to add.
+Plan: 21 to add.
 
 Summary by type:
-  functions: 8 to add
-  aggregates: 4 to add
+  functions: 11 to add
+  aggregates: 5 to add
   tables: 1 to add
-  views: 3 to add
+  views: 4 to add
 
 Functions:
   + acc_with_v
   + count_my_view
   + count_only_v
+  + count_spaced_v
   + count_v
   + get_total
+  + ob_sfunc
   + total_v
+  + total_with_v
   + touch_t
   + v_sfunc
 
 Aggregates:
   + count_ordered_v
+  + sum_ob
   + sum_v
   + sum_v_named
   + sum_with_v
@@ -28,6 +32,7 @@ Tables:
 
 Views:
   + My View
+  + Order By V
   + v
   + v_total
 
@@ -53,6 +58,10 @@ CREATE OR REPLACE TRIGGER touch_trg
     EXECUTE FUNCTION touch_t();
 
 CREATE OR REPLACE VIEW "My View" AS
+ SELECT id
+   FROM t;
+
+CREATE OR REPLACE VIEW "Order By V" AS
  SELECT id
    FROM t;
 
@@ -85,11 +94,28 @@ VOLATILE
 AS $$ SELECT count(*) FROM ONLY v
 $$;
 
+CREATE OR REPLACE FUNCTION count_spaced_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM public . v
+$$;
+
 CREATE OR REPLACE FUNCTION count_v()
 RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT count(*) FROM v
+$$;
+
+CREATE OR REPLACE FUNCTION ob_sfunc(
+    state integer,
+    r "Order By V"
+)
+RETURNS integer
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + r.id
 $$;
 
 CREATE OR REPLACE FUNCTION v_sfunc(
@@ -108,6 +134,12 @@ CREATE AGGREGATE count_ordered_v(ORDER BY v) (
     FINALFUNC_MODIFY = READ_WRITE,
     INITCOND = '0',
     MFINALFUNC_MODIFY = READ_WRITE
+);
+
+CREATE AGGREGATE sum_ob("Order By V") (
+    SFUNC = ob_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
 );
 
 CREATE AGGREGATE sum_v(v) (
@@ -133,6 +165,13 @@ RETURNS integer
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT sum_v(v.*) FROM v
+$$;
+
+CREATE OR REPLACE FUNCTION total_with_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT sum_with_v(id) FROM t
 $$;
 
 CREATE OR REPLACE VIEW v_total AS

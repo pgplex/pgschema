@@ -2072,7 +2072,14 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(aggregatesToCreateNow, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
 	generateCreateAggregatesSQL(aggregatesToCreateNow, targetSchema, collector)
 
-	// SQL-language functions that call one of the aggregates above.
+	// SQL-language functions that call an aggregate follow the batch that
+	// creates it: those calling only the aggregates above are created here, the
+	// rest join the view-dependent or recreated-view batch of their aggregate.
+	var callersOfLateAggregates, callersOfRecreatedAggregates []*ir.Function
+	functionsCallingAggregates, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsCallingAggregates, append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...))
+	callersOfLateAggregates, callersOfRecreatedAggregates = splitFunctionsCallingAggregates(callersOfLateAggregates, d.aggregatesAwaitingRecreatedViews)
+	functionsWithViewDeps = append(functionsWithViewDeps, callersOfLateAggregates...)
+	d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...)
 	generateCreateFunctionsSQL(functionsCallingAggregates, targetSchema, collector)
 
 	// Merge deferred policies from all batches
@@ -2135,7 +2142,13 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// A new view that calls a routine held for a view recreation must wait for
 	// that routine too; it is created in the modify phase with that batch (#480).
-	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews))
+	recreatedRoutineLookup := buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews)
+	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, recreatedRoutineLookup)
+	// The same applies to views deferred for an added column (issue #414): the
+	// recreated-view batch runs after the column is added, so they can join it.
+	var deferredCallingRecreated []*ir.View
+	d.deferredAddedViews, deferredCallingRecreated = splitViewsReferencingRoutines(d.deferredAddedViews, recreatedRoutineLookup)
+	d.viewsAwaitingRecreatedViews = append(d.viewsAwaitingRecreatedViews, deferredCallingRecreated...)
 
 	// Create views, then the functions and aggregates that reference views in
 	// their signature or SQL body (issue #300, #580).
@@ -2973,6 +2986,28 @@ func stripLeadingIdentifier(decl string) string {
 	return strings.TrimSpace(rest)
 }
 
+// findUnquotedOrderBy returns the index of the "ORDER BY " separator that
+// pg_get_function_identity_arguments emits for ordered-set aggregates, or -1.
+// The match is case-insensitive, must start a token, and is ignored inside a
+// quoted identifier such as "Order By V".
+func findUnquotedOrderBy(s string) int {
+	const sep = "ORDER BY "
+	inQuote := false
+	for i := 0; i+len(sep) <= len(s); i++ {
+		if s[i] == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if inQuote || (i > 0 && s[i-1] != ' ') {
+			continue
+		}
+		if strings.EqualFold(s[i:i+len(sep)], sep) {
+			return i
+		}
+	}
+	return -1
+}
+
 // aggregateArgumentTypes extracts candidate type expressions from an
 // aggregate's identity argument list, which may carry argument names, a
 // VARIADIC marker, and the ORDER BY separator of ordered-set aggregates
@@ -2983,7 +3018,7 @@ func aggregateArgumentTypes(args string) []string {
 	var types []string
 	for _, arg := range splitTopLevelCommas(args) {
 		arg = strings.TrimSpace(arg)
-		if idx := strings.Index(strings.ToUpper(arg), "ORDER BY "); idx >= 0 {
+		if idx := findUnquotedOrderBy(arg); idx >= 0 {
 			types = append(types, aggregateArgumentTypes(arg[:idx])...)
 			arg = strings.TrimSpace(arg[idx+len("ORDER BY "):])
 		}
@@ -3313,7 +3348,7 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // Captures the table name (possibly schema-qualified) in group 1.
 var tableRefPattern = regexp.MustCompile(
 	`(?i)(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+(?:ONLY\s+)?` +
-		`((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\.(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)`,
+		`((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)`,
 )
 
 // normalizeRelationReference converts a relation reference captured by
@@ -3321,9 +3356,9 @@ var tableRefPattern = regexp.MustCompile(
 // lowercase "name" or "schema.name" key format of buildSchemaNameLookup.
 func normalizeRelationReference(raw string) string {
 	if idx := findLastUnquotedDot(raw); idx != -1 {
-		return strings.ToLower(unquoteIdent(raw[:idx]) + "." + unquoteIdent(raw[idx+1:]))
+		return strings.ToLower(unquoteIdent(strings.TrimSpace(raw[:idx])) + "." + unquoteIdent(strings.TrimSpace(raw[idx+1:])))
 	}
-	return strings.ToLower(unquoteIdent(raw))
+	return strings.ToLower(unquoteIdent(strings.TrimSpace(raw)))
 }
 
 // functionReferencesNewTable determines if a function references any newly
