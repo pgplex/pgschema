@@ -2074,12 +2074,28 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// creates it: callers of the aggregates created here stay here, the rest
 	// join the view-dependent or recreated-view batch of their aggregate. A
 	// view-dependent function calling a recreated-batch aggregate moves too.
-	var callersOfLateAggregates, callersOfRecreatedAggregates []*ir.Function
-	functionsCallingAggregates, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsCallingAggregates, append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...))
-	callersOfLateAggregates, callersOfRecreatedAggregates = splitFunctionsCallingAggregates(callersOfLateAggregates, d.aggregatesAwaitingRecreatedViews)
-	functionsWithViewDeps = append(functionsWithViewDeps, callersOfLateAggregates...)
-	functionsWithViewDeps, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsWithViewDeps, d.aggregatesAwaitingRecreatedViews)
-	d.functionsAwaitingRecreatedViews = append(append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...), callersOfLateAggregates...)
+	// Moving a caller can in turn move an aggregate that uses it as a support
+	// function, and moving that aggregate can move its callers, so iterate
+	// until the batches are stable.
+	for changed := true; changed; {
+		changed = false
+		lateAggregates := append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...)
+
+		var moved, toRecreated []*ir.Function
+		functionsCallingAggregates, moved = splitFunctionsCallingAggregates(functionsCallingAggregates, lateAggregates)
+		functionsWithViewDeps = append(functionsWithViewDeps, moved...)
+		functionsWithViewDeps, toRecreated = splitFunctionsCallingAggregates(functionsWithViewDeps, d.aggregatesAwaitingRecreatedViews)
+		d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, toRecreated...)
+		changed = changed || len(moved) > 0 || len(toRecreated) > 0
+
+		lateFunctions := buildFunctionLookup(append(append([]*ir.Function{}, functionsWithViewDeps...), d.functionsAwaitingRecreatedViews...))
+		var movedAggs, aggsToRecreated []*ir.Aggregate
+		aggregatesToCreateNow, movedAggs = splitAggregatesByViewDeps(aggregatesToCreateNow, nil, lateFunctions)
+		aggregatesWithViewDeps = append(aggregatesWithViewDeps, movedAggs...)
+		aggregatesWithViewDeps, aggsToRecreated = splitAggregatesByViewDeps(aggregatesWithViewDeps, nil, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
+		d.aggregatesAwaitingRecreatedViews = append(d.aggregatesAwaitingRecreatedViews, aggsToRecreated...)
+		changed = changed || len(movedAggs) > 0 || len(aggsToRecreated) > 0
+	}
 
 	// Aggregates and their callers may chain (aggregate a -> SQL support
 	// function calling a -> aggregate b), so they are scheduled together.
@@ -2711,26 +2727,12 @@ func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bo
 	return bodyReferencesRelation(fn.Definition, newViews)
 }
 
-// bodyReferencesRelation scans a function body for FROM/JOIN/INTO/UPDATE/TABLE
-// references to a relation in the lookup.
+// bodyReferencesRelation reports whether a function body references a relation
+// in the lookup in relation position (see relationReferences).
 func bodyReferencesRelation(body string, relations map[string]struct{}) bool {
-	for _, match := range tableRefPattern.FindAllStringSubmatch(body, -1) {
-		if len(match) < 2 {
-			continue
-		}
-		for _, item := range splitTopLevelCommas(match[1]) {
-			item = strings.TrimSpace(item)
-			if len(item) > 5 && strings.EqualFold(item[:5], "ONLY ") {
-				item = strings.TrimSpace(item[5:])
-			}
-			item = strings.TrimPrefix(item, "(")
-			name := leadingQualifiedIdent.FindString(item)
-			if name == "" {
-				continue
-			}
-			if _, ok := relations[normalizeRelationReference(name)]; ok {
-				return true
-			}
+	for _, name := range relationReferences(body) {
+		if _, ok := relations[normalizeRelationReference(name)]; ok {
+			return true
 		}
 	}
 	return false
@@ -3005,13 +3007,30 @@ func tableReturnColumnTypes(returnType string) []string {
 func stripLeadingIdentifier(decl string) string {
 	var rest string
 	if strings.HasPrefix(decl, `"`) {
-		if end := strings.Index(decl[1:], `"`); end >= 0 {
-			rest = decl[end+2:]
+		if end := quotedIdentEnd(decl, 0); end > 0 {
+			rest = decl[end:]
 		}
 	} else if idx := strings.IndexByte(decl, ' '); idx >= 0 {
 		rest = decl[idx+1:]
 	}
 	return strings.TrimSpace(rest)
+}
+
+// quotedIdentEnd returns the index just past the quoted identifier starting at
+// s[start] (which must be a double quote), honoring "" escapes, or -1 if the
+// identifier is unterminated.
+func quotedIdentEnd(s string, start int) int {
+	for i := start + 1; i < len(s); i++ {
+		if s[i] != '"' {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '"' {
+			i++
+			continue
+		}
+		return i + 1
+	}
+	return -1
 }
 
 // findUnquotedOrderBy returns the index of the "ORDER BY " separator that
@@ -3374,23 +3393,138 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // tableRefPattern matches SQL table references: FROM table, JOIN table,
 // INSERT INTO table, UPDATE [ONLY] table, DELETE FROM table, TABLE table.
 // Captures the table name (possibly schema-qualified) in group 1.
-var tableRefPattern = regexp.MustCompile(
-	`(?i)(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+` +
-		// A comma-separated list of relations, each "[ONLY] [(]name[)] [[AS] alias]";
-		// the alias is only consumed when a comma follows so keywords such as
-		// WHERE or JOIN after the last item are never taken for one.
-		`((?:` + relationRefExpr + `(?:\s+(?:AS\s+)?[a-z_][a-z0-9_$]*)?\s*,\s*)*` + relationRefExpr + `)`,
-)
-
-// relationRefExpr matches one relation in a FROM list: an optional ONLY, an
-// optionally parenthesized name, possibly quoted and possibly schema-qualified.
-const relationRefExpr = `(?:ONLY\s+)?\(?` + qualifiedIdentExpr + `\)?`
+// relationKeywordPattern finds the keywords that introduce a relation or a
+// relation list: FROM, JOIN, INTO, UPDATE, DELETE FROM, TABLE.
+var relationKeywordPattern = regexp.MustCompile(`(?i)\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+`)
 
 // qualifiedIdentExpr matches a possibly quoted, possibly schema-qualified identifier.
 const qualifiedIdentExpr = `(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*`
 
-// leadingQualifiedIdent extracts the relation name at the start of one FROM-list item.
+// leadingQualifiedIdent extracts the identifier at the start of a string.
 var leadingQualifiedIdent = regexp.MustCompile(`(?i)^` + qualifiedIdentExpr)
+
+// relationReferences returns the relation names a SQL body references in
+// relation position: after FROM, JOIN, INTO, UPDATE, DELETE FROM, or TABLE,
+// walking a comma-separated list of table references. Function calls and
+// subqueries are skipped, ONLY and the parenthesized ONLY (name) form are
+// accepted, and an alias with an optional column list is consumed only when
+// another list item follows it, so a keyword after the last item is never
+// mistaken for an alias. This is a heuristic scan, not a parser: a string
+// literal or comment that mimics a FROM clause is scanned like real SQL.
+func relationReferences(body string) []string {
+	var refs []string
+	for _, loc := range relationKeywordPattern.FindAllStringIndex(body, -1) {
+		// After INTO the next token is always a relation, so "t(a, b)" is a
+		// column list, not a function call.
+		callAllowed := !strings.Contains(strings.ToUpper(body[loc[0]:loc[1]]), "INTO")
+		i := loc[1]
+		for {
+			i = skipSpaces(body, i)
+			if keywordAt(body, i, "ONLY") {
+				i = skipSpaces(body, i+len("ONLY"))
+			}
+			if i < len(body) && body[i] == '(' {
+				// Either "(name)" or a subquery; only the former is a relation.
+				end := matchingParen(body, i)
+				inner := strings.TrimSpace(body[i+1 : end])
+				if name := leadingQualifiedIdent.FindString(inner); name != "" && name == inner {
+					refs = append(refs, name)
+				}
+				i = end + 1
+			} else {
+				name := leadingQualifiedIdent.FindString(body[i:])
+				if name == "" {
+					break
+				}
+				i += len(name)
+				if callAllowed && i < len(body) && body[i] == '(' {
+					i = matchingParen(body, i) + 1 // function call, not a relation
+				} else {
+					refs = append(refs, name)
+				}
+			}
+
+			// Another item follows directly, or after "[AS] alias [(columns)]".
+			next := skipSpaces(body, i)
+			if next < len(body) && body[next] == ',' {
+				i = next + 1
+				continue
+			}
+			if keywordAt(body, next, "AS") {
+				next = skipSpaces(body, next+len("AS"))
+			}
+			alias := leadingQualifiedIdent.FindString(body[next:])
+			if alias == "" || strings.Contains(alias, ".") {
+				break
+			}
+			next = skipSpaces(body, next+len(alias))
+			if next < len(body) && body[next] == '(' {
+				next = skipSpaces(body, matchingParen(body, next)+1)
+			}
+			if next < len(body) && body[next] == ',' {
+				i = next + 1
+				continue
+			}
+			break
+		}
+	}
+	return refs
+}
+
+// skipSpaces returns the index of the first non-whitespace byte at or after i.
+func skipSpaces(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// keywordAt reports whether the keyword occurs at s[i] as a whole word,
+// case-insensitively.
+func keywordAt(s string, i int, keyword string) bool {
+	end := i + len(keyword)
+	if i < 0 || end > len(s) || !strings.EqualFold(s[i:end], keyword) {
+		return false
+	}
+	return end == len(s) || !isIdentByte(s[end])
+}
+
+// isIdentByte reports whether b can appear in a bare SQL identifier.
+func isIdentByte(b byte) bool {
+	return b == '_' || b == '$' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// matchingParen returns the index of the parenthesis closing the one at s[i],
+// skipping quoted identifiers and string literals, or len(s)-1 if unbalanced.
+func matchingParen(s string, i int) int {
+	depth := 0
+	for j := i; j < len(s); j++ {
+		switch s[j] {
+		case '"':
+			if end := quotedIdentEnd(s, j); end > 0 {
+				j = end - 1
+			}
+		case '\'':
+			for j++; j < len(s); j++ {
+				if s[j] == '\'' {
+					if j+1 < len(s) && s[j+1] == '\'' {
+						j++
+						continue
+					}
+					break
+				}
+			}
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return len(s) - 1
+}
 
 // normalizeRelationReference converts a relation reference captured by
 // tableRefPattern, possibly quoted and possibly schema-qualified, into the

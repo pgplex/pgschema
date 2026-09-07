@@ -74,6 +74,20 @@ VOLATILE
 AS $$ SELECT count(*) FROM public . v
 $$;
 
+CREATE OR REPLACE FUNCTION count_sub_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM (SELECT 1) AS s, v
+$$;
+
+CREATE OR REPLACE FUNCTION count_unnest_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM unnest(ARRAY[1]) AS u(x), v
+$$;
+
 CREATE OR REPLACE FUNCTION count_v()
 RETURNS bigint
 LANGUAGE sql
@@ -133,6 +147,16 @@ CREATE AGGREGATE sum_with_v(integer) (
     INITCOND = '0'
 );
 
+CREATE OR REPLACE FUNCTION chain_sfunc(
+    state integer,
+    x integer
+)
+RETURNS integer
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT state + x + coalesce(sum_v(NULL::v), 0)
+$$;
+
 CREATE OR REPLACE FUNCTION total_v()
 RETURNS integer
 LANGUAGE sql
@@ -146,6 +170,12 @@ LANGUAGE sql
 VOLATILE
 AS $$ SELECT sum_with_v(id) FROM t
 $$;
+
+CREATE AGGREGATE chain_agg(integer) (
+    SFUNC = chain_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);
 
 CREATE OR REPLACE VIEW v_total AS
  SELECT sum_v(v.*) AS total

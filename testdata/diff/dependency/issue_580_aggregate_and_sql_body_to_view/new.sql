@@ -142,3 +142,27 @@ CREATE FUNCTION count_paren_v()
 RETURNS bigint
 LANGUAGE sql
 AS $$ SELECT count(*) FROM ONLY (v) $$;
+
+-- Function-call and subquery items ahead of v in a FROM list must not hide it.
+CREATE FUNCTION count_unnest_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM unnest(ARRAY[1]) AS u(x), v $$;
+
+CREATE FUNCTION count_sub_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM (SELECT 1) AS s, v $$;
+
+-- Aggregate with ordinary types whose SQL transition function calls the
+-- view-dependent aggregate: chain sum_v -> chain_sfunc -> chain_agg.
+CREATE FUNCTION chain_sfunc(state integer, x integer)
+RETURNS integer
+LANGUAGE sql
+AS $$ SELECT state + x + coalesce(sum_v(NULL::v), 0) $$;
+
+CREATE AGGREGATE chain_agg(integer) (
+    SFUNC = chain_sfunc,
+    STYPE = integer,
+    INITCOND = '0'
+);
