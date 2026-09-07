@@ -1391,7 +1391,8 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 		aggregateName := agg.AggregateName
 
 		// Identity args (types only) drive the DROP/COMMENT signature and the overload key.
-		identityArgs := i.safeInterfaceToString(agg.AggregateIdentityArgs)
+		// Strip the aggregate's own schema prefix here so the key and Arguments agree.
+		identityArgs := StripSchemaPrefixFromBody(i.safeInterfaceToString(agg.AggregateIdentityArgs), schemaName)
 
 		// agginitval/aggminitval are nullable: preserve NULL (nil) vs explicit '' so an
 		// INITCOND/MINITCOND of empty string is not silently dropped.
@@ -1415,7 +1416,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 		aggregate := &Aggregate{
 			Schema:     schemaName,
 			Name:       aggregateName,
-			Arguments:  StripSchemaPrefixFromBody(identityArgs, schemaName),
+			Arguments:  identityArgs,
 			Signature:  StripSchemaPrefixFromBody(i.safeInterfaceToString(agg.AggregateSignature), schemaName),
 			Kind:       i.safeInterfaceToString(agg.AggregateKind),
 			ReturnType: i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.AggregateReturnType), schemaName),

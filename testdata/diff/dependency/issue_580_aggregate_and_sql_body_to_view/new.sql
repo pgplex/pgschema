@@ -41,3 +41,26 @@ CREATE AGGREGATE sum_v(v) (
     STYPE = integer,
     INITCOND = '0'
 );
+
+-- Aggregate with ordinary types whose transition function queries the view.
+-- The function is view-dependent, so the aggregate must follow it.
+CREATE FUNCTION acc_with_v(state bigint, x integer)
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT state + x + (SELECT count(*) FROM v) $$;
+
+CREATE AGGREGATE sum_with_v(integer) (
+    SFUNC = acc_with_v,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+-- View that calls the aggregate over v's row type, and a function returning
+-- that view's row type. Both must follow the aggregate.
+CREATE VIEW v_total AS
+SELECT sum_v(v.*) AS total FROM v;
+
+CREATE FUNCTION get_total()
+RETURNS SETOF v_total
+LANGUAGE sql
+AS $$ SELECT * FROM v_total $$;

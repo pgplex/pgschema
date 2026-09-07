@@ -33,6 +33,12 @@
           "path": "public.v"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION acc_with_v(\n    state bigint,\n    x integer\n)\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT state + x + (SELECT count(*) FROM v)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.acc_with_v"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION count_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM v\n$$;",
           "type": "function",
           "operation": "create",
@@ -49,6 +55,24 @@
           "type": "aggregate",
           "operation": "create",
           "path": "public.sum_v"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_with_v(integer) (\n    SFUNC = acc_with_v,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_with_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW v_total AS\n SELECT sum_v(v.*) AS total\n   FROM v;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.v_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION get_total()\nRETURNS SETOF v_total\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT * FROM v_total\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.get_total"
         }
       ]
     }

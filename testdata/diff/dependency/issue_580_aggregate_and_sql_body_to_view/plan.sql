@@ -21,6 +21,16 @@ CREATE OR REPLACE VIEW v AS
     name
    FROM t;
 
+CREATE OR REPLACE FUNCTION acc_with_v(
+    state bigint,
+    x integer
+)
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT state + x + (SELECT count(*) FROM v)
+$$;
+
 CREATE OR REPLACE FUNCTION count_v()
 RETURNS bigint
 LANGUAGE sql
@@ -43,3 +53,20 @@ CREATE AGGREGATE sum_v(v) (
     STYPE = integer,
     INITCOND = '0'
 );
+
+CREATE AGGREGATE sum_with_v(integer) (
+    SFUNC = acc_with_v,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+CREATE OR REPLACE VIEW v_total AS
+ SELECT sum_v(v.*) AS total
+   FROM v;
+
+CREATE OR REPLACE FUNCTION get_total()
+RETURNS SETOF v_total
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT * FROM v_total
+$$;
