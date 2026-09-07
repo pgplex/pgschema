@@ -3394,8 +3394,10 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // INSERT INTO table, UPDATE [ONLY] table, DELETE FROM table, TABLE table.
 // Captures the table name (possibly schema-qualified) in group 1.
 // relationKeywordPattern finds the keywords that introduce a relation or a
-// relation list: FROM, JOIN, INTO, UPDATE, DELETE FROM, TABLE.
-var relationKeywordPattern = regexp.MustCompile(`(?i)\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+`)
+// relation list: FROM, JOIN, INTO, UPDATE, DELETE FROM, TABLE, and the USING
+// of DELETE and MERGE (a JOIN's USING is always followed by a column list in
+// parentheses and is skipped by relationReferences).
+var relationKeywordPattern = regexp.MustCompile(`(?i)\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE|USING)\s+`)
 
 // qualifiedIdentExpr matches a possibly quoted, possibly schema-qualified identifier.
 const qualifiedIdentExpr = `(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*`
@@ -3416,8 +3418,12 @@ func relationReferences(body string) []string {
 	for _, loc := range relationKeywordPattern.FindAllStringIndex(body, -1) {
 		// After INTO the next token is always a relation, so "t(a, b)" is a
 		// column list, not a function call.
-		callAllowed := !strings.Contains(strings.ToUpper(body[loc[0]:loc[1]]), "INTO")
-		i := loc[1]
+		keyword := strings.ToUpper(strings.TrimSpace(body[loc[0]:loc[1]]))
+		callAllowed := keyword != "INTO"
+		i := skipSpaces(body, loc[1])
+		if keyword == "USING" && i < len(body) && body[i] == '(' {
+			continue // JOIN ... USING (columns), not a relation source
+		}
 		for {
 			i = skipSpaces(body, i)
 			if keywordAt(body, i, "ONLY") {
@@ -3439,6 +3445,11 @@ func relationReferences(body string) []string {
 				i += len(name)
 				if callAllowed && i < len(body) && body[i] == '(' {
 					i = matchingParen(body, i) + 1 // function call, not a relation
+					if k := skipSpaces(body, i); keywordAt(body, k, "WITH") {
+						if k = skipSpaces(body, k+len("WITH")); keywordAt(body, k, "ORDINALITY") {
+							i = k + len("ORDINALITY")
+						}
+					}
 				} else {
 					refs = append(refs, name)
 				}

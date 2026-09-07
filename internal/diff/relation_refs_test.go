@@ -27,6 +27,10 @@ func TestRelationReferences(t *testing.T) {
 		{"DELETE FROM t WHERE id = 1", []string{"t"}},
 		{"SELECT * FROM v ORDER BY x, y", []string{"v"}},
 		{"SELECT * FROM v GROUP BY a, b", []string{"v"}},
+		{"DELETE FROM t USING v WHERE t.id = v.id", []string{"t", "v"}},
+		{"MERGE INTO t USING v ON t.id = v.id WHEN MATCHED THEN DELETE", []string{"t", "v"}},
+		{"SELECT * FROM t JOIN v USING (id)", []string{"t", "v"}},
+		{"SELECT * FROM unnest(xs) WITH ORDINALITY AS u(x, n), v", []string{"v"}},
 	}
 	for _, c := range cases {
 		if got := relationReferences(c.body); !reflect.DeepEqual(got, c.want) {
