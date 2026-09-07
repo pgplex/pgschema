@@ -321,7 +321,8 @@ type ddlDiff struct {
 	// phase (before the view's DROP) would re-pin the old view and block its RESTRICT
 	// drop. They are created in the modify phase, AFTER generateModifyViewsSQL
 	// recreates the view (issue #480).
-	functionsAwaitingRecreatedViews []*ir.Function
+	functionsAwaitingRecreatedViews  []*ir.Function
+	aggregatesAwaitingRecreatedViews []*ir.Aggregate
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
 	// modifications (fkPreDrops) and desired-state ones are (re)created
@@ -2056,6 +2057,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// state, or return type, or through a support function that does, are held
 	// back until the view and the view-dependent functions exist (#580).
 	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(d.addedAggregates, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
+	// Aggregates typed on a view being recreated, or built on a function that is,
+	// wait for the recreation in the modify phase, like those functions (issue #480).
+	aggregatesToCreateNow, d.aggregatesAwaitingRecreatedViews = splitAggregatesByViewDeps(aggregatesToCreateNow, recreatedViewLookup, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
 	generateCreateAggregatesSQL(aggregatesToCreateNow, targetSchema, collector)
 
 	// Merge deferred policies from all batches
@@ -2107,38 +2111,18 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 			}
 		}
 	}
-	// A view that calls a view-dependent function or aggregate must wait for that
-	// routine, which itself waits for the views it depends on. Hold such views,
-	// and any view built on them, until after the late routines exist (#580).
-	viewsToCreateNow, viewsAfterLateRoutines := splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(functionsWithViewDeps, aggregatesWithViewDeps))
-	generateCreateViewsSQL(viewsToCreateNow, targetSchema, collector)
-
-	// If any views were deferred, also defer functions whose view dependency is
-	// on those deferred views, and aggregates built on such functions — they
-	// must be created after the views exist.
+	// If any views were deferred to the modify phase, also defer functions whose
+	// view dependency is on those deferred views, and aggregates built on such
+	// functions — they must be created after the views exist.
 	if len(d.deferredAddedViews) > 0 {
 		deferredViewLookup := buildViewLookup(d.deferredAddedViews)
 		functionsWithViewDeps, d.functionsAwaitingDeferredViews = splitFunctionsByViewDeps(functionsWithViewDeps, deferredViewLookup)
 		aggregatesWithViewDeps, d.aggregatesAwaitingDeferredViews = splitAggregatesByViewDeps(aggregatesWithViewDeps, deferredViewLookup, buildFunctionLookup(d.functionsAwaitingDeferredViews))
 	}
 
-	// Create functions WITH view dependencies (now that views exist)
-	// These functions reference views in their return type or parameter types (issue #300)
-	// Functions that depend on a held-back view, and aggregates built on them,
-	// are emitted after that view further below.
-	lateViewLookup := buildViewLookup(viewsAfterLateRoutines)
-	functionsWithViewDeps, functionsAfterLateViews := splitFunctionsByViewDeps(functionsWithViewDeps, lateViewLookup)
-	aggregatesWithViewDeps, aggregatesAfterLateViews := splitAggregatesByViewDeps(aggregatesWithViewDeps, lateViewLookup, buildFunctionLookup(functionsAfterLateViews))
-	generateCreateFunctionsSQL(functionsWithViewDeps, targetSchema, collector)
-
-	// Create aggregates that depend on a new view, after the view and after any
-	// support function that depends on it as well (#580).
-	generateCreateAggregatesSQL(aggregatesWithViewDeps, targetSchema, collector)
-
-	// Views that call the routines above, then the routines that depend on those views.
-	generateCreateViewsSQL(viewsAfterLateRoutines, targetSchema, collector)
-	generateCreateFunctionsSQL(functionsAfterLateViews, targetSchema, collector)
-	generateCreateAggregatesSQL(aggregatesAfterLateViews, targetSchema, collector)
+	// Create views, then the functions and aggregates that reference views in
+	// their signature or SQL body (issue #300, #580).
+	generateViewsAndDependentRoutinesSQL(viewsToCreateNow, functionsWithViewDeps, aggregatesWithViewDeps, targetSchema, collector)
 
 	// Revoke default grants on new tables that the user explicitly didn't include
 	// This must happen AFTER tables are created but BEFORE explicit grants
@@ -2191,15 +2175,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
 	// any functions whose view dependency was on those deferred views.
-	if len(d.deferredAddedViews) > 0 {
-		generateCreateViewsSQL(d.deferredAddedViews, targetSchema, collector)
-	}
-	if len(d.functionsAwaitingDeferredViews) > 0 {
-		generateCreateFunctionsSQL(d.functionsAwaitingDeferredViews, targetSchema, collector)
-	}
-	if len(d.aggregatesAwaitingDeferredViews) > 0 {
-		generateCreateAggregatesSQL(d.aggregatesAwaitingDeferredViews, targetSchema, collector)
-	}
+	generateViewsAndDependentRoutinesSQL(d.deferredAddedViews, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, targetSchema, collector)
 
 	// Find views that depend on views being recreated (issue #268, #308)
 	// Handles both materialized views and regular views with RequiresRecreate
@@ -2221,9 +2197,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// type references a view just recreated above. Emitting them now (rather than in
 	// the create phase) keeps the recreated view free of dependents during its
 	// RESTRICT drop (issue #480).
-	if len(d.functionsAwaitingRecreatedViews) > 0 {
-		generateCreateFunctionsSQL(d.functionsAwaitingRecreatedViews, targetSchema, collector)
-	}
+	// Aggregates built on those functions, or typed on the recreated view, follow.
+	generateCreateFunctionsSQL(d.functionsAwaitingRecreatedViews, targetSchema, collector)
+	generateCreateAggregatesSQL(d.aggregatesAwaitingRecreatedViews, targetSchema, collector)
 
 	// Modify functions
 	generateModifyFunctionsSQL(d.modifiedFunctions, targetSchema, collector)
@@ -2709,7 +2685,7 @@ func bodyReferencesRelation(body string, relations map[string]struct{}) bool {
 		if len(match) < 2 {
 			continue
 		}
-		if _, ok := relations[strings.ToLower(match[1])]; ok {
+		if _, ok := relations[normalizeRelationReference(match[1])]; ok {
 			return true
 		}
 	}
@@ -2794,6 +2770,24 @@ func splitAggregatesByViewDeps(aggregates []*ir.Aggregate, views, functions map[
 		}
 	}
 	return now, later
+}
+
+// generateViewsAndDependentRoutinesSQL creates views together with the functions
+// and aggregates that depend on them. A view that calls one of those routines is
+// created after it, and a routine that depends on such a view follows that view
+// in turn (#580). Every argument may be empty.
+func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Function, aggregates []*ir.Aggregate, targetSchema string, collector *diffCollector) {
+	viewsNow, viewsLater := splitViewsReferencingRoutines(views, buildRoutineLookup(functions, aggregates))
+	lateViewLookup := buildViewLookup(viewsLater)
+	functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
+	aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
+
+	generateCreateViewsSQL(viewsNow, targetSchema, collector)
+	generateCreateFunctionsSQL(functionsNow, targetSchema, collector)
+	generateCreateAggregatesSQL(aggregatesNow, targetSchema, collector)
+	generateCreateViewsSQL(viewsLater, targetSchema, collector)
+	generateCreateFunctionsSQL(functionsLater, targetSchema, collector)
+	generateCreateAggregatesSQL(aggregatesLater, targetSchema, collector)
 }
 
 // splitViewsReferencingRoutines partitions views into those that can be created
@@ -3227,8 +3221,18 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // Captures the table name (possibly schema-qualified) in group 1.
 var tableRefPattern = regexp.MustCompile(
 	`(?i)(?:FROM|JOIN|INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM|TABLE)\s+` +
-		`([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)`,
+		`((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\.(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)`,
 )
+
+// normalizeRelationReference converts a relation reference captured by
+// tableRefPattern, possibly quoted and possibly schema-qualified, into the
+// lowercase "name" or "schema.name" key format of buildSchemaNameLookup.
+func normalizeRelationReference(raw string) string {
+	if idx := findLastUnquotedDot(raw); idx != -1 {
+		return strings.ToLower(unquoteIdent(raw[:idx]) + "." + unquoteIdent(raw[idx+1:]))
+	}
+	return strings.ToLower(unquoteIdent(raw))
+}
 
 // functionReferencesNewTable determines if a function references any newly
 // added table that will be created after the first function batch (tablesWithDeps).

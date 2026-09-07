@@ -1,12 +1,17 @@
-Plan: 3 to add, 1 to modify.
+Plan: 6 to add, 1 to modify.
 
 Summary by type:
-  functions: 1 to add
+  functions: 2 to add
+  aggregates: 1 to add
   tables: 1 to modify
-  views: 2 to add
+  views: 3 to add
 
 Functions:
+  + foo_summary_step
   + get_foo_summary
+
+Aggregates:
+  + sum_foo_summary
 
 Tables:
   ~ foo
@@ -15,6 +20,7 @@ Tables:
 Views:
   + foo_base
   + foo_summary
+  + foo_total
 
 DDL to be executed:
 --------------------------------------------------
@@ -31,9 +37,29 @@ CREATE OR REPLACE VIEW foo_summary AS
  SELECT id
    FROM foo_base;
 
+CREATE OR REPLACE FUNCTION foo_summary_step(
+    state bigint,
+    r foo_summary
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + r.id
+$$;
+
 CREATE OR REPLACE FUNCTION get_foo_summary()
 RETURNS SETOF foo_summary
 LANGUAGE sql
 STABLE
 AS $$ SELECT * FROM foo_summary
 $$;
+
+CREATE AGGREGATE sum_foo_summary(foo_summary) (
+    SFUNC = foo_summary_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+CREATE OR REPLACE VIEW foo_total AS
+ SELECT sum_foo_summary(foo_summary.*) AS total
+   FROM foo_summary;

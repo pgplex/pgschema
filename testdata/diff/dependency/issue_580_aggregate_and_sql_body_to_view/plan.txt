@@ -1,13 +1,14 @@
-Plan: 10 to add.
+Plan: 12 to add.
 
 Summary by type:
-  functions: 5 to add
+  functions: 6 to add
   aggregates: 2 to add
   tables: 1 to add
-  views: 2 to add
+  views: 3 to add
 
 Functions:
   + acc_with_v
+  + count_my_view
   + count_v
   + get_total
   + touch_t
@@ -22,6 +23,7 @@ Tables:
     + touch_trg (trigger)
 
 Views:
+  + My View
   + v
   + v_total
 
@@ -46,6 +48,10 @@ CREATE OR REPLACE TRIGGER touch_trg
     FOR EACH ROW
     EXECUTE FUNCTION touch_t();
 
+CREATE OR REPLACE VIEW "My View" AS
+ SELECT id
+   FROM t;
+
 CREATE OR REPLACE VIEW v AS
  SELECT id,
     name
@@ -59,6 +65,13 @@ RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT state + x + (SELECT count(*) FROM v)
+$$;
+
+CREATE OR REPLACE FUNCTION count_my_view()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM "My View"
 $$;
 
 CREATE OR REPLACE FUNCTION count_v()

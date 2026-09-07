@@ -27,6 +27,12 @@
           "path": "public.t.touch_trg"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW \"My View\" AS\n SELECT id\n   FROM t;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.My View"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW v AS\n SELECT id,\n    name\n   FROM t;",
           "type": "view",
           "operation": "create",
@@ -37,6 +43,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.acc_with_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION count_my_view()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM \"My View\"\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_my_view"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION count_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM v\n$$;",

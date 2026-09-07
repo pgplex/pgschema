@@ -64,3 +64,12 @@ CREATE FUNCTION get_total()
 RETURNS SETOF v_total
 LANGUAGE sql
 AS $$ SELECT * FROM v_total $$;
+
+-- A quoted view name in a SQL-language body must still count as a dependency.
+CREATE VIEW "My View" AS
+SELECT id FROM t;
+
+CREATE FUNCTION count_my_view()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM "My View" $$;

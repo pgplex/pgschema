@@ -1307,6 +1307,21 @@ func (i *Inspector) stripSameSchemaPrefix(typeName, routineSchema string) string
 	return typeName
 }
 
+// stripSameSchemaPrefixFromList is stripSameSchemaPrefix for a comma-separated
+// argument list such as pg_get_function_identity_arguments output. Both the raw
+// and the quote_ident form of the schema name are handled, so a schema that
+// needs quoting (e.g. "My Schema".v) normalizes the same way as public.v.
+func (i *Inspector) stripSameSchemaPrefixFromList(list, schema string) string {
+	if list == "" || schema == "" {
+		return list
+	}
+	list = StripSchemaPrefixFromBody(list, schema)
+	if quoted := QuoteIdentifier(schema); quoted != schema {
+		list = StripSchemaPrefixFromBody(list, quoted)
+	}
+	return list
+}
+
 // oidToTypeName maps PostgreSQL type OIDs to standard SQL type names.
 // Reference: https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat
 var oidToTypeName = map[int64]string{
@@ -1392,7 +1407,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 
 		// Identity args (types only) drive the DROP/COMMENT signature and the overload key.
 		// Strip the aggregate's own schema prefix here so the key and Arguments agree.
-		identityArgs := StripSchemaPrefixFromBody(i.safeInterfaceToString(agg.AggregateIdentityArgs), schemaName)
+		identityArgs := i.stripSameSchemaPrefixFromList(i.safeInterfaceToString(agg.AggregateIdentityArgs), schemaName)
 
 		// agginitval/aggminitval are nullable: preserve NULL (nil) vs explicit '' so an
 		// INITCOND/MINITCOND of empty string is not silently dropped.
@@ -1420,7 +1435,7 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 			Schema:     schemaName,
 			Name:       aggregateName,
 			Arguments:  identityArgs,
-			Signature:  StripSchemaPrefixFromBody(i.safeInterfaceToString(agg.AggregateSignature), schemaName),
+			Signature:  i.stripSameSchemaPrefixFromList(i.safeInterfaceToString(agg.AggregateSignature), schemaName),
 			Kind:       i.safeInterfaceToString(agg.AggregateKind),
 			ReturnType: i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.AggregateReturnType), schemaName),
 			Parallel:   i.safeInterfaceToString(agg.Parallel),

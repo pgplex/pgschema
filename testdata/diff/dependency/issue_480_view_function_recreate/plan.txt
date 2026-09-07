@@ -1,13 +1,18 @@
-Plan: 1 to add, 2 to modify, 1 to drop.
+Plan: 3 to add, 2 to modify, 1 to drop.
 
 Summary by type:
-  functions: 1 to add, 1 to drop
+  functions: 2 to add, 1 to drop
+  aggregates: 1 to add
   tables: 1 to modify
   views: 1 to modify
 
 Functions:
   - fn_create_user
   + fn_create_user
+  + fn_users_step
+
+Aggregates:
+  + agg_users_count
 
 Tables:
   ~ tb_users
@@ -51,3 +56,19 @@ BEGIN
     RETURN v_result;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION fn_users_step(
+    state bigint,
+    u vw_users
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + 1
+$$;
+
+CREATE AGGREGATE agg_users_count(vw_users) (
+    SFUNC = fn_users_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);

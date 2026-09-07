@@ -30,3 +30,19 @@ BEGIN
     RETURN v_result;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION fn_users_step(
+    state bigint,
+    u vw_users
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + 1
+$$;
+
+CREATE AGGREGATE agg_users_count(vw_users) (
+    SFUNC = fn_users_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);

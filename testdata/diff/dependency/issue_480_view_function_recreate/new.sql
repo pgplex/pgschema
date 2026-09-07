@@ -23,3 +23,14 @@ BEGIN
     RETURN v_result;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Aggregate whose transition function is typed on the recreated view. Both
+-- must be created after the view is recreated in the modify phase (#580).
+CREATE FUNCTION fn_users_step(state bigint, u vw_users)
+RETURNS bigint LANGUAGE sql IMMUTABLE AS $$ SELECT state + 1 $$;
+
+CREATE AGGREGATE agg_users_count(vw_users) (
+    SFUNC = fn_users_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);

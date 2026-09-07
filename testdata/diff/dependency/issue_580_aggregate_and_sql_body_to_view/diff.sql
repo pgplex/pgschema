@@ -16,6 +16,10 @@ CREATE OR REPLACE TRIGGER touch_trg
     FOR EACH ROW
     EXECUTE FUNCTION touch_t();
 
+CREATE OR REPLACE VIEW "My View" AS
+ SELECT id
+   FROM t;
+
 CREATE OR REPLACE VIEW v AS
  SELECT id,
     name
@@ -29,6 +33,13 @@ RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT state + x + (SELECT count(*) FROM v)
+$$;
+
+CREATE OR REPLACE FUNCTION count_my_view()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM "My View"
 $$;
 
 CREATE OR REPLACE FUNCTION count_v()
