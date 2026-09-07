@@ -59,3 +59,9 @@ CREATE VIEW vw_role_counts AS
 SELECT u.role, agg_users_count(vw_users.*) AS n
 FROM tb_users u JOIN vw_users ON vw_users.id = u.id
 GROUP BY u.role;
+
+-- View-dependent function (typed on the new view) whose SQL body calls an
+-- aggregate held for the recreation, without naming the recreated view: it
+-- must join the recreated-view batch.
+CREATE FUNCTION active_marker(a vw_active) RETURNS bigint
+LANGUAGE sql AS $$ SELECT agg_users_count(NULL::vw_users) $$;

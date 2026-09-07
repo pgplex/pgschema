@@ -39,6 +39,13 @@ VOLATILE
 AS $$ SELECT state + x + (SELECT count(*) FROM v)
 $$;
 
+CREATE OR REPLACE FUNCTION count_list_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM t, v
+$$;
+
 CREATE OR REPLACE FUNCTION count_my_view()
 RETURNS bigint
 LANGUAGE sql
@@ -51,6 +58,13 @@ RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT count(*) FROM ONLY v
+$$;
+
+CREATE OR REPLACE FUNCTION count_paren_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM ONLY (v)
 $$;
 
 CREATE OR REPLACE FUNCTION count_spaced_v()

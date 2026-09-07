@@ -69,6 +69,15 @@ CREATE AGGREGATE agg_users_count(vw_users) (
     INITCOND = '0'
 );
 
+CREATE OR REPLACE FUNCTION active_marker(
+    a vw_active
+)
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT agg_users_count(NULL::vw_users)
+$$;
+
 CREATE OR REPLACE VIEW vw_users_count AS
  SELECT agg_users_count(vw_users.*) AS n
    FROM vw_users;

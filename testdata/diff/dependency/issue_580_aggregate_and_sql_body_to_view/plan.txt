@@ -1,15 +1,17 @@
-Plan: 21 to add.
+Plan: 23 to add.
 
 Summary by type:
-  functions: 11 to add
+  functions: 13 to add
   aggregates: 5 to add
   tables: 1 to add
   views: 4 to add
 
 Functions:
   + acc_with_v
+  + count_list_v
   + count_my_view
   + count_only_v
+  + count_paren_v
   + count_spaced_v
   + count_v
   + get_total
@@ -80,6 +82,13 @@ VOLATILE
 AS $$ SELECT state + x + (SELECT count(*) FROM v)
 $$;
 
+CREATE OR REPLACE FUNCTION count_list_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM t, v
+$$;
+
 CREATE OR REPLACE FUNCTION count_my_view()
 RETURNS bigint
 LANGUAGE sql
@@ -92,6 +101,13 @@ RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT count(*) FROM ONLY v
+$$;
+
+CREATE OR REPLACE FUNCTION count_paren_v()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT count(*) FROM ONLY (v)
 $$;
 
 CREATE OR REPLACE FUNCTION count_spaced_v()

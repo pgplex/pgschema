@@ -2070,17 +2070,20 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	var aggregatesToCreateNow []*ir.Aggregate
 	aggregatesToCreateNow, d.aggregatesAwaitingRecreatedViews = splitAggregatesByViewDeps(d.addedAggregates, recreatedViewLookup, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
 	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(aggregatesToCreateNow, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
-	generateCreateAggregatesSQL(aggregatesToCreateNow, targetSchema, collector)
-
 	// SQL-language functions that call an aggregate follow the batch that
-	// creates it: those calling only the aggregates above are created here, the
-	// rest join the view-dependent or recreated-view batch of their aggregate.
+	// creates it: callers of the aggregates created here stay here, the rest
+	// join the view-dependent or recreated-view batch of their aggregate. A
+	// view-dependent function calling a recreated-batch aggregate moves too.
 	var callersOfLateAggregates, callersOfRecreatedAggregates []*ir.Function
 	functionsCallingAggregates, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsCallingAggregates, append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...))
 	callersOfLateAggregates, callersOfRecreatedAggregates = splitFunctionsCallingAggregates(callersOfLateAggregates, d.aggregatesAwaitingRecreatedViews)
 	functionsWithViewDeps = append(functionsWithViewDeps, callersOfLateAggregates...)
-	d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...)
-	generateCreateFunctionsSQL(functionsCallingAggregates, targetSchema, collector)
+	functionsWithViewDeps, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsWithViewDeps, d.aggregatesAwaitingRecreatedViews)
+	d.functionsAwaitingRecreatedViews = append(append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...), callersOfLateAggregates...)
+
+	// Aggregates and their callers may chain (aggregate a -> SQL support
+	// function calling a -> aggregate b), so they are scheduled together.
+	generateFunctionsAndAggregatesSQL(functionsCallingAggregates, aggregatesToCreateNow, targetSchema, collector)
 
 	// Merge deferred policies from all batches
 	allDeferredPolicies := append(append(deferredPolicies1, deferredPolicies2...), deferredPolicies3...)
@@ -2715,8 +2718,19 @@ func bodyReferencesRelation(body string, relations map[string]struct{}) bool {
 		if len(match) < 2 {
 			continue
 		}
-		if _, ok := relations[normalizeRelationReference(match[1])]; ok {
-			return true
+		for _, item := range splitTopLevelCommas(match[1]) {
+			item = strings.TrimSpace(item)
+			if len(item) > 5 && strings.EqualFold(item[:5], "ONLY ") {
+				item = strings.TrimSpace(item[5:])
+			}
+			item = strings.TrimPrefix(item, "(")
+			name := leadingQualifiedIdent.FindString(item)
+			if name == "" {
+				continue
+			}
+			if _, ok := relations[normalizeRelationReference(name)]; ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -2850,19 +2864,33 @@ func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Func
 	lateViewLookup := buildViewLookup(viewsLater)
 	functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
 	aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
-	// Within each half, SQL-language functions that call one of the aggregates
-	// go after it; the aggregates' own support functions stay ahead of them.
-	functionsNow, functionsCallingNow := splitFunctionsCallingAggregates(functionsNow, aggregatesNow)
-	functionsLater, functionsCallingLater := splitFunctionsCallingAggregates(functionsLater, aggregatesLater)
 
 	generateCreateViewsSQL(viewsNow, targetSchema, collector)
-	generateCreateFunctionsSQL(functionsNow, targetSchema, collector)
-	generateCreateAggregatesSQL(aggregatesNow, targetSchema, collector)
-	generateCreateFunctionsSQL(functionsCallingNow, targetSchema, collector)
+	generateFunctionsAndAggregatesSQL(functionsNow, aggregatesNow, targetSchema, collector)
 	generateCreateViewsSQL(viewsLater, targetSchema, collector)
-	generateCreateFunctionsSQL(functionsLater, targetSchema, collector)
-	generateCreateAggregatesSQL(aggregatesLater, targetSchema, collector)
-	generateCreateFunctionsSQL(functionsCallingLater, targetSchema, collector)
+	generateFunctionsAndAggregatesSQL(functionsLater, aggregatesLater, targetSchema, collector)
+}
+
+// generateFunctionsAndAggregatesSQL creates functions and aggregates that may
+// depend on each other: an aggregate needs its support functions, and a
+// SQL-language function that calls an aggregate needs that aggregate. Each
+// round emits the functions that call none of the remaining aggregates, then
+// the aggregates whose support functions are all created, until nothing is
+// left. Anything that never becomes ready (a cycle PostgreSQL would reject
+// as well) is emitted as is so it still surfaces in the plan.
+func generateFunctionsAndAggregatesSQL(functions []*ir.Function, aggregates []*ir.Aggregate, targetSchema string, collector *diffCollector) {
+	for len(functions) > 0 || len(aggregates) > 0 {
+		functionsNow, functionsLater := splitFunctionsCallingAggregates(functions, aggregates)
+		aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, nil, buildFunctionLookup(functionsLater))
+		if len(functionsNow) == 0 && len(aggregatesNow) == 0 {
+			generateCreateFunctionsSQL(functions, targetSchema, collector)
+			generateCreateAggregatesSQL(aggregates, targetSchema, collector)
+			return
+		}
+		generateCreateFunctionsSQL(functionsNow, targetSchema, collector)
+		generateCreateAggregatesSQL(aggregatesNow, targetSchema, collector)
+		functions, aggregates = functionsLater, aggregatesLater
+	}
 }
 
 // splitViewsReferencingRoutines partitions views into those that can be created
@@ -3347,9 +3375,22 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // INSERT INTO table, UPDATE [ONLY] table, DELETE FROM table, TABLE table.
 // Captures the table name (possibly schema-qualified) in group 1.
 var tableRefPattern = regexp.MustCompile(
-	`(?i)(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+(?:ONLY\s+)?` +
-		`((?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*)`,
+	`(?i)(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE)\s+` +
+		// A comma-separated list of relations, each "[ONLY] [(]name[)] [[AS] alias]";
+		// the alias is only consumed when a comma follows so keywords such as
+		// WHERE or JOIN after the last item are never taken for one.
+		`((?:` + relationRefExpr + `(?:\s+(?:AS\s+)?[a-z_][a-z0-9_$]*)?\s*,\s*)*` + relationRefExpr + `)`,
 )
+
+// relationRefExpr matches one relation in a FROM list: an optional ONLY, an
+// optionally parenthesized name, possibly quoted and possibly schema-qualified.
+const relationRefExpr = `(?:ONLY\s+)?\(?` + qualifiedIdentExpr + `\)?`
+
+// qualifiedIdentExpr matches a possibly quoted, possibly schema-qualified identifier.
+const qualifiedIdentExpr = `(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*`
+
+// leadingQualifiedIdent extracts the relation name at the start of one FROM-list item.
+var leadingQualifiedIdent = regexp.MustCompile(`(?i)^` + qualifiedIdentExpr)
 
 // normalizeRelationReference converts a relation reference captured by
 // tableRefPattern, possibly quoted and possibly schema-qualified, into the

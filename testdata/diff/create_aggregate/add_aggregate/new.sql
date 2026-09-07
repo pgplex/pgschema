@@ -18,3 +18,15 @@ CREATE AGGREGATE my_agg(numeric) (
 CREATE FUNCTION first_of(vals numeric[]) RETURNS numeric
     LANGUAGE sql IMMUTABLE
     AS $$ SELECT my_agg(x) FROM unnest(vals) AS u(x) $$;
+
+-- Aggregate whose SQL transition function calls the first aggregate: the
+-- required order is my_agg -> b_sfunc -> b_agg.
+CREATE FUNCTION b_sfunc(state numeric, x numeric) RETURNS numeric
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT state + my_agg(v) FROM unnest(ARRAY[x]) AS u(v) $$;
+
+CREATE AGGREGATE b_agg(numeric) (
+    SFUNC = b_sfunc,
+    STYPE = numeric,
+    INITCOND = '0'
+);

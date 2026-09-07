@@ -1,12 +1,13 @@
-Plan: 8 to add, 2 to modify, 1 to drop.
+Plan: 9 to add, 2 to modify, 1 to drop.
 
 Summary by type:
-  functions: 3 to add, 1 to drop
+  functions: 4 to add, 1 to drop
   aggregates: 2 to add
   tables: 1 to modify
   views: 3 to add, 1 to modify
 
 Functions:
+  + active_marker
   - fn_create_user
   + fn_create_user
   + fn_pair_step
@@ -99,6 +100,15 @@ CREATE AGGREGATE agg_users_count(vw_users) (
     STYPE = bigint,
     INITCOND = '0'
 );
+
+CREATE OR REPLACE FUNCTION active_marker(
+    a vw_active
+)
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT agg_users_count(NULL::vw_users)
+$$;
 
 CREATE OR REPLACE VIEW vw_users_count AS
  SELECT agg_users_count(vw_users.*) AS n

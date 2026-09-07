@@ -1308,18 +1308,13 @@ func (i *Inspector) stripSameSchemaPrefix(typeName, routineSchema string) string
 }
 
 // stripSameSchemaPrefixFromList is stripSameSchemaPrefix for a comma-separated
-// argument list such as pg_get_function_identity_arguments output. Both the raw
-// and the quote_ident form of the schema name are handled, so a schema that
-// needs quoting (e.g. "My Schema".v) normalizes the same way as public.v.
+// argument list such as pg_get_function_identity_arguments output. It strips a
+// schema qualifier only where an identifier token equal to the schema (bare or
+// quote_ident form) directly precedes a dot, so a schema that needs quoting
+// ("MySchema".v) normalizes like public.v while quoted names that merely
+// contain the schema text ("public.foo") are left intact.
 func (i *Inspector) stripSameSchemaPrefixFromList(list, schema string) string {
-	if list == "" || schema == "" {
-		return list
-	}
-	list = StripSchemaPrefixFromBody(list, schema)
-	if quoted := QuoteIdentifier(schema); quoted != schema {
-		list = StripSchemaPrefixFromBody(list, quoted)
-	}
-	return list
+	return StripSchemaQualifiers(list, schema)
 }
 
 // oidToTypeName maps PostgreSQL type OIDs to standard SQL type names.

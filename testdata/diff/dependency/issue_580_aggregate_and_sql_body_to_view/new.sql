@@ -130,3 +130,15 @@ CREATE AGGREGATE sum_ob("Order By V") (
     STYPE = integer,
     INITCOND = '0'
 );
+
+-- Comma-separated FROM list and the parenthesized ONLY form must both be
+-- recognized as references to v.
+CREATE FUNCTION count_list_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM t, v $$;
+
+CREATE FUNCTION count_paren_v()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT count(*) FROM ONLY (v) $$;

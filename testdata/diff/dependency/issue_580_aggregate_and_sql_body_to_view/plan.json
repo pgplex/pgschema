@@ -51,6 +51,12 @@
           "path": "public.acc_with_v"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION count_list_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM t, v\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_list_v"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION count_my_view()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM \"My View\"\n$$;",
           "type": "function",
           "operation": "create",
@@ -61,6 +67,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.count_only_v"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION count_paren_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM ONLY (v)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_paren_v"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION count_spaced_v()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT count(*) FROM public . v\n$$;",
