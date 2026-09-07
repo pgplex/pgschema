@@ -25,6 +25,7 @@ const (
 	DiffTypeTableColumnComment
 	DiffTypeTableIndexComment
 	DiffTypeTablePersistence
+	DiffTypeTableData
 	DiffTypeView
 	DiffTypeViewTrigger
 	DiffTypeViewComment
@@ -70,6 +71,8 @@ func (d DiffType) String() string {
 		return "table.index.comment"
 	case DiffTypeTablePersistence:
 		return "table.persistence"
+	case DiffTypeTableData:
+		return "table.data"
 	case DiffTypeView:
 		return "view"
 	case DiffTypeViewTrigger:
@@ -146,6 +149,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeTableIndexComment
 	case "table.persistence":
 		*d = DiffTypeTablePersistence
+	case "table.data":
+		*d = DiffTypeTableData
 	case "view":
 		*d = DiffTypeView
 	case "view.trigger":
@@ -272,6 +277,7 @@ type ddlDiff struct {
 	droppedTables             []*ir.Table
 	modifiedTables            []*tableDiff
 	allNewTables              map[string]*ir.Table
+	dataDiffs                 []*tableDataDiff // row changes of data-managed tables
 	addedViews                []*ir.View
 	droppedViews              []*ir.View
 	modifiedViews             []*viewDiff
@@ -637,6 +643,9 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 	}
 
 	diff.allNewTables = newTables
+
+	// Compare rows of data-managed tables
+	diff.dataDiffs = diffTableData(oldTables, newTables)
 
 	// Compare functions across all schemas
 	oldFunctions := make(map[string]*ir.Function)
@@ -1594,6 +1603,9 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 
 	// Finally: Modify operations
 	d.generateModifySQL(targetSchema, collector, preDroppedViews)
+
+	// Rows of data-managed tables, once every table, column, and constraint exists
+	generateDataSQL(d.dataDiffs, targetSchema, collector)
 }
 
 // generatePreDropMaterializedViewsSQL drops materialized views that depend on

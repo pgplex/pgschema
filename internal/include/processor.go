@@ -9,10 +9,12 @@ import (
 	"strings"
 )
 
-// Processor handles processing SQL files with \i include directives
+// Processor handles processing SQL files with \i include directives and
+// \copy data directives.
 type Processor struct {
 	baseDir string
 	visited map[string]bool
+	copies  []*CopyDirective
 }
 
 // NewProcessor creates a new include processor for the given base directory
@@ -23,10 +25,27 @@ func NewProcessor(baseDir string) *Processor {
 	}
 }
 
-// ProcessFile processes a SQL file and resolves all \i include directives
+// CopyTables returns the distinct unqualified table names targeted by the
+// \copy directives found by the last ProcessFile call, in first-seen order.
+func (p *Processor) CopyTables() []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, d := range p.copies {
+		if !seen[d.Table] {
+			seen[d.Table] = true
+			names = append(names, d.Table)
+		}
+	}
+	return names
+}
+
+// ProcessFile processes a SQL file and resolves all \i include directives.
+// \copy directives are replaced by marker lines that the desired-state
+// provider executes as COPY ... FROM STDIN.
 func (p *Processor) ProcessFile(filename string) (string, error) {
 	// Reset visited map for each top-level file processing
 	p.visited = make(map[string]bool)
+	p.copies = nil
 	
 	// Get absolute path to ensure consistent path handling
 	absPath, err := filepath.Abs(filename)
@@ -113,6 +132,17 @@ func (p *Processor) processIncludes(content string, currentDir string) (string, 
 				includedLines = includedLines[:len(includedLines)-1]
 			}
 			resultLines = append(resultLines, includedLines...)
+		} else if directive, ok, err := parseCopyLine(line); ok || err != nil {
+			if err != nil {
+				return "", err
+			}
+			resolvedPath, _, err := p.resolveIncludePath(directive.Path, currentDir)
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve \\copy path %s: %w", directive.Path, err)
+			}
+			directive.Path = resolvedPath
+			p.copies = append(p.copies, directive)
+			resultLines = append(resultLines, EncodeCopyMarker(directive))
 		} else {
 			// Regular line, add as-is
 			resultLines = append(resultLines, line)

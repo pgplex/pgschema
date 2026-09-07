@@ -188,6 +188,12 @@ func (c *IgnoreConfig) ShouldIgnoreDefaultPrivilege(grantee string) bool {
 // Patterns support wildcards (*) and negation (!)
 // Negation patterns (starting with !) take precedence over inclusion patterns
 func (c *IgnoreConfig) shouldIgnore(name string, patterns []string) bool {
+	return matchPatterns(name, patterns)
+}
+
+// matchPatterns reports whether name matches the glob patterns. Negation
+// patterns (starting with !) take precedence over inclusion patterns.
+func matchPatterns(name string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return false
 	}

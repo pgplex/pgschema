@@ -1,0 +1,52 @@
+---
+title: "Config (pgschema.toml)"
+---
+
+`pgschema.toml` is the project configuration file. It declares which tables are [reference tables](/workflow/reference-data), so that `dump` exports their rows and `plan` and `apply` keep them in sync.
+
+## Overview
+
+<Note>
+The `pgschema.toml` file is automatically loaded when present in the current directory. No flag is needed.
+</Note>
+
+Create a `pgschema.toml` file in your project directory:
+
+```toml
+[data]
+tables = ["country", "currency", "ref_*", "!ref_archive"]
+```
+
+## `[data]`
+
+<ParamField path="tables" type="string[]" default="[]">
+  Glob patterns for tables whose rows pgschema manages. Patterns are matched against unqualified table names in the target schema, with the same rules as [`.pgschemaignore`](/cli/ignore): `*` matches any characters, `?` matches one, and a leading `!` negates a pattern.
+</ParamField>
+
+Listing a table means:
+
+- **`dump`** writes its rows to `data/<table>.csv` and appends a [`\copy`](/syntax/copy) directive to the schema file. No flag is needed, but `--file` is required so the CSV files have a location.
+- **`plan`** and **`apply`** compare its rows with the target database and generate `INSERT`, `UPDATE`, and `DELETE` steps. Rows in the database that are not in the file are deleted.
+- The table must have a primary key. Rows are matched by it.
+
+## Consistency Rules
+
+The config and the schema files must agree, so that reading the schema alone shows exactly which tables are managed:
+
+- **Every listed table needs a `\copy` directive.** If a table matches `[data]` but the schema has no directive for it, `plan` and `apply` fail:
+
+  ```
+  Error: table "country" is listed in pgschema.toml but has no \copy directive; run pgschema dump to bootstrap it
+  ```
+
+  This makes "list the table, then dump" the only way to start managing a table, and prevents a plan that would delete every row of a table you have not exported yet.
+
+- **Every `\copy` directive needs a listed table.** A directive for a table that does not match `[data]` is an error, since it is almost always a forgotten config line.
+
+- **A table cannot be both managed and ignored.** A table that matches `[data]` here and `[tables]` in `.pgschemaignore` is an error.
+
+A managed table that must be empty is a directive whose CSV contains only the header line. Listing a table never implies emptiness on its own.
+
+## Relationship to `.pgschemaignore`
+
+Ignore patterns stay in [`.pgschemaignore`](/cli/ignore). `pgschema.toml` holds project configuration that is not about exclusion. Both files are loaded from the current directory.

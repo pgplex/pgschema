@@ -3,7 +3,11 @@ title: "Data Migration"
 mode: "wide"
 ---
 
-pgschema manages schema state, not data. When a schema change requires touching existing data (e.g. backfilling a new column), declare the end state in your schema file, then edit the generated plan to insert the data migration steps.
+pgschema manages schema state, not user data. When a schema change requires touching existing data (e.g. backfilling a new column), declare the end state in your schema file, then edit the generated plan to insert the data migration steps.
+
+<Note>
+Small lookup and configuration tables are the exception: keep their rows in CSV files declared with [`\copy`](/syntax/copy) and pgschema plans the row changes for you. See [Reference Data](/workflow/reference-data). This page covers one-off changes to data that pgschema does not own.
+</Note>
 
 This works because the plan's `source_fingerprint` pins the **database state** the plan was generated against, not the plan's SQL. You can freely edit the steps; `pgschema apply` still detects if the database has drifted since planning.
 
@@ -88,4 +92,4 @@ CREATE TABLE users (
 For large tables, run the backfill in batches outside the transaction to avoid long locks. Put `ADD COLUMN` in one plan, batch the `UPDATE` with your own tooling, then run a second plan for `SET NOT NULL`. See [Online DDL](/workflow/online-ddl) for lock-aware patterns.
 </Tip>
 
-The same technique applies to any change the diff engine cannot infer, such as rewriting a rename from `DROP` + `ADD` into `ALTER TABLE ... RENAME`, or seeding lookup-table rows alongside a new table.
+The same technique applies to any change the diff engine cannot infer, such as rewriting a rename from `DROP` + `ADD` into `ALTER TABLE ... RENAME`, or resolving a `DELETE` on a [reference table](/workflow/reference-data) that is blocked by a foreign key from user data.

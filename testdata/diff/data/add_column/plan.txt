@@ -1,0 +1,19 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ country
+    + region (column)
+    ~ IL (row)
+    ~ US (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE country ADD COLUMN region text DEFAULT 'unknown' NOT NULL;
+
+UPDATE country SET region = 'EMEA' WHERE code = 'IL';
+
+UPDATE country SET region = 'unknown' WHERE code = 'US';

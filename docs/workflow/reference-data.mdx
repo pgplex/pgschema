@@ -1,0 +1,170 @@
+---
+title: "Reference Data"
+---
+
+Most applications keep a handful of small tables whose rows are part of the application rather than user data: countries, currencies, statuses, feature flags, plan tiers, permission catalogs. A release that adds a status or renames a plan needs those rows changed in lockstep with the schema.
+
+pgschema manages these rows the same way it manages schema objects. You list the tables in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy) directives, `plan` diffs them against the target database, and `apply` runs the resulting `INSERT`, `UPDATE`, and `DELETE` statements in the same transaction as the DDL.
+
+<Note>
+This is for **reference data**: small tables that the application reads and the deployment owns. For backfills and other one-off changes to user data, see [Data Migration](/workflow/data-migration).
+</Note>
+
+## Workflow
+
+<Steps>
+  <Step title="List the tables">
+    Create `pgschema.toml` in your project directory and list the reference tables. Patterns use the same glob rules as `.pgschemaignore`:
+
+    ```toml
+    [data]
+    tables = ["plan_tier", "feature_flag"]
+    ```
+
+    Listed tables must have a primary key. Rows are matched by it, so use natural, stable keys (`'US'`, `'enterprise'`) rather than `serial` values that differ between environments.
+  </Step>
+
+  <Step title="Dump">
+    Run `dump` to export the current rows. `--file` is required because the CSV files are written next to the schema:
+
+    ```bash
+    pgschema dump --host localhost --db myapp --user postgres \
+      --file schema/main.sql --multi-file
+    ```
+
+    Each listed table gets `data/<table>.csv`, sorted by primary key, and a `\copy` directive at the end of the main file after every other object, parent tables first. Data and schema stay in separate files:
+
+    ```
+    schema/
+    ├── main.sql
+    ├── tables/
+    │   ├── plan_tier.sql
+    │   └── feature_flag.sql
+    └── data/
+        ├── plan_tier.csv
+        └── feature_flag.csv
+    ```
+
+    `main.sql`:
+
+    ```sql
+    \i tables/plan_tier.sql
+    \i tables/feature_flag.sql
+
+    \copy plan_tier (id, name, monthly_price_cents, seat_limit) FROM 'data/plan_tier.csv' WITH (FORMAT csv, HEADER)
+    \copy feature_flag (key, enabled_for_tier, description) FROM 'data/feature_flag.csv' WITH (FORMAT csv, HEADER)
+    ```
+
+    `data/plan_tier.csv`:
+
+    ```csv
+    id,name,monthly_price_cents,seat_limit
+    enterprise,Enterprise,19900,
+    free,Free,0,3
+    team,Team,4900,25
+    ```
+
+    An unquoted empty field, like the `seat_limit` of the enterprise tier, is `NULL`. A quoted empty field `""` is an empty string.
+  </Step>
+
+  <Step title="Edit">
+    Change the CSV files. They are ordinary spreadsheets: open one in any spreadsheet application, edit the cells, and save as CSV. Keep the header line so the column order matches the directive.
+
+    To declare that a table must be empty, leave only the header line.
+  </Step>
+
+  <Step title="Plan and apply">
+    ```bash
+    pgschema plan --host localhost --db myapp --user postgres --file schema/main.sql
+    ```
+
+    Row changes appear under their table alongside column changes:
+
+    ```
+    Plan: 1 to modify.
+
+    Summary by type:
+      tables: 1 to modify
+
+    Tables:
+      ~ plan_tier
+        + starter (row)
+        ~ team (row)
+        - legacy (row)
+
+    DDL to be executed:
+    --------------------------------------------------
+
+    DELETE FROM plan_tier WHERE id = 'legacy';
+
+    INSERT INTO plan_tier (id, name, monthly_price_cents, seat_limit) VALUES ('starter', 'Starter', 1900, 10);
+
+    UPDATE plan_tier SET seat_limit = 50 WHERE id = 'team';
+    ```
+
+    In JSON output each row is a step of type `table.data`, with the primary key in the path, so it can be inspected or edited like any other step before apply:
+
+    ```json
+    {
+      "sql": "UPDATE plan_tier SET seat_limit = 50 WHERE id = 'team';",
+      "type": "table.data",
+      "operation": "alter",
+      "path": "public.plan_tier.team"
+    }
+    ```
+
+    Apply as usual. Data steps run in the same transaction as the schema steps, so a failed `INSERT` rolls back the `ALTER TABLE` that preceded it:
+
+    ```bash
+    pgschema apply --host localhost --db myapp --user postgres --plan plan.json
+    ```
+  </Step>
+</Steps>
+
+A listed table is a **managed table**: pgschema owns all of its rows. Rows that exist in the database but not in the file are deleted by the next plan. A table that is not listed is not touched, even if it has rows. To stop managing a table, remove it from `pgschema.toml` and delete its directive and CSV.
+
+## Writing Directives by Hand
+
+You do not have to start from a dump. A directive you write yourself works the same way, as long as the table is listed:
+
+```sql
+\copy country (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)
+```
+
+Place directives after the tables, constraints, and triggers they depend on. Rows load into the desired state at the point the directive appears, so a parent table's rows must come before a child table's, and a trigger must exist before the rows it should transform. Dump puts all directives last for this reason.
+
+## How Rows Are Compared
+
+pgschema does not parse the values in your CSV files. It streams them into the temporary plan database with PostgreSQL's own `COPY`, along with the rest of the schema, then reads the rows back from both databases with the same query. This means:
+
+- Any input format or option PostgreSQL's `COPY` accepts is valid in the directive.
+- Column defaults, triggers, and generated columns take effect before comparison. A column you leave out of the column list compares as its default, not as missing.
+- Values are compared in PostgreSQL's canonical text form for the column type. `1.50` and `1.5` in a `numeric(10,2)` column are equal; `2024-01-01T00:00:00Z` and `2024-01-01 00:00:00+00` in a `timestamptz` column are equal.
+- The comparison covers the columns of the desired table. A column added in the same plan is set on every existing row after the `ADD COLUMN` step; a column dropped in the same plan is ignored.
+- `NULL` and an empty string are different values.
+
+## Ordering
+
+Data steps run after the schema steps that create or alter tables and constraints, so new columns and new tables exist before rows are written to them. Within the data steps:
+
+1. `DELETE` statements run first, child tables before parent tables
+2. `INSERT` statements run next, parent tables before child tables
+3. `UPDATE` statements run last
+
+Foreign keys between managed tables are satisfied by this order. A `DELETE` blocked by a foreign key from an unmanaged table fails the transaction, which is the intended outcome: resolve it by editing the plan, as described in [Data Migration](/workflow/data-migration).
+
+## Guardrails
+
+- **Explicit opt-in**. Only a `[data]` entry in `pgschema.toml` makes a table managed. Rows already in the database never do.
+- **Config and schema must agree**. A listed table without a `\copy` directive fails `plan` and `apply` with a message pointing at `dump`, so you cannot plan a table you have not exported yet. A directive for a table that is not listed is an error too. See [Config](/cli/config#consistency-rules).
+- **Deletes are visible**. Every removed row is a separate `DELETE` in the plan, listed by primary key, and apply asks for approval unless `--auto-approve` is set.
+- **Ignored tables**. A table cannot be both listed in `pgschema.toml` and matched by `.pgschemaignore`.
+
+## Limitations
+
+- **`INSERT` does not make a table managed.** `INSERT` statements in schema files run while building the desired state. Their rows count for listed tables and are discarded for everything else, as before.
+- **Primary key required.** Tables without a primary key cannot be managed. Unique constraints are not used for matching.
+- **Sequences are not advanced.** Inserting explicit values into a `serial` or identity column does not move the sequence. If the application also inserts into a managed table, prefer natural keys or reset the sequence yourself.
+- **Not fingerprinted.** The `source_fingerprint` that guards against concurrent changes covers the schema only. A row changed in the database between `plan` and `apply` is overwritten by the plan or shows up in the next plan.
+- **Partitioned tables** are managed through the parent table. Individual partitions cannot carry their own directive.
+- **Large tables** are out of scope by design. The feature is tuned for tables with hundreds or a few thousand rows, where one statement per row keeps the plan reviewable.

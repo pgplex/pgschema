@@ -1,0 +1,112 @@
+package plan
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/pgplex/pgschema/testutil"
+)
+
+// TestPlanReferenceDataConsistency covers the rules that keep pgschema.toml
+// and the schema files in agreement.
+func TestPlanReferenceDataConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	ctx := context.Background()
+
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, `
+		CREATE TABLE country (code text PRIMARY KEY, name text NOT NULL);
+		INSERT INTO country VALUES ('US', 'United States');
+		CREATE TABLE keyless (code text, name text);
+	`); err != nil {
+		t.Fatalf("Failed to set up schema: %v", err)
+	}
+
+	provider := testutil.SetupPostgres(t)
+	defer provider.Stop()
+
+	const ddl = "CREATE TABLE country (code text PRIMARY KEY, name text NOT NULL);\nCREATE TABLE keyless (code text, name text);\n"
+	const directive = "\\copy country (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)\n"
+
+	run := func(t *testing.T, schemaSQL, config, ignore string) error {
+		t.Helper()
+		dir := t.TempDir()
+		mustWrite(t, filepath.Join(dir, "schema.sql"), schemaSQL)
+		mustWrite(t, filepath.Join(dir, "data", "country.csv"), "code,name\nUS,United States\n")
+		if config != "" {
+			mustWrite(t, filepath.Join(dir, "pgschema.toml"), config)
+		}
+		if ignore != "" {
+			mustWrite(t, filepath.Join(dir, ".pgschemaignore"), ignore)
+			t.Chdir(dir)
+		}
+		_, err := GeneratePlan(&PlanConfig{
+			Host: host, Port: port, DB: dbname, User: user, Password: password,
+			Schema: "public", File: filepath.Join(dir, "schema.sql"), ApplicationName: "pgschema", ConfigDir: dir,
+		}, provider)
+		return err
+	}
+
+	t.Run("listed and declared", func(t *testing.T) {
+		if err := run(t, ddl+directive, "[data]\ntables = [\"country\"]\n", ""); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("listed without directive", func(t *testing.T) {
+		err := run(t, ddl, "[data]\ntables = [\"country\"]\n", "")
+		if err == nil || !strings.Contains(err.Error(), `has no \copy directive`) {
+			t.Fatalf("expected missing directive error, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "pgschema dump") {
+			t.Errorf("error should point at dump for bootstrapping: %v", err)
+		}
+	})
+
+	t.Run("directive without listing", func(t *testing.T) {
+		err := run(t, ddl+directive, "", "")
+		if err == nil || !strings.Contains(err.Error(), "not listed under [data]") {
+			t.Fatalf("expected unlisted table error, got %v", err)
+		}
+	})
+
+	t.Run("directive for table listed by a different pattern", func(t *testing.T) {
+		err := run(t, ddl+directive, "[data]\ntables = [\"ref_*\"]\n", "")
+		if err == nil || !strings.Contains(err.Error(), "not listed under [data]") {
+			t.Fatalf("expected unlisted table error, got %v", err)
+		}
+	})
+
+	t.Run("listed table without primary key", func(t *testing.T) {
+		err := run(t, ddl+directive, "[data]\ntables = [\"country\", \"keyless\"]\n", "")
+		if err == nil || !strings.Contains(err.Error(), "no primary key") {
+			t.Fatalf("expected primary key error, got %v", err)
+		}
+	})
+
+	t.Run("listed and ignored", func(t *testing.T) {
+		err := run(t, ddl+directive, "[data]\ntables = [\"country\"]\n", "[tables]\npatterns = [\"country\"]\n")
+		if err == nil || !strings.Contains(err.Error(), "cannot be both managed and ignored") {
+			t.Fatalf("expected conflict error, got %v", err)
+		}
+	})
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}

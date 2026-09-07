@@ -139,6 +139,7 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
   - Main file with header and include statements
   - Separate directories for different object types (tables, views, functions, etc.)
   - Each database object in its own file
+  - One `data/<table>.csv` file per table listed in [`pgschema.toml`](/cli/config), declared last
   
   Requires `--file` to specify the main output file path.
 </ParamField>
@@ -148,6 +149,7 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
 
   For single-file mode, this is optional (defaults to stdout).
   For multi-file mode, this specifies the main file path.
+  Required when [`pgschema.toml`](/cli/config) lists reference tables, since their CSV files are written to `data/` next to the output file.
 </ParamField>
 
 <ParamField path="--no-comments" type="boolean" default="false">
@@ -165,6 +167,10 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
 ## Ignoring Objects
 
 You can exclude specific database objects from dumps using a `.pgschemaignore` file. See [Ignore (.pgschemaignore)](/cli/ignore) for complete documentation.
+
+## Reference Tables
+
+Tables listed under `[data]` in [`pgschema.toml`](/cli/config) have their rows dumped to CSV files alongside the schema. See [Reference Data](/workflow/reference-data) for the workflow and the [example](#reference-data) below.
 
 ## Examples
 
@@ -275,6 +281,52 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ```
+
+### Reference Data
+
+With a `pgschema.toml` in the current directory:
+
+```toml
+[data]
+tables = ["country"]
+```
+
+```bash
+pgschema dump \
+  --host localhost \
+  --db myapp \
+  --user postgres \
+  --file schema.sql
+```
+
+Listed tables get a `\copy` directive after all other objects in `schema.sql`:
+
+```sql
+--
+-- Name: country; Type: TABLE; Schema: -; Owner: -
+--
+
+CREATE TABLE IF NOT EXISTS country (
+    code text PRIMARY KEY,
+    name text NOT NULL
+);
+
+--
+-- Name: country; Type: TABLE DATA; Schema: -; Owner: -
+--
+
+\copy country (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)
+```
+
+and their rows go to `data/country.csv` beside it:
+
+```csv
+code,name
+IL,Israel
+US,United States
+```
+
+With `--multi-file`, the directive is appended to the main file after every `\i` include. Without a `pgschema.toml`, or with no matching tables, dump output is unchanged and contains no rows. See [\copy](/syntax/copy) for the format and [Reference Data](/workflow/reference-data) for the workflow.
 
 ## Schema Qualification
 

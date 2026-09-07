@@ -193,6 +193,9 @@ type PlanConfig struct {
 	PlanDBPassword string
 	SSLMode        string
 	PlanDBSSLMode  string
+	// ConfigDir is where pgschema.toml is looked up. Empty means the current
+	// directory, which is what the CLI uses; tests point it at a fixture.
+	ConfigDir string
 }
 
 // CreateDesiredStateProvider creates either an embedded PostgreSQL instance or connects to an external database
@@ -276,17 +279,40 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		return nil, fmt.Errorf("failed to load .pgschemaignore: %w", err)
 	}
 
-	// Process desired state file with include directives
+	// Load project configuration (reference tables)
+	dataConfig, err := util.LoadDataConfig(config.ConfigDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process desired state file with include and \copy directives
 	processor := include.NewProcessor(filepath.Dir(config.File))
 	desiredState, err := processor.ProcessFile(config.File)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process desired state schema file: %w", err)
 	}
+	copyTables := processor.CopyTables()
+
+	// Every \copy directive must target a listed reference table.
+	for _, name := range copyTables {
+		if !dataConfig.IsDataTable(name) {
+			return nil, fmt.Errorf("\\copy directive loads rows into table %q, but the table is not listed under [data] in %s; add it there to manage its rows", name, util.ConfigFileName)
+		}
+	}
 
 	// Get current state from target database
-	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
+	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig, dataConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current state from database: %w", err)
+	}
+	if dataConfig != nil {
+		names := copyTables
+		if dbSchema, ok := currentStateIR.Schemas[config.Schema]; ok {
+			names = append(dbSchema.TableNames(), names...)
+		}
+		if err := util.ValidateDataAgainstIgnore(dataConfig, ignoreConfig, names); err != nil {
+			return nil, err
+		}
 	}
 
 	// Compute fingerprint of current database state
@@ -359,9 +385,16 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 			providerSSLMode = "prefer"
 		}
 	}
-	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig)
+	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig, dataConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get desired state: %w", err)
+	}
+
+	// Every listed reference table in the desired state must have a \copy
+	// directive, so the schema files alone show which tables are managed and
+	// a plan cannot delete rows of a table that was never exported.
+	if err := validateDataDirectives(desiredStateIR, schemaToInspect, copyTables); err != nil {
+		return nil, err
 	}
 
 	// Normalize schema names in the IR from temporary schema to target schema.
@@ -853,4 +886,24 @@ func ResetFlags() {
 	planDBPassword = ""
 	planSSLMode = "prefer"
 	planDBSSLMode = "prefer"
+}
+
+// validateDataDirectives checks that every data-managed table in the desired
+// state is loaded by a \copy directive.
+func validateDataDirectives(desiredIR *ir.IR, schemaName string, copyTables []string) error {
+	dbSchema, ok := desiredIR.Schemas[schemaName]
+	if !ok {
+		return nil
+	}
+	declared := make(map[string]bool, len(copyTables))
+	for _, name := range copyTables {
+		declared[name] = true
+	}
+	for _, name := range dbSchema.TableNames() {
+		table := dbSchema.Tables[name]
+		if table.DataManaged && !declared[name] {
+			return fmt.Errorf("table %q is listed under [data] in %s but has no \\copy directive; run pgschema dump to bootstrap it", name, util.ConfigFileName)
+		}
+	}
+	return nil
 }

@@ -97,6 +97,10 @@ pgschema uses fingerprinting to detect if the database schema has changed since 
 - If the schema has changed (concurrent modifications), the apply operation will fail safely
 - This prevents conflicts and ensures migrations are applied to the expected schema state
 
+### Can pgschema manage table data?
+
+Only for reference tables. List the table under `[data]` in [`pgschema.toml`](/cli/config), run `dump` to export its rows to a CSV file loaded by a [`\copy`](/syntax/copy) directive, and from then on `plan` generates the `INSERT`, `UPDATE`, and `DELETE` statements needed to match the file. Tables that are not listed are never touched, and `INSERT` statements for them are discarded while building the desired state, as before. See [Reference Data](/workflow/reference-data). For backfills and other one-off changes to user data, see [Data Migration](/workflow/data-migration).
+
 ### Can I use pgschema for database comparisons?
 
 Yes! You can compare schemas across databases:

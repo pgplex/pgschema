@@ -91,6 +91,7 @@ pgschema covers all the schema objects developers use in real-world Postgres app
 | **Privileges** | GRANT/REVOKE for tables (including column-level), sequences, functions, procedures, types/domains; WITH GRANT OPTION |
 | **Default Privileges** | ALTER DEFAULT PRIVILEGES for tables, sequences, functions, types |
 | **Comments** | COMMENT ON for tables, columns, views, materialized views, functions, procedures, aggregates, indexes |
+| **Reference Data** | Rows of lookup/config tables kept in CSV files declared with `\copy`, diffed by primary key into INSERT/UPDATE/DELETE |
 
 See [Unsupported](https://www.pgschema.com/syntax/unsupported) for objects that are explicitly out of scope.
 

@@ -1,0 +1,4 @@
+id,name,ratio,tags,payload,updated_at,blob,note
+1,alpha,1.50,"{a,b}","{""k"": 1}",2024-01-01 00:00:00+00,\x00ff,it's
+2,beta,,,,,,""
+3,gamma,2,"{c}","{""z"": [1, 2]}",2024-06-01 12:30:00+02,\xdead,

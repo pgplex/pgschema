@@ -1,0 +1,26 @@
+Plan: 2 to modify.
+
+Summary by type:
+  tables: 2 to modify
+
+Tables:
+  ~ feature_flag
+    - old_flag,legacy (row)
+    + sso,enterprise (row)
+  ~ plan_tier
+    + enterprise (row)
+    - legacy (row)
+    ~ team (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+DELETE FROM feature_flag WHERE key = 'old_flag' AND tier = 'legacy';
+
+DELETE FROM plan_tier WHERE id = 'legacy';
+
+INSERT INTO plan_tier (id, name, seat_limit) VALUES ('enterprise', 'Enterprise', NULL);
+
+INSERT INTO feature_flag (key, tier, description) VALUES ('sso', 'enterprise', 'Single sign-on');
+
+UPDATE plan_tier SET seat_limit = 50 WHERE id = 'team';

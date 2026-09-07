@@ -127,6 +127,9 @@ type ApplyConfig struct {
 	// Plan database configuration (needed when GeneratePlan checks provider SSL mode)
 	PlanDBHost    string
 	PlanDBSSLMode string
+	// ConfigDir is where pgschema.toml is looked up (File Mode). Empty means
+	// the current directory.
+	ConfigDir string
 }
 
 // ApplyMigration applies a migration plan to update a database schema.
@@ -161,6 +164,7 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 			SSLMode:         config.SSLMode,
 			PlanDBHost:      config.PlanDBHost,
 			PlanDBSSLMode:   config.PlanDBSSLMode,
+			ConfigDir:       config.ConfigDir,
 		}
 
 		// Generate plan using shared logic
@@ -457,7 +461,7 @@ func RunApply(cmd *cobra.Command, args []string) error {
 func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, db, user, password, sslmode, schema, applicationName string, ignoreConfig *ir.IgnoreConfig) error {
 	// Get current state from target database with ignore config
 	// This ensures ignored objects are excluded from fingerprint calculation
-	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig)
+	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig, nil)
 	if err != nil {
 		return fmt.Errorf("failed to get current database state for fingerprint validation: %w", err)
 	}

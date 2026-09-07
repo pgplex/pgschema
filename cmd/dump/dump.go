@@ -1,6 +1,7 @@
 package dump
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -38,6 +39,9 @@ type DumpConfig struct {
 	NoComments    bool
 	SSLMode       string
 	QualifySchema bool
+	// ConfigDir is where pgschema.toml is looked up. Empty means the current
+	// directory.
+	ConfigDir string
 }
 
 var DumpCmd = &cobra.Command{
@@ -78,10 +82,41 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 		return "", fmt.Errorf("failed to load .pgschemaignore: %w", err)
 	}
 
-	// Get IR from database using the shared utility
-	schemaIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, "pgschema", ignoreConfig)
+	// Load project configuration (reference tables)
+	dataConfig, err := util.LoadDataConfig(config.ConfigDir)
+	if err != nil {
+		return "", err
+	}
+
+	conn, err := util.Connect(&util.ConnectionConfig{
+		Host: config.Host, Port: config.Port, Database: config.DB, User: config.User,
+		Password: config.Password, SSLMode: config.SSLMode, ApplicationName: "pgschema",
+	})
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	ctx := context.Background()
+
+	// Inspect the schema. Reference tables are only marked, not loaded: their
+	// rows are exported below with COPY straight into CSV files.
+	schemaIR, err := ir.NewInspector(conn, ignoreConfig).WithDataConfig(dataConfig, false).BuildIR(ctx, config.Schema)
 	if err != nil {
 		return "", fmt.Errorf("failed to get database schema: %w", err)
+	}
+
+	// Reference tables: rows go to data/<table>.csv beside the output file and
+	// a \copy directive is appended after every other object.
+	dataTables := dump.DataTables(schemaIR, config.Schema)
+	if len(dataTables) > 0 {
+		if dbSchema, ok := schemaIR.Schemas[config.Schema]; ok {
+			if err := util.ValidateDataAgainstIgnore(dataConfig, ignoreConfig, dbSchema.TableNames()); err != nil {
+				return "", err
+			}
+		}
+		if config.File == "" {
+			return "", fmt.Errorf("%s lists reference tables, so --file is required: their rows are written to %s/ next to the output file", util.ConfigFileName, dump.DataDir)
+		}
 	}
 
 	// Create an empty schema for comparison to generate a dump diff
@@ -92,6 +127,10 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 
 	// Create dump formatter
 	formatter := dump.NewDumpFormatter(schemaIR.Metadata.DatabaseVersion, config.Schema, config.NoComments, config.QualifySchema)
+	formatter.SetDataTables(dataTables)
+	if err := formatter.WriteDataFiles(ctx, conn, dataTables, config.File); err != nil {
+		return "", err
+	}
 
 	if config.MultiFile {
 		// Multi-file mode - output to files
@@ -100,11 +139,17 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 			return "", fmt.Errorf("failed to create multi-file output: %w", err)
 		}
 		return "", nil
-	} else {
-		// Single file mode - return output as string
-		output := formatter.FormatSingleFile(diffs)
-		return output, nil
 	}
+
+	// Single file mode - return output as string, or write it to --file
+	output := formatter.FormatSingleFile(diffs)
+	if config.File != "" {
+		if err := os.WriteFile(config.File, []byte(output), 0644); err != nil {
+			return "", fmt.Errorf("failed to write %s: %w", config.File, err)
+		}
+		return "", nil
+	}
+	return output, nil
 }
 
 func runDump(cmd *cobra.Command, args []string) error {

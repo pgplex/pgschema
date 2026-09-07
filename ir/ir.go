@@ -60,13 +60,13 @@ type Table struct {
 	Dependencies      []TableDependency      `json:"dependencies"`
 	Comment           string                 `json:"comment,omitempty"`
 	IsPartitioned     bool                   `json:"is_partitioned"`
-	PartitionStrategy string                 `json:"partition_strategy,omitempty"` // RANGE, LIST, HASH
-	PartitionKey      string                 `json:"partition_key,omitempty"`      // Column(s) used for partitioning
-	PartitionOf       string                 `json:"partition_of,omitempty"`       // Parent table name (partition children)
+	PartitionStrategy string                 `json:"partition_strategy,omitempty"`  // RANGE, LIST, HASH
+	PartitionKey      string                 `json:"partition_key,omitempty"`       // Column(s) used for partitioning
+	PartitionOf       string                 `json:"partition_of,omitempty"`        // Parent table name (partition children)
 	PartitionOfSchema string                 `json:"partition_of_schema,omitempty"` // Parent table schema (partition children)
-	PartitionBound    string                 `json:"partition_bound,omitempty"`    // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
-	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`       // LIKE clauses in CREATE TABLE
-	Unlogged          bool                   `json:"unlogged,omitempty"`           // True for UNLOGGED tables
+	PartitionBound    string                 `json:"partition_bound,omitempty"`     // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
+	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`        // LIKE clauses in CREATE TABLE
+	Unlogged          bool                   `json:"unlogged,omitempty"`            // True for UNLOGGED tables
 	// AllConstraintNames records every constraint name present on the table in
 	// the database, including constraints not represented in the IR (NOT NULL
 	// constraints on PG18+, redundant CHECK (col IS NOT NULL) constraints,
@@ -75,6 +75,12 @@ type Table struct {
 	// schema definition, so it is excluded from serialization (and thereby
 	// from fingerprints and plan JSON).
 	AllConstraintNames map[string]bool `json:"-"`
+	// DataManaged is true when the table matches [data] in pgschema.toml and
+	// its rows are part of the desired state. Rows holds those rows, in
+	// DataColumns() order. Both are excluded from serialization, and therefore
+	// from fingerprints and plan JSON.
+	DataManaged bool   `json:"-"`
+	Rows        []*Row `json:"-"`
 }
 
 // Column represents a table column
@@ -287,9 +293,9 @@ type Index struct {
 type IndexColumn struct {
 	Name      string `json:"name"`
 	Position  int    `json:"position"`
-	Direction string `json:"direction,omitempty"`   // ASC, DESC
-	NullOrder string `json:"null_order,omitempty"`  // NULLS FIRST, NULLS LAST (only when non-default)
-	Operator  string `json:"operator,omitempty"`    // operator class
+	Direction string `json:"direction,omitempty"`  // ASC, DESC
+	NullOrder string `json:"null_order,omitempty"` // NULLS FIRST, NULLS LAST (only when non-default)
+	Operator  string `json:"operator,omitempty"`   // operator class
 }
 
 // IndexType represents different types of database indexes

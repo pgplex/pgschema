@@ -94,8 +94,10 @@ func ValidateSSLMode(mode string) error {
 	}
 }
 
-// GetIRFromDatabase gets the IR from a database with ignore configuration
-func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
+// GetIRFromDatabase gets the IR from a database with ignore configuration.
+// Tables matching dataConfig (the [data] section of pgschema.toml, nil for
+// none) also get their rows loaded.
+func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig, dataConfig *ir.DataConfig) (*ir.IR, error) {
 	if sslmode == "" {
 		sslmode = "prefer"
 	}
@@ -120,7 +122,7 @@ func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schem
 	ctx := context.Background()
 
 	// Build IR using the IR system with ignore config
-	inspector := ir.NewInspector(conn, ignoreConfig)
+	inspector := ir.NewInspector(conn, ignoreConfig).WithDataConfig(dataConfig, true)
 
 	// Default to public schema if none specified
 	targetSchema := schemaName

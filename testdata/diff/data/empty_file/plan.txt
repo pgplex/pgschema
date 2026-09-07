@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ country
+    - IL (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+DELETE FROM country WHERE code = 'IL';

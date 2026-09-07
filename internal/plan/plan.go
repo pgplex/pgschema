@@ -839,6 +839,9 @@ func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 				}
 				// Clean up sub-resource type for display (remove "table." prefix)
 				displaySubType := strings.TrimPrefix(subRes.subType, "table.")
+				if subRes.subType == diff.DiffTypeTableData.String() {
+					displaySubType = "row"
+				}
 				fmt.Fprintf(summary, "    %s %s (%s)\n", subSymbol, objectName, displaySubType)
 			}
 		}

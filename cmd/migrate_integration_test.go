@@ -165,7 +165,8 @@ func TestPlanAndApply(t *testing.T) {
 			planTXTFile:  planTXTFile,
 		})
 
-		return nil
+		// A test case's subdirectories (e.g. data/ with CSV files) are not test cases
+		return filepath.SkipDir
 	})
 
 	if err != nil {
@@ -437,6 +438,7 @@ func applySchemaChanges(host string, port int, database, user, password, schema,
 		Quiet:           true, // Suppress plan display and progress messages in tests
 		LockTimeout:     "",
 		ApplicationName: "pgschema",
+		ConfigDir:       filepath.Dir(schemaFile),
 	}
 
 	// Call ApplyMigration API directly with shared embedded postgres
@@ -455,6 +457,7 @@ func generatePlanOutput(host string, port int, database, user, password, schema,
 		Schema:          schema,
 		File:            schemaFile,
 		ApplicationName: "pgschema",
+		ConfigDir:       filepath.Dir(schemaFile),
 	}
 
 	// Generate the plan (reuse shared embedded postgres for performance)
