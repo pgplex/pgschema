@@ -62,13 +62,19 @@ func ExecuteSchemaSQL(ctx context.Context, conn *sql.Conn, sqlText string, targe
 
 // copyFromFile streams a directive's file into its table.
 func copyFromFile(ctx context.Context, conn *sql.Conn, d *include.CopyDirective, targetSchema string) error {
+	// Data tables live in the managed schema. A qualifier for any other
+	// schema would write past the temporary schema, which on an external plan
+	// database is a real, shared schema.
+	if d.Schema != "" && d.Schema != targetSchema {
+		return fmt.Errorf("\\copy target %s.%s is outside the managed schema %q; data tables must be in the schema being planned", d.Schema, d.Table, targetSchema)
+	}
 	f, err := os.Open(d.Path)
 	if err != nil {
 		return fmt.Errorf("failed to open \\copy file for table %s: %w", d.Table, err)
 	}
 	defer f.Close()
 
-	cmd := buildCopyCommand(d, targetSchema)
+	cmd := buildCopyCommand(d)
 	err = WithPgConn(conn, func(pgConn *pgconn.PgConn) error {
 		_, err := pgConn.CopyFrom(ctx, f, cmd)
 		return err
@@ -92,14 +98,11 @@ func WithPgConn(conn *sql.Conn, fn func(*pgconn.PgConn) error) error {
 	})
 }
 
-// buildCopyCommand renders the server-side COPY for a directive.
-func buildCopyCommand(d *include.CopyDirective, targetSchema string) string {
+// buildCopyCommand renders the server-side COPY for a directive. The target
+// is unqualified so search_path routes it into the temporary schema.
+func buildCopyCommand(d *include.CopyDirective) string {
 	var b strings.Builder
 	b.WriteString("COPY ")
-	if d.Schema != "" && d.Schema != targetSchema {
-		b.WriteString(quoteIdent(d.Schema))
-		b.WriteByte('.')
-	}
 	b.WriteString(quoteIdent(d.Table))
 	if d.Columns != "" {
 		b.WriteString(" (")

@@ -126,6 +126,12 @@ func TestPlanAndApply(t *testing.T) {
 		planJSONFile := filepath.Join(path, "plan.json")
 		planTXTFile := filepath.Join(path, "plan.txt")
 
+		// Apply test filter if provided; a filtered-out case is still a case,
+		// so its subdirectories (e.g. data/) are not walked
+		if testFilter != "" && !matchesFilter(relPath, testFilter) {
+			return filepath.SkipDir
+		}
+
 		// Check for required input files (always required)
 		if _, err := os.Stat(oldFile); os.IsNotExist(err) {
 			return fmt.Errorf("missing required file: %s", oldFile)
@@ -145,11 +151,6 @@ func TestPlanAndApply(t *testing.T) {
 			if _, err := os.Stat(planTXTFile); os.IsNotExist(err) {
 				return fmt.Errorf("missing required file: %s (use --generate to create)", planTXTFile)
 			}
-		}
-
-		// Apply test filter if provided
-		if testFilter != "" && !matchesFilter(relPath, testFilter) {
-			return nil
 		}
 
 		// Get relative path for test name

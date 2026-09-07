@@ -18,6 +18,10 @@ type tableDataDiff struct {
 	Inserts []*ir.Row
 	Updates []*rowUpdate
 	Deletes []*rowDelete
+	// DeleteAll replaces Deletes when the primary key columns changed in this
+	// migration: current rows cannot be addressed by a key that the DDL may
+	// have already dropped, so the whole table is cleared before inserts.
+	DeleteAll bool
 }
 
 type rowUpdate struct {
@@ -102,6 +106,10 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 		}
 	}
 
+	if oldTable != nil && !sameKey && len(oldTable.Rows) > 0 {
+		d.DeleteAll = true
+	}
+
 	for _, k := range oldOrder {
 		oldRow := oldKeys[k]
 		if newRow, ok := newKeys[k]; ok && sameKey {
@@ -120,6 +128,9 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 			}
 			continue
 		}
+		if d.DeleteAll {
+			continue
+		}
 		del := &rowDelete{Key: k, PKColumns: oldPK}
 		for _, name := range oldPK {
 			del.PKValues = append(del.PKValues, oldRow.Values[oldColIdx[name]])
@@ -133,7 +144,7 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 		d.Inserts = append(d.Inserts, newKeys[k])
 	}
 
-	if len(d.Inserts) == 0 && len(d.Updates) == 0 && len(d.Deletes) == 0 {
+	if len(d.Inserts) == 0 && len(d.Updates) == 0 && len(d.Deletes) == 0 && !d.DeleteAll {
 		return nil
 	}
 	return d
@@ -165,9 +176,21 @@ func rowKey(row *ir.Row, pkIdx []int) string {
 	return strings.Join(parts, keySeparator)
 }
 
+// displayKey renders a key for paths and plan output. A composite key is
+// joined with commas; a value containing a comma or a quote is quoted CSV
+// style so distinct keys never render the same.
 func displayKey(key string) string {
-	return strings.ReplaceAll(key, keySeparator, keyDisplaySeparator)
+	parts := strings.Split(key, keySeparator)
+	for i, part := range parts {
+		if strings.ContainsAny(part, keyDisplaySeparator+`"`) {
+			parts[i] = `"` + strings.ReplaceAll(part, `"`, `""`) + `"`
+		}
+	}
+	return strings.Join(parts, keyDisplaySeparator)
 }
+
+// allRowsKey names the step that clears a table whose primary key changed.
+const allRowsKey = "*"
 
 func equalValue(a, b *string) bool {
 	if a == nil || b == nil {
@@ -198,6 +221,10 @@ func generateDataSQL(diffs []*tableDataDiff, targetSchema string, collector *dif
 	}
 
 	for _, d := range reverseSlice(ordered) {
+		if d.DeleteAll {
+			collector.collect(d.context(DiffOperationDrop, allRowsKey), fmt.Sprintf("DELETE FROM %s;", name(d)))
+			continue
+		}
 		for _, del := range d.Deletes {
 			where := make([]string, len(del.PKColumns))
 			for i, col := range del.PKColumns {

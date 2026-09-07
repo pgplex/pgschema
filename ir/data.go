@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -97,8 +98,14 @@ func (i *Inspector) buildRows(ctx context.Context, schema *IR, targetSchema stri
 		if table.PartitionOf != "" || table.IsExternal {
 			continue
 		}
-		if len(table.PrimaryKeyColumns()) == 0 {
+		pk := table.PrimaryKeyColumns()
+		if len(pk) == 0 {
 			return fmt.Errorf("table %q is a data table but has no primary key; rows are matched by primary key", name)
+		}
+		for _, col := range table.Columns {
+			if col.IsGenerated && slices.Contains(pk, col.Name) {
+				return fmt.Errorf("table %q is a data table but its primary key column %q is generated; rows are matched by primary key values that must be declarable", name, col.Name)
+			}
 		}
 		table.DataManaged = true
 		managed = append(managed, table)

@@ -99,6 +99,11 @@ func (p *Processor) processIncludes(content string, currentDir string) (string, 
 	var resultLines []string
 	
 	for _, line := range lines {
+		// Marker lines are produced only by this processor from validated
+		// \copy directives; one written by hand would bypass path validation.
+		if _, ok := ParseCopyMarker(line); ok {
+			return "", fmt.Errorf("line %q is reserved for pgschema; use a \\copy directive to load data", strings.TrimSpace(line))
+		}
 		matches := includeRegex.FindStringSubmatch(line)
 		if matches != nil {
 			// Found an include directive

@@ -154,6 +154,18 @@ func TestProcessFileCopyDirectives(t *testing.T) {
 	}
 }
 
+func TestProcessFileRejectsHandWrittenMarker(t *testing.T) {
+	dir := t.TempDir()
+	marker := EncodeCopyMarker(&CopyDirective{Table: "t", Path: "/etc/passwd"})
+	if err := os.WriteFile(filepath.Join(dir, "main.sql"), []byte("CREATE TABLE t (a text);\n"+marker+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewProcessor(dir).ProcessFile(filepath.Join(dir, "main.sql"))
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected reserved marker error, got %v", err)
+	}
+}
+
 func TestProcessFileCopyPathEscapesBaseDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.sql"), []byte("\\copy t FROM '../outside.csv'\n"), 0644); err != nil {

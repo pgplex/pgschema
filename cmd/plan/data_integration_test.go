@@ -27,6 +27,7 @@ func TestPlanConfigDataConsistency(t *testing.T) {
 		CREATE TABLE country (code text PRIMARY KEY, name text NOT NULL);
 		INSERT INTO country VALUES ('US', 'United States');
 		CREATE TABLE keyless (code text, name text);
+		CREATE TABLE genpk (code text NOT NULL, upper_code text GENERATED ALWAYS AS (upper(code)) STORED PRIMARY KEY);
 	`); err != nil {
 		t.Fatalf("Failed to set up schema: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestPlanConfigDataConsistency(t *testing.T) {
 	provider := testutil.SetupPostgres(t)
 	defer provider.Stop()
 
-	const ddl = "CREATE TABLE country (code text PRIMARY KEY, name text NOT NULL);\nCREATE TABLE keyless (code text, name text);\n"
+	const ddl = "CREATE TABLE country (code text PRIMARY KEY, name text NOT NULL);\nCREATE TABLE keyless (code text, name text);\nCREATE TABLE genpk (code text NOT NULL, upper_code text GENERATED ALWAYS AS (upper(code)) STORED PRIMARY KEY);\n"
 	const directive = "\\copy country (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)\n"
 
 	run := func(t *testing.T, schemaSQL, config, ignore string) error {
@@ -90,6 +91,21 @@ func TestPlanConfigDataConsistency(t *testing.T) {
 		err := run(t, ddl+directive, "[data]\ntables = [\"country\", \"keyless\"]\n", "")
 		if err == nil || !strings.Contains(err.Error(), "no primary key") {
 			t.Fatalf("expected primary key error, got %v", err)
+		}
+	})
+
+	t.Run("listed table with generated primary key", func(t *testing.T) {
+		err := run(t, ddl+directive, "[data]\ntables = [\"country\", \"genpk\"]\n", "")
+		if err == nil || !strings.Contains(err.Error(), "generated") {
+			t.Fatalf("expected generated primary key error, got %v", err)
+		}
+	})
+
+	t.Run("directive outside the managed schema", func(t *testing.T) {
+		other := "\\copy other.country (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)\n"
+		err := run(t, ddl+other, "[data]\ntables = [\"country\"]\n", "")
+		if err == nil || !strings.Contains(err.Error(), "outside the managed schema") {
+			t.Fatalf("expected schema error, got %v", err)
 		}
 	})
 

@@ -33,7 +33,7 @@ The directive follows psql's `\copy` meta-command: one line, no terminating semi
 - **Empty file**: A file with no data rows (or a header line only) declares that the table must contain no rows
 - **Multiple directives**: Several `\copy` directives for the same table are combined
 - **Identity columns**: Values for `GENERATED ALWAYS AS IDENTITY` columns are used as given, matching PostgreSQL's `COPY` behavior
-- **Schema-qualified names**: The target schema prefix is stripped, so the same files can be applied to different schemas
+- **Schema-qualified names**: The target schema prefix is stripped, so the same files can be applied to different schemas. A qualifier for any other schema is an error
 
 Not supported in this release:
 
@@ -41,7 +41,7 @@ Not supported in this release:
 - `FROM STDIN`, `FROM PROGRAM`, or paths outside the schema directory
 - Server-side `COPY ... FROM 'file'`, which reads from the database server's filesystem
 - Generated columns in the column list (PostgreSQL rejects them)
-- Tables without a primary key
+- Tables without a primary key, or whose primary key includes a generated column
 - Tables not listed in `pgschema.toml`, or matched by `[tables]` patterns in [`.pgschemaignore`](/cli/ignore)
 
 <Note>
@@ -110,4 +110,5 @@ DELETE FROM country WHERE code = 'XX';
 - `UPDATE` sets only the columns that differ and matches on the primary key
 - `DELETE` matches on the primary key
 - A change to a primary key value is a `DELETE` followed by an `INSERT`
+- A change to the primary key columns themselves clears the table with a single `DELETE FROM` and inserts every row again, since the old key may no longer exist once the DDL has run
 - Numeric and boolean values are written bare; every other value is a quoted string literal that PostgreSQL casts to the column type; missing values are `NULL`

@@ -21,7 +21,7 @@ This is for **config data**: small tables that the application reads and the dep
     tables = ["plan_tier", "feature_flag"]
     ```
 
-    Listed tables must have a primary key. Rows are matched by it, so use natural, stable keys (`'US'`, `'enterprise'`) rather than `serial` values that differ between environments.
+    Listed tables must have a primary key that does not include generated columns. Rows are matched by it, so use natural, stable keys (`'US'`, `'enterprise'`) rather than `serial` values that differ between environments.
   </Step>
 
   <Step title="Dump">
@@ -150,6 +150,8 @@ Data steps run after the schema steps that create or alter tables and constraint
 1. `DELETE` statements run first, child tables before parent tables
 2. `INSERT` statements run next, parent tables before child tables
 3. `UPDATE` statements run last
+
+If a migration changes the primary key columns of a managed table, its current rows can no longer be addressed by key, so the plan clears the table with one `DELETE FROM` and inserts every row again.
 
 Foreign keys between managed tables are satisfied by this order. A `DELETE` blocked by a foreign key from an unmanaged table fails the transaction, which is the intended outcome: resolve it by editing the plan, as described in [Custom Migration Steps](/workflow/custom-migration-steps).
 

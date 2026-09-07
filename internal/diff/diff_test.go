@@ -106,9 +106,10 @@ func TestDiffFromFiles(t *testing.T) {
 		relPath, _ := filepath.Rel(testdataDir, path)
 		testName := strings.ReplaceAll(relPath, string(os.PathSeparator), "_")
 
-		// Apply test filter if provided
+		// Apply test filter if provided; a filtered-out case is still a case,
+		// so its subdirectories (e.g. data/) are not walked
 		if testFilter != "" && !matchesFilter(relPath, testFilter) {
-			return nil
+			return filepath.SkipDir
 		}
 
 		// Increment test counter
