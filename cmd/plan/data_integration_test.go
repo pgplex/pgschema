@@ -10,9 +10,9 @@ import (
 	"github.com/pgplex/pgschema/testutil"
 )
 
-// TestPlanReferenceDataConsistency covers the rules that keep pgschema.toml
+// TestPlanConfigDataConsistency covers the rules that keep pgschema.toml
 // and the schema files in agreement.
-func TestPlanReferenceDataConsistency(t *testing.T) {
+func TestPlanConfigDataConsistency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}

@@ -39,7 +39,7 @@
               "workflow/online-ddl",
               "workflow/rollback",
               "workflow/data-migration",
-              "workflow/reference-data",
+              "workflow/config-data",
               "workflow/modular-schema-files",
               "workflow/gitops",
               "workflow/orm"

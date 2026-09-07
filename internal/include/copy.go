@@ -27,7 +27,7 @@ const copyMarkerPrefix = "--pgschema:copy "
 var copyLineRegex = regexp.MustCompile(`^\s*\\copy\s+(.*?)\s*;?\s*$`)
 
 // HasCopyMarkers reports whether processed SQL contains any marker line, so
-// callers can skip line scanning for the common case of no reference data.
+// callers can skip line scanning for the common case of no config data.
 func HasCopyMarkers(sqlText string) bool {
 	return strings.Contains(sqlText, copyMarkerPrefix)
 }
@@ -106,7 +106,7 @@ func parseCopyDirective(rest string) (*CopyDirective, error) {
 	switch strings.ToLower(fields[0]) {
 	case "from":
 	case "to":
-		return nil, fmt.Errorf("\\copy ... TO is not supported; only \\copy ... FROM '<file>' loads reference data")
+		return nil, fmt.Errorf("\\copy ... TO is not supported; only \\copy ... FROM '<file>' loads config data")
 	default:
 		return nil, fmt.Errorf("expected FROM in \\copy directive, found %q", fields[0])
 	}

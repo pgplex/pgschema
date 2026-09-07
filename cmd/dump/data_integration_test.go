@@ -11,10 +11,10 @@ import (
 	"github.com/pgplex/pgschema/testutil"
 )
 
-// TestDumpReferenceData dumps reference tables listed in pgschema.toml to
+// TestDumpConfigData dumps config tables listed in pgschema.toml to
 // CSV files plus \copy directives, then plans the dump against the same
 // database and expects no changes: the round trip must be lossless.
-func TestDumpReferenceData(t *testing.T) {
+func TestDumpConfigData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -68,7 +68,7 @@ func TestDumpReferenceData(t *testing.T) {
 
 	// Without --file the CSV files have nowhere to go.
 	if _, err := ExecuteDump(config); err == nil || !strings.Contains(err.Error(), "--file") {
-		t.Fatalf("expected --file error for stdout dump with reference tables, got %v", err)
+		t.Fatalf("expected --file error for stdout dump with config tables, got %v", err)
 	}
 
 	// Multi-file dump

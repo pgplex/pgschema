@@ -1,5 +1,5 @@
 ---
-title: "Reference Data"
+title: "Config Data"
 ---
 
 Most applications keep a handful of small tables whose rows are part of the application rather than user data: countries, currencies, statuses, feature flags, plan tiers, permission catalogs. A release that adds a status or renames a plan needs those rows changed in lockstep with the schema.
@@ -7,14 +7,14 @@ Most applications keep a handful of small tables whose rows are part of the appl
 pgschema manages these rows the same way it manages schema objects. You list the tables in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy) directives, `plan` diffs them against the target database, and `apply` runs the resulting `INSERT`, `UPDATE`, and `DELETE` statements in the same transaction as the DDL.
 
 <Note>
-This is for **reference data**: small tables that the application reads and the deployment owns. For backfills and other one-off changes to user data, see [Data Migration](/workflow/data-migration).
+This is for **config data**: small tables that the application reads and the deployment owns. For backfills and other one-off changes to user data, see [Data Migration](/workflow/data-migration).
 </Note>
 
 ## Workflow
 
 <Steps>
   <Step title="List the tables">
-    Create `pgschema.toml` in your project directory and list the reference tables. Patterns use the same glob rules as `.pgschemaignore`:
+    Create `pgschema.toml` in your project directory and list the config tables. Patterns use the same glob rules as `.pgschemaignore`:
 
     ```toml
     [data]

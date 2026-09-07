@@ -149,7 +149,7 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
 
   For single-file mode, this is optional (defaults to stdout).
   For multi-file mode, this specifies the main file path.
-  Required when [`pgschema.toml`](/cli/config) lists reference tables, since their CSV files are written to `data/` next to the output file.
+  Required when [`pgschema.toml`](/cli/config) lists config tables, since their CSV files are written to `data/` next to the output file.
 </ParamField>
 
 <ParamField path="--no-comments" type="boolean" default="false">
@@ -168,9 +168,9 @@ pgschema apply --host staging-host --db myapp --user postgres --file current.sql
 
 You can exclude specific database objects from dumps using a `.pgschemaignore` file. See [Ignore (.pgschemaignore)](/cli/ignore) for complete documentation.
 
-## Reference Tables
+## Config Tables
 
-Tables listed under `[data]` in [`pgschema.toml`](/cli/config) have their rows dumped to CSV files alongside the schema. See [Reference Data](/workflow/reference-data) for the workflow and the [example](#reference-data) below.
+Tables listed under `[data]` in [`pgschema.toml`](/cli/config) have their rows dumped to CSV files alongside the schema. See [Config Data](/workflow/config-data) for the workflow and the [example](#config-data) below.
 
 ## Examples
 
@@ -282,7 +282,7 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ```
 
-### Reference Data
+### Config Data
 
 With a `pgschema.toml` in the current directory:
 
@@ -326,7 +326,7 @@ IL,Israel
 US,United States
 ```
 
-With `--multi-file`, the directive is appended to the main file after every `\i` include. Without a `pgschema.toml`, or with no matching tables, dump output is unchanged and contains no rows. See [\copy](/syntax/copy) for the format and [Reference Data](/workflow/reference-data) for the workflow.
+With `--multi-file`, the directive is appended to the main file after every `\i` include. Without a `pgschema.toml`, or with no matching tables, dump output is unchanged and contains no rows. See [\copy](/syntax/copy) for the format and [Config Data](/workflow/config-data) for the workflow.
 
 ## Schema Qualification
 

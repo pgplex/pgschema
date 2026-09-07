@@ -2,7 +2,7 @@
 title: '\copy'
 ---
 
-`\copy` loads the rows of a reference table into the desired state from a separate CSV file. The table must be listed under `[data]` in [`pgschema.toml`](/cli/config). pgschema compares the loaded rows with the rows in the target database and generates the `INSERT`, `UPDATE`, and `DELETE` statements needed to make them match. See [Reference Data](/workflow/reference-data) for the workflow.
+`\copy` loads the rows of a config table into the desired state from a separate CSV file. The table must be listed under `[data]` in [`pgschema.toml`](/cli/config). pgschema compares the loaded rows with the rows in the target database and generates the `INSERT`, `UPDATE`, and `DELETE` statements needed to make them match. See [Config Data](/workflow/config-data) for the workflow.
 
 ## Syntax
 

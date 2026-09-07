@@ -18,12 +18,12 @@ type DumpFormatter struct {
 	targetSchema  string
 	noComments    bool
 	qualifySchema bool
-	// dataTables are the reference tables whose \copy directives are appended
+	// dataTables are the config tables whose \copy directives are appended
 	// after every object (see FormatDataDirectives).
 	dataTables []*ir.Table
 }
 
-// SetDataTables sets the reference tables whose \copy directives follow all
+// SetDataTables sets the config tables whose \copy directives follow all
 // objects, in single-file output and in the multi-file main file.
 func (f *DumpFormatter) SetDataTables(tables []*ir.Table) {
 	f.dataTables = tables

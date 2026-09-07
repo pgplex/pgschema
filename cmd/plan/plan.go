@@ -279,7 +279,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		return nil, fmt.Errorf("failed to load .pgschemaignore: %w", err)
 	}
 
-	// Load project configuration (reference tables)
+	// Load project configuration (config tables)
 	dataConfig, err := util.LoadDataConfig(config.ConfigDir)
 	if err != nil {
 		return nil, err
@@ -293,7 +293,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	}
 	copyTables := processor.CopyTables()
 
-	// Every \copy directive must target a listed reference table.
+	// Every \copy directive must target a listed config table.
 	for _, name := range copyTables {
 		if !dataConfig.IsDataTable(name) {
 			return nil, fmt.Errorf("\\copy directive loads rows into table %q, but the table is not listed under [data] in %s; add it there to manage its rows", name, util.ConfigFileName)
@@ -390,7 +390,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		return nil, fmt.Errorf("failed to get desired state: %w", err)
 	}
 
-	// Every listed reference table in the desired state must have a \copy
+	// Every listed config table in the desired state must have a \copy
 	// directive, so the schema files alone show which tables are managed and
 	// a plan cannot delete rows of a table that was never exported.
 	if err := validateDataDirectives(desiredStateIR, schemaToInspect, copyTables); err != nil {

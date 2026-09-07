@@ -167,7 +167,7 @@ func runFileBasedDiffTest(t *testing.T, oldFile, newFile, diffFile, testName str
 		t.Fatalf("Failed to read plan.sql: %v", err)
 	}
 
-	// Reference tables listed in the test case's pgschema.toml, if any
+	// Config tables listed in the test case's pgschema.toml, if any
 	dataConfig := testutil.LoadDataConfig(t, filepath.Dir(oldFile))
 
 	// Parse DDL to IR with optional setup SQL

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// DataConfig lists the reference tables whose rows pgschema manages. It is the
+// DataConfig lists the config tables whose rows pgschema manages. It is the
 // [data] section of pgschema.toml. Patterns follow the same glob and "!"
 // negation rules as .pgschemaignore and match unqualified table names.
 type DataConfig struct {

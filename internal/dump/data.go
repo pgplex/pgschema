@@ -15,7 +15,7 @@ import (
 )
 
 // DataDir is the directory, beside the main output file, that holds one CSV
-// file per reference table.
+// file per config table.
 const DataDir = "data"
 
 // DataTables returns the data-managed tables of a schema, parents before the

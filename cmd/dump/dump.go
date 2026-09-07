@@ -82,7 +82,7 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 		return "", fmt.Errorf("failed to load .pgschemaignore: %w", err)
 	}
 
-	// Load project configuration (reference tables)
+	// Load project configuration (config tables)
 	dataConfig, err := util.LoadDataConfig(config.ConfigDir)
 	if err != nil {
 		return "", err
@@ -98,14 +98,14 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	defer conn.Close()
 	ctx := context.Background()
 
-	// Inspect the schema. Reference tables are only marked, not loaded: their
+	// Inspect the schema. Config tables are only marked, not loaded: their
 	// rows are exported below with COPY straight into CSV files.
 	schemaIR, err := ir.NewInspector(conn, ignoreConfig).WithDataConfig(dataConfig, false).BuildIR(ctx, config.Schema)
 	if err != nil {
 		return "", fmt.Errorf("failed to get database schema: %w", err)
 	}
 
-	// Reference tables: rows go to data/<table>.csv beside the output file and
+	// Config tables: rows go to data/<table>.csv beside the output file and
 	// a \copy directive is appended after every other object.
 	dataTables := dump.DataTables(schemaIR, config.Schema)
 	if len(dataTables) > 0 {
@@ -115,7 +115,7 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 			}
 		}
 		if config.File == "" {
-			return "", fmt.Errorf("%s lists reference tables, so --file is required: their rows are written to %s/ next to the output file", util.ConfigFileName, dump.DataDir)
+			return "", fmt.Errorf("%s lists config tables, so --file is required: their rows are written to %s/ next to the output file", util.ConfigFileName, dump.DataDir)
 		}
 	}
 
