@@ -1,14 +1,17 @@
-Plan: 3 to add.
+Plan: 6 to add.
 
 Summary by type:
-  functions: 2 to add
-  aggregates: 1 to add
+  functions: 4 to add
+  aggregates: 2 to add
 
 Functions:
+  + b_sfunc
+  + first_of
   + numeric_accum
   + numeric_first
 
 Aggregates:
+  + b_agg
   + my_agg
 
 DDL to be executed:
@@ -38,4 +41,29 @@ CREATE AGGREGATE my_agg(numeric) (
     STYPE = numeric[],
     FINALFUNC = numeric_first,
     INITCOND = '{}'
+);
+
+CREATE OR REPLACE FUNCTION b_sfunc(
+    state numeric,
+    x numeric
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + my_agg(v) FROM unnest(ARRAY[x]) AS u(v)
+$$;
+
+CREATE OR REPLACE FUNCTION first_of(
+    vals numeric[]
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT my_agg(x) FROM unnest(vals) AS u(x)
+$$;
+
+CREATE AGGREGATE b_agg(numeric) (
+    SFUNC = b_sfunc,
+    STYPE = numeric,
+    INITCOND = '0'
 );

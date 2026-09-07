@@ -13,3 +13,19 @@ CREATE OR REPLACE FUNCTION get_foo_summary()
     RETURNS SETOF foo_summary
     LANGUAGE sql STABLE
     AS $$ SELECT * FROM foo_summary $$;
+
+-- Aggregate over the deferred view's row type, and a view that calls it. The
+-- view must follow the aggregate, which follows its transition function (#580).
+CREATE OR REPLACE FUNCTION foo_summary_step(state bigint, r foo_summary)
+    RETURNS bigint
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT state + r.id $$;
+
+CREATE AGGREGATE sum_foo_summary(foo_summary) (
+    SFUNC = foo_summary_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+CREATE OR REPLACE VIEW foo_total AS
+SELECT sum_foo_summary(foo_summary.*) AS total FROM foo_summary;

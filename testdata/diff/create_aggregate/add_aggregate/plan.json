@@ -25,6 +25,24 @@
           "type": "aggregate",
           "operation": "create",
           "path": "public.my_agg"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION b_sfunc(\n    state numeric,\n    x numeric\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + my_agg(v) FROM unnest(ARRAY[x]) AS u(v)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.b_sfunc"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION first_of(\n    vals numeric[]\n)\nRETURNS numeric\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT my_agg(x) FROM unnest(vals) AS u(x)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.first_of"
+        },
+        {
+          "sql": "CREATE AGGREGATE b_agg(numeric) (\n    SFUNC = b_sfunc,\n    STYPE = numeric,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.b_agg"
         }
       ]
     }

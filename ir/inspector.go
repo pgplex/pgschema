@@ -1307,6 +1307,16 @@ func (i *Inspector) stripSameSchemaPrefix(typeName, routineSchema string) string
 	return typeName
 }
 
+// stripSameSchemaPrefixFromList is stripSameSchemaPrefix for a comma-separated
+// argument list such as pg_get_function_identity_arguments output. It strips a
+// schema qualifier only where an identifier token equal to the schema (bare or
+// quote_ident form) directly precedes a dot, so a schema that needs quoting
+// ("MySchema".v) normalizes like public.v while quoted names that merely
+// contain the schema text ("public.foo") are left intact.
+func (i *Inspector) stripSameSchemaPrefixFromList(list, schema string) string {
+	return StripSchemaQualifiers(list, schema)
+}
+
 // oidToTypeName maps PostgreSQL type OIDs to standard SQL type names.
 // Reference: https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat
 var oidToTypeName = map[int64]string{
@@ -1391,7 +1401,8 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 		aggregateName := agg.AggregateName
 
 		// Identity args (types only) drive the DROP/COMMENT signature and the overload key.
-		identityArgs := i.safeInterfaceToString(agg.AggregateIdentityArgs)
+		// Strip the aggregate's own schema prefix here so the key and Arguments agree.
+		identityArgs := i.stripSameSchemaPrefixFromList(i.safeInterfaceToString(agg.AggregateIdentityArgs), schemaName)
 
 		// agginitval/aggminitval are nullable: preserve NULL (nil) vs explicit '' so an
 		// INITCOND/MINITCOND of empty string is not silently dropped.
@@ -1408,13 +1419,20 @@ func (i *Inspector) buildAggregates(ctx context.Context, schema *IR, targetSchem
 
 		dbSchema := schema.getOrCreateSchema(schemaName)
 
+		// Identity args, signature, and return type come from pg_get_function_*
+		// and format_type, which qualify a type only when it is outside the
+		// search_path, so the same aggregate can inspect as sum_v(v) on one side
+		// of a plan and sum_v(public.v) on the other. Strip the aggregate's own
+		// schema from those, mirroring function parameters. The state types are
+		// qualified explicitly by the query and stripped (or kept for
+		// --qualify-schema) by the diff layer, so they are left as is.
 		aggregate := &Aggregate{
 			Schema:     schemaName,
 			Name:       aggregateName,
 			Arguments:  identityArgs,
-			Signature:  i.safeInterfaceToString(agg.AggregateSignature),
+			Signature:  i.stripSameSchemaPrefixFromList(i.safeInterfaceToString(agg.AggregateSignature), schemaName),
 			Kind:       i.safeInterfaceToString(agg.AggregateKind),
-			ReturnType: i.safeInterfaceToString(agg.AggregateReturnType),
+			ReturnType: i.stripSameSchemaPrefix(i.safeInterfaceToString(agg.AggregateReturnType), schemaName),
 			Parallel:   i.safeInterfaceToString(agg.Parallel),
 
 			TransitionFunction: i.safeInterfaceToString(agg.TransitionFunction),

@@ -312,15 +312,18 @@ type ddlDiff struct {
 	// Newly-added views that reference newly-added columns on modified tables.
 	// Created in the modify phase, AFTER generateModifyTablesSQL, so the columns
 	// exist when the view body is parsed (issue #414).
-	deferredAddedViews             []*ir.View
-	functionsAwaitingDeferredViews []*ir.Function
+	deferredAddedViews              []*ir.View
+	functionsAwaitingDeferredViews  []*ir.Function
+	aggregatesAwaitingDeferredViews []*ir.Aggregate
 	// Added functions whose return/parameter type references a view being recreated
 	// (DROP + CREATE) by this migration. For a function whose signature changed, its
 	// old definition is dropped in the drop phase; creating the new one in the create
 	// phase (before the view's DROP) would re-pin the old view and block its RESTRICT
 	// drop. They are created in the modify phase, AFTER generateModifyViewsSQL
 	// recreates the view (issue #480).
-	functionsAwaitingRecreatedViews []*ir.Function
+	functionsAwaitingRecreatedViews  []*ir.Function
+	aggregatesAwaitingRecreatedViews []*ir.Aggregate
+	viewsAwaitingRecreatedViews      []*ir.View
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
 	// modifications (fkPreDrops) and desired-state ones are (re)created
@@ -1974,6 +1977,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithViewDeps = deferRecreated(functionsWithViewDeps)
 	}
 
+	// SQL-language functions whose body calls a new aggregate are validated
+	// against it at creation, so they are created after the aggregates instead
+	// of in the table-relative batches below (#580).
+	var functionsCallingAggregates []*ir.Function
+	functionsWithoutViewDeps, functionsCallingAggregates = splitFunctionsCallingAggregates(functionsWithoutViewDeps, d.addedAggregates)
+
 	// Separate functions WITHOUT view deps into those that reference deferred
 	// tables and those that don't. Functions that query new tables must be
 	// created after those tables (issue #530). Functions referencing tables in
@@ -2051,7 +2060,28 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create aggregates after their transition/final functions AND all tables exist
 	// (an aggregate may use a new table's row type as an argument or state type), and
 	// before views, which may reference the aggregates in their definitions.
-	generateCreateAggregatesSQL(d.addedAggregates, targetSchema, collector)
+	// Aggregates that depend on a new view, either through their own argument,
+	// state, or return type, or through a support function that does, are held
+	// back until the view and the view-dependent functions exist (#580).
+	// Aggregates typed on a view being recreated, or built on a function that is,
+	// wait for the recreation in the modify phase, like those functions (issue #480).
+	// This split comes first so an aggregate that also depends on a new view is
+	// still held for the recreation, which happens after the whole create phase.
+	var aggregatesToCreateNow []*ir.Aggregate
+	aggregatesToCreateNow, d.aggregatesAwaitingRecreatedViews = splitAggregatesByViewDeps(d.addedAggregates, recreatedViewLookup, buildFunctionLookup(d.functionsAwaitingRecreatedViews))
+	aggregatesToCreateNow, aggregatesWithViewDeps := splitAggregatesByViewDeps(aggregatesToCreateNow, newViewLookup, buildFunctionLookup(functionsWithViewDeps))
+	// SQL-language functions that call an aggregate follow the batch that
+	// creates it: callers of the aggregates created here stay here, the rest
+	// join the view-dependent or recreated-view batch of their aggregate.
+	var callersOfLateAggregates, callersOfRecreatedAggregates []*ir.Function
+	functionsCallingAggregates, callersOfLateAggregates = splitFunctionsCallingAggregates(functionsCallingAggregates, append(append([]*ir.Aggregate{}, aggregatesWithViewDeps...), d.aggregatesAwaitingRecreatedViews...))
+	callersOfLateAggregates, callersOfRecreatedAggregates = splitFunctionsCallingAggregates(callersOfLateAggregates, d.aggregatesAwaitingRecreatedViews)
+	functionsWithViewDeps = append(functionsWithViewDeps, callersOfLateAggregates...)
+	d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...)
+
+	// Aggregates and their callers may chain (aggregate a -> SQL support
+	// function calling a -> aggregate b), so they are scheduled together.
+	generateFunctionsAndAggregatesSQL(functionsCallingAggregates, aggregatesToCreateNow, targetSchema, collector)
 
 	// Merge deferred policies from all batches
 	allDeferredPolicies := append(append(deferredPolicies1, deferredPolicies2...), deferredPolicies3...)
@@ -2102,26 +2132,22 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 			}
 		}
 	}
-	generateCreateViewsSQL(viewsToCreateNow, targetSchema, collector)
-
-	// If any views were deferred, also defer functions whose view dependency is
-	// on those deferred views — they must be created after the views exist.
+	// If any views were deferred to the modify phase, also defer functions whose
+	// view dependency is on those deferred views, and aggregates built on such
+	// functions — they must be created after the views exist.
 	if len(d.deferredAddedViews) > 0 {
 		deferredViewLookup := buildViewLookup(d.deferredAddedViews)
-		var keepNow []*ir.Function
-		for _, fn := range functionsWithViewDeps {
-			if functionReferencesNewView(fn, deferredViewLookup) {
-				d.functionsAwaitingDeferredViews = append(d.functionsAwaitingDeferredViews, fn)
-			} else {
-				keepNow = append(keepNow, fn)
-			}
-		}
-		functionsWithViewDeps = keepNow
+		functionsWithViewDeps, d.functionsAwaitingDeferredViews = splitFunctionsByViewDeps(functionsWithViewDeps, deferredViewLookup)
+		aggregatesWithViewDeps, d.aggregatesAwaitingDeferredViews = splitAggregatesByViewDeps(aggregatesWithViewDeps, deferredViewLookup, buildFunctionLookup(d.functionsAwaitingDeferredViews))
 	}
 
-	// Create functions WITH view dependencies (now that views exist)
-	// These functions reference views in their return type or parameter types (issue #300)
-	generateCreateFunctionsSQL(functionsWithViewDeps, targetSchema, collector)
+	// A new view that calls a routine held for a view recreation must wait for
+	// that routine too; it is created in the modify phase with that batch (#480).
+	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews))
+
+	// Create views, then the functions and aggregates that reference views in
+	// their signature or SQL body (issue #300, #580).
+	generateViewsAndDependentRoutinesSQL(viewsToCreateNow, functionsWithViewDeps, aggregatesWithViewDeps, targetSchema, collector)
 
 	// Revoke default grants on new tables that the user explicitly didn't include
 	// This must happen AFTER tables are created but BEFORE explicit grants
@@ -2174,12 +2200,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
 	// any functions whose view dependency was on those deferred views.
-	if len(d.deferredAddedViews) > 0 {
-		generateCreateViewsSQL(d.deferredAddedViews, targetSchema, collector)
-	}
-	if len(d.functionsAwaitingDeferredViews) > 0 {
-		generateCreateFunctionsSQL(d.functionsAwaitingDeferredViews, targetSchema, collector)
-	}
+	generateViewsAndDependentRoutinesSQL(d.deferredAddedViews, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, targetSchema, collector)
 
 	// Find views that depend on views being recreated (issue #268, #308)
 	// Handles both materialized views and regular views with RequiresRecreate
@@ -2201,9 +2222,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// type references a view just recreated above. Emitting them now (rather than in
 	// the create phase) keeps the recreated view free of dependents during its
 	// RESTRICT drop (issue #480).
-	if len(d.functionsAwaitingRecreatedViews) > 0 {
-		generateCreateFunctionsSQL(d.functionsAwaitingRecreatedViews, targetSchema, collector)
-	}
+	// Aggregates built on those functions, or typed on the recreated view, and
+	// new views that call any of these routines, follow in dependency order.
+	generateViewsAndDependentRoutinesSQL(d.viewsAwaitingRecreatedViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews, targetSchema, collector)
 
 	// Modify functions
 	generateModifyFunctionsSQL(d.modifiedFunctions, targetSchema, collector)
@@ -2588,21 +2609,33 @@ func buildSchemaNameLookup(names []struct{ schema, name string }) map[string]str
 // (mixed case, reserved word, special characters) keeps its exact case here,
 // matching functionLookupKeyPart used when normalizing scanned expressions.
 func buildFunctionLookup(functions []*ir.Function) map[string]struct{} {
-	if len(functions) == 0 {
+	return buildRoutineLookup(functions, nil)
+}
+
+// buildRoutineLookup returns lookup keys for newly added functions and
+// aggregates, which share call syntax, for use with referencesNewFunction.
+// Case folding follows the rules described on buildFunctionLookup.
+func buildRoutineLookup(functions []*ir.Function, aggregates []*ir.Aggregate) map[string]struct{} {
+	if len(functions) == 0 && len(aggregates) == 0 {
 		return nil
 	}
 
-	lookup := make(map[string]struct{}, len(functions)*2)
+	lookup := make(map[string]struct{}, 2*(len(functions)+len(aggregates)))
+	add := func(schema, name string) {
+		key := functionLookupKeyPart(name)
+		if key == "" {
+			return
+		}
+		lookup[key] = struct{}{}
+		if schema != "" {
+			lookup[functionGraphKey(schema, name)] = struct{}{}
+		}
+	}
 	for _, fn := range functions {
-		name := functionLookupKeyPart(fn.Name)
-		if name == "" {
-			continue
-		}
-		lookup[name] = struct{}{}
-
-		if fn.Schema != "" {
-			lookup[functionGraphKey(fn.Schema, fn.Name)] = struct{}{}
-		}
+		add(fn.Schema, fn.Name)
+	}
+	for _, agg := range aggregates {
+		add(agg.Schema, agg.Name)
 	}
 	return lookup
 }
@@ -2656,7 +2689,204 @@ func buildRecreatedViewLookup(modifiedViews []*viewDiff) map[string]struct{} {
 // in its return type or parameter types. This handles cases where functions use
 // view composite types (e.g., RETURNS SETOF view_name or parameter of view_name type).
 func functionReferencesNewView(fn *ir.Function, newViews map[string]struct{}) bool {
-	return functionSignatureReferencesRelation(fn, newViews)
+	if functionSignatureReferencesRelation(fn, newViews) {
+		return true
+	}
+	// A SQL-language body is resolved against the catalog when the function is
+	// created, so querying a new view is a creation-time dependency. Other
+	// languages (plpgsql) resolve relations at run time; treating their body
+	// mentions as dependencies would push trigger functions past the triggers
+	// that reference them, since triggers are created before views (#580).
+	if fn == nil || !strings.EqualFold(fn.Language, "sql") || fn.Definition == "" {
+		return false
+	}
+	return bodyReferencesRelation(fn.Definition, newViews)
+}
+
+// bodyReferencesRelation reports whether a function body references a relation
+// in the lookup in relation position (see relationReferences).
+func bodyReferencesRelation(body string, relations map[string]struct{}) bool {
+	for _, name := range relationReferences(body) {
+		if _, ok := relations[normalizeRelationReference(name)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// aggregateReferencesNewView reports whether an aggregate's argument, state,
+// moving-state, or return type is a new view's row type. Such an aggregate must
+// be created after the view (#580).
+func aggregateReferencesNewView(agg *ir.Aggregate, newViews map[string]struct{}) bool {
+	if agg == nil || len(newViews) == 0 {
+		return false
+	}
+	candidates := append([]string{agg.StateType, agg.MStateType, agg.ReturnType}, aggregateArgumentTypes(agg.Arguments)...)
+	for _, typ := range candidates {
+		if typeMatchesLookup(extractBaseTypeName(typ), agg.Schema, newViews) {
+			return true
+		}
+	}
+	return false
+}
+
+// aggregateUsesFunction reports whether any of the aggregate's support functions
+// (transition, final, combine, serial/deserial, and their moving-aggregate
+// variants) is in a lookup built by buildFunctionLookup.
+func aggregateUsesFunction(agg *ir.Aggregate, functions map[string]struct{}) bool {
+	if agg == nil || len(functions) == 0 {
+		return false
+	}
+	for _, name := range []string{
+		agg.TransitionFunction, agg.FinalFunction, agg.CombineFunction,
+		agg.SerialFunction, agg.DeserialFunction,
+		agg.MTransitionFunction, agg.MInvTransitionFunction, agg.MFinalFunction,
+	} {
+		if name == "" {
+			continue
+		}
+		identifier := normalizeFunctionIdentifier(name)
+		if _, ok := functions[identifier]; ok {
+			return true
+		}
+		if !strings.Contains(identifier, "\x00") && agg.Schema != "" {
+			if _, ok := functions[functionGraphKey(agg.Schema, identifier)]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// splitFunctionsByViewDeps partitions functions into those that can be created
+// now and those whose signature or SQL body references a view in the lookup.
+// Order within each partition is preserved.
+func splitFunctionsByViewDeps(functions []*ir.Function, views map[string]struct{}) (now, later []*ir.Function) {
+	if len(views) == 0 {
+		return functions, nil
+	}
+	for _, fn := range functions {
+		if functionReferencesNewView(fn, views) {
+			later = append(later, fn)
+		} else {
+			now = append(now, fn)
+		}
+	}
+	return now, later
+}
+
+// splitFunctionsCallingAggregates partitions functions into those that can be
+// created before the given aggregates and those whose SQL-language body calls
+// one of them, directly or through another such function. PostgreSQL resolves
+// a SQL body at creation, so the caller must follow the aggregate. Other
+// languages resolve calls at run time and are never held back. Order within
+// each partition is preserved.
+func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.Aggregate) (now, later []*ir.Function) {
+	if len(aggregates) == 0 {
+		return functions, nil
+	}
+	calls := func(fn *ir.Function, routines map[string]struct{}) bool {
+		return strings.EqualFold(fn.Language, "sql") && referencesNewFunction(fn.Definition, fn.Schema, routines)
+	}
+	aggregateLookup := buildRoutineLookup(nil, aggregates)
+	for _, fn := range functions {
+		if calls(fn, aggregateLookup) {
+			later = append(later, fn)
+		} else {
+			now = append(now, fn)
+		}
+	}
+	// Transitive closure: a function that calls a held-back function waits too.
+	for changed := len(later) > 0; changed; {
+		changed = false
+		lateLookup := buildFunctionLookup(later)
+		var still []*ir.Function
+		for _, fn := range now {
+			if calls(fn, lateLookup) {
+				later = append(later, fn)
+				changed = true
+			} else {
+				still = append(still, fn)
+			}
+		}
+		now = still
+	}
+	return now, later
+}
+
+// splitAggregatesByViewDeps partitions aggregates into those that can be
+// created now and those that depend on a view in the lookup, either through
+// their own argument, state, or return type or through a support function in
+// the functions lookup (one that itself depends on such a view). Order within
+// each partition is preserved.
+func splitAggregatesByViewDeps(aggregates []*ir.Aggregate, views, functions map[string]struct{}) (now, later []*ir.Aggregate) {
+	if len(views) == 0 && len(functions) == 0 {
+		return aggregates, nil
+	}
+	for _, agg := range aggregates {
+		if aggregateReferencesNewView(agg, views) || aggregateUsesFunction(agg, functions) {
+			later = append(later, agg)
+		} else {
+			now = append(now, agg)
+		}
+	}
+	return now, later
+}
+
+// generateViewsAndDependentRoutinesSQL creates views together with the functions
+// and aggregates that depend on them. A view that calls one of those routines is
+// created after it, and a routine that depends on such a view follows that view
+// in turn (#580). Every argument may be empty.
+func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Function, aggregates []*ir.Aggregate, targetSchema string, collector *diffCollector) {
+	viewsNow, viewsLater := splitViewsReferencingRoutines(views, buildRoutineLookup(functions, aggregates))
+	lateViewLookup := buildViewLookup(viewsLater)
+	functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
+	aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
+
+	generateCreateViewsSQL(viewsNow, targetSchema, collector)
+	generateFunctionsAndAggregatesSQL(functionsNow, aggregatesNow, targetSchema, collector)
+	generateCreateViewsSQL(viewsLater, targetSchema, collector)
+	generateFunctionsAndAggregatesSQL(functionsLater, aggregatesLater, targetSchema, collector)
+}
+
+// generateFunctionsAndAggregatesSQL creates functions and aggregates that may
+// depend on each other: an aggregate needs its support functions, and a
+// SQL-language function that calls an aggregate needs that aggregate. Each
+// round emits the functions that call none of the remaining aggregates, then
+// the aggregates whose support functions are all created, until nothing is
+// left. Anything that never becomes ready (a cycle PostgreSQL would reject
+// as well) is emitted as is so it still surfaces in the plan.
+func generateFunctionsAndAggregatesSQL(functions []*ir.Function, aggregates []*ir.Aggregate, targetSchema string, collector *diffCollector) {
+	for len(functions) > 0 || len(aggregates) > 0 {
+		functionsNow, functionsLater := splitFunctionsCallingAggregates(functions, aggregates)
+		aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, nil, buildFunctionLookup(functionsLater))
+		if len(functionsNow) == 0 && len(aggregatesNow) == 0 {
+			generateCreateFunctionsSQL(functions, targetSchema, collector)
+			generateCreateAggregatesSQL(aggregates, targetSchema, collector)
+			return
+		}
+		generateCreateFunctionsSQL(functionsNow, targetSchema, collector)
+		generateCreateAggregatesSQL(aggregatesNow, targetSchema, collector)
+		functions, aggregates = functionsLater, aggregatesLater
+	}
+}
+
+// splitViewsReferencingRoutines partitions views into those that can be created
+// now and those that call a routine in the lookup, directly or through another
+// held-back view. The input is topologically sorted, so a single pass suffices:
+// a view built on a held-back view appears after it and sees it in `later`.
+func splitViewsReferencingRoutines(views []*ir.View, routines map[string]struct{}) (now, later []*ir.View) {
+	if len(routines) == 0 {
+		return views, nil
+	}
+	for _, v := range views {
+		if referencesNewFunction(v.Definition, v.Schema, routines) || viewReferencesAnyDeferredView(v, later) {
+			later = append(later, v)
+		} else {
+			now = append(now, v)
+		}
+	}
+	return now, later
 }
 
 // RelationLookup builds a case-insensitive lookup of table and view names, keyed
@@ -2737,29 +2967,106 @@ func tableReturnColumnTypes(returnType string) []string {
 	inner := t[6 : len(t)-1]
 
 	var types []string
-	appendColType := func(col string) {
-		col = strings.TrimSpace(col)
-		// Strip the leading column name (possibly a quoted identifier
-		// containing spaces) to leave the type expression.
-		var typeExpr string
-		if strings.HasPrefix(col, `"`) {
-			if end := strings.Index(col[1:], `"`); end >= 0 {
-				typeExpr = col[end+2:]
-			}
-		} else if idx := strings.IndexByte(col, ' '); idx >= 0 {
-			typeExpr = col[idx+1:]
-		}
-		if typeExpr = strings.TrimSpace(typeExpr); typeExpr != "" {
+	for _, col := range splitTopLevelCommas(inner) {
+		// Each column is "name type"; drop the name to leave the type expression.
+		if typeExpr := stripLeadingIdentifier(strings.TrimSpace(col)); typeExpr != "" {
 			types = append(types, typeExpr)
 		}
 	}
+	return types
+}
 
-	// Split on top-level commas, ignoring commas inside parentheses (e.g.
-	// numeric(10,2)) and quoted identifiers.
+// stripLeadingIdentifier removes a leading identifier (bare, or quoted and
+// possibly containing spaces) from a declaration such as `name type` or
+// `"my col" numeric(10,2)` and returns the remainder, trimmed. It returns ""
+// when the declaration has no second part.
+func stripLeadingIdentifier(decl string) string {
+	var rest string
+	if strings.HasPrefix(decl, `"`) {
+		if end := quotedIdentEnd(decl, 0); end > 0 {
+			rest = decl[end:]
+		}
+	} else if idx := strings.IndexByte(decl, ' '); idx >= 0 {
+		rest = decl[idx+1:]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// quotedIdentEnd returns the index just past the quoted identifier starting at
+// s[start] (which must be a double quote), honoring "" escapes, or -1 if the
+// identifier is unterminated.
+func quotedIdentEnd(s string, start int) int {
+	for i := start + 1; i < len(s); i++ {
+		if s[i] != '"' {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '"' {
+			i++
+			continue
+		}
+		return i + 1
+	}
+	return -1
+}
+
+// findUnquotedOrderBy returns the index of the "ORDER BY " separator that
+// pg_get_function_identity_arguments emits for ordered-set aggregates, or -1.
+// The match is case-insensitive, must start a token, and is ignored inside a
+// quoted identifier such as "Order By V".
+func findUnquotedOrderBy(s string) int {
+	const sep = "ORDER BY "
+	inQuote := false
+	for i := 0; i+len(sep) <= len(s); i++ {
+		if s[i] == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if inQuote || (i > 0 && s[i-1] != ' ') {
+			continue
+		}
+		if strings.EqualFold(s[i:i+len(sep)], sep) {
+			return i
+		}
+	}
+	return -1
+}
+
+// aggregateArgumentTypes extracts candidate type expressions from an
+// aggregate's identity argument list, which may carry argument names, a
+// VARIADIC marker, and the ORDER BY separator of ordered-set aggregates
+// (e.g. "r v", "ORDER BY v", "x integer ORDER BY v"). Each argument yields
+// both its whole declaration and the part after a leading name, so the type
+// is found whether or not the argument is named.
+func aggregateArgumentTypes(args string) []string {
+	var types []string
+	for _, arg := range splitTopLevelCommas(args) {
+		arg = strings.TrimSpace(arg)
+		if idx := findUnquotedOrderBy(arg); idx >= 0 {
+			types = append(types, aggregateArgumentTypes(arg[:idx])...)
+			arg = strings.TrimSpace(arg[idx+len("ORDER BY "):])
+		}
+		if len(arg) > 9 && strings.EqualFold(arg[:9], "VARIADIC ") {
+			arg = strings.TrimSpace(arg[9:])
+		}
+		if arg == "" {
+			continue
+		}
+		types = append(types, arg)
+		if rest := stripLeadingIdentifier(arg); rest != "" {
+			types = append(types, rest)
+		}
+	}
+	return types
+}
+
+// splitTopLevelCommas splits s on commas that are not inside parentheses (e.g.
+// numeric(10,2)) or quoted identifiers.
+func splitTopLevelCommas(s string) []string {
+	var parts []string
 	depth, start := 0, 0
 	inQuote := false
-	for i := 0; i < len(inner); i++ {
-		switch inner[i] {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
 		case '"':
 			inQuote = !inQuote
 		case '(':
@@ -2772,13 +3079,12 @@ func tableReturnColumnTypes(returnType string) []string {
 			}
 		case ',':
 			if !inQuote && depth == 0 {
-				appendColType(inner[start:i])
+				parts = append(parts, s[start:i])
 				start = i + 1
 			}
 		}
 	}
-	appendColType(inner[start:])
-	return types
+	return append(parts, s[start:])
 }
 
 // extractBaseTypeName extracts the base type name from a type expression,
@@ -3063,10 +3369,159 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 // tableRefPattern matches SQL table references: FROM table, JOIN table,
 // INSERT INTO table, UPDATE [ONLY] table, DELETE FROM table, TABLE table.
 // Captures the table name (possibly schema-qualified) in group 1.
-var tableRefPattern = regexp.MustCompile(
-	`(?i)(?:FROM|JOIN|INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM|TABLE)\s+` +
-		`([a-z_][a-z0-9_$]*(?:\.[a-z_][a-z0-9_$]*)*)`,
-)
+// relationKeywordPattern finds the keywords that introduce a relation or a
+// relation list: FROM, JOIN, INTO, UPDATE, DELETE FROM, TABLE, and the USING
+// of DELETE and MERGE (a JOIN's USING is always followed by a column list in
+// parentheses and is skipped by relationReferences).
+var relationKeywordPattern = regexp.MustCompile(`(?i)\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM|TABLE|USING)\s+`)
+
+// qualifiedIdentExpr matches a possibly quoted, possibly schema-qualified identifier.
+const qualifiedIdentExpr = `(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*")(?:\s*\.\s*(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")*"))*`
+
+// leadingQualifiedIdent extracts the identifier at the start of a string.
+var leadingQualifiedIdent = regexp.MustCompile(`(?i)^` + qualifiedIdentExpr)
+
+// relationReferences returns the relation names a SQL body references in
+// relation position: after FROM, JOIN, INTO, UPDATE, DELETE FROM, or TABLE,
+// walking a comma-separated list of table references. Function calls and
+// subqueries are skipped, ONLY and the parenthesized ONLY (name) form are
+// accepted, and an alias with an optional column list is consumed only when
+// another list item follows it, so a keyword after the last item is never
+// mistaken for an alias. This is a heuristic scan, not a parser: a string
+// literal or comment that mimics a FROM clause is scanned like real SQL.
+func relationReferences(body string) []string {
+	var refs []string
+	for _, loc := range relationKeywordPattern.FindAllStringIndex(body, -1) {
+		// After INTO the next token is always a relation, so "t(a, b)" is a
+		// column list, not a function call.
+		keyword := strings.ToUpper(strings.TrimSpace(body[loc[0]:loc[1]]))
+		callAllowed := keyword != "INTO"
+		i := skipSpaces(body, loc[1])
+		if keyword == "USING" && i < len(body) && body[i] == '(' {
+			continue // JOIN ... USING (columns), not a relation source
+		}
+		for {
+			i = skipSpaces(body, i)
+			if keywordAt(body, i, "ONLY") {
+				i = skipSpaces(body, i+len("ONLY"))
+			}
+			if i < len(body) && body[i] == '(' {
+				// Either "(name)" or a subquery; only the former is a relation.
+				end := matchingParen(body, i)
+				inner := strings.TrimSpace(body[i+1 : end])
+				if name := leadingQualifiedIdent.FindString(inner); name != "" && name == inner {
+					refs = append(refs, name)
+				}
+				i = end + 1
+			} else {
+				name := leadingQualifiedIdent.FindString(body[i:])
+				if name == "" {
+					break
+				}
+				i += len(name)
+				if callAllowed && i < len(body) && body[i] == '(' {
+					i = matchingParen(body, i) + 1 // function call, not a relation
+					if k := skipSpaces(body, i); keywordAt(body, k, "WITH") {
+						if k = skipSpaces(body, k+len("WITH")); keywordAt(body, k, "ORDINALITY") {
+							i = k + len("ORDINALITY")
+						}
+					}
+				} else {
+					refs = append(refs, name)
+				}
+			}
+
+			// Another item follows directly, or after "[AS] alias [(columns)]".
+			next := skipSpaces(body, i)
+			if next < len(body) && body[next] == ',' {
+				i = next + 1
+				continue
+			}
+			if keywordAt(body, next, "AS") {
+				next = skipSpaces(body, next+len("AS"))
+			}
+			alias := leadingQualifiedIdent.FindString(body[next:])
+			if alias == "" || strings.Contains(alias, ".") {
+				break
+			}
+			next = skipSpaces(body, next+len(alias))
+			if next < len(body) && body[next] == '(' {
+				next = skipSpaces(body, matchingParen(body, next)+1)
+			}
+			if next < len(body) && body[next] == ',' {
+				i = next + 1
+				continue
+			}
+			break
+		}
+	}
+	return refs
+}
+
+// skipSpaces returns the index of the first non-whitespace byte at or after i.
+func skipSpaces(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// keywordAt reports whether the keyword occurs at s[i] as a whole word,
+// case-insensitively.
+func keywordAt(s string, i int, keyword string) bool {
+	end := i + len(keyword)
+	if i < 0 || end > len(s) || !strings.EqualFold(s[i:end], keyword) {
+		return false
+	}
+	return end == len(s) || !isIdentByte(s[end])
+}
+
+// isIdentByte reports whether b can appear in a bare SQL identifier.
+func isIdentByte(b byte) bool {
+	return b == '_' || b == '$' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// matchingParen returns the index of the parenthesis closing the one at s[i],
+// skipping quoted identifiers and string literals, or len(s)-1 if unbalanced.
+func matchingParen(s string, i int) int {
+	depth := 0
+	for j := i; j < len(s); j++ {
+		switch s[j] {
+		case '"':
+			if end := quotedIdentEnd(s, j); end > 0 {
+				j = end - 1
+			}
+		case '\'':
+			for j++; j < len(s); j++ {
+				if s[j] == '\'' {
+					if j+1 < len(s) && s[j+1] == '\'' {
+						j++
+						continue
+					}
+					break
+				}
+			}
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return len(s) - 1
+}
+
+// normalizeRelationReference converts a relation reference captured by
+// tableRefPattern, possibly quoted and possibly schema-qualified, into the
+// lowercase "name" or "schema.name" key format of buildSchemaNameLookup.
+func normalizeRelationReference(raw string) string {
+	if idx := findLastUnquotedDot(raw); idx != -1 {
+		return strings.ToLower(unquoteIdent(strings.TrimSpace(raw[:idx])) + "." + unquoteIdent(strings.TrimSpace(raw[idx+1:])))
+	}
+	return strings.ToLower(unquoteIdent(strings.TrimSpace(raw)))
+}
 
 // functionReferencesNewTable determines if a function references any newly
 // added table that will be created after the first function batch (tablesWithDeps).
@@ -3090,19 +3545,9 @@ func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) 
 		return false
 	}
 
-	matches := tableRefPattern.FindAllStringSubmatch(fn.Definition, -1)
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		ref := strings.ToLower(match[1])
-		// The lookup contains both qualified (schema.table) and unqualified
-		// (table) keys for each table, so a single check covers both forms.
-		if _, ok := newTables[ref]; ok {
-			return true
-		}
-	}
-	return false
+	// The lookup contains both qualified (schema.table) and unqualified
+	// (table) keys for each table, so a single check covers both forms.
+	return bodyReferencesRelation(fn.Definition, newTables)
 }
 
 // GetObjectName implementations for DiffSource interface

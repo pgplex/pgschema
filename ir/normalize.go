@@ -503,6 +503,61 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 	return result.String()
 }
 
+// StripSchemaQualifiers removes "schema." qualifiers from a string containing
+// SQL identifiers, such as a type or argument list, where the token directly
+// before an unquoted dot is the schema name in bare or quote_ident form.
+// Quoted identifiers are never modified, so a name like "public.foo" survives.
+func StripSchemaQualifiers(s, schema string) string {
+	if s == "" || schema == "" {
+		return s
+	}
+	var out strings.Builder
+	out.Grow(len(s))
+	for i := 0; i < len(s); {
+		start := i
+		switch {
+		case s[i] == '"':
+			// Quoted identifier: find the closing quote, honoring "" escapes.
+			i++
+			for i < len(s) {
+				if s[i] == '"' {
+					if i+1 < len(s) && s[i+1] == '"' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+		case isIdentChar(s[i]):
+			for i < len(s) && isIdentChar(s[i]) {
+				i++
+			}
+		default:
+			out.WriteByte(s[i])
+			i++
+			continue
+		}
+		token := s[start:i]
+		if i < len(s) && s[i] == '.' && unquoteIdentifier(token) == schema {
+			i++ // drop the schema token and its dot
+			continue
+		}
+		out.WriteString(token)
+	}
+	return out.String()
+}
+
+// unquoteIdentifier strips quote_ident double-quoting from a single identifier;
+// bare identifiers are returned unchanged.
+func unquoteIdentifier(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return strings.ReplaceAll(s[1:len(s)-1], `""`, `"`)
+	}
+	return s
+}
+
 // isIdentChar returns true if the byte is a valid SQL identifier character.
 func isIdentChar(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '$'

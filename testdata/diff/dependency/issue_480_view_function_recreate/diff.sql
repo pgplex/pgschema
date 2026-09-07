@@ -1,5 +1,10 @@
 DROP FUNCTION IF EXISTS fn_create_user(text);
 
+CREATE OR REPLACE VIEW vw_active AS
+ SELECT id
+   FROM tb_users
+  WHERE is_deleted = false;
+
 ALTER TABLE tb_users ADD COLUMN role text DEFAULT 'member' NOT NULL;
 
 DROP VIEW IF EXISTS vw_users RESTRICT;
@@ -30,3 +35,40 @@ BEGIN
     RETURN v_result;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION fn_pair_step(
+    state bigint,
+    u vw_users,
+    a vw_active
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + 1
+$$;
+
+CREATE OR REPLACE FUNCTION fn_users_step(
+    state bigint,
+    u vw_users
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT state + 1
+$$;
+
+CREATE AGGREGATE agg_pair(vw_users, vw_active) (
+    SFUNC = fn_pair_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+CREATE AGGREGATE agg_users_count(vw_users) (
+    SFUNC = fn_users_step,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+CREATE OR REPLACE VIEW vw_users_count AS
+ SELECT agg_users_count(vw_users.*) AS n
+   FROM vw_users;
