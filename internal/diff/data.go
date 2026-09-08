@@ -166,12 +166,13 @@ func diffRows(oldTable, newTable *ir.Table) *tableDataDiff {
 }
 
 // markEarlyDeletes flags deletes whose row shares a secondary unique value
-// (a UNIQUE constraint or non-partial unique index other than the primary
-// key) with an inserted row. Such a delete has to run before the inserts or
-// the unique constraint rejects the insert. Deletes not flagged run after the
-// updates, so child rows re-pointed at new parent rows no longer block them.
+// (a UNIQUE constraint or unique index other than the primary key) with an
+// inserted or updated row. Such a delete has to run before the inserts and
+// updates or the unique constraint rejects them. Deletes not flagged run
+// after the updates, so child rows re-pointed at new parent rows no longer
+// block them.
 func markEarlyDeletes(d *tableDataDiff, deletedRows []*ir.Row, oldColIdx map[string]int) {
-	if len(d.Inserts) == 0 || len(d.Deletes) == 0 {
+	if (len(d.Inserts) == 0 && len(d.Updates) == 0) || len(d.Deletes) == 0 {
 		return
 	}
 	pk := d.Table.PrimaryKeyColumns()
@@ -200,14 +201,19 @@ func markEarlyDeletes(d *tableDataDiff, deletedRows []*ir.Row, oldColIdx map[str
 			}
 			return completeRowKey(row, idx)
 		}
-		inserted := make(map[string]bool, len(d.Inserts))
+		claimed := make(map[string]bool, len(d.Inserts)+len(d.Updates))
 		for _, row := range d.Inserts {
 			if k, ok := keyOf(row, newIdx); ok {
-				inserted[k] = true
+				claimed[k] = true
+			}
+		}
+		for _, upd := range d.Updates {
+			if k, ok := keyOf(upd.Row, newIdx); ok {
+				claimed[k] = true
 			}
 		}
 		for i, row := range deletedRows {
-			if k, ok := keyOf(row, oldIdx); ok && inserted[k] {
+			if k, ok := keyOf(row, oldIdx); ok && claimed[k] {
 				d.Deletes[i].Early = true
 			}
 		}
@@ -232,8 +238,11 @@ type uniqueKey struct {
 	nullsNotDistinct bool
 }
 
-// secondaryUniqueKeys lists every UNIQUE constraint and non-partial,
-// non-expression unique index of a table, except the primary key.
+// secondaryUniqueKeys lists every UNIQUE constraint and unique index of a
+// table, except the primary key. A partial unique index counts as if it
+// covered every row, since its predicate cannot be evaluated here; that only
+// ever adds early deletes. Expression indexes cannot be evaluated either and
+// are skipped.
 func secondaryUniqueKeys(table *ir.Table, pk []string) []uniqueKey {
 	var keys []uniqueKey
 	pkKey := strings.Join(pk, keySeparator)
@@ -263,7 +272,7 @@ func secondaryUniqueKeys(table *ir.Table, pk []string) []uniqueKey {
 		add(cols, c.NullsNotDistinct)
 	}
 	for _, idx := range table.Indexes {
-		if idx.Type != ir.IndexTypeUnique || idx.IsPartial || idx.IsExpression {
+		if idx.Type != ir.IndexTypeUnique || idx.IsExpression {
 			continue
 		}
 		cols := make([]string, len(idx.Columns))
@@ -472,6 +481,11 @@ func formatDataLiteral(col *ir.Column, v *string) string {
 				return "false"
 			}
 		}
+	}
+	if strings.Contains(*v, `\`) {
+		// An escape-string literal reads the same whether or not
+		// standard_conforming_strings is on.
+		return "E'" + strings.NewReplacer(`\`, `\\`, "'", "''").Replace(*v) + "'"
 	}
 	return quoteString(*v)
 }
