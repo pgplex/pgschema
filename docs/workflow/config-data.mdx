@@ -4,7 +4,7 @@ title: "Config Data"
 
 Most applications keep a handful of small tables whose rows are part of the application rather than user data: countries, currencies, statuses, feature flags, plan tiers, permission catalogs. A release that adds a status or renames a plan needs those rows changed in lockstep with the schema.
 
-pgschema manages these rows the same way it manages schema objects. You list the tables in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy) directives, `plan` diffs them against the target database, and `apply` runs the resulting `INSERT`, `UPDATE`, and `DELETE` statements in the same transaction as the DDL.
+pgschema manages these rows the same way it manages schema objects. You list the tables in [`pgschema.toml`](/cli/config), keep their rows in CSV files loaded by [`\copy`](/syntax/copy) directives, `plan` diffs them against the target database, and `apply` runs the resulting `INSERT`, `UPDATE`, and `DELETE` statements after the DDL, in the same transaction as the schema steps that precede them.
 
 <Note>
 This is for **config data**: small tables that the application reads and the deployment owns. For backfills and other one-off changes to user data, see [Custom Migration Steps](/workflow/custom-migration-steps).
@@ -113,7 +113,7 @@ This is for **config data**: small tables that the application reads and the dep
     }
     ```
 
-    Apply as usual. Data steps run in the same transaction as the schema steps, so a failed `INSERT` rolls back the `ALTER TABLE` that preceded it:
+    Apply as usual. Data steps join the transaction of the schema steps before them, so a failed `INSERT` rolls back the `ALTER TABLE` that preceded it. Steps that cannot run in a transaction, such as `CREATE INDEX CONCURRENTLY` or an online `VALIDATE CONSTRAINT`, commit on their own before the data steps and are not rolled back:
 
     ```bash
     pgschema apply --host localhost --db myapp --user postgres --plan plan.json
@@ -171,5 +171,6 @@ Foreign keys between managed tables are satisfied by this order. A `DELETE` bloc
 - **Primary key required.** Tables without a primary key cannot be managed. Unique constraints are not used for matching.
 - **Sequences are not advanced.** Inserting explicit values into a `serial` or identity column does not move the sequence. If the application also inserts into a managed table, prefer natural keys or reset the sequence yourself.
 - **Not fingerprinted.** The `source_fingerprint` that guards against concurrent changes covers the schema only. A row changed in the database between `plan` and `apply` is overwritten by the plan or shows up in the next plan.
+- **Data runs after DDL.** Row changes are applied once every table, column, and constraint of the plan exists. A new constraint that current rows violate until the CSV is applied, such as a `CHECK` on a column the CSV fills in, fails to validate; add the constraint in a later plan.
 - **Partitioned tables** are managed through the parent table. Individual partitions cannot carry their own directive.
 - **Large tables** are out of scope by design. The feature is tuned for tables with hundreds or a few thousand rows, where one statement per row keeps the plan reviewable.

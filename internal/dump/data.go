@@ -67,8 +67,14 @@ func (f *DumpFormatter) WriteDataFiles(ctx context.Context, db *sql.DB, tables [
 		return fmt.Errorf("failed to set session settings: %w", err)
 	}
 
+	written := make(map[string]string, len(tables))
 	for _, table := range tables {
-		path := filepath.Join(baseDir, filepath.FromSlash(f.DataFileName(table)))
+		rel := f.DataFileName(table)
+		if other, dup := written[rel]; dup {
+			return fmt.Errorf("tables %q and %q would both be written to %s; rename one of them", other, table.Name, rel)
+		}
+		written[rel] = table.Name
+		path := filepath.Join(baseDir, filepath.FromSlash(rel))
 		if err := writeCSV(ctx, conn, table, path); err != nil {
 			return fmt.Errorf("failed to write %s: %w", path, err)
 		}

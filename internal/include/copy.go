@@ -90,7 +90,7 @@ func parseCopyDirective(rest string) (*CopyDirective, error) {
 
 	// Optional column list
 	if strings.HasPrefix(rest, "(") {
-		end := strings.Index(rest, ")")
+		end := closingParen(rest)
 		if end < 0 {
 			return nil, fmt.Errorf("unterminated column list in \\copy directive")
 		}
@@ -133,6 +133,23 @@ func parseCopyDirective(rest string) (*CopyDirective, error) {
 	d.Path = path
 	d.Options = strings.TrimSpace(rest)
 	return d, nil
+}
+
+// closingParen returns the index of the ")" that closes the list opened at
+// s[0], skipping any ")" inside double-quoted identifiers, or -1.
+func closingParen(s string) int {
+	inQuote := false
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			inQuote = !inQuote
+		case ')':
+			if !inQuote {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // readIdentifier reads a bare or double-quoted SQL identifier from the start

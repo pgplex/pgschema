@@ -30,6 +30,11 @@ func TestParseCopyLine(t *testing.T) {
 			want: CopyDirective{Schema: "public", Table: "Country", Columns: "code", Path: "x.csv", Options: "csv header"},
 		},
 		{
+			name: "parenthesis inside quoted column",
+			line: `\copy t ("amount)usd", "a""b") FROM 'x.csv'`,
+			want: CopyDirective{Table: "t", Columns: `"amount)usd", "a""b"`, Path: "x.csv"},
+		},
+		{
 			name: "quote in path",
 			line: `\copy t FROM 'it''s.csv' WITH (FORMAT csv)`,
 			want: CopyDirective{Table: "t", Path: "it's.csv", Options: "WITH (FORMAT csv)"},

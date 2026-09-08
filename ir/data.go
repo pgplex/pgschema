@@ -67,8 +67,11 @@ func (t *Table) PrimaryKeyColumns() []string {
 // DataSessionSettings pins the text output format of every type whose
 // rendering depends on session state, so rows read from the plan database,
 // from the target database, and by dump all use the same canonical form.
+// row_security is off, as in pg_dump, so a role that cannot bypass row-level
+// security fails instead of reading a partial table.
 // Run inside a transaction; SET LOCAL reverts at its end.
-const DataSessionSettings = `SET LOCAL TimeZone = 'UTC';
+const DataSessionSettings = `SET LOCAL row_security = off;
+SET LOCAL TimeZone = 'UTC';
 SET LOCAL DateStyle = 'ISO, MDY';
 SET LOCAL IntervalStyle = 'postgres';
 SET LOCAL bytea_output = 'hex';

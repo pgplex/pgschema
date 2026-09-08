@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/pgplex/pgschema/ir"
 )
 
 func TestLoadDataConfig(t *testing.T) {
@@ -79,23 +77,4 @@ func TestLoadDataConfig(t *testing.T) {
 			t.Fatal("expected parse error")
 		}
 	})
-}
-
-func TestValidateDataAgainstIgnore(t *testing.T) {
-	data := &ir.DataConfig{Tables: []string{"ref_*"}}
-	ignore := &ir.IgnoreConfig{Tables: []string{"ref_legacy"}}
-
-	if err := ValidateDataAgainstIgnore(data, ignore, []string{"ref_status", "users"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	err := ValidateDataAgainstIgnore(data, ignore, []string{"ref_status", "ref_legacy"})
-	if err == nil || !strings.Contains(err.Error(), "ref_legacy") {
-		t.Fatalf("expected conflict error for ref_legacy, got %v", err)
-	}
-	if err := ValidateDataAgainstIgnore(nil, ignore, []string{"ref_legacy"}); err != nil {
-		t.Fatalf("nil data config must not error: %v", err)
-	}
-	if err := ValidateDataAgainstIgnore(data, nil, []string{"ref_legacy"}); err != nil {
-		t.Fatalf("nil ignore config must not error: %v", err)
-	}
 }

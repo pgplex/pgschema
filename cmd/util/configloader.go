@@ -54,17 +54,3 @@ func LoadDataConfig(dir string) (*ir.DataConfig, error) {
 	}
 	return &config.Data, nil
 }
-
-// ValidateDataAgainstIgnore rejects tables that are both data-managed and
-// ignored, since the two are contradictory.
-func ValidateDataAgainstIgnore(dataConfig *ir.DataConfig, ignoreConfig *ir.IgnoreConfig, tableNames []string) error {
-	if dataConfig == nil || ignoreConfig == nil {
-		return nil
-	}
-	for _, name := range tableNames {
-		if dataConfig.IsDataTable(name) && ignoreConfig.ShouldIgnoreTable(name) {
-			return fmt.Errorf("table %q is listed under [data] in %s and matched by [tables] in %s; a table cannot be both managed and ignored", name, ConfigFileName, IgnoreFileName)
-		}
-	}
-	return nil
-}

@@ -109,11 +109,6 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	// a \copy directive is appended after every other object.
 	dataTables := dump.DataTables(schemaIR, config.Schema)
 	if len(dataTables) > 0 {
-		if dbSchema, ok := schemaIR.Schemas[config.Schema]; ok {
-			if err := util.ValidateDataAgainstIgnore(dataConfig, ignoreConfig, dbSchema.TableNames()); err != nil {
-				return "", err
-			}
-		}
 		if config.File == "" {
 			return "", fmt.Errorf("%s lists config tables, so --file is required: their rows are written to %s/ next to the output file", util.ConfigFileName, dump.DataDir)
 		}

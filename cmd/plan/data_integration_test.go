@@ -109,6 +109,16 @@ func TestPlanConfigDataConsistency(t *testing.T) {
 		}
 	})
 
+	t.Run("directive for a partition", func(t *testing.T) {
+		parted := "CREATE TABLE events (code text, name text, PRIMARY KEY (code, name)) PARTITION BY LIST (code);\n" +
+			"CREATE TABLE events_us PARTITION OF events FOR VALUES IN ('US');\n"
+		child := "\\copy events_us (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)\n"
+		err := run(t, ddl+directive+parted+child, "[data]\ntables = [\"country\", \"events_us\"]\n", "")
+		if err == nil || !strings.Contains(err.Error(), "through its parent table") {
+			t.Fatalf("expected partition error, got %v", err)
+		}
+	})
+
 	t.Run("listed and ignored", func(t *testing.T) {
 		err := run(t, ddl+directive, "[data]\ntables = [\"country\"]\n", "[tables]\npatterns = [\"country\"]\n")
 		if err == nil || !strings.Contains(err.Error(), "cannot be both managed and ignored") {

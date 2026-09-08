@@ -305,15 +305,6 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current state from database: %w", err)
 	}
-	if dataConfig != nil {
-		names := copyTables
-		if dbSchema, ok := currentStateIR.Schemas[config.Schema]; ok {
-			names = append(dbSchema.TableNames(), names...)
-		}
-		if err := util.ValidateDataAgainstIgnore(dataConfig, ignoreConfig, names); err != nil {
-			return nil, err
-		}
-	}
 
 	// Compute fingerprint of current database state
 	sourceFingerprint, err := fingerprint.ComputeFingerprint(currentStateIR, config.Schema)
@@ -889,7 +880,8 @@ func ResetFlags() {
 }
 
 // validateDataDirectives checks that every data-managed table in the desired
-// state is loaded by a \copy directive.
+// state is loaded by a \copy directive, and that every directive loads a
+// table that is actually managed, so no directive is silently ignored.
 func validateDataDirectives(desiredIR *ir.IR, schemaName string, copyTables []string) error {
 	dbSchema, ok := desiredIR.Schemas[schemaName]
 	if !ok {
@@ -898,6 +890,15 @@ func validateDataDirectives(desiredIR *ir.IR, schemaName string, copyTables []st
 	declared := make(map[string]bool, len(copyTables))
 	for _, name := range copyTables {
 		declared[name] = true
+		table, exists := dbSchema.Tables[name]
+		switch {
+		case !exists:
+			return fmt.Errorf("\\copy directive loads rows into table %q, but the desired state does not create that table", name)
+		case table.PartitionOf != "":
+			return fmt.Errorf("\\copy directive loads rows into partition %q; load them through its parent table %q instead", name, table.PartitionOf)
+		case !table.DataManaged:
+			return fmt.Errorf("\\copy directive loads rows into table %q, but its rows are not managed", name)
+		}
 	}
 	for _, name := range dbSchema.TableNames() {
 		table := dbSchema.Tables[name]

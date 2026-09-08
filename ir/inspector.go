@@ -256,6 +256,9 @@ func (i *Inspector) buildTables(ctx context.Context, schema *IR, targetSchema st
 
 		// Check if table should be ignored
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreTable(tableName) {
+			if i.dataConfig.IsDataTable(tableName) {
+				return fmt.Errorf("table %q is listed under [data] in pgschema.toml and matched by [tables] in .pgschemaignore; a table cannot be both managed and ignored", tableName)
+			}
 			continue
 		}
 
