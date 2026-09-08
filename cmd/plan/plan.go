@@ -239,13 +239,15 @@ func CreateDesiredStateProvider(config *PlanConfig) (postgres.DesiredStateProvid
 		return postgres.NewExternalDatabase(externalConfig)
 	}
 
-	// Otherwise, use embedded PostgreSQL
-	return CreateEmbeddedPostgresForPlan(config, pgVersion)
+	// Otherwise, use embedded PostgreSQL, mirroring the target's extensions (issue #584)
+	return CreateEmbeddedPostgresForPlan(config, pgVersion, targetExtensions)
 }
 
 // CreateEmbeddedPostgresForPlan creates a temporary embedded PostgreSQL instance
 // for validating the desired state schema. The instance should be stopped by the caller.
-func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.PostgresVersion) (*postgres.EmbeddedPostgres, error) {
+// targetExtensions (name -> schema) are installed into the instance before the
+// desired state is applied so extension types resolve without CREATE EXTENSION.
+func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.PostgresVersion, targetExtensions map[string]string) (*postgres.EmbeddedPostgres, error) {
 	if config.User == "" {
 		return nil, fmt.Errorf("target database user must not be empty when creating embedded postgres")
 	}
@@ -256,10 +258,11 @@ func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.Postgr
 	// This ensures ALTER DEFAULT PRIVILEGES FOR ROLE <user> works correctly
 	// and that implicit owner roles match the target database. (issue #303)
 	embeddedConfig := &postgres.EmbeddedPostgresConfig{
-		Version:  pgVersion,
-		Database: "pgschema_temp",
-		Username: config.User,
-		Password: "pgschema",
+		Version:    pgVersion,
+		Database:   "pgschema_temp",
+		Username:   config.User,
+		Password:   "pgschema",
+		Extensions: targetExtensions,
 	}
 	embeddedPG, err := postgres.StartEmbeddedPostgres(embeddedConfig)
 	if err != nil {

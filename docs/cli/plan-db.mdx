@@ -14,7 +14,7 @@ By default, the `plan` command (and `apply` command in File Mode) spins up a tem
 
 Use an external database for plan generation when:
 
-- Your schema uses **PostgreSQL extensions** (like `hstore`, `postgis`, `uuid-ossp`, etc.) - The embedded database doesn't have extensions pre-installed, causing plan generation to fail with "type does not exist" errors ([#121](https://github.com/pgplex/pgschema/issues/121))
+- Your schema uses **third-party PostgreSQL extensions** (like `postgis` or `pgvector`) - The embedded database automatically mirrors every extension installed on the target, but only extensions bundled with PostgreSQL (contrib: `hstore`, `pg_trgm`, `citext`, `uuid-ossp`, etc.) are available to it. Anything else causes plan generation to fail with "type does not exist" errors ([#121](https://github.com/pgplex/pgschema/issues/121), [#584](https://github.com/pgplex/pgschema/issues/584))
 - Your schema has **cross-schema foreign key references** to tables you do not manage (for example Supabase `auth.users`) - If the referenced table exists on the target database, [ignore that schema or table](/cli/ignore) and pgschema stubs it automatically during plan (embedded postgres is enough). Use the fallbacks below only when the table is missing on target ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548))
 
 ### How It Works
@@ -63,13 +63,14 @@ pgschema apply \
 
 ### Using PostgreSQL Extensions
 
-If your schema uses extensions like `hstore`, `postgis`, or `uuid-ossp`, you need to install them in the plan database first:
+pgschema does not manage extensions, so `dump` never emits `CREATE EXTENSION` and you should not add it to your schema files. Instead, the plan database must already have the extensions your schema uses, in the same schema as on the target.
+
+The default embedded plan database handles this for you: it installs every extension found on the target database before applying your schema. This covers all extensions bundled with PostgreSQL (`hstore`, `pg_trgm`, `citext`, `uuid-ossp`, `btree_gist`, ...). Third-party extensions such as `postgis` or `pgvector` are not bundled, so for those you need an external plan database with the extension installed first:
 
 ```sql
 -- In your plan database, install required extensions
-CREATE EXTENSION IF NOT EXISTS hstore;
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 Then run plan or apply with the external database:
