@@ -17,7 +17,7 @@ The `.pgschemaignore` file allows you to exclude database objects from pgschema 
 ## File Format
 
 <Note>
-The `.pgschemaignore` file is automatically loaded when present in the current directory:
+The `.pgschemaignore` file is automatically loaded when present in the current directory. Project configuration that is not about exclusion, such as the list of [config tables](/workflow/config-data), lives in [`pgschema.toml`](/cli/config). A table cannot be both ignored here and listed there.
 </Note>
 
 Create a `.pgschemaignore` file in your project directory using TOML format:

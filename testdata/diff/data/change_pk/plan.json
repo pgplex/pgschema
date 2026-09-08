@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "53120b564f9d170f3f5ec3b033b247c1645b9a10ae3b8328c69c6cf72d823dac"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE country DROP COLUMN id;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.country.id"
+        },
+        {
+          "sql": "ALTER TABLE country\nADD CONSTRAINT country_pkey PRIMARY KEY (code);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.country.country_pkey"
+        }
+      ]
+    }
+  ]
+}

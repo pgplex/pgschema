@@ -18,6 +18,15 @@ type DumpFormatter struct {
 	targetSchema  string
 	noComments    bool
 	qualifySchema bool
+	// dataTables are the config tables whose \copy directives are appended
+	// after every object (see FormatDataDirectives).
+	dataTables []*ir.Table
+}
+
+// SetDataTables sets the config tables whose \copy directives follow all
+// objects, in single-file output and in the multi-file main file.
+func (f *DumpFormatter) SetDataTables(tables []*ir.Table) {
+	f.dataTables = tables
 }
 
 // NewDumpFormatter creates a new DumpFormatter. When qualifySchema is true, comment
@@ -71,6 +80,8 @@ func (f *DumpFormatter) FormatSingleFile(diffs []diff.Diff) string {
 			output.WriteString("\n")
 		}
 	}
+
+	output.WriteString(f.FormatDataDirectives(f.dataTables))
 
 	// Add trailing newline (Unix convention)
 	output.WriteString("\n")
@@ -176,6 +187,8 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	for _, include := range includes {
 		mainFile.WriteString(include + "\n")
 	}
+
+	mainFile.WriteString(f.FormatDataDirectives(f.dataTables))
 
 	return nil
 }
@@ -552,6 +565,11 @@ func (f *DumpFormatter) formatObjectCommentHeader(step diff.Diff) string {
 	output.WriteString("\n")
 
 	return output.String()
+}
+
+// commentHeader renders the pg_dump-style header used before every object.
+func commentHeader(objectName, displayType, schemaName string) string {
+	return fmt.Sprintf("--\n-- Name: %s; Type: %s; Schema: %s; Owner: -\n--\n\n", objectName, displayType, schemaName)
 }
 
 // getCommentSchemaName determines the schema name for comment headers

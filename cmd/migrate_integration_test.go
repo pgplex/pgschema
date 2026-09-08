@@ -126,6 +126,12 @@ func TestPlanAndApply(t *testing.T) {
 		planJSONFile := filepath.Join(path, "plan.json")
 		planTXTFile := filepath.Join(path, "plan.txt")
 
+		// Apply test filter if provided; a filtered-out case is still a case,
+		// so its subdirectories (e.g. data/) are not walked
+		if testFilter != "" && !matchesFilter(relPath, testFilter) {
+			return filepath.SkipDir
+		}
+
 		// Check for required input files (always required)
 		if _, err := os.Stat(oldFile); os.IsNotExist(err) {
 			return fmt.Errorf("missing required file: %s", oldFile)
@@ -147,11 +153,6 @@ func TestPlanAndApply(t *testing.T) {
 			}
 		}
 
-		// Apply test filter if provided
-		if testFilter != "" && !matchesFilter(relPath, testFilter) {
-			return nil
-		}
-
 		// Get relative path for test name
 		testName := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
 
@@ -165,7 +166,8 @@ func TestPlanAndApply(t *testing.T) {
 			planTXTFile:  planTXTFile,
 		})
 
-		return nil
+		// A test case's subdirectories (e.g. data/ with CSV files) are not test cases
+		return filepath.SkipDir
 	})
 
 	if err != nil {
@@ -437,6 +439,7 @@ func applySchemaChanges(host string, port int, database, user, password, schema,
 		Quiet:           true, // Suppress plan display and progress messages in tests
 		LockTimeout:     "",
 		ApplicationName: "pgschema",
+		ConfigDir:       filepath.Dir(schemaFile),
 	}
 
 	// Call ApplyMigration API directly with shared embedded postgres
@@ -455,6 +458,7 @@ func generatePlanOutput(host string, port int, database, user, password, schema,
 		Schema:          schema,
 		File:            schemaFile,
 		ApplicationName: "pgschema",
+		ConfigDir:       filepath.Dir(schemaFile),
 	}
 
 	// Generate the plan (reuse shared embedded postgres for performance)

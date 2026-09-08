@@ -217,8 +217,11 @@ schema/
 ├── procedures/
 ├── indexes/
 ├── triggers/
-└── types/
+├── types/
+└── data/                  # CSV files for tables listed in pgschema.toml
 ```
+
+Rows of [config tables](/workflow/config-data) live as CSV files under `data/`, loaded by `\copy` directives at the end of `main.sql`.
 
 ### Custom Organization
 

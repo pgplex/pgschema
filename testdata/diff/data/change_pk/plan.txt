@@ -1,0 +1,17 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ country
+    - id (column)
+    + country_pkey (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE country DROP COLUMN id;
+
+ALTER TABLE country
+ADD CONSTRAINT country_pkey PRIMARY KEY (code);

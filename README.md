@@ -13,7 +13,7 @@
  </picture>
 </a>
 
-**pgschema** is a CLI tool that brings Terraform-style declarative schema migration to PostgreSQL. Instead of writing migration files by hand, you declare the desired schema state and pgschema generates the migration plan automatically.
+**pgschema** is a CLI tool that brings Terraform-style declarative schema migration to PostgreSQL. Instead of writing migration files by hand, you declare the desired schema state and pgschema generates the migration plan automatically. Config data, the rows of lookup tables, settings, and feature flags, can be managed the same way, so a release ships its rows together with its schema.
 
 ```
 pgschema dump → edit schema.sql → pgschema plan → pgschema apply
@@ -48,6 +48,7 @@ Most state-based tools spin up a temporary "shadow" database to validate migrati
 - You want a fully free and open-source tool with no feature gating
 - You want to version-control your schema as plain SQL and apply changes declaratively
 - You need Postgres-specific features (RLS, partitioning, complex triggers) tracked in migrations
+- You want config data (lookup tables, settings, feature flags) versioned as CSV and applied with the schema
 - You want migration validation without provisioning a separate shadow database
 - You want a plan/preview step before applying changes, like `terraform plan`
 - You're migrating from a manual SQL workflow and want structure without an ORM
@@ -62,6 +63,7 @@ Most state-based tools spin up a temporary "shadow" database to validate migrati
 | Postgres-specific objects | Auto-detected and diffed (RLS, partitioning, triggers, …) | You write the migration SQL manually | Auto-detected and diffed |
 | Shadow database | Not required | Not required | Required by default |
 | Migration history table | Not required | Required | Not required |
+| Config data (lookup tables, settings) | Rows diffed by primary key, CSV files as source of truth | Manual DML in migration files | Supported |
 
 ### Why is it free?
 
@@ -91,6 +93,7 @@ pgschema covers all the schema objects developers use in real-world Postgres app
 | **Privileges** | GRANT/REVOKE for tables (including column-level), sequences, functions, procedures, types/domains; WITH GRANT OPTION |
 | **Default Privileges** | ALTER DEFAULT PRIVILEGES for tables, sequences, functions, types |
 | **Comments** | COMMENT ON for tables, columns, views, materialized views, functions, procedures, aggregates, indexes |
+| **Config Data** | Rows of config tables (lookups, settings, feature flags) listed in `pgschema.toml`, kept in CSV files loaded by `\copy`, diffed by primary key into INSERT/UPDATE/DELETE |
 
 See [Unsupported](https://www.pgschema.com/syntax/unsupported) for objects that are explicitly out of scope.
 

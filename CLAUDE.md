@@ -90,7 +90,7 @@ PGAPPNAME=pgschema
 - `dump/` - Schema extraction from live database
 - `plan/` - Migration planning by comparing schemas
 - `apply/` - Migration execution with safety checks
-- `util/` - Shared utilities (connection, env, ignore file loading, SQL logging)
+- `util/` - Shared utilities (connection, env, ignore file and `pgschema.toml` loading, SQL logging)
 - `root.go` - Main CLI setup with Cobra
 - `migrate_integration_test.go`, `schema_integration_test.go`, `include_integration_test.go`, `ignore_integration_test.go` - Integration test suites
 
@@ -192,6 +192,7 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 - **Privileges**: GRANT/REVOKE for tables, functions, sequences, types
 - **Default Privileges**: ALTER DEFAULT PRIVILEGES for grantor-level access control
 - **Comments**: On all supported object types
+- **Config Data**: Rows of tables listed under `[data]` in `pgschema.toml`, kept in CSV files loaded by `\copy` directives, diffed by primary key into INSERT/UPDATE/DELETE (`internal/diff/data.go`, `internal/include/copy.go`, `internal/postgres/copy.go`, `internal/dump/data.go`)
 
 ## Environment Variables
 
@@ -245,6 +246,7 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 - `ir/normalize.go` - Schema normalization (version-specific differences, type mappings)
 - `ir/quote.go` - Identifier quoting utilities
 - `ir/ignore.go` - IgnoreConfig for filtering database objects with glob patterns
+- `ir/data.go` - DataConfig (`[data]` section of `pgschema.toml`), row loading for config tables
 - `ir/queries/` - sqlc-generated code for type-safe SQL queries (`queries.sql`, `queries.sql.go`, `models.sql.go`, `dml.sql.go`, `sqlc.yaml`)
 
 **Diff Package** (`internal/diff/`):
@@ -274,6 +276,7 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 Tests are organized by object type (150+ test cases):
 
 - `comment/` (12), `create_aggregate/` (4), `create_domain/` (5), `create_function/` (8), `create_index/` (2)
+- `data/` (7) - config data; each case also has `pgschema.toml` and a `data/` directory of CSV files loaded by `\copy` in `new.sql`
 - `create_materialized_view/` (3), `create_policy/` (10), `create_procedure/` (3), `create_sequence/` (3)
 - `create_table/` (37), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
 - `default_privilege/` (9), `privilege/` (13)

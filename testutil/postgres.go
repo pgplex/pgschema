@@ -58,6 +58,15 @@ func ParseSQLToIR(t *testing.T, embeddedPG *postgres.EmbeddedPostgres, sqlConten
 // (e.g., citext in public schema) which would otherwise be dropped during schema reset.
 func ParseSQLToIRWithSetup(t *testing.T, embeddedPG *postgres.EmbeddedPostgres, sqlContent string, schema string, setupSQL string) *ir.IR {
 	t.Helper()
+	return buildIRFromSQL(t, embeddedPG, sqlContent, schema, setupSQL, nil)
+}
+
+// buildIRFromSQL resets schema on the embedded instance, runs setupSQL then
+// sqlContent (which may contain \copy marker lines from the include
+// processor), and inspects the result. Tables matching dataConfig get their
+// rows loaded.
+func buildIRFromSQL(t *testing.T, embeddedPG *postgres.EmbeddedPostgres, sqlContent string, schema string, setupSQL string, dataConfig *ir.DataConfig) *ir.IR {
+	t.Helper()
 
 	ctx := context.Background()
 
@@ -69,16 +78,18 @@ func ParseSQLToIRWithSetup(t *testing.T, embeddedPG *postgres.EmbeddedPostgres, 
 		username, password, host, port, database)
 
 	// Connect to database
-	conn, err := sql.Open("pgx", dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer conn.Close()
+	defer db.Close()
 
-	// Test the connection
-	if err := conn.PingContext(ctx); err != nil {
-		t.Fatalf("Failed to ping database: %v", err)
+	// A single connection keeps SET search_path in effect for every statement.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("Failed to acquire connection: %v", err)
 	}
+	defer conn.Close()
 
 	// Drop and recreate schema for clean state
 	dropSchema := fmt.Sprintf("DROP SCHEMA IF EXISTS \"%s\" CASCADE", schema)
@@ -105,13 +116,13 @@ func ParseSQLToIRWithSetup(t *testing.T, embeddedPG *postgres.EmbeddedPostgres, 
 		}
 	}
 
-	// Execute the SQL
-	if _, err := conn.ExecContext(ctx, sqlContent); err != nil {
+	// Execute the SQL, streaming any \copy files it references
+	if err := postgres.ExecuteSchemaSQL(ctx, conn, sqlContent, schema); err != nil {
 		t.Fatalf("Failed to apply SQL to embedded PostgreSQL: %v", err)
 	}
 
 	// Inspect the database to get IR
-	inspector := ir.NewInspector(conn, nil)
+	inspector := ir.NewInspector(db, nil).WithDataConfig(dataConfig, true)
 	irResult, err := inspector.BuildIR(ctx, schema)
 	if err != nil {
 		t.Fatalf("Failed to inspect embedded PostgreSQL: %v", err)

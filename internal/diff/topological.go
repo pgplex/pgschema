@@ -963,3 +963,11 @@ func buildFunctionBodyDependencies(functions []*ir.Function) {
 		}
 	}
 }
+
+// TopologicallySortTables orders tables so that every table follows the
+// tables it references through foreign keys or partition parents. Tables
+// without dependencies keep their input order. Used by dump to order the
+// \copy directives of config tables so parent rows load first.
+func TopologicallySortTables(tables []*ir.Table) []*ir.Table {
+	return topologicallySortTables(tables)
+}

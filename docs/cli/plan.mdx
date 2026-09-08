@@ -10,7 +10,7 @@ The plan command follows infrastructure-as-code principles similar to Terraform:
 1. Read the desired state from a SQL file (with include directive support)
 1. Apply the desired state SQL to a temporary PostgreSQL instance (embedded by default, or external via `--plan-*` flags)
 1. Connect to the target database and analyze current state of the specified schema
-1. Compare the two states
+1. Compare the two states, including the rows of config tables declared with [`\copy`](/syntax/copy) directives
 1. Generate a detailed migration plan with proper dependency ordering
 1. Display the plan without making any changes
 
@@ -348,6 +348,34 @@ ALTER TABLE products DROP COLUMN old_price;
 DROP TABLE legacy_data;
 ```
 
+### Config Data Changes
+
+When the schema declares rows with [`\copy`](/syntax/copy) directives, row changes are listed under their table and emitted as `INSERT`, `UPDATE`, and `DELETE` steps of type `table.data`:
+
+```
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ country
+    + FR (row)
+    ~ IL (row)
+    - XX (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+INSERT INTO country (code, name) VALUES ('FR', 'France');
+
+UPDATE country SET name = 'State of Israel' WHERE code = 'IL';
+
+DELETE FROM country WHERE code = 'XX';
+```
+
+See [Config Data](/workflow/config-data) for details.
+
 ### Plan for Specific Schema
 
 ```bash
@@ -466,3 +494,9 @@ The plan command supports include directives in schema files, allowing you to or
 ```
 
 The include processor will resolve all includes relative to the directory containing the main schema file.
+
+[`\copy`](/syntax/copy) directives are resolved the same way and load reference rows from CSV files:
+
+```sql
+\copy country (code, name) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)
+```

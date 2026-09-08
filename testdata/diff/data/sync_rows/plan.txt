@@ -1,0 +1,19 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ country
+    + FR (row)
+    ~ IL (row)
+    - XX (row)
+
+DDL to be executed:
+--------------------------------------------------
+
+INSERT INTO country (code, name, active) VALUES ('FR', 'France', true);
+
+UPDATE country SET name = 'State of Israel' WHERE code = 'IL';
+
+DELETE FROM country WHERE code = 'XX';

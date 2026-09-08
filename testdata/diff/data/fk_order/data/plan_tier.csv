@@ -1,0 +1,4 @@
+id,name,seat_limit
+enterprise,Enterprise,
+free,Free,3
+team,Team,50

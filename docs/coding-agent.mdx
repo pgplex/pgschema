@@ -27,7 +27,7 @@ For optimal code integration, add this configuration to your [CLAUDE.md](https:/
 - **Plan**: Compare desired state with current database and generate migration plan
 - **Apply**: Execute the migration with safety features like concurrent change detection
 
-The tool supports PostgreSQL versions 14-17 and handles most common schema objects (tables, indexes, functions, views, constraints, etc.).
+The tool supports PostgreSQL versions 14-18 and handles most common schema objects (tables, indexes, functions, views, constraints, etc.), plus the rows of config tables (lookups, settings, feature flags) listed in `pgschema.toml`.
 
 ## Core Workflow
 
@@ -164,6 +164,7 @@ pgschema handles most common PostgreSQL schema objects:
 - **Sequences**: Auto-generated and custom sequences
 - **Policies**: Row-level security policies
 - **Comments**: Comments on all supported objects
+- **Config data**: Rows of tables listed under `[data]` in `pgschema.toml`, kept in CSV files loaded by `\copy` directives and diffed by primary key
 
 For unsupported objects, see the documentation.
 

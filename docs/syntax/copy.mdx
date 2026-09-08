@@ -1,0 +1,114 @@
+---
+title: '\copy'
+---
+
+`\copy` loads the rows of a config table into the desired state from a separate CSV file. The table must be listed under `[data]` in [`pgschema.toml`](/cli/config). pgschema compares the loaded rows with the rows in the target database and generates the `INSERT`, `UPDATE`, and `DELETE` statements needed to make them match. See [Config Data](/workflow/config-data) for the workflow.
+
+## Syntax
+
+```sql
+copy ::= \copy table_name [ ( column_name [, ...] ) ] FROM 'file_path' [ [ WITH ] ( option [, ...] ) ]
+
+table_name ::= [schema.]name
+
+file_path ::= path relative to the file containing the directive
+
+option ::= FORMAT { text | csv }
+         | HEADER [ boolean | MATCH ]
+         | DELIMITER 'character'
+         | NULL 'string'
+         | QUOTE 'character'
+         | ESCAPE 'character'
+         | FORCE_NULL ( column_name [, ...] )
+         | FORCE_NOT_NULL ( column_name [, ...] )
+         | ENCODING 'encoding_name'
+```
+
+The directive follows psql's `\copy` meta-command: one line, no terminating semicolon required. pgschema understands the following features:
+
+- **File path**: Resolved relative to the file containing the directive, the same way [`\i`](/workflow/modular-schema-files) resolves includes. The path must stay inside the main schema file's directory
+- **Options**: Passed to PostgreSQL's `COPY ... FROM` unchanged, so any input option PostgreSQL accepts works. With no options the file is in `COPY` text format: tab-separated, `\N` for `NULL`
+- **CSV**: `FORMAT csv` with `HEADER` is the format `dump` writes. An unquoted empty field is `NULL`; a quoted empty field `""` is an empty string
+- **Column list**: Optional. Without one, values are matched to all non-generated columns in table order. With one, unlisted columns receive their defaults
+- **Empty file**: A file with no data rows (or a header line only) declares that the table must contain no rows
+- **Multiple directives**: Several `\copy` directives for the same table are combined
+- **Identity columns**: Values for `GENERATED ALWAYS AS IDENTITY` columns are used as given, matching PostgreSQL's `COPY` behavior
+- **Schema-qualified names**: The target schema prefix is stripped, so the same files can be applied to different schemas. A qualifier for any other schema is an error
+
+Not supported in this release:
+
+- `\copy ... TO` (output direction)
+- `FROM STDIN`, `FROM PROGRAM`, or paths outside the schema directory
+- Server-side `COPY ... FROM 'file'`, which reads from the database server's filesystem
+- Generated columns in the column list (PostgreSQL rejects them)
+- Tables without a primary key, or whose primary key includes a generated column
+- Tables not listed in `pgschema.toml`, or matched by `[tables]` patterns in [`.pgschemaignore`](/cli/ignore)
+
+<Note>
+`INSERT` statements in a schema file do not make a table managed. They are executed while building the desired state, and their rows count only for tables listed in `pgschema.toml`; for any other table they are discarded, as before.
+</Note>
+
+## Example
+
+`pgschema.toml`:
+
+```toml
+[data]
+tables = ["country"]
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE country (
+    code text PRIMARY KEY,
+    name text NOT NULL,
+    active boolean NOT NULL DEFAULT true
+);
+
+\copy country (code, name, active) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)
+```
+
+`data/country.csv`:
+
+```csv
+code,name,active
+IL,Israel,true
+US,United States,true
+```
+
+## Canonical Format
+
+`pgschema dump` writes one CSV file per listed table under `data/` and one `\copy` directive per table at the end of the main schema file:
+
+```sql
+--
+-- Name: country; Type: TABLE DATA; Schema: -; Owner: -
+--
+
+\copy country (code, name, active) FROM 'data/country.csv' WITH (FORMAT csv, HEADER)
+```
+
+**Key characteristics of the canonical format:**
+
+- Always includes the column list, listing every non-generated column in table order
+- The CSV has a header line with the column names and is written exactly as PostgreSQL's `COPY ... TO ... WITH (FORMAT csv, HEADER)` writes it
+- Rows are sorted by primary key so the file is stable across dumps and diff-friendly in git
+- Directives are placed after every other object so foreign key targets and triggers exist first, with parent tables before the child tables that reference them
+
+When generating migration SQL, pgschema never emits `COPY`. Row changes are ordinary DML, one statement per row:
+
+```sql
+INSERT INTO country (code, name, active) VALUES ('FR', 'France', true);
+
+UPDATE country SET name = 'State of Israel' WHERE code = 'IL';
+
+DELETE FROM country WHERE code = 'XX';
+```
+
+- `INSERT` lists every non-generated column; `OVERRIDING SYSTEM VALUE` is added for `GENERATED ALWAYS AS IDENTITY` columns
+- `UPDATE` sets only the columns that differ and matches on the primary key
+- `DELETE` matches on the primary key
+- A change to a primary key value is an `INSERT` of the new row and a `DELETE` of the old one. The delete runs first when the new row reuses one of the old row's unique values, and otherwise after any updates that re-point child rows
+- When the primary key columns themselves change, current rows are still matched by the new key as long as its columns already exist with distinct values, so promoting a natural key such as `code` to primary key needs no data changes. If a new key column has to be added, the table is cleared with a single `DELETE FROM` and every row inserted again
+- Numeric and boolean values are written bare; every other value is a quoted string literal that PostgreSQL casts to the column type; missing values are `NULL`
