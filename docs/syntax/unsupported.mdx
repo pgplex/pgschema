@@ -11,6 +11,8 @@ title: "Unsupported"
 - `CREATE TABLESPACE`
 - `CREATE USER`
 
+Roles stay out of your schema files, but you can still grant to them: `plan` stubs every role your schema references (`GRANT`/`REVOKE`, `CREATE POLICY ... TO`, `ALTER DEFAULT PRIVILEGES FOR ROLE`) in its temporary database, provided the role exists on the target database. See [Roles](/cli/plan-db#roles).
+
 ## Database Level Commands
 
 - `CREATE CAST`
