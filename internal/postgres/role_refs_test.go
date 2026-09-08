@@ -77,6 +77,13 @@ func TestExtractReferencedRoles(t *testing.T) {
 			want: []string{"app_user", "staff"},
 		},
 		{
+			name: "keywords inside quoted identifiers are not list introducers",
+			sql: `GRANT SELECT ON "to" TO app_user;
+			      REVOKE SELECT ON "from" FROM reader;
+			      CREATE POLICY "to" ON "from" TO auditor;`,
+			want: []string{"app_user", "reader", "auditor"},
+		},
+		{
 			name: "no roles",
 			sql:  `CREATE TABLE grants (id int, policy text, to_date date);`,
 			want: nil,

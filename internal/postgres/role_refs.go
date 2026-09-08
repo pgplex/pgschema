@@ -53,11 +53,11 @@ func ExtractReferencedRoles(sql string) []string {
 	}
 	for stmt := range strings.SplitSeq(codeOnly(sql), ";") {
 		for _, c := range clauses {
-			at := indexKeyword(stmt, 0, c.stmt)
+			at := indexKeywordOutsideQuotes(stmt, 0, c.stmt)
 			if at < 0 {
 				continue
 			}
-			at = indexKeyword(stmt, at+len(c.stmt), c.list)
+			at = indexKeywordOutsideQuotes(stmt, at+len(c.stmt), c.list)
 			if at < 0 {
 				continue
 			}
@@ -67,6 +67,25 @@ func ExtractReferencedRoles(sql string) []string {
 		}
 	}
 	return out
+}
+
+// indexKeywordOutsideQuotes is indexKeyword that skips double-quoted
+// identifiers, so an object named "to" or "from" cannot be mistaken for the
+// keyword that introduces a role list.
+func indexKeywordOutsideQuotes(s string, start int, keyword string) int {
+	for i := start; i < len(s); i++ {
+		if s[i] == '"' {
+			if _, next, ok := parseQuotedIdent(s, i); ok {
+				i = next - 1
+				continue
+			}
+			return -1 // unterminated quote: nothing reliable follows
+		}
+		if hasKeywordAt(s, i, keyword) {
+			return i
+		}
+	}
+	return -1
 }
 
 // codeOnly returns sql with string literals, comments, and dollar-quoted
