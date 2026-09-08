@@ -19,9 +19,11 @@ import (
 // throwaway database first — pinned to the same schema as on the target so the
 // diff sees identical type qualification (issue #518).
 //
-// Three placements are covered, each a different mapping into the plan database:
+// Four placements are covered, each a different mapping into the plan database:
 //   - citext in public:          installed into public as-is
 //   - hstore in a side schema:   the side schema is created, then the extension
+//   - seg in pg_catalog:         installed there directly; the system schema
+//     cannot be created (reserved pg_ prefix) but always exists
 //   - ltree in the managed schema: mapped to the temporary schema, since that is
 //     where the managed schema's objects live during plan
 func TestEmbeddedPlanDB_InstallsTargetExtensions(t *testing.T) {
@@ -40,10 +42,12 @@ func TestEmbeddedPlanDB_InstallsTargetExtensions(t *testing.T) {
 		CREATE SCHEMA app;
 		CREATE EXTENSION citext SCHEMA public;
 		CREATE EXTENSION hstore SCHEMA exts;
+		CREATE EXTENSION seg SCHEMA pg_catalog;
 		CREATE EXTENSION ltree SCHEMA app;
 
 		CREATE TABLE public.users (id integer PRIMARY KEY, email citext NOT NULL);
 		CREATE TABLE public.products (id integer PRIMARY KEY, attrs exts.hstore);
+		CREATE TABLE public.ranges (id integer PRIMARY KEY, r seg);
 		CREATE TABLE app.paths (id integer PRIMARY KEY, path app.ltree NOT NULL);
 	`)
 	require.NoError(t, err)
@@ -71,6 +75,7 @@ func TestEmbeddedPlanDB_InstallsTargetExtensions(t *testing.T) {
 		run(t, "public", `
 			CREATE TABLE users (id integer PRIMARY KEY, email citext NOT NULL);
 			CREATE TABLE products (id integer PRIMARY KEY, attrs exts.hstore);
+			CREATE TABLE ranges (id integer PRIMARY KEY, r seg);
 		`)
 	})
 

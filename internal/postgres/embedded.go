@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -311,11 +312,16 @@ func (ep *EmbeddedPostgres) installTargetExtensions(ctx context.Context, conn *s
 	for _, name := range names {
 		schema := ep.extensions[name]
 		switch {
-		case name == "plpgsql", schema == "pg_catalog":
-			// Preinstalled or system-owned; nothing to mirror.
+		case name == "plpgsql":
+			// Preinstalled in every database; nothing to mirror.
 			continue
 		case schema == managedSchema:
 			schema = ep.tempSchema
+		case strings.HasPrefix(schema, "pg_"):
+			// System schemas (pg_catalog etc.) always exist and cannot be
+			// created — the pg_ prefix is reserved, even with IF NOT EXISTS.
+			// Extensions installed there (adminpack, or a relocatable one the
+			// user pinned to pg_catalog) still need mirroring.
 		default:
 			createSchemaSQL := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdent(schema))
 			if _, err := util.ExecContextWithLogging(ctx, conn, createSchemaSQL, "create schema for target extension"); err != nil {

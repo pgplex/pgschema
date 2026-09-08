@@ -65,19 +65,21 @@ pgschema apply \
 
 pgschema does not manage extensions, so `dump` never emits `CREATE EXTENSION` and you should not add it to your schema files. Instead, the plan database must already have the extensions your schema uses, in the same schema as on the target.
 
-The default embedded plan database handles this for you: it installs every extension found on the target database before applying your schema. This covers all extensions bundled with PostgreSQL (`hstore`, `pg_trgm`, `citext`, `uuid-ossp`, `btree_gist`, ...). Third-party extensions such as `postgis` or `pgvector` are not bundled, so for those you need an external plan database with the extension installed first:
+The default embedded plan database handles this for you: it installs every extension found on the target database before applying your schema. This covers all extensions bundled with PostgreSQL (`hstore`, `pg_trgm`, `citext`, `uuid-ossp`, `btree_gist`, ...). Third-party extensions such as `postgis` or `pgvector` are not bundled, so for those you need an external plan database.
+
+An external plan database is not mirrored automatically: install every extension your schema uses yourself, bundled ones included, in the same schema as on the target:
 
 ```sql
 -- In your plan database, install required extensions
+CREATE EXTENSION IF NOT EXISTS hstore;
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 Then run plan or apply with the external database:
 
 ```bash
 # Install extensions in plan database
-psql -h localhost -U postgres -d pgschema_plan -c "CREATE EXTENSION IF NOT EXISTS hstore;"
+psql -h localhost -U postgres -d pgschema_plan -c "CREATE EXTENSION IF NOT EXISTS hstore; CREATE EXTENSION IF NOT EXISTS postgis;"
 
 # Now run plan - it will work because extensions are available
 pgschema plan \
