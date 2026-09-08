@@ -97,8 +97,14 @@ func (i *Inspector) buildRows(ctx context.Context, schema *IR, targetSchema stri
 			continue
 		}
 		// Partition children are managed through their parent, which sees
-		// every row.
-		if table.PartitionOf != "" || table.IsExternal {
+		// every row. A child listed on its own would silently do nothing.
+		if table.PartitionOf != "" {
+			if !i.dataConfig.IsDataTable(table.PartitionOf) {
+				return fmt.Errorf("table %q is a partition of %q; list the parent table under [data] to manage its rows", name, table.PartitionOf)
+			}
+			continue
+		}
+		if table.IsExternal {
 			continue
 		}
 		pk := table.PrimaryKeyColumns()
@@ -118,8 +124,9 @@ func (i *Inspector) buildRows(ctx context.Context, schema *IR, targetSchema stri
 	}
 
 	// A transaction scopes the SET LOCAL settings to this read so a pooled
-	// connection is returned unchanged.
-	tx, err := i.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	// connection is returned unchanged; REPEATABLE READ reads every table
+	// from one snapshot.
+	tx, err := i.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction for reading rows: %w", err)
 	}

@@ -58,8 +58,9 @@ func (f *DumpFormatter) WriteDataFiles(ctx context.Context, db *sql.DB, tables [
 	}
 	defer conn.Close()
 
-	// A transaction scopes the SET LOCAL settings to this dump.
-	if _, err := conn.ExecContext(ctx, "BEGIN READ ONLY"); err != nil {
+	// A transaction scopes the SET LOCAL settings to this dump, and REPEATABLE
+	// READ gives every table's COPY the same snapshot.
+	if _, err := conn.ExecContext(ctx, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"); err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer conn.ExecContext(ctx, "ROLLBACK")
