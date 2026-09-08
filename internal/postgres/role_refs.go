@@ -51,24 +51,34 @@ func ExtractReferencedRoles(sql string) []string {
 		{"revoke", "from"},
 		{"policy", "to"},
 	}
-	walkSQLCode(sql, func(code string) {
-		for stmt := range strings.SplitSeq(code, ";") {
-			for _, c := range clauses {
-				at := indexKeyword(stmt, 0, c.stmt)
-				if at < 0 {
-					continue
-				}
-				at = indexKeyword(stmt, at+len(c.stmt), c.list)
-				if at < 0 {
-					continue
-				}
-				for _, role := range parseRoleList(stmt, at+len(c.list)) {
-					add(role)
-				}
+	for stmt := range strings.SplitSeq(codeOnly(sql), ";") {
+		for _, c := range clauses {
+			at := indexKeyword(stmt, 0, c.stmt)
+			if at < 0 {
+				continue
+			}
+			at = indexKeyword(stmt, at+len(c.stmt), c.list)
+			if at < 0 {
+				continue
+			}
+			for _, role := range parseRoleList(stmt, at+len(c.list)) {
+				add(role)
 			}
 		}
-	})
+	}
 	return out
+}
+
+// codeOnly returns sql with string literals, comments, and dollar-quoted
+// bodies replaced by a space, so a statement stays contiguous even when a
+// comment sits between its keywords (GRANT ... TO /* why */ app_user).
+func codeOnly(sql string) string {
+	var b strings.Builder
+	walkSQLCode(sql, func(code string) {
+		b.WriteString(code)
+		b.WriteByte(' ')
+	})
+	return b.String()
 }
 
 // parseRoleList parses a comma-separated list of role specifications starting
@@ -114,8 +124,8 @@ func createRoleIfMissing(ctx context.Context, conn *sql.Conn, role string) (bool
 			if qerr := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)", role).Scan(&exists); qerr == nil && exists {
 				return false, nil
 			}
-			return false, fmt.Errorf("failed to create stub role %s: %w\nHint: the plan database user needs CREATEROLE to stub roles referenced by the schema; grant it, or create the role in the plan database first", role, err)
+			return false, fmt.Errorf("failed to create stub role %q: %w\nHint: the plan database user needs CREATEROLE to stub roles referenced by the schema; grant it, or create the role in the plan database first", role, err)
 		}
 	}
-	return false, fmt.Errorf("failed to create stub role %s: %w", role, err)
+	return false, fmt.Errorf("failed to create stub role %q: %w", role, err)
 }

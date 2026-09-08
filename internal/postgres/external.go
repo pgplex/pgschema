@@ -200,7 +200,10 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 			continue
 		}
 		var isMember bool
-		if err := conn.QueryRowContext(ctx, "SELECT pg_has_role($1, $2, 'MEMBER')", ed.username, role).Scan(&isMember); err != nil || !isMember {
+		if err := conn.QueryRowContext(ctx, "SELECT pg_has_role($1, $2, 'MEMBER')", ed.username, role).Scan(&isMember); err != nil {
+			return fmt.Errorf("failed to check whether %q is a member of role %q: %w", ed.username, role, err)
+		}
+		if !isMember {
 			return fmt.Errorf("role %q already exists in the plan database and the plan user %q is not a member of it; grant membership manually or use a plan user that is already a member of that role", role, ed.username)
 		}
 	}

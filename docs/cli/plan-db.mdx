@@ -112,7 +112,7 @@ pgschema does not manage roles either — they are cluster-global — so `dump` 
 To keep that output usable by `plan`, every role your schema references (`GRANT`/`REVOKE` grantees, `CREATE POLICY ... TO`, `ALTER DEFAULT PRIVILEGES FOR ROLE` grantors) is stubbed in the plan database before your schema is applied:
 
 - **Embedded plan database**: stubs are created in the throwaway instance and vanish with it.
-- **External plan database**: stubs are created on the plan host and dropped on cleanup. Only roles pgschema created are ever dropped; a role that already exists there is left untouched. The plan user needs `CREATEROLE` (or the roles must already exist on the plan host).
+- **External plan database**: stubs are created on the plan host and dropped on cleanup. Only roles pgschema created are ever dropped; a role that already exists there is left untouched. The plan user needs `CREATEROLE` (or the roles must already exist on the plan host). Stub roles are cluster-global, so concurrent plans sharing one plan host can contend on them — give each concurrent run its own plan host, or pre-create the roles there.
 
 A referenced role must exist on the **target** database. If it does not, `plan` fails up front with `role "x" is referenced by the schema but does not exist on the target database`, because `apply` would fail on it anyway — create the role on the target first.
 

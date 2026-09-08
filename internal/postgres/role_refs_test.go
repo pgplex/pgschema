@@ -70,6 +70,13 @@ func TestExtractReferencedRoles(t *testing.T) {
 			want: []string{"app_user"},
 		},
 		{
+			name: "comments inside a statement do not split it",
+			sql: `GRANT SELECT ON users TO /* read only */ app_user;
+			      GRANT INSERT ON users -- staff only
+			      TO staff;`,
+			want: []string{"app_user", "staff"},
+		},
+		{
 			name: "no roles",
 			sql:  `CREATE TABLE grants (id int, policy text, to_date date);`,
 			want: nil,
