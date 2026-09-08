@@ -248,6 +248,15 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 		return err
 	}
 
+	// Stub the roles the desired state grants to, so GRANT/POLICY/DEFAULT
+	// PRIVILEGES statements apply (issue #450). The instance is discarded, so
+	// nothing leaks; plan has already rejected roles missing on the target.
+	for _, role := range ExtractReferencedRoles(sql) {
+		if _, err := createRoleIfMissing(ctx, conn, role); err != nil {
+			return err
+		}
+	}
+
 	// Set search_path to the temporary schema, with public as fallback
 	// for resolving extension types installed in public schema (issue #197)
 	setSearchPathSQL := fmt.Sprintf("SET search_path TO \"%s\", public", ep.tempSchema)

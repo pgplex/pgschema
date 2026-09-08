@@ -171,33 +171,41 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// so we need to rewrite it to point to the temporary schema (issue #335)
 	schemaAgnosticSQL = replaceSchemaInSearchPath(schemaAgnosticSQL, schema, ed.tempSchema)
 
-	// Create stub roles referenced by ALTER DEFAULT PRIVILEGES FOR ROLE so that
-	// the desired SQL can apply in the plan database without "permission denied"
-	// errors (issue #553). The plan user must be a member of these roles for
-	// PostgreSQL to accept the ALTER DEFAULT PRIVILEGES statement.
-	// Only roles that do not already exist are created and tracked for cleanup.
-	candidateRoles := ExtractDefaultPrivilegeRoles(schemaAgnosticSQL)
-	for _, role := range candidateRoles {
-		var exists bool
-		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)", role).Scan(&exists); err != nil {
-			return fmt.Errorf("failed to check existence of role %s: %w", role, err)
+	// Stub every role the desired state references so GRANT/POLICY/DEFAULT
+	// PRIVILEGES statements apply in the plan database (issue #450). A
+	// successful CREATE ROLE is the sole proof that a role is ours to drop on
+	// Stop; a pre-existing role is never touched. ALTER DEFAULT PRIVILEGES FOR
+	// ROLE additionally requires the plan user to be a member of the grantor
+	// (issue #553), which we can only arrange for roles we created.
+	adpGrantors := make(map[string]bool)
+	for _, role := range ExtractDefaultPrivilegeRoles(schemaAgnosticSQL) {
+		adpGrantors[role] = true
+	}
+	for _, role := range ExtractReferencedRoles(schemaAgnosticSQL) {
+		created, err := createRoleIfMissing(ctx, conn, role)
+		if err != nil {
+			return err
 		}
-		if exists {
-			var isMember bool
-			if err := conn.QueryRowContext(ctx, "SELECT pg_has_role($1, $2, 'MEMBER')", ed.username, role).Scan(&isMember); err != nil || !isMember {
-				return fmt.Errorf("role %q already exists in the plan database and the plan user %q is not a member of it; grant membership manually or use a plan user that is already a member of that role", role, ed.username)
+		if created {
+			ed.stubRoles = append(ed.stubRoles, role)
+		}
+		if !adpGrantors[role] {
+			continue
+		}
+		if created {
+			grantSQL := fmt.Sprintf("GRANT %s TO %s", quoteIdent(role), quoteIdent(ed.username))
+			if _, err := util.ExecContextWithLogging(ctx, conn, grantSQL, "grant stub role membership"); err != nil {
+				return fmt.Errorf("failed to grant role %s to %s: %w", role, ed.username, err)
 			}
 			continue
 		}
-		createRoleSQL := fmt.Sprintf("CREATE ROLE %s", quoteIdent(role))
-		if _, err := util.ExecContextWithLogging(ctx, conn, createRoleSQL, "create stub role for default privileges"); err != nil {
-			return fmt.Errorf("failed to create stub role %s: %w", role, err)
+		var isMember bool
+		if err := conn.QueryRowContext(ctx, "SELECT pg_has_role($1, $2, 'MEMBER')", ed.username, role).Scan(&isMember); err != nil {
+			return fmt.Errorf("failed to check whether %q is a member of role %q: %w", ed.username, role, err)
 		}
-		grantSQL := fmt.Sprintf("GRANT %s TO %s", quoteIdent(role), quoteIdent(ed.username))
-		if _, err := util.ExecContextWithLogging(ctx, conn, grantSQL, "grant stub role membership"); err != nil {
-			return fmt.Errorf("failed to grant role %s to %s: %w", role, ed.username, err)
+		if !isMember {
+			return fmt.Errorf("role %q already exists in the plan database and the plan user %q is not a member of it; grant membership manually or use a plan user that is already a member of that role", role, ed.username)
 		}
-		ed.stubRoles = append(ed.stubRoles, role)
 	}
 
 	// Execute the SQL directly
