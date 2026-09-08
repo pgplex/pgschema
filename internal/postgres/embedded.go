@@ -303,14 +303,10 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 // does not bundle (e.g. postgis, pgvector) are skipped with a warning; if the
 // desired state actually needs one, the later apply error points at --plan-host.
 func (ep *EmbeddedPostgres) installTargetExtensions(ctx context.Context, conn *sql.Conn, managedSchema string) error {
-	names := make([]string, 0, len(ep.extensions))
-	for name := range ep.extensions {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		schema := ep.extensions[name]
+	// Resolve each extension's schema in the plan database and make sure it exists.
+	schemas := make(map[string]string, len(ep.extensions))
+	pending := make([]string, 0, len(ep.extensions))
+	for name, schema := range ep.extensions {
 		switch {
 		case name == "plpgsql":
 			// Preinstalled in every database; nothing to mirror.
@@ -328,14 +324,54 @@ func (ep *EmbeddedPostgres) installTargetExtensions(ctx context.Context, conn *s
 				return fmt.Errorf("failed to create schema %s for extension %s: %w", schema, name, err)
 			}
 		}
+		schemas[name] = schema
+		pending = append(pending, name)
+	}
+	sort.Strings(pending)
 
-		createExtSQL := fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s WITH SCHEMA %s", quoteIdent(name), quoteIdent(schema))
-		if _, err := util.ExecContextWithLogging(ctx, conn, createExtSQL, "install target extension"); err != nil {
+	unavailable := installUntilFixpoint(pending, func(name string) error {
+		createExtSQL := fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s WITH SCHEMA %s", quoteIdent(name), quoteIdent(schemas[name]))
+		_, err := util.ExecContextWithLogging(ctx, conn, createExtSQL, "install target extension")
+		return err
+	})
+	for _, name := range pending {
+		if err, ok := unavailable[name]; ok {
 			logger.Get().Warn("extension installed on the target database is not available in the embedded plan database; if the schema depends on it, use an external plan database (--plan-host)",
 				"extension", name, "error", err)
 		}
 	}
 	return nil
+}
+
+// installUntilFixpoint calls install for every name, then retries the failures
+// after each pass until a pass installs nothing more. It returns the last error
+// for each name that never succeeded.
+//
+// Extensions can require others (hstore_plperl needs hstore and plperl), and the
+// required one may sort later, so a single ordered pass is not enough. Rather
+// than reconstructing the dependency graph from the target, keep retrying: each
+// pass installs at least the prerequisites whose own prerequisites are met, so
+// the loop terminates within len(names) passes. CASCADE is not an option — it
+// would install prerequisites into the wrong schema.
+func installUntilFixpoint(names []string, install func(name string) error) map[string]error {
+	lastErr := make(map[string]error)
+	pending := names
+	for len(pending) > 0 {
+		var failed []string
+		for _, name := range pending {
+			if err := install(name); err != nil {
+				failed = append(failed, name)
+				lastErr[name] = err
+			} else {
+				delete(lastErr, name)
+			}
+		}
+		if len(failed) == len(pending) {
+			break
+		}
+		pending = failed
+	}
+	return lastErr
 }
 
 // findAvailablePort finds an available TCP port for PostgreSQL to use
