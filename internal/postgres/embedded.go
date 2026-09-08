@@ -11,10 +11,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pgplex/pgschema/cmd/util"
+	"github.com/pgplex/pgschema/internal/logger"
 )
 
 // binariesPath is the path that contains the Postgres binaries.
@@ -37,7 +40,8 @@ type EmbeddedPostgres struct {
 	username    string
 	password    string
 	runtimePath string
-	tempSchema  string // temporary schema name with timestamp for uniqueness
+	tempSchema  string            // temporary schema name with timestamp for uniqueness
+	extensions  map[string]string // target extensions to mirror, name -> schema (issue #584)
 }
 
 // EmbeddedPostgresConfig holds configuration for starting embedded PostgreSQL
@@ -46,6 +50,11 @@ type EmbeddedPostgresConfig struct {
 	Database string
 	Username string
 	Password string
+	// Extensions maps extension name to its installation schema on the target
+	// database. ApplySchema installs each one into the embedded database before
+	// applying the desired state, so desired-state SQL can reference extension
+	// types without a CREATE EXTENSION statement (issue #584). Optional.
+	Extensions map[string]string
 }
 
 // DetectPostgresVersionAndExtensionsFromDB connects to a database and detects its
@@ -157,6 +166,7 @@ func StartEmbeddedPostgres(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, e
 		password:    config.Password,
 		runtimePath: runtimePath,
 		tempSchema:  tempSchema,
+		extensions:  config.Extensions,
 	}, nil
 }
 
@@ -233,6 +243,11 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 		return fmt.Errorf("failed to create temporary schema %s: %w", ep.tempSchema, err)
 	}
 
+	// Mirror the target's extensions so extension types resolve (issue #584)
+	if err := ep.installTargetExtensions(ctx, conn, schema); err != nil {
+		return err
+	}
+
 	// Set search_path to the temporary schema, with public as fallback
 	// for resolving extension types installed in public schema (issue #197)
 	setSearchPathSQL := fmt.Sprintf("SET search_path TO \"%s\", public", ep.tempSchema)
@@ -267,12 +282,96 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.
 	if err := ExecuteSchemaSQL(ctx, conn, schemaAgnosticSQL, schema); err != nil {
-		enhanced := hintExtensionDependency(err, "this schema may depend on a PostgreSQL extension, which the embedded plan database cannot provide. Use an external plan database with the extension installed (--plan-host), see https://www.pgschema.com/cli/plan-db")
+		enhanced := hintExtensionDependency(err, "this schema may depend on a PostgreSQL extension that the embedded plan database cannot provide. Extensions installed on the target database are mirrored automatically, but only those bundled with PostgreSQL (contrib) are available; for third-party extensions such as postgis or pgvector, use an external plan database with the extension installed (--plan-host), see https://www.pgschema.com/cli/plan-db")
 		enhanced = hintCrossSchemaReference(enhanced, "this schema may reference objects in another schema that the embedded plan database does not have. If the table exists on the target database, add it to .pgschemaignore ([schemas] or schema-qualified [tables] pattern, e.g. auth or auth.users), see https://www.pgschema.com/cli/ignore. Otherwise add a stub CREATE SCHEMA/TABLE in your desired SQL, or use an external plan database (--plan-host), see https://www.pgschema.com/cli/plan-db")
 		return fmt.Errorf("failed to apply schema SQL to temporary schema %s: %w", ep.tempSchema, enhanced)
 	}
 
 	return nil
+}
+
+// installTargetExtensions mirrors the target database's extensions into the
+// embedded plan database. pgschema does not manage extensions (they are
+// database-level objects), so a dump never emits CREATE EXTENSION; without this
+// step, desired-state SQL that references an extension type fails with
+// "type does not exist" (issue #584).
+//
+// Each extension is pinned to the schema it occupies on the target so that type
+// qualification matches on both sides of the diff (issue #518). An extension
+// living in the managed schema is installed into the temporary schema, which
+// stands in for the managed schema during plan. Extensions the embedded binary
+// does not bundle (e.g. postgis, pgvector) are skipped with a warning; if the
+// desired state actually needs one, the later apply error points at --plan-host.
+func (ep *EmbeddedPostgres) installTargetExtensions(ctx context.Context, conn *sql.Conn, managedSchema string) error {
+	// Resolve each extension's schema in the plan database and make sure it exists.
+	schemas := make(map[string]string, len(ep.extensions))
+	pending := make([]string, 0, len(ep.extensions))
+	for name, schema := range ep.extensions {
+		switch {
+		case name == "plpgsql":
+			// Preinstalled in every database; nothing to mirror.
+			continue
+		case schema == managedSchema:
+			schema = ep.tempSchema
+		case strings.HasPrefix(schema, "pg_"):
+			// System schemas (pg_catalog etc.) always exist and cannot be
+			// created — the pg_ prefix is reserved, even with IF NOT EXISTS.
+			// Extensions installed there (adminpack, or a relocatable one the
+			// user pinned to pg_catalog) still need mirroring.
+		default:
+			createSchemaSQL := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdent(schema))
+			if _, err := util.ExecContextWithLogging(ctx, conn, createSchemaSQL, "create schema for target extension"); err != nil {
+				return fmt.Errorf("failed to create schema %s for extension %s: %w", schema, name, err)
+			}
+		}
+		schemas[name] = schema
+		pending = append(pending, name)
+	}
+	sort.Strings(pending)
+
+	unavailable := installUntilFixpoint(pending, func(name string) error {
+		createExtSQL := fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s WITH SCHEMA %s", quoteIdent(name), quoteIdent(schemas[name]))
+		_, err := util.ExecContextWithLogging(ctx, conn, createExtSQL, "install target extension")
+		return err
+	})
+	for _, name := range pending {
+		if err, ok := unavailable[name]; ok {
+			logger.Get().Warn("extension installed on the target database is not available in the embedded plan database; if the schema depends on it, use an external plan database (--plan-host)",
+				"extension", name, "error", err)
+		}
+	}
+	return nil
+}
+
+// installUntilFixpoint calls install for every name, then retries the failures
+// after each pass until a pass installs nothing more. It returns the last error
+// for each name that never succeeded.
+//
+// Extensions can require others (hstore_plperl needs hstore and plperl), and the
+// required one may sort later, so a single ordered pass is not enough. Rather
+// than reconstructing the dependency graph from the target, keep retrying: each
+// pass installs at least the prerequisites whose own prerequisites are met, so
+// the loop terminates within len(names) passes. CASCADE is not an option — it
+// would install prerequisites into the wrong schema.
+func installUntilFixpoint(names []string, install func(name string) error) map[string]error {
+	lastErr := make(map[string]error)
+	pending := names
+	for len(pending) > 0 {
+		var failed []string
+		for _, name := range pending {
+			if err := install(name); err != nil {
+				failed = append(failed, name)
+				lastErr[name] = err
+			} else {
+				delete(lastErr, name)
+			}
+		}
+		if len(failed) == len(pending) {
+			break
+		}
+		pending = failed
+	}
+	return lastErr
 }
 
 // findAvailablePort finds an available TCP port for PostgreSQL to use
