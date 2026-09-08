@@ -72,6 +72,12 @@ WITH column_base AS (
         c.numeric_scale,
         c.udt_name,
         COALESCE(d.description, '') AS column_comment,
+        -- Name of a NOT NULL constraint on this column that was added NOT VALID
+        -- and never validated (PostgreSQL 18+; contype 'n' does not exist before
+        -- that, so the join simply yields ''). attnotnull is already set for such
+        -- a column, so this is the only signal that VALIDATE CONSTRAINT is still
+        -- pending (issue #564).
+        COALESCE(nn.conname, '') AS invalid_not_null_constraint,
         CASE
             WHEN dt.typtype = 'd' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
@@ -118,6 +124,7 @@ WITH column_base AS (
     LEFT JOIN pg_namespace dn ON dt.typnamespace = dn.oid
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
+    LEFT JOIN pg_constraint nn ON nn.conrelid = cl.oid AND nn.contype = 'n' AND NOT nn.convalidated AND a.attnum = ANY(nn.conkey)
     WHERE
         c.table_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
         AND c.table_schema NOT LIKE 'pg_temp_%'
@@ -137,6 +144,7 @@ SELECT
     cb.numeric_scale,
     cb.udt_name,
     cb.column_comment,
+    cb.invalid_not_null_constraint,
     cb.resolved_type,
     cb.is_identity,
     cb.identity_generation,
@@ -186,6 +194,12 @@ WITH column_base AS (
         c.numeric_scale,
         c.udt_name,
         COALESCE(d.description, '') AS column_comment,
+        -- Name of a NOT NULL constraint on this column that was added NOT VALID
+        -- and never validated (PostgreSQL 18+; contype 'n' does not exist before
+        -- that, so the join simply yields ''). attnotnull is already set for such
+        -- a column, so this is the only signal that VALIDATE CONSTRAINT is still
+        -- pending (issue #564).
+        COALESCE(nn.conname, '') AS invalid_not_null_constraint,
         CASE
             WHEN dt.typtype = 'd' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
@@ -233,6 +247,7 @@ WITH column_base AS (
     LEFT JOIN pg_namespace dn ON dt.typnamespace = dn.oid
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
+    LEFT JOIN pg_constraint nn ON nn.conrelid = cl.oid AND nn.contype = 'n' AND NOT nn.convalidated AND a.attnum = ANY(nn.conkey)
     WHERE
         c.table_schema = $1
 )
@@ -250,6 +265,7 @@ SELECT
     cb.numeric_scale,
     cb.udt_name,
     cb.column_comment,
+    cb.invalid_not_null_constraint,
     cb.resolved_type,
     cb.is_identity,
     cb.identity_generation,

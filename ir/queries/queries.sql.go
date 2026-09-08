@@ -387,6 +387,12 @@ WITH column_base AS (
         c.numeric_scale,
         c.udt_name,
         COALESCE(d.description, '') AS column_comment,
+        -- Name of a NOT NULL constraint on this column that was added NOT VALID
+        -- and never validated (PostgreSQL 18+; contype 'n' does not exist before
+        -- that, so the join simply yields ''). attnotnull is already set for such
+        -- a column, so this is the only signal that VALIDATE CONSTRAINT is still
+        -- pending (issue #564).
+        COALESCE(nn.conname, '') AS invalid_not_null_constraint,
         CASE
             WHEN dt.typtype = 'd' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
@@ -433,6 +439,7 @@ WITH column_base AS (
     LEFT JOIN pg_namespace dn ON dt.typnamespace = dn.oid
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
+    LEFT JOIN pg_constraint nn ON nn.conrelid = cl.oid AND nn.contype = 'n' AND NOT nn.convalidated AND a.attnum = ANY(nn.conkey)
     WHERE
         c.table_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
         AND c.table_schema NOT LIKE 'pg_temp_%'
@@ -452,6 +459,7 @@ SELECT
     cb.numeric_scale,
     cb.udt_name,
     cb.column_comment,
+    cb.invalid_not_null_constraint,
     cb.resolved_type,
     cb.is_identity,
     cb.identity_generation,
@@ -487,28 +495,29 @@ ORDER BY cb.table_schema, cb.table_name, cb.ordinal_position
 `
 
 type GetColumnsRow struct {
-	TableSchema            interface{}    `db:"table_schema" json:"table_schema"`
-	TableName              interface{}    `db:"table_name" json:"table_name"`
-	ColumnName             interface{}    `db:"column_name" json:"column_name"`
-	OrdinalPosition        interface{}    `db:"ordinal_position" json:"ordinal_position"`
-	ColumnDefault          sql.NullString `db:"column_default" json:"column_default"`
-	IsNullable             interface{}    `db:"is_nullable" json:"is_nullable"`
-	DataType               interface{}    `db:"data_type" json:"data_type"`
-	CharacterMaximumLength interface{}    `db:"character_maximum_length" json:"character_maximum_length"`
-	NumericPrecision       interface{}    `db:"numeric_precision" json:"numeric_precision"`
-	NumericScale           interface{}    `db:"numeric_scale" json:"numeric_scale"`
-	UdtName                interface{}    `db:"udt_name" json:"udt_name"`
-	ColumnComment          sql.NullString `db:"column_comment" json:"column_comment"`
-	ResolvedType           sql.NullString `db:"resolved_type" json:"resolved_type"`
-	IsIdentity             interface{}    `db:"is_identity" json:"is_identity"`
-	IdentityGeneration     interface{}    `db:"identity_generation" json:"identity_generation"`
-	IdentityStart          interface{}    `db:"identity_start" json:"identity_start"`
-	IdentityIncrement      interface{}    `db:"identity_increment" json:"identity_increment"`
-	IdentityMaximum        interface{}    `db:"identity_maximum" json:"identity_maximum"`
-	IdentityMinimum        interface{}    `db:"identity_minimum" json:"identity_minimum"`
-	IdentityCycle          interface{}    `db:"identity_cycle" json:"identity_cycle"`
-	Attgenerated           interface{}    `db:"attgenerated" json:"attgenerated"`
-	GeneratedExpr          sql.NullString `db:"generated_expr" json:"generated_expr"`
+	TableSchema              interface{}    `db:"table_schema" json:"table_schema"`
+	TableName                interface{}    `db:"table_name" json:"table_name"`
+	ColumnName               interface{}    `db:"column_name" json:"column_name"`
+	OrdinalPosition          interface{}    `db:"ordinal_position" json:"ordinal_position"`
+	ColumnDefault            sql.NullString `db:"column_default" json:"column_default"`
+	IsNullable               interface{}    `db:"is_nullable" json:"is_nullable"`
+	DataType                 interface{}    `db:"data_type" json:"data_type"`
+	CharacterMaximumLength   interface{}    `db:"character_maximum_length" json:"character_maximum_length"`
+	NumericPrecision         interface{}    `db:"numeric_precision" json:"numeric_precision"`
+	NumericScale             interface{}    `db:"numeric_scale" json:"numeric_scale"`
+	UdtName                  interface{}    `db:"udt_name" json:"udt_name"`
+	ColumnComment            sql.NullString `db:"column_comment" json:"column_comment"`
+	InvalidNotNullConstraint sql.NullString `db:"invalid_not_null_constraint" json:"invalid_not_null_constraint"`
+	ResolvedType             sql.NullString `db:"resolved_type" json:"resolved_type"`
+	IsIdentity               interface{}    `db:"is_identity" json:"is_identity"`
+	IdentityGeneration       interface{}    `db:"identity_generation" json:"identity_generation"`
+	IdentityStart            interface{}    `db:"identity_start" json:"identity_start"`
+	IdentityIncrement        interface{}    `db:"identity_increment" json:"identity_increment"`
+	IdentityMaximum          interface{}    `db:"identity_maximum" json:"identity_maximum"`
+	IdentityMinimum          interface{}    `db:"identity_minimum" json:"identity_minimum"`
+	IdentityCycle            interface{}    `db:"identity_cycle" json:"identity_cycle"`
+	Attgenerated             interface{}    `db:"attgenerated" json:"attgenerated"`
+	GeneratedExpr            sql.NullString `db:"generated_expr" json:"generated_expr"`
 }
 
 // GetColumns retrieves all columns for all tables
@@ -534,6 +543,7 @@ func (q *Queries) GetColumns(ctx context.Context) ([]GetColumnsRow, error) {
 			&i.NumericScale,
 			&i.UdtName,
 			&i.ColumnComment,
+			&i.InvalidNotNullConstraint,
 			&i.ResolvedType,
 			&i.IsIdentity,
 			&i.IdentityGeneration,
@@ -573,6 +583,12 @@ WITH column_base AS (
         c.numeric_scale,
         c.udt_name,
         COALESCE(d.description, '') AS column_comment,
+        -- Name of a NOT NULL constraint on this column that was added NOT VALID
+        -- and never validated (PostgreSQL 18+; contype 'n' does not exist before
+        -- that, so the join simply yields ''). attnotnull is already set for such
+        -- a column, so this is the only signal that VALIDATE CONSTRAINT is still
+        -- pending (issue #564).
+        COALESCE(nn.conname, '') AS invalid_not_null_constraint,
         CASE
             WHEN dt.typtype = 'd' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
@@ -620,6 +636,7 @@ WITH column_base AS (
     LEFT JOIN pg_namespace dn ON dt.typnamespace = dn.oid
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
+    LEFT JOIN pg_constraint nn ON nn.conrelid = cl.oid AND nn.contype = 'n' AND NOT nn.convalidated AND a.attnum = ANY(nn.conkey)
     WHERE
         c.table_schema = $1
 )
@@ -637,6 +654,7 @@ SELECT
     cb.numeric_scale,
     cb.udt_name,
     cb.column_comment,
+    cb.invalid_not_null_constraint,
     cb.resolved_type,
     cb.is_identity,
     cb.identity_generation,
@@ -684,28 +702,29 @@ ORDER BY cb.table_name, cb.ordinal_position
 `
 
 type GetColumnsForSchemaRow struct {
-	TableSchema            interface{}    `db:"table_schema" json:"table_schema"`
-	TableName              interface{}    `db:"table_name" json:"table_name"`
-	ColumnName             interface{}    `db:"column_name" json:"column_name"`
-	OrdinalPosition        interface{}    `db:"ordinal_position" json:"ordinal_position"`
-	ColumnDefault          sql.NullString `db:"column_default" json:"column_default"`
-	IsNullable             interface{}    `db:"is_nullable" json:"is_nullable"`
-	DataType               interface{}    `db:"data_type" json:"data_type"`
-	CharacterMaximumLength interface{}    `db:"character_maximum_length" json:"character_maximum_length"`
-	NumericPrecision       interface{}    `db:"numeric_precision" json:"numeric_precision"`
-	NumericScale           interface{}    `db:"numeric_scale" json:"numeric_scale"`
-	UdtName                interface{}    `db:"udt_name" json:"udt_name"`
-	ColumnComment          sql.NullString `db:"column_comment" json:"column_comment"`
-	ResolvedType           sql.NullString `db:"resolved_type" json:"resolved_type"`
-	IsIdentity             interface{}    `db:"is_identity" json:"is_identity"`
-	IdentityGeneration     interface{}    `db:"identity_generation" json:"identity_generation"`
-	IdentityStart          interface{}    `db:"identity_start" json:"identity_start"`
-	IdentityIncrement      interface{}    `db:"identity_increment" json:"identity_increment"`
-	IdentityMaximum        interface{}    `db:"identity_maximum" json:"identity_maximum"`
-	IdentityMinimum        interface{}    `db:"identity_minimum" json:"identity_minimum"`
-	IdentityCycle          interface{}    `db:"identity_cycle" json:"identity_cycle"`
-	Attgenerated           interface{}    `db:"attgenerated" json:"attgenerated"`
-	GeneratedExpr          sql.NullString `db:"generated_expr" json:"generated_expr"`
+	TableSchema              interface{}    `db:"table_schema" json:"table_schema"`
+	TableName                interface{}    `db:"table_name" json:"table_name"`
+	ColumnName               interface{}    `db:"column_name" json:"column_name"`
+	OrdinalPosition          interface{}    `db:"ordinal_position" json:"ordinal_position"`
+	ColumnDefault            sql.NullString `db:"column_default" json:"column_default"`
+	IsNullable               interface{}    `db:"is_nullable" json:"is_nullable"`
+	DataType                 interface{}    `db:"data_type" json:"data_type"`
+	CharacterMaximumLength   interface{}    `db:"character_maximum_length" json:"character_maximum_length"`
+	NumericPrecision         interface{}    `db:"numeric_precision" json:"numeric_precision"`
+	NumericScale             interface{}    `db:"numeric_scale" json:"numeric_scale"`
+	UdtName                  interface{}    `db:"udt_name" json:"udt_name"`
+	ColumnComment            sql.NullString `db:"column_comment" json:"column_comment"`
+	InvalidNotNullConstraint sql.NullString `db:"invalid_not_null_constraint" json:"invalid_not_null_constraint"`
+	ResolvedType             sql.NullString `db:"resolved_type" json:"resolved_type"`
+	IsIdentity               interface{}    `db:"is_identity" json:"is_identity"`
+	IdentityGeneration       interface{}    `db:"identity_generation" json:"identity_generation"`
+	IdentityStart            interface{}    `db:"identity_start" json:"identity_start"`
+	IdentityIncrement        interface{}    `db:"identity_increment" json:"identity_increment"`
+	IdentityMaximum          interface{}    `db:"identity_maximum" json:"identity_maximum"`
+	IdentityMinimum          interface{}    `db:"identity_minimum" json:"identity_minimum"`
+	IdentityCycle            interface{}    `db:"identity_cycle" json:"identity_cycle"`
+	Attgenerated             interface{}    `db:"attgenerated" json:"attgenerated"`
+	GeneratedExpr            sql.NullString `db:"generated_expr" json:"generated_expr"`
 }
 
 // GetColumnsForSchema retrieves all columns for tables in a specific schema
@@ -731,6 +750,7 @@ func (q *Queries) GetColumnsForSchema(ctx context.Context, tableSchema sql.NullS
 			&i.NumericScale,
 			&i.UdtName,
 			&i.ColumnComment,
+			&i.InvalidNotNullConstraint,
 			&i.ResolvedType,
 			&i.IsIdentity,
 			&i.IdentityGeneration,

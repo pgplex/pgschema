@@ -115,6 +115,8 @@ ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;
 
 The constraint name matches what PostgreSQL generates for a `NOT NULL` column in `CREATE TABLE`, so the migrated table converges with a freshly created one.
 
+If the `VALIDATE` step never ran (an interrupted apply, or a `NOT VALID` constraint added by hand), the column already reads as `NOT NULL` in the catalog, but existing rows are unchecked. pgschema detects the unvalidated constraint on the next `plan` and emits just the `VALIDATE CONSTRAINT` step, so the migration can be finished by re-applying.
+
 On PostgreSQL 14-17, adding `NOT NULL` uses a check constraint based process:
 
 ```sql

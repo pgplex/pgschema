@@ -331,6 +331,9 @@ func (i *Inspector) buildColumns(ctx context.Context, schema *IR, targetSchema s
 			IsNullable: i.safeInterfaceToString(col.IsNullable) == "YES",
 			Comment:    comment,
 		}
+		if col.InvalidNotNullConstraint.Valid {
+			column.InvalidNotNullConstraint = col.InvalidNotNullConstraint.String
+		}
 
 		// Handle generated columns first (attgenerated: 's' = STORED, 'v' = VIRTUAL in PG18+)
 		attgenerated := i.safeInterfaceToString(col.Attgenerated)
