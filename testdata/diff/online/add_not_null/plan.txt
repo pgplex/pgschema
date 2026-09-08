@@ -6,6 +6,7 @@ Summary by type:
 Tables:
   ~ users
     ~ email (column)
+    ~ phone (column)
 
 DDL to be executed:
 --------------------------------------------------
@@ -15,3 +16,6 @@ ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;
 
 -- Transaction Group #2
 ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;
+
+-- Transaction Group #3
+ALTER TABLE users VALIDATE CONSTRAINT users_phone_not_null;

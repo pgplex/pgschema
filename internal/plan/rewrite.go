@@ -100,6 +100,20 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 						}
 					}
 				}
+				// A pending VALIDATE CONSTRAINT for a NOT VALID NOT NULL constraint
+				// (issue #564) must run in its own transaction like every other
+				// VALIDATE step, so the scan is not batched with lock-taking DDL.
+				if !columnDiff.New.IsNullable && columnDiff.Old.InvalidNotNullConstraint != "" {
+					for _, stmt := range d.Statements {
+						if strings.Contains(stmt.SQL, "VALIDATE CONSTRAINT") {
+							return []RewriteStep{{
+								SQL:                 stmt.SQL,
+								CanRunInTransaction: true,
+								RequiresIsolation:   true,
+							}}
+						}
+					}
+				}
 				// Check if identity is being added or changed on an existing column
 				// This includes: adding identity, or changing identity generation (drop + re-add)
 				if columnDiff.New.Identity != nil {

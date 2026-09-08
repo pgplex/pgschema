@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/ir"
 )
 
@@ -180,4 +181,37 @@ func TestGenerateColumnNotNullRewriteNameCollision(t *testing.T) {
 			t.Fatalf("add step:\ngot  %q\nwant %q", steps[0].SQL, wantAdd)
 		}
 	})
+}
+
+// TestPendingNotNullValidateIsolated verifies that a VALIDATE CONSTRAINT step
+// emitted for a NOT NULL constraint that was added NOT VALID and never
+// validated (issue #564) runs in its own execution group, like every other
+// VALIDATE step, rather than being batched with surrounding DDL.
+func TestPendingNotNullValidateIsolated(t *testing.T) {
+	colDiff := &diff.ColumnDiff{
+		Old: &ir.Column{Name: "phone", DataType: "text", IsNullable: false, InvalidNotNullConstraint: "users_phone_not_null"},
+		New: &ir.Column{Name: "phone", DataType: "text", IsNullable: false},
+	}
+	validate := diff.Diff{
+		Type:       diff.DiffTypeTableColumn,
+		Operation:  diff.DiffOperationAlter,
+		Path:       "public.users.phone",
+		Source:     colDiff,
+		Statements: []diff.SQLStatement{{SQL: "ALTER TABLE users VALIDATE CONSTRAINT users_phone_not_null;"}},
+	}
+	other := diff.Diff{
+		Type:       diff.DiffTypeTableColumn,
+		Operation:  diff.DiffOperationAlter,
+		Path:       "public.users.email",
+		Source:     &diff.ColumnDiff{Old: &ir.Column{Name: "email"}, New: &ir.Column{Name: "email"}},
+		Statements: []diff.SQLStatement{{SQL: "ALTER TABLE users ALTER COLUMN email SET DEFAULT '';"}},
+	}
+
+	groups := groupDiffs([]diff.Diff{other, validate}, 18, nil)
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (VALIDATE must be isolated): %+v", len(groups), groups)
+	}
+	if got := groups[1].Steps[0].SQL; got != validate.Statements[0].SQL {
+		t.Errorf("isolated step SQL = %q, want %q", got, validate.Statements[0].SQL)
+	}
 }

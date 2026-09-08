@@ -67,6 +67,13 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name))
 			statements = append(statements, sql)
 		}
+	} else if !cd.New.IsNullable && cd.Old.InvalidNotNullConstraint != "" {
+		// Both sides are NOT NULL, but the current constraint was added NOT VALID
+		// (PG18+) and never validated, e.g. an interrupted online apply. Finish
+		// the job so existing rows are actually checked (issue #564).
+		sql := fmt.Sprintf("ALTER TABLE %s VALIDATE CONSTRAINT %s;",
+			qualifiedTableName, ir.QuoteIdentifier(cd.Old.InvalidNotNullConstraint))
+		statements = append(statements, sql)
 	}
 
 	// Handle default value changes
@@ -171,6 +178,11 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 		return false
 	}
 	if old.IsNullable != new.IsNullable {
+		return false
+	}
+	// A NOT NULL constraint that is still NOT VALID must be validated to reach
+	// the desired NOT NULL state (issue #564).
+	if !new.IsNullable && old.InvalidNotNullConstraint != "" {
 		return false
 	}
 

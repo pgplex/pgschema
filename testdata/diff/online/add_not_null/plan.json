@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "653938aaa4f39adc46e8b751c1d67ef7229a57a407833953c0b0176e33e70a58"
+    "hash": "c37218dfe7dcac89bfc7a28a3e7a661ca9d48345001260c2998dc67eddfc3589"
   },
   "groups": [
     {
@@ -23,6 +23,16 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.users.email"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE users VALIDATE CONSTRAINT users_phone_not_null;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.users.phone"
         }
       ]
     }

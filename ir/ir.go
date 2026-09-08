@@ -98,6 +98,13 @@ type Column struct {
 	GeneratedExpr *string   `json:"generated_expr,omitempty"` // Expression for generated columns
 	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
 	GeneratedKind string    `json:"generated_kind,omitempty"` // "s" for STORED, "v" for VIRTUAL (PG18+)
+	// InvalidNotNullConstraint is the name of a NOT NULL constraint on this
+	// column that was added NOT VALID and has not been validated yet (PG18+).
+	// The column already reads as NOT NULL (attnotnull is set), so without this
+	// the pending VALIDATE CONSTRAINT would be invisible to the diff (issue #564).
+	// Only ever set on the current state; a freshly created desired state has no
+	// invalid constraints.
+	InvalidNotNullConstraint string `json:"invalid_not_null_constraint,omitempty"`
 	// IsSerial is true when the column was created with the SERIAL shorthand:
 	// its default is nextval() on a sequence that is owned by this column
 	// (pg_depend) and that carries PostgreSQL's default <table>_<column>_seq
