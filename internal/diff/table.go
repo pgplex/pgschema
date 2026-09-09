@@ -2036,9 +2036,7 @@ func generateForeignKeyClauseMode(constraint *ir.Constraint, targetSchema string
 	if constraint.UpdateRule != "" && constraint.UpdateRule != "NO ACTION" {
 		clause += fmt.Sprintf(" ON UPDATE %s", constraint.UpdateRule)
 	}
-	if constraint.DeleteRule != "" && constraint.DeleteRule != "NO ACTION" {
-		clause += fmt.Sprintf(" ON DELETE %s", constraint.DeleteRule)
-	}
+	clause += onDeleteClause(constraint)
 
 	// Add deferrable clause
 	if constraint.Deferrable {

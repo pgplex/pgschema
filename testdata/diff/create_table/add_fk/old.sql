@@ -106,6 +106,38 @@ CREATE TABLE public.orders (
     CONSTRAINT orders_pkey PRIMARY KEY (id)
 );
 
+-- Composite FK with ON DELETE SET NULL / SET DEFAULT column list (PG15+, issue #589)
+CREATE TABLE public.members (
+    id integer NOT NULL,
+    org_id integer NOT NULL,
+    CONSTRAINT members_pkey PRIMARY KEY (id),
+    CONSTRAINT members_org_id_id_key UNIQUE (org_id, id)
+);
+
+CREATE TABLE public.audit_log (
+    id integer NOT NULL,
+    org_id integer NOT NULL,
+    actor_member_id integer,
+    CONSTRAINT audit_log_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.tasks (
+    id integer NOT NULL,
+    org_id integer NOT NULL,
+    owner_member_id integer DEFAULT 0,
+    CONSTRAINT tasks_pkey PRIMARY KEY (id)
+);
+
+-- Existing composite FK that lacks the column list: the desired state adds it,
+-- so the constraint must be recreated (the column list must be compared).
+CREATE TABLE public.notes (
+    id integer NOT NULL,
+    org_id integer NOT NULL,
+    author_member_id integer,
+    CONSTRAINT notes_pkey PRIMARY KEY (id),
+    CONSTRAINT notes_org_id_author_member_id_fkey FOREIGN KEY (org_id, author_member_id) REFERENCES public.members(org_id, id) ON DELETE SET NULL
+);
+
 -- Temporal FK case (PG18+)
 CREATE TABLE public.price_history (
     product_id integer NOT NULL,

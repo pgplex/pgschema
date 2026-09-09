@@ -322,6 +322,14 @@ func generateForeignKeyRewrite(constraint *ir.Constraint) []RewriteStep {
 	}
 	if constraint.DeleteRule != "" && constraint.DeleteRule != "NO ACTION" {
 		fkClause += fmt.Sprintf(" ON DELETE %s", constraint.DeleteRule)
+		// SET NULL / SET DEFAULT column list (PG15+, issue #589)
+		if len(constraint.DeleteSetColumns) > 0 {
+			var setCols []string
+			for _, col := range constraint.DeleteSetColumns {
+				setCols = append(setCols, ir.QuoteIdentifier(col))
+			}
+			fkClause += fmt.Sprintf(" (%s)", joinStrings(setCols, ", "))
+		}
 	}
 
 	// Add DEFERRABLE clauses if specified

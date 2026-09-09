@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pgplex/pgschema/ir"
@@ -59,9 +60,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string, quali
 		if constraint.UpdateRule != "" && constraint.UpdateRule != "NO ACTION" {
 			stmt += fmt.Sprintf(" ON UPDATE %s", constraint.UpdateRule)
 		}
-		if constraint.DeleteRule != "" && constraint.DeleteRule != "NO ACTION" {
-			stmt += fmt.Sprintf(" ON DELETE %s", constraint.DeleteRule)
-		}
+		stmt += onDeleteClause(constraint)
 		// Add deferrable clause
 		stmt += deferrableClause(constraint)
 		// Add NOT VALID if needed
@@ -182,6 +181,11 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 	if old.DeleteRule != new.DeleteRule {
 		return false
 	}
+	// The SET NULL/SET DEFAULT column list is a set: PostgreSQL stores it in the
+	// order written, so compare order-independently to avoid a needless recreate.
+	if !slices.Equal(slices.Sorted(slices.Values(old.DeleteSetColumns)), slices.Sorted(slices.Values(new.DeleteSetColumns))) {
+		return false
+	}
 	if old.UpdateRule != new.UpdateRule {
 		return false
 	}
@@ -236,4 +240,22 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 	}
 
 	return true
+}
+
+// onDeleteClause renders the ON DELETE action of a foreign key, including the
+// optional column list of SET NULL / SET DEFAULT (PG15+, issue #589). Returns
+// "" for the default NO ACTION.
+func onDeleteClause(constraint *ir.Constraint) string {
+	if constraint.DeleteRule == "" || constraint.DeleteRule == "NO ACTION" {
+		return ""
+	}
+	clause := fmt.Sprintf(" ON DELETE %s", constraint.DeleteRule)
+	if len(constraint.DeleteSetColumns) > 0 {
+		cols := make([]string, len(constraint.DeleteSetColumns))
+		for i, col := range constraint.DeleteSetColumns {
+			cols[i] = ir.QuoteIdentifier(col)
+		}
+		clause += fmt.Sprintf(" (%s)", strings.Join(cols, ", "))
+	}
+	return clause
 }

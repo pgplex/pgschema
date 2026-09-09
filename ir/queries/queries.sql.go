@@ -962,7 +962,11 @@ SELECT
     c.condeferred AS initially_deferred,
     c.convalidated AS is_valid,
     COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
-    c.connoinherit AS no_inherit
+    c.connoinherit AS no_inherit,
+    -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
+    -- Rendered as a JSON array of column names so it survives the per-column row fan-out
+    -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -970,6 +974,15 @@ LEFT JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
 LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(da.attname ORDER BY e.ord)::text AS delete_set_columns
+    FROM jsonb_array_elements_text(
+        CASE WHEN jsonb_typeof(to_jsonb(c) -> 'confdelsetcols') = 'array'
+             THEN to_jsonb(c) -> 'confdelsetcols'
+             ELSE '[]'::jsonb END
+    ) WITH ORDINALITY AS e(attnum, ord)
+    JOIN pg_attribute da ON da.attrelid = c.conrelid AND da.attnum = e.attnum::int
+) ds ON true
 LEFT JOIN LATERAL (
     SELECT
         -- Render with search_path set to the table's own schema so same-schema
@@ -1011,6 +1024,7 @@ type GetConstraintsRow struct {
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
 	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
+	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
 }
 
 // GetConstraints retrieves all table constraints
@@ -1043,6 +1057,7 @@ func (q *Queries) GetConstraints(ctx context.Context) ([]GetConstraintsRow, erro
 			&i.IsValid,
 			&i.IsPeriod,
 			&i.NoInherit,
+			&i.DeleteSetColumns,
 		); err != nil {
 			return nil, err
 		}
@@ -1101,7 +1116,11 @@ SELECT
     c.connoinherit AS no_inherit,
     -- pg_index.indnullsnotdistinct is PG15+. Use to_jsonb so the column reference
     -- doesn't fail to plan on PG14 (where the attribute does not exist on pg_index).
-    COALESCE((to_jsonb(i) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct
+    COALESCE((to_jsonb(i) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct,
+    -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
+    -- Rendered as a JSON array of column names so it survives the per-column row fan-out
+    -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1110,6 +1129,15 @@ LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
 LEFT JOIN pg_index i ON i.indexrelid = c.conindid
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(da.attname ORDER BY e.ord)::text AS delete_set_columns
+    FROM jsonb_array_elements_text(
+        CASE WHEN jsonb_typeof(to_jsonb(c) -> 'confdelsetcols') = 'array'
+             THEN to_jsonb(c) -> 'confdelsetcols'
+             ELSE '[]'::jsonb END
+    ) WITH ORDINALITY AS e(attnum, ord)
+    JOIN pg_attribute da ON da.attrelid = c.conrelid AND da.attnum = e.attnum::int
+) ds ON true
 LEFT JOIN LATERAL (
     SELECT
         -- Render with search_path set to the table's own schema so same-schema
@@ -1150,6 +1178,7 @@ type GetConstraintsForSchemaRow struct {
 	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 	NullsNotDistinct       sql.NullBool   `db:"nulls_not_distinct" json:"nulls_not_distinct"`
+	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
 }
 
 // GetConstraintsForSchema retrieves all table constraints for a specific schema
@@ -1183,6 +1212,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.IsPeriod,
 			&i.NoInherit,
 			&i.NullsNotDistinct,
+			&i.DeleteSetColumns,
 		); err != nil {
 			return nil, err
 		}

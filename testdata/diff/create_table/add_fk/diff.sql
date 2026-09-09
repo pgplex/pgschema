@@ -1,3 +1,6 @@
+ALTER TABLE audit_log
+ADD CONSTRAINT audit_log_org_id_actor_member_id_fkey FOREIGN KEY (org_id, actor_member_id) REFERENCES members (org_id, id) ON DELETE SET NULL (actor_member_id);
+
 ALTER TABLE books
 ADD CONSTRAINT books_author_id_fkey FOREIGN KEY (author_id) REFERENCES authors (id) ON DELETE CASCADE;
 
@@ -6,6 +9,11 @@ ADD CONSTRAINT employees_department_id_fkey FOREIGN KEY (department_id) REFERENC
 
 ALTER TABLE nodes
 ADD CONSTRAINT nodes_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES nodes (id);
+
+ALTER TABLE notes DROP CONSTRAINT notes_org_id_author_member_id_fkey;
+
+ALTER TABLE notes
+ADD CONSTRAINT notes_org_id_author_member_id_fkey FOREIGN KEY (org_id, author_member_id) REFERENCES members (org_id, id) ON DELETE SET NULL (author_member_id);
 
 ALTER TABLE orders
 ADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customers (id);
@@ -24,6 +32,9 @@ ADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCE
 
 ALTER TABLE projects
 ADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id);
+
+ALTER TABLE tasks
+ADD CONSTRAINT tasks_org_id_owner_member_id_fkey FOREIGN KEY (org_id, owner_member_id) REFERENCES members (org_id, id) ON DELETE SET DEFAULT (owner_member_id);
 
 ALTER TABLE teams
 ADD CONSTRAINT teams_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL;
