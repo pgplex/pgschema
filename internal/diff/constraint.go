@@ -181,7 +181,9 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 	if old.DeleteRule != new.DeleteRule {
 		return false
 	}
-	if !slices.Equal(old.DeleteSetColumns, new.DeleteSetColumns) {
+	// The SET NULL/SET DEFAULT column list is a set: PostgreSQL stores it in the
+	// order written, so compare order-independently to avoid a needless recreate.
+	if !slices.Equal(slices.Sorted(slices.Values(old.DeleteSetColumns)), slices.Sorted(slices.Values(new.DeleteSetColumns))) {
 		return false
 	}
 	if old.UpdateRule != new.UpdateRule {
