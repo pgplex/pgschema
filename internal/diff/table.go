@@ -90,7 +90,9 @@ func sortConstraintColumnsByPosition(columns []*ir.ConstraintColumn) []*ir.Const
 }
 
 // diffTriggers compares triggers between two tables and populates the diff
-func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
+// recreatedColumns names the columns applied as DROP COLUMN + ADD COLUMN; a
+// trigger depending on one of them is dropped and created again. (#591)
+func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff, recreatedColumns map[string]bool) {
 	oldTriggers := make(map[string]*ir.Trigger)
 	newTriggers := make(map[string]*ir.Trigger)
 
@@ -123,6 +125,15 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 	// Find modified triggers (structural changes, comment-only, or enabled-state-only)
 	for name, newTrigger := range newTriggers {
 		if oldTrigger, exists := oldTriggers[name]; exists {
+			// A trigger whose WHEN condition or UPDATE OF list names a column
+			// being re-created blocks the DROP COLUMN (SQLSTATE 2BP01). It is
+			// dropped in the drop phase and created again from the desired
+			// state after the column is back. (#591)
+			if triggerReferencesColumns(oldTrigger, recreatedColumns) {
+				diff.DroppedTriggers = append(diff.DroppedTriggers, oldTrigger)
+				diff.AddedTriggers = append(diff.AddedTriggers, newTrigger)
+				continue
+			}
 			structurallyEqual := triggersEqual(oldTrigger, newTrigger)
 			commentChanged := oldTrigger.Comment != newTrigger.Comment
 			enabledChanged := oldTrigger.Disabled != newTrigger.Disabled
@@ -326,7 +337,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 	}
 
 	// Compare triggers
-	diffTriggers(oldTable, newTable, diff)
+	diffTriggers(oldTable, newTable, diff, recreatedColumns)
 
 	// Compare policies
 	oldPolicies := make(map[string]*ir.RLSPolicy)
@@ -361,6 +372,14 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 	// Find modified policies
 	for name, newPolicy := range newPolicies {
 		if oldPolicy, exists := oldPolicies[name]; exists {
+			// A policy whose expressions name a column being re-created blocks
+			// the DROP COLUMN (SQLSTATE 2BP01); it is dropped before the column
+			// and created again from the desired state afterwards. (#591)
+			if policyReferencesColumns(oldPolicy, recreatedColumns) {
+				diff.DroppedPolicies = append(diff.DroppedPolicies, oldPolicy)
+				diff.AddedPolicies = append(diff.AddedPolicies, newPolicy)
+				continue
+			}
 			if !policiesEqual(oldPolicy, newPolicy) {
 				diff.ModifiedPolicies = append(diff.ModifiedPolicies, &policyDiff{
 					Old: oldPolicy,
@@ -438,7 +457,7 @@ func diffExternalTable(oldTable, newTable *ir.Table) *tableDiff {
 	}
 
 	// For external tables, only compare triggers (not table structure)
-	diffTriggers(oldTable, newTable, diff)
+	diffTriggers(oldTable, newTable, diff, nil)
 
 	// Return nil if no trigger changes
 	if len(diff.AddedTriggers) == 0 && len(diff.DroppedTriggers) == 0 && len(diff.ModifiedTriggers) == 0 {
@@ -1100,6 +1119,41 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 	return false
 }
 
+// collectDropPolicy emits DROP POLICY for a policy of this table.
+func (td *tableDiff) collectDropPolicy(policy *ir.RLSPolicy, targetSchema string, collector *diffCollector) {
+	tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+	sql := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s;", ir.QuoteIdentifier(policy.Name), tableName)
+
+	context := &diffContext{
+		Type:                DiffTypeTablePolicy,
+		Operation:           DiffOperationDrop,
+		Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, policy.Name),
+		Source:              policy,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
+}
+
+// policyReferencesColumns reports whether a policy's USING or WITH CHECK
+// expression names any of the given columns. (#591)
+func policyReferencesColumns(policy *ir.RLSPolicy, columns map[string]bool) bool {
+	return policy != nil && (exprReferencesAnyColumn(policy.Using, columns) || exprReferencesAnyColumn(policy.WithCheck, columns))
+}
+
+// triggerReferencesColumns reports whether a trigger depends on any of the
+// given columns through its UPDATE OF list or WHEN condition. (#591)
+func triggerReferencesColumns(trigger *ir.Trigger, columns map[string]bool) bool {
+	if trigger == nil || len(columns) == 0 {
+		return false
+	}
+	for _, name := range trigger.UpdateColumns {
+		if columns[name] {
+			return true
+		}
+	}
+	return exprReferencesAnyColumn(trigger.Condition, columns)
+}
+
 // indexReferencesColumns reports whether an index depends on any of the given
 // columns, i.e. whether ALTER TABLE ... DROP COLUMN of one of them removes it:
 // as a key or INCLUDE column, inside an expression, or in the partial-index
@@ -1142,7 +1196,8 @@ func exprReferencesAnyColumn(expr string, columns map[string]bool) bool {
 		bare := regexp.QuoteMeta(column)
 		// pg_get_expr doubles embedded quotes inside a quoted identifier.
 		quoted := regexp.QuoteMeta(`"` + strings.ReplaceAll(column, `"`, `""`) + `"`)
-		re := regexp.MustCompile(`(?:^|[^\w"])(?:` + bare + `|` + quoted + `)(?:[^\w"(]|$)`)
+		// \w plus $ covers every character of an unquoted identifier.
+		re := regexp.MustCompile(`(?:^|[^\w$"])(?:` + bare + `|` + quoted + `)(?:[^\w$"(]|$)`)
 		if re.MatchString(expr) {
 			return true
 		}
@@ -1180,6 +1235,15 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
+	}
+
+	// Policies that reference a column being re-created must go before the
+	// DROP COLUMN they would otherwise block; the remaining policy drops keep
+	// their usual place after the RLS changes below. (#591)
+	for _, policy := range td.DroppedPolicies {
+		if policyReferencesColumns(policy, td.RecreatedColumns) {
+			td.collectDropPolicy(policy, targetSchema, collector)
+		}
 	}
 
 	// Drop constraints first (before dropping columns) - already sorted by the Diff operation
@@ -1629,17 +1693,11 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Drop policies - already sorted by the Diff operation
 	for _, policy := range td.DroppedPolicies {
-		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
-		sql := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s;", ir.QuoteIdentifier(policy.Name), tableName)
-
-		context := &diffContext{
-			Type:                DiffTypeTablePolicy,
-			Operation:           DiffOperationDrop,
-			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, policy.Name),
-			Source:              policy,
-			CanRunInTransaction: true,
+		// Already dropped ahead of the column it depends on. (#591)
+		if policyReferencesColumns(policy, td.RecreatedColumns) {
+			continue
 		}
-		collector.collect(context, sql)
+		td.collectDropPolicy(policy, targetSchema, collector)
 	}
 
 	// Drop triggers - skipped here because they are already dropped in the DROP phase

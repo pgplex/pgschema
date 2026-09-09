@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "9d16cac1391edcd0cebffe22c50891525861d04d7f459e61de41da64255372af"
+    "hash": "d55cddab4cdd29708f6dd7af47adf0a45bcbf022f435f3c131b17a3b124a5f61"
   },
   "groups": [
     {
@@ -21,10 +21,28 @@
           "path": "public.order_totals"
         },
         {
+          "sql": "DROP VIEW IF EXISTS order_labels RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.order_labels"
+        },
+        {
+          "sql": "DROP TRIGGER IF EXISTS orders_total_trg ON orders;",
+          "type": "table.trigger",
+          "operation": "drop",
+          "path": "public.orders.orders_total_trg"
+        },
+        {
           "sql": "ALTER TABLE shipments DROP CONSTRAINT shipments_order_code_fkey;",
           "type": "table.constraint",
           "operation": "drop",
           "path": "public.shipments.shipments_order_code_fkey"
+        },
+        {
+          "sql": "DROP POLICY IF EXISTS orders_big ON orders;",
+          "type": "table.policy",
+          "operation": "drop",
+          "path": "public.orders.orders_big"
         },
         {
           "sql": "ALTER TABLE orders DROP COLUMN total;",
@@ -49,6 +67,18 @@
           "type": "table.column",
           "operation": "create",
           "path": "public.orders.code"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER orders_total_trg\n    AFTER UPDATE ON orders\n    FOR EACH ROW\n    WHEN (((NEW.total > 0)))\n    EXECUTE FUNCTION orders_audit();",
+          "type": "table.trigger",
+          "operation": "create",
+          "path": "public.orders.orders_total_trg"
+        },
+        {
+          "sql": "CREATE POLICY orders_big ON orders TO PUBLIC USING (total > 100);",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.orders.orders_big"
         }
       ]
     },
@@ -139,6 +169,12 @@
     {
       "steps": [
         {
+          "sql": "CREATE OR REPLACE VIEW order_labels AS\n SELECT id,\n    'x'::text AS label\n   FROM orders;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.order_labels"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW order_totals AS\n SELECT id,\n    total\n   FROM orders;",
           "type": "view",
           "operation": "create",
@@ -149,6 +185,12 @@
           "type": "view",
           "operation": "recreate",
           "path": "public.big_orders"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE order_totals TO app_reader;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.VIEW.order_totals.app_reader"
         },
         {
           "sql": "GRANT SELECT (id, total) ON TABLE orders TO app_reader;",

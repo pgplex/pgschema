@@ -5,6 +5,10 @@ BEGIN
     END IF;
 END $$;
 
+CREATE FUNCTION public.orders_audit() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$ BEGIN RETURN NEW; END $$;
+
 CREATE TABLE public.orders (
     id integer PRIMARY KEY,
     qty integer NOT NULL,
@@ -29,4 +33,14 @@ CREATE VIEW public.big_orders AS SELECT id FROM public.order_totals WHERE total 
 
 CREATE VIEW public.order_prices AS SELECT id, price FROM public.orders;
 
+CREATE VIEW public.order_labels AS SELECT id, code AS label FROM public.orders;
+
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY orders_big ON public.orders USING (total > 100);
+
+CREATE TRIGGER orders_total_trg AFTER UPDATE ON public.orders FOR EACH ROW WHEN (NEW.total > 0) EXECUTE FUNCTION public.orders_audit();
+
 GRANT SELECT (id, total) ON public.orders TO app_reader;
+
+GRANT SELECT ON public.order_totals TO app_reader;

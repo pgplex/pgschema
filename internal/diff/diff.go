@@ -947,7 +947,8 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			// A view that reads a column being re-created (DROP COLUMN + ADD
 			// COLUMN) would block the DROP with SQLSTATE 2BP01, so it goes
 			// through the pre-drop/recreate cycle even when unchanged (#591).
-			dependsOnRecreated := viewDependsOnRecreatedColumn(newView, recreatedColumnsByTable)
+			// The live (old) definition is what holds the dependency.
+			dependsOnRecreated := viewDependsOnRecreatedColumn(oldView, recreatedColumnsByTable)
 			// Check if the view definition itself changed (excluding options).
 			// This is used to decide if materialized views need DROP+CREATE:
 			// option-only changes should use ALTER VIEW SET/RESET, not recreation.
@@ -1081,6 +1082,11 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 
 	// Store all new views for dependent view handling (issue #268)
 	diff.allNewViews = newViews
+
+	// Views this migration drops and creates again (root recreations and
+	// their transitive dependents), keyed by schema.name. DROP VIEW discards
+	// the view's ACL, so their grants are re-issued below (#591).
+	recreatedViewKeys := collectRecreatedViewKeys(diff.allNewViews, diff.modifiedViews, diff.addedViews)
 
 	// Compare sequences across all schemas
 	oldSequences := make(map[string]*ir.Sequence)
@@ -1284,6 +1290,14 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 
 	for _, dbSchema := range oldIR.Schemas {
 		for _, p := range dbSchema.Privileges {
+			// A grant on a view that is dropped and created again by this
+			// migration does not survive; leaving it out of the old state
+			// makes the desired grant come back as an addition, emitted after
+			// the views are recreated (#591).
+			if (p.ObjectType == ir.PrivilegeObjectTypeTable || p.ObjectType == ir.PrivilegeObjectTypeView) &&
+				recreatedViewKeys[dbSchema.Name+"."+p.ObjectName] {
+				continue
+			}
 			key := p.GetFullKey()
 			oldPrivs[key] = p
 		}
@@ -2413,6 +2427,28 @@ func viewDependsOnRecreatedColumn(view *ir.View, recreatedColumnsByTable map[str
 		}
 	}
 	return false
+}
+
+// collectRecreatedViewKeys returns the schema.name keys of every view the
+// migration drops and creates again: views marked RequiresRecreate and the
+// views that transitively depend on them (see generateModifyViewsSQL).
+func collectRecreatedViewKeys(allNewViews map[string]*ir.View, modifiedViews []*viewDiff, addedViews []*ir.View) map[string]bool {
+	keys := make(map[string]bool)
+	for _, vd := range modifiedViews {
+		if vd.RequiresRecreate {
+			keys[vd.New.Schema+"."+vd.New.Name] = true
+		}
+	}
+	if len(keys) == 0 {
+		return keys
+	}
+	ctx := findDependentViewsForRecreatedViews(allNewViews, modifiedViews, addedViews)
+	for _, dependents := range ctx.dependents {
+		for _, view := range dependents {
+			keys[view.Schema+"."+view.Name] = true
+		}
+	}
+	return keys
 }
 
 // columnPrivilegeTouchesColumns reports whether a column grant covers any of

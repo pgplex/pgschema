@@ -87,6 +87,8 @@ func TestExprReferencesAnyColumn(t *testing.T) {
 		{"(\"my col\" * 2)", true},
 		{`("a""b" + 1)`, true}, // embedded quote doubled by pg_get_expr
 		{`("a"b" + 1)`, false},
+		{"(b$x + 1)", false}, // $ is part of the identifier
+		{"(x$b + 1)", false},
 		{"(b > 10)", true},
 		{"(bb + 1)", false},
 		{"(a + 1)", false},
