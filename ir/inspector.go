@@ -3,6 +3,7 @@ package ir
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -556,6 +557,15 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				}
 				if deleteRule := i.safeInterfaceToString(constraint.DeleteRule); deleteRule != "" && deleteRule != "<nil>" {
 					c.DeleteRule = deleteRule
+				}
+				// ON DELETE SET NULL/SET DEFAULT (column list) arrives as a JSON array of
+				// column names (empty string when absent or on PG14). Issue #589.
+				if setCols := constraint.DeleteSetColumns.String; setCols != "" {
+					var cols []string
+					if err := json.Unmarshal([]byte(setCols), &cols); err != nil {
+						return fmt.Errorf("failed to parse delete set columns for constraint %s.%s.%s: %w", schemaName, tableName, constraintName, err)
+					}
+					c.DeleteSetColumns = cols
 				}
 				if updateRule := i.safeInterfaceToString(constraint.UpdateRule); updateRule != "" && updateRule != "<nil>" {
 					c.UpdateRule = updateRule

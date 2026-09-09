@@ -244,6 +244,7 @@ type Constraint struct {
 	CheckClause         string              `json:"check_clause,omitempty"`
 	ExclusionDefinition string              `json:"exclusion_definition,omitempty"` // Full EXCLUDE definition from pg_get_constraintdef()
 	DeleteRule          string              `json:"delete_rule,omitempty"`
+	DeleteSetColumns    []string            `json:"delete_set_columns,omitempty"` // PG15+: column list of ON DELETE SET NULL/SET DEFAULT (confdelsetcols)
 	UpdateRule          string              `json:"update_rule,omitempty"`
 	Deferrable          bool                `json:"deferrable,omitempty"`
 	InitiallyDeferred   bool                `json:"initially_deferred,omitempty"`

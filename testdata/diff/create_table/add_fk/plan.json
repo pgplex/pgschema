@@ -3,9 +3,29 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "9b85e377059726a1c480a565f28fa2caf1e39ba1512de5c1adc8efbabc669dc1"
+    "hash": "d362a1d307cacbda3523c26227836ff883ea2839ece7b16eec4eb53c5d6959d6"
   },
   "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE audit_log\nADD CONSTRAINT audit_log_org_id_actor_member_id_fkey FOREIGN KEY (org_id, actor_member_id) REFERENCES members (org_id, id) ON DELETE SET NULL (actor_member_id) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.audit_log.audit_log_org_id_actor_member_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE audit_log VALIDATE CONSTRAINT audit_log_org_id_actor_member_id_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.audit_log.audit_log_org_id_actor_member_id_fkey"
+        }
+      ]
+    },
     {
       "steps": [
         {
@@ -63,6 +83,32 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.nodes.nodes_parent_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE notes DROP CONSTRAINT notes_org_id_author_member_id_fkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.notes.notes_org_id_author_member_id_fkey"
+        },
+        {
+          "sql": "ALTER TABLE notes\nADD CONSTRAINT notes_org_id_author_member_id_fkey FOREIGN KEY (org_id, author_member_id) REFERENCES members (org_id, id) ON DELETE SET NULL (author_member_id) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.notes.notes_org_id_author_member_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE notes VALIDATE CONSTRAINT notes_org_id_author_member_id_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.notes.notes_org_id_author_member_id_fkey"
         }
       ]
     },
@@ -183,6 +229,26 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.projects.projects_tenant_id_org_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE tasks\nADD CONSTRAINT tasks_org_id_owner_member_id_fkey FOREIGN KEY (org_id, owner_member_id) REFERENCES members (org_id, id) ON DELETE SET DEFAULT (owner_member_id) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.tasks.tasks_org_id_owner_member_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE tasks VALIDATE CONSTRAINT tasks_org_id_owner_member_id_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.tasks.tasks_org_id_owner_member_id_fkey"
         }
       ]
     },

@@ -1,15 +1,20 @@
-Plan: 9 to modify.
+Plan: 12 to modify.
 
 Summary by type:
-  tables: 9 to modify
+  tables: 12 to modify
 
 Tables:
+  ~ audit_log
+    + audit_log_org_id_actor_member_id_fkey (constraint)
   ~ books
     + books_author_id_fkey (constraint)
   ~ employees
     + employees_department_id_fkey (constraint)
   ~ nodes
     + nodes_parent_id_fkey (constraint)
+  ~ notes
+    - notes_org_id_author_member_id_fkey (constraint)
+    + notes_org_id_author_member_id_fkey (constraint)
   ~ orders
     + orders_customer_id_fkey (constraint)
     + orders_manager_id_fkey (constraint)
@@ -20,6 +25,8 @@ Tables:
     + products_category_code_fkey (constraint)
   ~ projects
     + projects_tenant_id_org_id_fkey (constraint)
+  ~ tasks
+    + tasks_org_id_owner_member_id_fkey (constraint)
   ~ teams
     + teams_manager_id_fkey (constraint)
   ~ user_profiles
@@ -29,78 +36,101 @@ DDL to be executed:
 --------------------------------------------------
 
 -- Transaction Group #1
+ALTER TABLE audit_log
+ADD CONSTRAINT audit_log_org_id_actor_member_id_fkey FOREIGN KEY (org_id, actor_member_id) REFERENCES members (org_id, id) ON DELETE SET NULL (actor_member_id) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE audit_log VALIDATE CONSTRAINT audit_log_org_id_actor_member_id_fkey;
+
+-- Transaction Group #3
 ALTER TABLE books
 ADD CONSTRAINT books_author_id_fkey FOREIGN KEY (author_id) REFERENCES authors (id) ON DELETE CASCADE NOT VALID;
 
--- Transaction Group #2
+-- Transaction Group #4
 ALTER TABLE books VALIDATE CONSTRAINT books_author_id_fkey;
 
--- Transaction Group #3
+-- Transaction Group #5
 ALTER TABLE employees
 ADD CONSTRAINT employees_department_id_fkey FOREIGN KEY (department_id) REFERENCES departments (id) NOT VALID;
 
--- Transaction Group #4
+-- Transaction Group #6
 ALTER TABLE employees VALIDATE CONSTRAINT employees_department_id_fkey;
 
--- Transaction Group #5
+-- Transaction Group #7
 ALTER TABLE nodes
 ADD CONSTRAINT nodes_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES nodes (id) NOT VALID;
 
--- Transaction Group #6
+-- Transaction Group #8
 ALTER TABLE nodes VALIDATE CONSTRAINT nodes_parent_id_fkey;
 
--- Transaction Group #7
-ALTER TABLE orders
-ADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customers (id) NOT VALID;
-
--- Transaction Group #8
-ALTER TABLE orders VALIDATE CONSTRAINT orders_customer_id_fkey;
-
 -- Transaction Group #9
-ALTER TABLE orders
-ADD CONSTRAINT orders_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE notes DROP CONSTRAINT notes_org_id_author_member_id_fkey;
+
+ALTER TABLE notes
+ADD CONSTRAINT notes_org_id_author_member_id_fkey FOREIGN KEY (org_id, author_member_id) REFERENCES members (org_id, id) ON DELETE SET NULL (author_member_id) NOT VALID;
 
 -- Transaction Group #10
-ALTER TABLE orders VALIDATE CONSTRAINT orders_manager_id_fkey;
+ALTER TABLE notes VALIDATE CONSTRAINT notes_org_id_author_member_id_fkey;
 
 -- Transaction Group #11
 ALTER TABLE orders
-ADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE NOT VALID;
+ADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customers (id) NOT VALID;
 
 -- Transaction Group #12
-ALTER TABLE orders VALIDATE CONSTRAINT orders_product_id_fkey;
+ALTER TABLE orders VALIDATE CONSTRAINT orders_customer_id_fkey;
 
 -- Transaction Group #13
+ALTER TABLE orders
+ADD CONSTRAINT orders_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;
+
+-- Transaction Group #14
+ALTER TABLE orders VALIDATE CONSTRAINT orders_manager_id_fkey;
+
+-- Transaction Group #15
+ALTER TABLE orders
+ADD CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE NOT VALID;
+
+-- Transaction Group #16
+ALTER TABLE orders VALIDATE CONSTRAINT orders_product_id_fkey;
+
+-- Transaction Group #17
 ALTER TABLE price_adjustments
 ADD CONSTRAINT price_adjustments_product_fkey FOREIGN KEY (product_id, PERIOD adjustment_period) REFERENCES price_history (product_id, PERIOD valid_period) NOT VALID;
 
--- Transaction Group #14
+-- Transaction Group #18
 ALTER TABLE price_adjustments VALIDATE CONSTRAINT price_adjustments_product_fkey;
 
--- Transaction Group #15
+-- Transaction Group #19
 ALTER TABLE products
 ADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCES categories (code) ON UPDATE CASCADE NOT VALID;
 
--- Transaction Group #16
+-- Transaction Group #20
 ALTER TABLE products VALIDATE CONSTRAINT products_category_code_fkey;
 
--- Transaction Group #17
+-- Transaction Group #21
 ALTER TABLE projects
 ADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id) NOT VALID;
 
--- Transaction Group #18
+-- Transaction Group #22
 ALTER TABLE projects VALIDATE CONSTRAINT projects_tenant_id_org_id_fkey;
 
--- Transaction Group #19
+-- Transaction Group #23
+ALTER TABLE tasks
+ADD CONSTRAINT tasks_org_id_owner_member_id_fkey FOREIGN KEY (org_id, owner_member_id) REFERENCES members (org_id, id) ON DELETE SET DEFAULT (owner_member_id) NOT VALID;
+
+-- Transaction Group #24
+ALTER TABLE tasks VALIDATE CONSTRAINT tasks_org_id_owner_member_id_fkey;
+
+-- Transaction Group #25
 ALTER TABLE teams
 ADD CONSTRAINT teams_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;
 
--- Transaction Group #20
+-- Transaction Group #26
 ALTER TABLE teams VALIDATE CONSTRAINT teams_manager_id_fkey;
 
--- Transaction Group #21
+-- Transaction Group #27
 ALTER TABLE user_profiles
 ADD CONSTRAINT user_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED NOT VALID;
 
--- Transaction Group #22
+-- Transaction Group #28
 ALTER TABLE user_profiles VALIDATE CONSTRAINT user_profiles_user_id_fkey;
