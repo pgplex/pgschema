@@ -209,6 +209,10 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 		}
 	}
 
+	if len(recreatedColumns) > 0 {
+		diff.RecreatedColumns = recreatedColumns
+	}
+
 	// Compare constraints
 	oldConstraints := make(map[string]*ir.Constraint)
 	newConstraints := make(map[string]*ir.Constraint)
@@ -296,8 +300,11 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 	for name, newIndex := range newIndexes {
 		if oldIndex, exists := oldIndexes[name]; exists {
 			// DROP COLUMN removes every index on a re-created column, so the
-			// desired-state index is created afresh afterwards. (#591)
-			if indexReferencesColumns(newIndex, recreatedColumns) {
+			// desired-state index is created afresh afterwards. The old
+			// definition decides: a same-named index that moves from another
+			// column onto the re-created one still exists and takes the normal
+			// drop + add path below. (#591)
+			if indexReferencesColumns(oldIndex, recreatedColumns) {
 				diff.AddedIndexes = append(diff.AddedIndexes, newIndex)
 				continue
 			}
@@ -652,8 +659,20 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPr
 func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTables []*ir.Table, oldTables, newTables map[string]*ir.Table) (preDrops []*ir.Constraint, postAdds []*deferredConstraint, suppressedInlineFKs map[string]bool) {
 	// Unique/PK constraints removed by this migration, keyed by their table
 	replaced := make(map[string][]*ir.Constraint)
+	// Standalone unique indexes that DROP COLUMN removes along with a
+	// re-created column; a foreign key can be bound to such an index just like
+	// to a unique constraint. (#591)
+	replacedUniqueIndexes := make(map[string][]*ir.Index)
 	for _, td := range modifiedTables {
 		key := td.Table.Schema + "." + td.Table.Name
+		if oldTable := oldTables[key]; oldTable != nil && len(td.RecreatedColumns) > 0 {
+			for _, name := range sortedKeys(oldTable.Indexes) {
+				idx := oldTable.Indexes[name]
+				if idx.Type == ir.IndexTypeUnique && !idx.IsPartial && indexReferencesColumns(idx, td.RecreatedColumns) {
+					replacedUniqueIndexes[key] = append(replacedUniqueIndexes[key], idx)
+				}
+			}
+		}
 		for _, c := range td.DroppedConstraints {
 			if c.Type == ir.ConstraintTypeUnique || c.Type == ir.ConstraintTypePrimaryKey {
 				replaced[key] = append(replaced[key], c)
@@ -686,7 +705,7 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 		}
 	}
 
-	if len(replaced) == 0 && len(addedConstraints) == 0 && len(addedUniqueIndexes) == 0 {
+	if len(replaced) == 0 && len(replacedUniqueIndexes) == 0 && len(addedConstraints) == 0 && len(addedUniqueIndexes) == 0 {
 		return nil, nil, nil
 	}
 
@@ -703,12 +722,14 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 				continue
 			}
 			newFK := newTable.Constraints[name]
-			oldBound := fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)])
+			oldBound := fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)]) ||
+				fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[fkReferencedTableKey(fk)])
 			// A changed FK whose new definition targets a replaced constraint
 			// must also wait for the replacement, even if its old definition
 			// was bound elsewhere.
 			newBound := newFK != nil && !constraintsEqual(fk, newFK) &&
-				fkReferencesAnyConstraint(newFK, replaced[fkReferencedTableKey(newFK)])
+				(fkReferencesAnyConstraint(newFK, replaced[fkReferencedTableKey(newFK)]) ||
+					fkReferencesAnyUniqueIndex(newFK, replacedUniqueIndexes[fkReferencedTableKey(newFK)]))
 			if !oldBound && !newBound {
 				continue
 			}
@@ -732,6 +753,7 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			}
 			refKey := fkReferencedTableKey(fk)
 			if !fkReferencesAnyConstraint(fk, replaced[refKey]) &&
+				!fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[refKey]) &&
 				!fkReferencesAnyConstraint(fk, addedConstraints[refKey]) &&
 				!fkReferencesAnyUniqueIndex(fk, addedUniqueIndexes[refKey]) {
 				continue
@@ -1117,8 +1139,10 @@ func exprReferencesAnyColumn(expr string, columns map[string]bool) bool {
 	}
 	expr = sqlStringLiteralRegex.ReplaceAllString(expr, "''")
 	for column := range columns {
-		q := regexp.QuoteMeta(column)
-		re := regexp.MustCompile(`(?:^|[^\w"])(?:` + q + `|"` + q + `")(?:[^\w"(]|$)`)
+		bare := regexp.QuoteMeta(column)
+		// pg_get_expr doubles embedded quotes inside a quoted identifier.
+		quoted := regexp.QuoteMeta(`"` + strings.ReplaceAll(column, `"`, `""`) + `"`)
+		re := regexp.MustCompile(`(?:^|[^\w"])(?:` + bare + `|` + quoted + `)(?:[^\w"(]|$)`)
 		if re.MatchString(expr) {
 			return true
 		}

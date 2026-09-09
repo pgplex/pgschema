@@ -434,14 +434,20 @@ type tableDiff struct {
 	AddedTriggers       []*ir.Trigger
 	DroppedTriggers     []*ir.Trigger
 	ModifiedTriggers    []*triggerDiff
-	AddedPolicies       []*ir.RLSPolicy
-	DroppedPolicies     []*ir.RLSPolicy
-	ModifiedPolicies    []*policyDiff
-	RLSChanges          []*rlsChange
-	CommentChanged      bool
-	OldComment          string
-	NewComment          string
-	PersistenceChanged  bool
+	// RecreatedColumns names columns applied as DROP COLUMN + ADD COLUMN
+	// because their generation clause cannot be altered in place (issue #591).
+	// They appear in both DroppedColumns and AddedColumns; dependent objects
+	// outside the table (views, column grants, FKs bound to a unique index)
+	// are re-created from this set.
+	RecreatedColumns   map[string]bool
+	AddedPolicies      []*ir.RLSPolicy
+	DroppedPolicies    []*ir.RLSPolicy
+	ModifiedPolicies   []*policyDiff
+	RLSChanges         []*rlsChange
+	CommentChanged     bool
+	OldComment         string
+	NewComment         string
+	PersistenceChanged bool
 }
 
 // ColumnDiff represents changes to a column
@@ -658,6 +664,9 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	}
 
 	diff.allNewTables = newTables
+
+	// Columns re-created by this migration, keyed by schema.table (issue #591)
+	recreatedColumnsByTable := collectRecreatedColumns(diff.modifiedTables)
 
 	// Compare rows of data-managed tables
 	diff.dataDiffs = diffTableData(oldTables, newTables)
@@ -935,6 +944,10 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 		newView := newViews[key]
 		if oldView, exists := oldViews[key]; exists {
 			structurallyDifferent := !viewsEqual(oldView, newView)
+			// A view that reads a column being re-created (DROP COLUMN + ADD
+			// COLUMN) would block the DROP with SQLSTATE 2BP01, so it goes
+			// through the pre-drop/recreate cycle even when unchanged (#591).
+			dependsOnRecreated := viewDependsOnRecreatedColumn(newView, recreatedColumnsByTable)
 			// Check if the view definition itself changed (excluding options).
 			// This is used to decide if materialized views need DROP+CREATE:
 			// option-only changes should use ALTER VIEW SET/RESET, not recreation.
@@ -985,13 +998,14 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			addedTriggers, droppedTriggers, modifiedTriggers := diffViewTriggers(oldView, newView)
 			triggersChanged := len(addedTriggers) > 0 || len(droppedTriggers) > 0 || len(modifiedTriggers) > 0
 
-			if structurallyDifferent || commentChanged || indexesChanged || triggersChanged {
+			if structurallyDifferent || commentChanged || indexesChanged || triggersChanged || dependsOnRecreated {
 				// For materialized views with definition changes, mark for recreation.
 				// For regular views with column changes incompatible with CREATE OR REPLACE VIEW,
 				// also mark for recreation (issue #308).
 				// Use definitionChanged (not structurallyDifferent) so that option-only changes
 				// on materialized views use ALTER SET/RESET instead of DROP+CREATE.
-				needsRecreate := definitionChanged && (newView.Materialized || viewColumnsRequireRecreate(oldView, newView))
+				needsRecreate := dependsOnRecreated ||
+					(definitionChanged && (newView.Materialized || viewColumnsRequireRecreate(oldView, newView)))
 
 				if needsRecreate {
 					diff.modifiedViews = append(diff.modifiedViews, &viewDiff{
@@ -1465,6 +1479,13 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 
 	for _, dbSchema := range oldIR.Schemas {
 		for _, cp := range dbSchema.ColumnPrivileges {
+			// DROP COLUMN discards the column's ACL, so a grant touching a
+			// re-created column is gone once the migration runs; leaving it
+			// out of the old state makes the desired grant come back as an
+			// addition after the column exists again (#591).
+			if columnPrivilegeTouchesColumns(cp, recreatedColumnsByTable[dbSchema.Name+"."+cp.TableName]) {
+				continue
+			}
 			key := cp.GetFullKey()
 			oldColPrivs[key] = cp
 		}
@@ -2362,6 +2383,50 @@ func filterPreDroppedViews(views []*ir.View, preDropped map[string]bool) []*ir.V
 		}
 	}
 	return filtered
+}
+
+// collectRecreatedColumns indexes the columns re-created by this migration
+// (see tableDiff.RecreatedColumns) by their schema.table key. (#591)
+func collectRecreatedColumns(modifiedTables []*tableDiff) map[string]map[string]bool {
+	byTable := make(map[string]map[string]bool)
+	for _, td := range modifiedTables {
+		if len(td.RecreatedColumns) > 0 {
+			byTable[td.Table.Schema+"."+td.Table.Name] = td.RecreatedColumns
+		}
+	}
+	return byTable
+}
+
+// viewDependsOnRecreatedColumn reports whether a view reads a column that this
+// migration re-creates, in which case the view must be dropped before the
+// column and created again afterwards. The column check is a textual match on
+// the view definition, so a same-named column of another table the view also
+// reads can cause a redundant recreation. (#591)
+func viewDependsOnRecreatedColumn(view *ir.View, recreatedColumnsByTable map[string]map[string]bool) bool {
+	for tableKey, columns := range recreatedColumnsByTable {
+		schema, table, ok := strings.Cut(tableKey, ".")
+		if !ok {
+			continue
+		}
+		if viewDependsOnTable(view, schema, table) && exprReferencesAnyColumn(view.Definition, columns) {
+			return true
+		}
+	}
+	return false
+}
+
+// columnPrivilegeTouchesColumns reports whether a column grant covers any of
+// the given columns.
+func columnPrivilegeTouchesColumns(cp *ir.ColumnPrivilege, columns map[string]bool) bool {
+	if len(columns) == 0 {
+		return false
+	}
+	for _, name := range cp.Columns {
+		if columns[name] {
+			return true
+		}
+	}
+	return false
 }
 
 // getTableNameWithSchema returns the table name with schema qualification only when necessary

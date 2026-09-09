@@ -1,0 +1,162 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "9d16cac1391edcd0cebffe22c50891525861d04d7f459e61de41da64255372af"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP VIEW IF EXISTS big_orders RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.big_orders"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS order_totals RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.order_totals"
+        },
+        {
+          "sql": "ALTER TABLE shipments DROP CONSTRAINT shipments_order_code_fkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.shipments.shipments_order_code_fkey"
+        },
+        {
+          "sql": "ALTER TABLE orders DROP COLUMN total;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.orders.total"
+        },
+        {
+          "sql": "ALTER TABLE orders DROP COLUMN code;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.orders.code"
+        },
+        {
+          "sql": "ALTER TABLE orders ADD COLUMN total integer GENERATED ALWAYS AS ((qty * price)) STORED;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.orders.total"
+        },
+        {
+          "sql": "ALTER TABLE orders ADD COLUMN code text GENERATED ALWAYS AS (('ORD-'::text || (id)::text)) STORED;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.orders.code"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_lookup_idx_pgschema_new ON orders (total);",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_lookup_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'orders_lookup_idx_pgschema_new';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index orders_lookup_idx_pgschema_new"
+          },
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_lookup_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "DROP INDEX IF EXISTS orders_lookup_idx;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_lookup_idx"
+        },
+        {
+          "sql": "ALTER INDEX orders_lookup_idx_pgschema_new RENAME TO orders_lookup_idx;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_lookup_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key ON orders (code);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.orders_code_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'orders_code_key';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index orders_code_key"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.orders_code_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE shipments\nADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.shipments.shipments_order_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE shipments VALIDATE CONSTRAINT shipments_order_code_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.shipments.shipments_order_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE VIEW order_totals AS\n SELECT id,\n    total\n   FROM orders;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.order_totals"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW big_orders AS\n SELECT id\n   FROM order_totals\n  WHERE total > 100;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.big_orders"
+        },
+        {
+          "sql": "GRANT SELECT (id, total) ON TABLE orders TO app_reader;",
+          "type": "column_privilege",
+          "operation": "create",
+          "path": "column_privileges.TABLE.orders.id,total.app_reader"
+        }
+      ]
+    }
+  ]
+}

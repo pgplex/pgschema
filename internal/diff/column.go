@@ -285,7 +285,10 @@ func generatedColumnNeedsRecreate(old, new *ir.Column, targetMajorVersion int) b
 		// plain -> generated
 		return true
 	case !new.IsGenerated:
-		// generated -> plain: DROP EXPRESSION only works on STORED columns
+		// generated -> plain: DROP EXPRESSION only works on STORED columns.
+		// A VIRTUAL column has no stored values to keep (which is why
+		// PostgreSQL refuses DROP EXPRESSION for it), so the re-created
+		// plain column starts out NULL; the plan shows it as dropped + added.
 		return old.GeneratedKind == "v"
 	case old.GeneratedKind != new.GeneratedKind:
 		return true

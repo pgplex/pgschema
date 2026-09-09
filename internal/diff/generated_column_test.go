@@ -77,7 +77,7 @@ func TestGeneratedExpressionChange_VersionGate(t *testing.T) {
 }
 
 func TestExprReferencesAnyColumn(t *testing.T) {
-	cols := map[string]bool{"b": true, "my col": true}
+	cols := map[string]bool{"b": true, "my col": true, `a"b`: true}
 	cases := []struct {
 		expr string
 		want bool
@@ -85,6 +85,8 @@ func TestExprReferencesAnyColumn(t *testing.T) {
 		{"(b + 1)", true},
 		{"b", true},
 		{"(\"my col\" * 2)", true},
+		{`("a""b" + 1)`, true}, // embedded quote doubled by pg_get_expr
+		{`("a"b" + 1)`, false},
 		{"(b > 10)", true},
 		{"(bb + 1)", false},
 		{"(a + 1)", false},

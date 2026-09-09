@@ -186,7 +186,19 @@ func normalizeTable(table *Table) {
 // normalizeColumn normalizes column default values
 // tableSchema is used to strip same-schema qualifiers from function calls
 func normalizeColumn(column *Column, tableSchema string) {
-	if column == nil || column.DefaultValue == nil {
+	if column == nil {
+		return
+	}
+
+	// pg_get_expr qualifies same-schema functions and types in a generation
+	// expression depending on the inspecting session's search_path; strip the
+	// qualifier so current and desired state compare textually (issue #591).
+	if column.GeneratedExpr != nil && tableSchema != "" {
+		stripped := StripSchemaPrefixFromBody(*column.GeneratedExpr, tableSchema)
+		column.GeneratedExpr = &stripped
+	}
+
+	if column.DefaultValue == nil {
 		return
 	}
 
