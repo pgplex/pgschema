@@ -31,6 +31,17 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	hasOldDefault := oldDefault != nil && *oldDefault != ""
 	needsUsing := hasTypeChange && needsUsingClause(oldBaseType, newBaseType)
 
+	// A STORED generated column turning into a plain column keeps its current
+	// values and simply stops being recomputed (issue #591). Emit it first so
+	// the remaining clauses (type, default, NOT NULL) act on a plain column.
+	// VIRTUAL -> plain and the other transitions without an ALTER form are
+	// handled by re-creating the column instead (see generatedColumnNeedsRecreate).
+	if cd.Old.IsGenerated && !cd.New.IsGenerated {
+		sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP EXPRESSION;",
+			qualifiedTableName, ir.QuoteIdentifier(cd.New.Name))
+		statements = append(statements, sql)
+	}
+
 	// If type is changing with USING clause and there's an existing default, drop the default first
 	if needsUsing && hasOldDefault {
 		sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;",
@@ -52,6 +63,15 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name), newType)
 			statements = append(statements, sql)
 		}
+	}
+
+	// Handle generation expression changes (issue #591). SET EXPRESSION AS
+	// (PostgreSQL 17+) recomputes STORED values in place; on older servers the
+	// column is re-created instead and never reaches this point.
+	if cd.Old.IsGenerated && cd.New.IsGenerated && generatedExpr(cd.Old) != generatedExpr(cd.New) {
+		sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET EXPRESSION AS (%s);",
+			qualifiedTableName, ir.QuoteIdentifier(cd.New.Name), generatedExpr(cd.New))
+		statements = append(statements, sql)
 	}
 
 	// Handle nullable changes
@@ -217,5 +237,60 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 		return false
 	}
 
+	// Compare the generation clause (issue #591)
+	if generatedColumnChanged(old, new) {
+		return false
+	}
+
 	return true
+}
+
+// generatedExpr returns the generation expression of a column, or "" when the
+// column is not generated.
+func generatedExpr(c *ir.Column) string {
+	if !c.IsGenerated || c.GeneratedExpr == nil {
+		return ""
+	}
+	return *c.GeneratedExpr
+}
+
+// generatedColumnChanged reports whether the generation clause differs between
+// two versions of a column: plain vs generated, STORED vs VIRTUAL, or the
+// expression itself. Both expressions come from pg_get_expr on the same
+// inspector, so they compare textually (issue #591).
+func generatedColumnChanged(old, new *ir.Column) bool {
+	if old.IsGenerated != new.IsGenerated {
+		return true
+	}
+	if !new.IsGenerated {
+		return false
+	}
+	return old.GeneratedKind != new.GeneratedKind || generatedExpr(old) != generatedExpr(new)
+}
+
+// generatedColumnNeedsRecreate reports whether a generation-clause change can
+// only be applied by dropping and re-adding the column. PostgreSQL has no ALTER
+// form for turning a plain column into a generated one, for switching between
+// STORED and VIRTUAL, or for dropping the expression of a VIRTUAL column, and
+// ALTER COLUMN ... SET EXPRESSION AS only exists on PostgreSQL 17+. A generated
+// column holds no data of its own, so recreating it loses nothing; the indexes
+// and constraints that DROP COLUMN takes with it are re-created by diffTables.
+// targetMajorVersion 0 means unknown and is treated as a current server.
+func generatedColumnNeedsRecreate(old, new *ir.Column, targetMajorVersion int) bool {
+	if !generatedColumnChanged(old, new) {
+		return false
+	}
+	switch {
+	case !old.IsGenerated:
+		// plain -> generated
+		return true
+	case !new.IsGenerated:
+		// generated -> plain: DROP EXPRESSION only works on STORED columns
+		return old.GeneratedKind == "v"
+	case old.GeneratedKind != new.GeneratedKind:
+		return true
+	default:
+		// expression change: SET EXPRESSION AS needs PostgreSQL 17+
+		return targetMajorVersion != 0 && targetMajorVersion < 17
+	}
 }

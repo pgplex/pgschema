@@ -395,16 +395,16 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		normalizeSchemaNames(desiredStateIR, schemaToInspect, config.Schema)
 	}
 
-	// Generate diff (current -> desired) using IR directly
-	diffs := diff.GenerateMigration(currentStateIR, desiredStateIR, config.Schema)
-
 	// Extract the target database's major version (e.g. "PostgreSQL 18.1" -> 18)
-	// to gate version-specific rewrites. Zero (unknown) falls back to the
-	// version-portable rewrite patterns.
+	// to gate version-specific DDL and rewrites. Zero (unknown) falls back to
+	// the version-portable patterns.
 	targetMajorVersion := 0
 	if v, ok := strings.CutPrefix(currentStateIR.Metadata.DatabaseVersion, "PostgreSQL "); ok {
 		fmt.Sscanf(v, "%d", &targetMajorVersion)
 	}
+
+	// Generate diff (current -> desired) using IR directly
+	diffs := diff.GenerateMigrationForTarget(currentStateIR, desiredStateIR, config.Schema, targetMajorVersion)
 
 	// Create plan from diffs with fingerprint
 	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint, targetMajorVersion, currentStateIR)

@@ -1,0 +1,25 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ vt
+    - s1 (column)
+    + s1 (column)
+    ~ v1 (column)
+    - v2 (column)
+    + v2 (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE vt DROP COLUMN v2;
+
+ALTER TABLE vt DROP COLUMN s1;
+
+ALTER TABLE vt ADD COLUMN v2 integer;
+
+ALTER TABLE vt ADD COLUMN s1 integer GENERATED ALWAYS AS ((a * 2)) VIRTUAL;
+
+ALTER TABLE vt ALTER COLUMN v1 SET EXPRESSION AS ((a * 2));

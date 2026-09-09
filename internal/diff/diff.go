@@ -270,6 +270,7 @@ type Diff struct {
 }
 
 type ddlDiff struct {
+	targetMajorVersion        int // target PostgreSQL major version, 0 if unknown (gates version-specific DDL)
 	addedSchemas              []*ir.Schema
 	droppedSchemas            []*ir.Schema
 	modifiedSchemas           []*schemaDiff
@@ -478,7 +479,16 @@ type rlsChange struct {
 // GenerateMigration generates the migration diff using standard "smart qualification"
 // (the target-schema prefix is omitted on entity names).
 func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
-	return GenerateMigrationWithOptions(oldIR, newIR, targetSchema, false)
+	return generateMigration(oldIR, newIR, targetSchema, false, 0)
+}
+
+// GenerateMigrationForTarget is GenerateMigration for a target database whose
+// PostgreSQL major version is known (0 if unknown, treated as a current
+// server). The version gates DDL that only newer servers accept, such as
+// ALTER COLUMN ... SET EXPRESSION AS (PostgreSQL 17+); older targets get a
+// version-portable equivalent instead (issue #591).
+func GenerateMigrationForTarget(oldIR, newIR *ir.IR, targetSchema string, targetMajorVersion int) []Diff {
+	return generateMigration(oldIR, newIR, targetSchema, false, targetMajorVersion)
 }
 
 // GenerateMigrationWithOptions is like GenerateMigration, but when qualifySchema is
@@ -491,7 +501,12 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 // stay bare because the IR stores them without schema identity (#493). Default
 // behavior (false) is unchanged for plan/apply.
 func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool) []Diff {
+	return generateMigration(oldIR, newIR, targetSchema, qualifySchema, 0)
+}
+
+func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool, targetMajorVersion int) []Diff {
 	diff := &ddlDiff{
+		targetMajorVersion:         targetMajorVersion,
 		addedSchemas:               []*ir.Schema{},
 		droppedSchemas:             []*ir.Schema{},
 		modifiedSchemas:            []*schemaDiff{},
@@ -635,7 +650,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 					diff.modifiedTables = append(diff.modifiedTables, tableDiff)
 				}
 			} else {
-				if tableDiff := diffTables(oldTable, newTable, targetSchema); tableDiff != nil {
+				if tableDiff := diffTables(oldTable, newTable, targetSchema, diff.targetMajorVersion); tableDiff != nil {
 					diff.modifiedTables = append(diff.modifiedTables, tableDiff)
 				}
 			}

@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -137,7 +138,10 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 
 // diffTables compares two tables and returns the differences
 // targetSchema is used to normalize type names before comparison
-func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
+// targetMajorVersion is the target database's PostgreSQL major version (0 if
+// unknown); it decides whether a generated-column expression change can use
+// SET EXPRESSION AS (PG17+) or must re-create the column (issue #591).
+func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVersion int) *tableDiff {
 	diff := &tableDiff{
 		Table:               newTable,
 		AddedColumns:        []*ir.Column{},
@@ -184,10 +188,19 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		}
 	}
 
-	// Find modified columns
+	// Find modified columns. A generation-clause change that PostgreSQL cannot
+	// ALTER in place is applied as DROP COLUMN + ADD COLUMN instead (issue #591);
+	// recreatedColumns drives the re-creation of their dependent objects below.
+	recreatedColumns := make(map[string]bool)
 	for name, newColumn := range newColumns {
 		if oldColumn, exists := oldColumns[name]; exists {
 			if !columnsEqual(oldColumn, newColumn, targetSchema) {
+				if generatedColumnNeedsRecreate(oldColumn, newColumn, targetMajorVersion) {
+					diff.DroppedColumns = append(diff.DroppedColumns, oldColumn)
+					diff.AddedColumns = append(diff.AddedColumns, newColumn)
+					recreatedColumns[name] = true
+					continue
+				}
 				diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{
 					Old: oldColumn,
 					New: newColumn,
@@ -229,6 +242,17 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified constraints
 	for name, newConstraint := range newConstraints {
 		if oldConstraint, exists := oldConstraints[name]; exists {
+			// A constraint on a re-created column goes away with DROP COLUMN, so
+			// it must be added back once the column exists again. Listing it as
+			// dropped (the DROP statement itself is skipped, see
+			// constraintDroppedWithColumns) also lets
+			// planFKRecreationForReplacedConstraints re-bind foreign keys that
+			// depend on a unique/PK constraint among them. (#591)
+			if constraintDroppedWithColumns(newConstraint, recreatedColumns) {
+				diff.DroppedConstraints = append(diff.DroppedConstraints, oldConstraint)
+				diff.AddedConstraints = append(diff.AddedConstraints, newConstraint)
+				continue
+			}
 			if !constraintsEqual(oldConstraint, newConstraint) {
 				diff.ModifiedConstraints = append(diff.ModifiedConstraints, &ConstraintDiff{
 					Old: oldConstraint,
@@ -260,6 +284,10 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find dropped indexes
 	for name, index := range oldIndexes {
 		if _, exists := newIndexes[name]; !exists {
+			// Already gone with the re-created column it depends on. (#591)
+			if indexReferencesColumns(index, recreatedColumns) {
+				continue
+			}
 			diff.DroppedIndexes = append(diff.DroppedIndexes, index)
 		}
 	}
@@ -267,6 +295,12 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified indexes (comment changes and structural changes)
 	for name, newIndex := range newIndexes {
 		if oldIndex, exists := oldIndexes[name]; exists {
+			// DROP COLUMN removes every index on a re-created column, so the
+			// desired-state index is created afresh afterwards. (#591)
+			if indexReferencesColumns(newIndex, recreatedColumns) {
+				diff.AddedIndexes = append(diff.AddedIndexes, newIndex)
+				continue
+			}
 			structurallyEqual := indexesStructurallyEqual(oldIndex, newIndex)
 			commentChanged := oldIndex.Comment != newIndex.Comment
 
@@ -1041,6 +1075,54 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 		}
 	}
 
+	return false
+}
+
+// indexReferencesColumns reports whether an index depends on any of the given
+// columns, i.e. whether ALTER TABLE ... DROP COLUMN of one of them removes it:
+// as a key or INCLUDE column, inside an expression, or in the partial-index
+// predicate. (#591)
+func indexReferencesColumns(index *ir.Index, columns map[string]bool) bool {
+	if index == nil || len(columns) == 0 {
+		return false
+	}
+	for _, col := range index.Columns {
+		// pg_get_indexdef renders a key column as its (possibly quoted) name
+		// and an expression column as the expression text.
+		if columns[col.Name] || exprReferencesAnyColumn(col.Name, columns) {
+			return true
+		}
+	}
+	for _, name := range index.IncludeColumns {
+		if columns[name] || exprReferencesAnyColumn(name, columns) {
+			return true
+		}
+	}
+	return index.IsPartial && exprReferencesAnyColumn(index.Where, columns)
+}
+
+// sqlStringLiteralRegex matches a single-quoted SQL string literal, including
+// doubled-quote escapes.
+var sqlStringLiteralRegex = regexp.MustCompile(`'(?:[^']|'')*'`)
+
+// exprReferencesAnyColumn reports whether a SQL expression as rendered by
+// pg_get_expr mentions any of the columns as a bare or quoted identifier.
+// String literals are blanked out first, and a name directly followed by "("
+// is a function call rather than a column. A false positive only costs a
+// redundant CREATE INDEX that fails loudly at apply time, whereas a miss would
+// silently lose the dependent index. (#591)
+func exprReferencesAnyColumn(expr string, columns map[string]bool) bool {
+	if expr == "" || len(columns) == 0 {
+		return false
+	}
+	expr = sqlStringLiteralRegex.ReplaceAllString(expr, "''")
+	for column := range columns {
+		q := regexp.QuoteMeta(column)
+		re := regexp.MustCompile(`(?:^|[^\w"])(?:` + q + `|"` + q + `")(?:[^\w"(]|$)`)
+		if re.MatchString(expr) {
+			return true
+		}
+	}
 	return false
 }
 
