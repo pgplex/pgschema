@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "d55cddab4cdd29708f6dd7af47adf0a45bcbf022f435f3c131b17a3b124a5f61"
+    "hash": "8c9711295d6cb9aae61a1a685ce7b7060849c2c394261f84b1ab57f92bdd0f21"
   },
   "groups": [
     {
@@ -45,6 +45,12 @@
           "path": "public.orders.orders_big"
         },
         {
+          "sql": "ALTER TABLE orders DROP CONSTRAINT orders_total_excl;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.orders.orders_total_excl"
+        },
+        {
           "sql": "ALTER TABLE orders DROP COLUMN total;",
           "type": "table.column",
           "operation": "drop",
@@ -67,6 +73,12 @@
           "type": "table.column",
           "operation": "create",
           "path": "public.orders.code"
+        },
+        {
+          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_total_excl EXCLUDE USING btree ((total + 0) WITH =);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.orders.orders_total_excl"
         },
         {
           "sql": "CREATE OR REPLACE TRIGGER orders_total_trg\n    AFTER UPDATE ON orders\n    FOR EACH ROW\n    WHEN (((NEW.total > 0)))\n    EXECUTE FUNCTION orders_audit();",
@@ -160,6 +172,26 @@
           "operation": "alter",
           "path": "public.orders.orders_lookup_idx"
         },
+        {
+          "sql": "ALTER TABLE returns\nADD CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.returns.returns_order_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE returns VALIDATE CONSTRAINT returns_order_code_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.returns.returns_order_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE shipments\nADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;",
           "type": "table.constraint",

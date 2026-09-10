@@ -495,6 +495,29 @@ func stripSchemaPrefixOccurrences(body, prefix string) string {
 			continue
 		}
 
+		// A double-quoted identifier is copied verbatim unless it is the quoted
+		// schema token itself (the prefix check below runs first for that), so
+		// a column literally named "public.foo" keeps its name.
+		if !inString && ch == '"' && !(i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix) {
+			end := i + 1
+			for end < len(body) {
+				if body[end] == '"' {
+					if end+1 < len(body) && body[end+1] == '"' {
+						end += 2
+						continue
+					}
+					break
+				}
+				end++
+			}
+			if end >= len(body) {
+				end = len(body) - 1
+			}
+			result.WriteString(body[i : end+1])
+			i = end
+			continue
+		}
+
 		// Only attempt replacement outside string literals
 		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix {
 			// Ensure this is a schema qualifier, not part of a longer identifier

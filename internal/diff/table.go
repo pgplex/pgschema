@@ -262,7 +262,11 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 			// constraintDroppedWithColumns) also lets
 			// planFKRecreationForReplacedConstraints re-bind foreign keys that
 			// depend on a unique/PK constraint among them. (#591)
-			if constraintDroppedWithColumns(newConstraint, recreatedColumns) {
+			// An EXCLUDE constraint can reference the column only through an
+			// expression, which conkey records as 0, so its definition text is
+			// checked as well; its DROP is then emitted explicitly (before the
+			// column drop) because constraintDroppedWithColumns will not skip it.
+			if constraintDroppedWithColumns(newConstraint, recreatedColumns) || exclusionReferencesColumns(oldConstraint, recreatedColumns) {
 				diff.DroppedConstraints = append(diff.DroppedConstraints, oldConstraint)
 				diff.AddedConstraints = append(diff.AddedConstraints, newConstraint)
 				continue
@@ -624,7 +628,9 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 }
 
 // generateModifyTablesSQL generates ALTER TABLE statements
-func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPreDrops []*ir.Constraint, targetSchema string, collector *diffCollector) {
+// deferredFKs holds "schema.table.constraint" keys of added foreign keys that
+// are emitted by the post-add step instead of with their table's changes.
+func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPreDrops []*ir.Constraint, deferredFKs map[string]bool, targetSchema string, collector *diffCollector) {
 	// Build a set of tables being dropped (CASCADE will remove their dependent FK constraints)
 	droppedTableSet := make(map[string]bool, len(droppedTables))
 	for _, t := range droppedTables {
@@ -647,7 +653,7 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPr
 		}
 
 		// Pass collector to generateAlterTableStatements to collect with proper context
-		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet, preDroppedFKSet)
+		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet, preDroppedFKSet, deferredFKs)
 	}
 }
 
@@ -776,6 +782,23 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			}
 			suppressedInlineFKs[constraintPathKey(fk)] = true
 			postAdds = append(postAdds, &deferredConstraint{table: table, constraint: fk})
+		}
+	}
+
+	// FKs newly added to existing tables that target a unique index rebuilt
+	// with a re-created column: the ALTER TABLE ... ADD CONSTRAINT would run
+	// before the index is back (always for a self-reference, and depending
+	// on table order otherwise), so they are deferred the same way. (#591)
+	for _, td := range modifiedTables {
+		for _, fk := range td.AddedConstraints {
+			if fk.Type != ir.ConstraintTypeForeignKey {
+				continue
+			}
+			if !fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[fkReferencedTableKey(fk)]) {
+				continue
+			}
+			suppressedInlineFKs[constraintPathKey(fk)] = true
+			postAdds = append(postAdds, &deferredConstraint{table: td.Table, constraint: fk})
 		}
 	}
 
@@ -1131,6 +1154,14 @@ func (td *tableDiff) collectDropPolicy(policy *ir.RLSPolicy, targetSchema string
 	collector.collect(context, sql)
 }
 
+// exclusionReferencesColumns reports whether an EXCLUDE constraint's
+// definition names any of the given columns inside an expression element,
+// which pg_constraint.conkey does not record. (#591)
+func exclusionReferencesColumns(constraint *ir.Constraint, columns map[string]bool) bool {
+	return constraint != nil && constraint.Type == ir.ConstraintTypeExclusion &&
+		exprReferencesAnyColumn(constraint.ExclusionDefinition, columns)
+}
+
 // policyReferencesColumns reports whether a policy's USING or WITH CHECK
 // expression names any of the given columns. (#591)
 func policyReferencesColumns(policy *ir.RLSPolicy, columns map[string]bool) bool {
@@ -1184,7 +1215,10 @@ func indexReferencesColumns(index *ir.Index, columns map[string]bool) bool {
 // preDroppedFKSet contains "schema.table.constraint" keys for FKs already dropped in the
 // pre-drop step because they were bound to a replaced unique/PK constraint; their drop
 // and modify entries are skipped since the pre-drop/post-add steps handle them. (#439)
-func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool, preDroppedFKSet map[string]bool) {
+// deferredFKSet contains "schema.table.constraint" keys of added FKs emitted by the
+// post-add step (they target a key that is rebuilt in this migration); their normal
+// and inline emission is skipped. (#591)
+func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool, preDroppedFKSet map[string]bool, deferredFKSet map[string]bool) {
 	// Persistence change (UNLOGGED to LOGGED or vice versa) should emit first
 	// because PostgreSQL rewrites the heap so doing it before column/constraint
 	// changes reduces data movement on subsequent steps
@@ -1300,6 +1334,10 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		// Check for single-column constraints that can be added inline
 		var inlineConstraint string
 		for _, constraint := range td.AddedConstraints {
+			// Deferred FKs are emitted by the post-add step. (#591)
+			if deferredFKSet[constraintPathKey(constraint)] {
+				continue
+			}
 			// Only add inline for single-column constraints
 			if len(constraint.Columns) == 1 && constraint.Columns[0].Name == column.Name {
 				switch constraint.Type {
@@ -1397,6 +1435,10 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	for _, constraint := range td.AddedConstraints {
 		// Skip constraints that were already added inline with columns
 		if inlineConstraints[constraint.Name] {
+			continue
+		}
+		// Deferred FKs are emitted by the post-add step. (#591)
+		if deferredFKSet[constraintPathKey(constraint)] {
 			continue
 		}
 

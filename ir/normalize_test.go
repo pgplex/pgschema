@@ -683,6 +683,8 @@ func TestStripSchemaPrefixFromBody_QuotedSchema(t *testing.T) {
 		{`"my""s".calc(a)`, `my"s`, `calc(a)`},
 		{`public.calc(a)`, "public", `calc(a)`},
 		{`other.calc(a)`, "My Schema", `other.calc(a)`},
+		{`("public.foo" * 2)`, "public", `("public.foo" * 2)`},                      // a column literally named public.foo
+		{`("My Schema".calc("My Schema.x"))`, "My Schema", `(calc("My Schema.x"))`}, // quoted schema token vs quoted column
 	}
 	for _, c := range cases {
 		if got := StripSchemaPrefixFromBody(c.body, c.schema); got != c.want {

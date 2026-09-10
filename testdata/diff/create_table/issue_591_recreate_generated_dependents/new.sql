@@ -14,7 +14,8 @@ CREATE TABLE public.orders (
     qty integer NOT NULL,
     price integer NOT NULL,
     total integer GENERATED ALWAYS AS (qty * price) STORED,
-    code text GENERATED ALWAYS AS ('ORD-' || id::text) STORED
+    code text GENERATED ALWAYS AS ('ORD-' || id::text) STORED,
+    CONSTRAINT orders_total_excl EXCLUDE USING btree ((total + 0) WITH =)
 );
 
 CREATE UNIQUE INDEX orders_code_key ON public.orders (code);
@@ -25,6 +26,12 @@ CREATE TABLE public.shipments (
     id integer PRIMARY KEY,
     order_code text,
     CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES public.orders (code)
+);
+
+CREATE TABLE public.returns (
+    id integer PRIMARY KEY,
+    order_code text,
+    CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES public.orders (code)
 );
 
 CREATE VIEW public.order_totals AS SELECT id, total FROM public.orders;

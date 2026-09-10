@@ -2247,7 +2247,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	generateDropRecreatedFKsSQL(d.fkPreDrops, targetSchema, collector)
 
 	// Modify tables
-	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, targetSchema, collector)
+	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, d.suppressedInlineFKs, targetSchema, collector)
 
 	// Attach OWNED BY for explicitly created sequences whose owning column was
 	// created by this migration, either with a new table (create phase) or by
