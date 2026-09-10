@@ -583,7 +583,7 @@ func TestStripRedundantTextCast(t *testing.T) {
 		{"('new'::character varying)::text", "'new'::character varying"},
 		{"('new'::varchar)::text", "'new'::varchar"},
 		{"'new'::character varying::text", "'new'::character varying"},
-		{"'new'::character varying", "'new'::character varying"}, // already clean
+		{"'new'::character varying", "'new'::character varying"},         // already clean
 		{"'active'::public.status_type", "'active'::public.status_type"}, // custom type untouched
 		{"42", "42"},
 	}
@@ -666,6 +666,29 @@ func TestMarkSerialColumns(t *testing.T) {
 	for table, wantSerial := range want {
 		if got := schema.Tables[table].Columns[0].IsSerial; got != wantSerial {
 			t.Errorf("%s.id IsSerial = %v, want %v", table, got, wantSerial)
+		}
+	}
+}
+
+// A schema name that needs quoting is rendered by the deparsers in quote_ident
+// form; the qualifier must be stripped in that form too, or the current and
+// desired states of a generated column expression never compare equal (#591).
+func TestStripSchemaPrefixFromBody_QuotedSchema(t *testing.T) {
+	cases := []struct {
+		body, schema, want string
+	}{
+		{`"My Schema".calc(a)`, "My Schema", `calc(a)`},
+		{`("My Schema".calc(a) + "My Schema"."Other"(b))`, "My Schema", `(calc(a) + "Other"(b))`},
+		{`'"My Schema".calc'`, "My Schema", `'"My Schema".calc'`},
+		{`"my""s".calc(a)`, `my"s`, `calc(a)`},
+		{`public.calc(a)`, "public", `calc(a)`},
+		{`other.calc(a)`, "My Schema", `other.calc(a)`},
+		{`("public.foo" * 2)`, "public", `("public.foo" * 2)`},                      // a column literally named public.foo
+		{`("My Schema".calc("My Schema.x"))`, "My Schema", `(calc("My Schema.x"))`}, // quoted schema token vs quoted column
+	}
+	for _, c := range cases {
+		if got := StripSchemaPrefixFromBody(c.body, c.schema); got != c.want {
+			t.Errorf("StripSchemaPrefixFromBody(%q, %q) = %q, want %q", c.body, c.schema, got, c.want)
 		}
 	}
 }

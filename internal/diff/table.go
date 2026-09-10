@@ -89,7 +89,9 @@ func sortConstraintColumnsByPosition(columns []*ir.ConstraintColumn) []*ir.Const
 }
 
 // diffTriggers compares triggers between two tables and populates the diff
-func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
+// recreatedColumns names the columns applied as DROP COLUMN + ADD COLUMN; a
+// trigger depending on one of them is dropped and created again. (#591)
+func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff, recreatedColumns map[string]bool) {
 	oldTriggers := make(map[string]*ir.Trigger)
 	newTriggers := make(map[string]*ir.Trigger)
 
@@ -122,6 +124,15 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 	// Find modified triggers (structural changes, comment-only, or enabled-state-only)
 	for name, newTrigger := range newTriggers {
 		if oldTrigger, exists := oldTriggers[name]; exists {
+			// A trigger whose WHEN condition or UPDATE OF list names a column
+			// being re-created blocks the DROP COLUMN (SQLSTATE 2BP01). It is
+			// dropped in the drop phase and created again from the desired
+			// state after the column is back. (#591)
+			if triggerReferencesColumns(oldTrigger, recreatedColumns) {
+				diff.DroppedTriggers = append(diff.DroppedTriggers, oldTrigger)
+				diff.AddedTriggers = append(diff.AddedTriggers, newTrigger)
+				continue
+			}
 			structurallyEqual := triggersEqual(oldTrigger, newTrigger)
 			commentChanged := oldTrigger.Comment != newTrigger.Comment
 			enabledChanged := oldTrigger.Disabled != newTrigger.Disabled
@@ -137,7 +148,10 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff) {
 
 // diffTables compares two tables and returns the differences
 // targetSchema is used to normalize type names before comparison
-func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
+// targetMajorVersion is the target database's PostgreSQL major version (0 if
+// unknown); it decides whether a generated-column expression change can use
+// SET EXPRESSION AS (PG17+) or must re-create the column (issue #591).
+func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVersion int) *tableDiff {
 	diff := &tableDiff{
 		Table:               newTable,
 		AddedColumns:        []*ir.Column{},
@@ -184,16 +198,29 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 		}
 	}
 
-	// Find modified columns
+	// Find modified columns. A generation-clause change that PostgreSQL cannot
+	// ALTER in place is applied as DROP COLUMN + ADD COLUMN instead (issue #591);
+	// recreatedColumns drives the re-creation of their dependent objects below.
+	recreatedColumns := make(map[string]bool)
 	for name, newColumn := range newColumns {
 		if oldColumn, exists := oldColumns[name]; exists {
 			if !columnsEqual(oldColumn, newColumn, targetSchema) {
+				if generatedColumnNeedsRecreate(oldColumn, newColumn, targetMajorVersion) {
+					diff.DroppedColumns = append(diff.DroppedColumns, oldColumn)
+					diff.AddedColumns = append(diff.AddedColumns, newColumn)
+					recreatedColumns[name] = true
+					continue
+				}
 				diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{
 					Old: oldColumn,
 					New: newColumn,
 				})
 			}
 		}
+	}
+
+	if len(recreatedColumns) > 0 {
+		diff.RecreatedColumns = recreatedColumns
 	}
 
 	// Compare constraints
@@ -229,6 +256,21 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified constraints
 	for name, newConstraint := range newConstraints {
 		if oldConstraint, exists := oldConstraints[name]; exists {
+			// A constraint on a re-created column goes away with DROP COLUMN, so
+			// it must be added back once the column exists again. Listing it as
+			// dropped (the DROP statement itself is skipped, see
+			// constraintDroppedWithColumns) also lets
+			// planFKRecreationForReplacedConstraints re-bind foreign keys that
+			// depend on a unique/PK constraint among them. (#591)
+			// An EXCLUDE constraint can reference the column only through an
+			// expression, which conkey records as 0, so its definition text is
+			// checked as well; its DROP is then emitted explicitly (before the
+			// column drop) because constraintDroppedWithColumns will not skip it.
+			if constraintDroppedWithColumns(newConstraint, recreatedColumns) || exclusionReferencesColumns(oldConstraint, recreatedColumns) {
+				diff.DroppedConstraints = append(diff.DroppedConstraints, oldConstraint)
+				diff.AddedConstraints = append(diff.AddedConstraints, newConstraint)
+				continue
+			}
 			if !constraintsEqual(oldConstraint, newConstraint) {
 				diff.ModifiedConstraints = append(diff.ModifiedConstraints, &ConstraintDiff{
 					Old: oldConstraint,
@@ -267,6 +309,17 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified indexes (comment changes and structural changes)
 	for name, newIndex := range newIndexes {
 		if oldIndex, exists := oldIndexes[name]; exists {
+			// DROP COLUMN removes every index on a re-created column, so the
+			// desired-state index is created afresh afterwards. The old
+			// definition decides, and it is dropped explicitly as well: the
+			// DROP uses IF EXISTS, so it is a no-op when the column drop
+			// already took the index, and it still removes the old index
+			// when the textual dependency check was a false positive. (#591)
+			if indexReferencesColumns(oldIndex, recreatedColumns) {
+				diff.DroppedIndexes = append(diff.DroppedIndexes, oldIndex)
+				diff.AddedIndexes = append(diff.AddedIndexes, newIndex)
+				continue
+			}
 			structurallyEqual := indexesStructurallyEqual(oldIndex, newIndex)
 			commentChanged := oldIndex.Comment != newIndex.Comment
 
@@ -285,7 +338,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	}
 
 	// Compare triggers
-	diffTriggers(oldTable, newTable, diff)
+	diffTriggers(oldTable, newTable, diff, recreatedColumns)
 
 	// Compare policies
 	oldPolicies := make(map[string]*ir.RLSPolicy)
@@ -320,6 +373,14 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string) *tableDiff {
 	// Find modified policies
 	for name, newPolicy := range newPolicies {
 		if oldPolicy, exists := oldPolicies[name]; exists {
+			// A policy whose expressions name a column being re-created blocks
+			// the DROP COLUMN (SQLSTATE 2BP01); it is dropped before the column
+			// and created again from the desired state afterwards. (#591)
+			if policyReferencesColumns(oldPolicy, recreatedColumns) {
+				diff.DroppedPolicies = append(diff.DroppedPolicies, oldPolicy)
+				diff.AddedPolicies = append(diff.AddedPolicies, newPolicy)
+				continue
+			}
 			if !policiesEqual(oldPolicy, newPolicy) {
 				diff.ModifiedPolicies = append(diff.ModifiedPolicies, &policyDiff{
 					Old: oldPolicy,
@@ -397,7 +458,7 @@ func diffExternalTable(oldTable, newTable *ir.Table) *tableDiff {
 	}
 
 	// For external tables, only compare triggers (not table structure)
-	diffTriggers(oldTable, newTable, diff)
+	diffTriggers(oldTable, newTable, diff, nil)
 
 	// Return nil if no trigger changes
 	if len(diff.AddedTriggers) == 0 && len(diff.DroppedTriggers) == 0 && len(diff.ModifiedTriggers) == 0 {
@@ -567,7 +628,9 @@ func generateDeferredConstraintsSQL(deferred []*deferredConstraint, targetSchema
 }
 
 // generateModifyTablesSQL generates ALTER TABLE statements
-func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPreDrops []*ir.Constraint, targetSchema string, collector *diffCollector) {
+// deferredFKs holds "schema.table.constraint" keys of added foreign keys that
+// are emitted by the post-add step instead of with their table's changes.
+func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPreDrops []*ir.Constraint, deferredFKs map[string]bool, targetSchema string, collector *diffCollector) {
 	// Build a set of tables being dropped (CASCADE will remove their dependent FK constraints)
 	droppedTableSet := make(map[string]bool, len(droppedTables))
 	for _, t := range droppedTables {
@@ -590,7 +653,7 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPr
 		}
 
 		// Pass collector to generateAlterTableStatements to collect with proper context
-		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet, preDroppedFKSet)
+		diff.generateAlterTableStatements(targetSchema, collector, droppedTableSet, droppedColumnSet, preDroppedFKSet, deferredFKs)
 	}
 }
 
@@ -618,8 +681,20 @@ func generateModifyTablesSQL(diffs []*tableDiff, droppedTables []*ir.Table, fkPr
 func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTables []*ir.Table, oldTables, newTables map[string]*ir.Table) (preDrops []*ir.Constraint, postAdds []*deferredConstraint, suppressedInlineFKs map[string]bool) {
 	// Unique/PK constraints removed by this migration, keyed by their table
 	replaced := make(map[string][]*ir.Constraint)
+	// Standalone unique indexes that DROP COLUMN removes along with a
+	// re-created column; a foreign key can be bound to such an index just like
+	// to a unique constraint. (#591)
+	replacedUniqueIndexes := make(map[string][]*ir.Index)
 	for _, td := range modifiedTables {
 		key := td.Table.Schema + "." + td.Table.Name
+		if oldTable := oldTables[key]; oldTable != nil && len(td.RecreatedColumns) > 0 {
+			for _, name := range sortedKeys(oldTable.Indexes) {
+				idx := oldTable.Indexes[name]
+				if idx.Type == ir.IndexTypeUnique && !idx.IsPartial && indexReferencesColumns(idx, td.RecreatedColumns) {
+					replacedUniqueIndexes[key] = append(replacedUniqueIndexes[key], idx)
+				}
+			}
+		}
 		for _, c := range td.DroppedConstraints {
 			if c.Type == ir.ConstraintTypeUnique || c.Type == ir.ConstraintTypePrimaryKey {
 				replaced[key] = append(replaced[key], c)
@@ -652,7 +727,7 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 		}
 	}
 
-	if len(replaced) == 0 && len(addedConstraints) == 0 && len(addedUniqueIndexes) == 0 {
+	if len(replaced) == 0 && len(replacedUniqueIndexes) == 0 && len(addedConstraints) == 0 && len(addedUniqueIndexes) == 0 {
 		return nil, nil, nil
 	}
 
@@ -669,12 +744,15 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 				continue
 			}
 			newFK := newTable.Constraints[name]
-			oldBound := fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)])
+			oldBound := fkReferencesAnyConstraint(fk, replaced[fkReferencedTableKey(fk)]) ||
+				fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[fkReferencedTableKey(fk)])
 			// A changed FK whose new definition targets a replaced constraint
 			// must also wait for the replacement, even if its old definition
 			// was bound elsewhere.
 			newBound := newFK != nil && !constraintsEqual(fk, newFK) &&
-				fkReferencesAnyConstraint(newFK, replaced[fkReferencedTableKey(newFK)])
+				(fkReferencesAnyConstraint(newFK, replaced[fkReferencedTableKey(newFK)]) ||
+					fkReferencesAnyUniqueIndex(newFK, replacedUniqueIndexes[fkReferencedTableKey(newFK)]) ||
+					fkReferencesAnyUniqueIndex(newFK, addedUniqueIndexes[fkReferencedTableKey(newFK)]))
 			if !oldBound && !newBound {
 				continue
 			}
@@ -698,12 +776,33 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			}
 			refKey := fkReferencedTableKey(fk)
 			if !fkReferencesAnyConstraint(fk, replaced[refKey]) &&
+				!fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[refKey]) &&
 				!fkReferencesAnyConstraint(fk, addedConstraints[refKey]) &&
 				!fkReferencesAnyUniqueIndex(fk, addedUniqueIndexes[refKey]) {
 				continue
 			}
 			suppressedInlineFKs[constraintPathKey(fk)] = true
 			postAdds = append(postAdds, &deferredConstraint{table: table, constraint: fk})
+		}
+	}
+
+	// FKs newly added to existing tables that target a unique index this
+	// migration creates, whether rebuilt with a re-created column or new: the
+	// ALTER TABLE ... ADD CONSTRAINT would run before the index exists
+	// (always for a self-reference, and depending on table order otherwise),
+	// so they are deferred the same way. (#591, #506)
+	for _, td := range modifiedTables {
+		for _, fk := range td.AddedConstraints {
+			if fk.Type != ir.ConstraintTypeForeignKey {
+				continue
+			}
+			refKey := fkReferencedTableKey(fk)
+			if !fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[refKey]) &&
+				!fkReferencesAnyUniqueIndex(fk, addedUniqueIndexes[refKey]) {
+				continue
+			}
+			suppressedInlineFKs[constraintPathKey(fk)] = true
+			postAdds = append(postAdds, &deferredConstraint{table: td.Table, constraint: fk})
 		}
 	}
 
@@ -1044,6 +1143,72 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 	return false
 }
 
+// collectDropPolicy emits DROP POLICY for a policy of this table.
+func (td *tableDiff) collectDropPolicy(policy *ir.RLSPolicy, targetSchema string, collector *diffCollector) {
+	tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+	sql := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s;", ir.QuoteIdentifier(policy.Name), tableName)
+
+	context := &diffContext{
+		Type:                DiffTypeTablePolicy,
+		Operation:           DiffOperationDrop,
+		Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, policy.Name),
+		Source:              policy,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
+}
+
+// exclusionReferencesColumns reports whether an EXCLUDE constraint's
+// definition names any of the given columns inside an expression element,
+// which pg_constraint.conkey does not record. (#591)
+func exclusionReferencesColumns(constraint *ir.Constraint, columns map[string]bool) bool {
+	return constraint != nil && constraint.Type == ir.ConstraintTypeExclusion &&
+		exprReferencesAnyColumn(constraint.ExclusionDefinition, columns)
+}
+
+// policyReferencesColumns reports whether a policy's USING or WITH CHECK
+// expression names any of the given columns. (#591)
+func policyReferencesColumns(policy *ir.RLSPolicy, columns map[string]bool) bool {
+	return policy != nil && (exprReferencesAnyColumn(policy.Using, columns) || exprReferencesAnyColumn(policy.WithCheck, columns))
+}
+
+// triggerReferencesColumns reports whether a trigger depends on any of the
+// given columns through its UPDATE OF list or WHEN condition. (#591)
+func triggerReferencesColumns(trigger *ir.Trigger, columns map[string]bool) bool {
+	if trigger == nil || len(columns) == 0 {
+		return false
+	}
+	for _, name := range trigger.UpdateColumns {
+		if columns[name] {
+			return true
+		}
+	}
+	return exprReferencesAnyColumn(trigger.Condition, columns)
+}
+
+// indexReferencesColumns reports whether an index depends on any of the given
+// columns, i.e. whether ALTER TABLE ... DROP COLUMN of one of them removes it:
+// as a key or INCLUDE column, inside an expression, or in the partial-index
+// predicate. (#591)
+func indexReferencesColumns(index *ir.Index, columns map[string]bool) bool {
+	if index == nil || len(columns) == 0 {
+		return false
+	}
+	for _, col := range index.Columns {
+		// pg_get_indexdef renders a key column as its (possibly quoted) name
+		// and an expression column as the expression text.
+		if columns[col.Name] || exprReferencesAnyColumn(col.Name, columns) {
+			return true
+		}
+	}
+	for _, name := range index.IncludeColumns {
+		if columns[name] || exprReferencesAnyColumn(name, columns) {
+			return true
+		}
+	}
+	return index.IsPartial && exprReferencesAnyColumn(index.Where, columns)
+}
+
 // generateAlterTableStatements generates SQL statements for table modifications
 // Note: DroppedTriggers are skipped here because they are already processed in the DROP phase
 // (see generateDropTriggersFromModifiedTables in trigger.go)
@@ -1054,7 +1219,10 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 // preDroppedFKSet contains "schema.table.constraint" keys for FKs already dropped in the
 // pre-drop step because they were bound to a replaced unique/PK constraint; their drop
 // and modify entries are skipped since the pre-drop/post-add steps handle them. (#439)
-func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool, preDroppedFKSet map[string]bool) {
+// deferredFKSet contains "schema.table.constraint" keys of added FKs emitted by the
+// post-add step (they target a key that is rebuilt in this migration); their normal
+// and inline emission is skipped. (#591)
+func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector *diffCollector, droppedTableSet map[string]bool, droppedColumnSet map[string]bool, preDroppedFKSet map[string]bool, deferredFKSet map[string]bool) {
 	// Persistence change (UNLOGGED to LOGGED or vice versa) should emit first
 	// because PostgreSQL rewrites the heap so doing it before column/constraint
 	// changes reduces data movement on subsequent steps
@@ -1074,6 +1242,15 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
+	}
+
+	// Policies that reference a column being re-created must go before the
+	// DROP COLUMN they would otherwise block; the remaining policy drops keep
+	// their usual place after the RLS changes below. (#591)
+	for _, policy := range td.DroppedPolicies {
+		if policyReferencesColumns(policy, td.RecreatedColumns) {
+			td.collectDropPolicy(policy, targetSchema, collector)
+		}
 	}
 
 	// Drop constraints first (before dropping columns) - already sorted by the Diff operation
@@ -1161,6 +1338,10 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		// Check for single-column constraints that can be added inline
 		var inlineConstraint string
 		for _, constraint := range td.AddedConstraints {
+			// Deferred FKs are emitted by the post-add step. (#591)
+			if deferredFKSet[constraintPathKey(constraint)] {
+				continue
+			}
 			// Only add inline for single-column constraints
 			if len(constraint.Columns) == 1 && constraint.Columns[0].Name == column.Name {
 				switch constraint.Type {
@@ -1258,6 +1439,10 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	for _, constraint := range td.AddedConstraints {
 		// Skip constraints that were already added inline with columns
 		if inlineConstraints[constraint.Name] {
+			continue
+		}
+		// Deferred FKs are emitted by the post-add step. (#591)
+		if deferredFKSet[constraintPathKey(constraint)] {
 			continue
 		}
 
@@ -1523,17 +1708,11 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Drop policies - already sorted by the Diff operation
 	for _, policy := range td.DroppedPolicies {
-		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
-		sql := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s;", ir.QuoteIdentifier(policy.Name), tableName)
-
-		context := &diffContext{
-			Type:                DiffTypeTablePolicy,
-			Operation:           DiffOperationDrop,
-			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, policy.Name),
-			Source:              policy,
-			CanRunInTransaction: true,
+		// Already dropped ahead of the column it depends on. (#591)
+		if policyReferencesColumns(policy, td.RecreatedColumns) {
+			continue
 		}
-		collector.collect(context, sql)
+		td.collectDropPolicy(policy, targetSchema, collector)
 	}
 
 	// Drop triggers - skipped here because they are already dropped in the DROP phase

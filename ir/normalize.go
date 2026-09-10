@@ -186,7 +186,19 @@ func normalizeTable(table *Table) {
 // normalizeColumn normalizes column default values
 // tableSchema is used to strip same-schema qualifiers from function calls
 func normalizeColumn(column *Column, tableSchema string) {
-	if column == nil || column.DefaultValue == nil {
+	if column == nil {
+		return
+	}
+
+	// pg_get_expr qualifies same-schema functions and types in a generation
+	// expression depending on the inspecting session's search_path; strip the
+	// qualifier so current and desired state compare textually (issue #591).
+	if column.GeneratedExpr != nil && tableSchema != "" {
+		stripped := StripSchemaPrefixFromBody(*column.GeneratedExpr, tableSchema)
+		column.GeneratedExpr = &stripped
+	}
+
+	if column.DefaultValue == nil {
 		return
 	}
 
@@ -435,12 +447,23 @@ func normalizeFunctionDefinition(def string) string {
 // StripSchemaPrefixFromBody removes the current schema qualifier from identifiers
 // in a function or procedure body. For example, "public.users" becomes "users".
 // It skips single-quoted string literals to avoid modifying string constants.
+// A schema name that needs quoting is recognized in the form the deparsers
+// render it, e.g. "My Schema".calc(a) becomes calc(a).
 func StripSchemaPrefixFromBody(body, schema string) string {
 	if body == "" || schema == "" {
 		return body
 	}
 
-	prefix := schema + "."
+	if quoted := QuoteIdentifier(schema); quoted != schema {
+		body = stripSchemaPrefixOccurrences(body, quoted+".")
+	}
+	return stripSchemaPrefixOccurrences(body, schema+".")
+}
+
+// stripSchemaPrefixOccurrences removes every occurrence of prefix ("schema."
+// in bare or quote_ident form) that starts an identifier reference outside
+// string literals, quoting the remaining identifier when it is a reserved word.
+func stripSchemaPrefixOccurrences(body, prefix string) string {
 	prefixLen := len(prefix)
 
 	// Fast path: if the prefix doesn't appear at all, return as-is
@@ -469,6 +492,29 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 				inString = true
 			}
 			result.WriteByte(ch)
+			continue
+		}
+
+		// A double-quoted identifier is copied verbatim unless it is the quoted
+		// schema token itself (the prefix check below runs first for that), so
+		// a column literally named "public.foo" keeps its name.
+		if !inString && ch == '"' && !(i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix) {
+			end := i + 1
+			for end < len(body) {
+				if body[end] == '"' {
+					if end+1 < len(body) && body[end+1] == '"' {
+						end += 2
+						continue
+					}
+					break
+				}
+				end++
+			}
+			if end >= len(body) {
+				end = len(body) - 1
+			}
+			result.WriteString(body[i : end+1])
+			i = end
 			continue
 		}
 

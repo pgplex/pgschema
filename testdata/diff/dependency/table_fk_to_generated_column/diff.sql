@@ -15,7 +15,7 @@ $$;
 CREATE TABLE IF NOT EXISTS article (
     id integer,
     title text NOT NULL,
-    priority integer GENERATED ALWAYS AS (public.calc_priority()) STORED,
+    priority integer GENERATED ALWAYS AS (calc_priority()) STORED,
     CONSTRAINT article_pkey PRIMARY KEY (id)
 );
 
