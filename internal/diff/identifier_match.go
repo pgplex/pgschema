@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/pgplex/pgschema/ir"
 )
 
 // Textual dependency checks (does this view read that table, does this
@@ -35,12 +37,18 @@ var sqlStringLiteralRegex = regexp.MustCompile(`'(?:[^']|'')*'`)
 // dependency checks run the same names over many definitions.
 var identifierRegexpCache sync.Map // map[string]*regexp.Regexp
 
-// identifierSpellings renders the two ways a deparser can spell name: bare, or
-// double-quoted with embedded quotes doubled.
+// identifierSpellings renders the ways a deparser can spell name. A name that
+// needs quoting (mixed case, special characters, reserved word) is only ever
+// rendered double-quoted, with embedded quotes doubled, and quoted identifiers
+// are case-sensitive, so it gets an exact quoted branch alone: a column named
+// "select" must not match the SELECT keyword, nor foo the column "Foo". Any
+// other name may appear bare (matched case-insensitively) or quoted.
 func identifierSpellings(name string) string {
-	bare := regexp.QuoteMeta(name)
 	quoted := regexp.QuoteMeta(`"` + strings.ReplaceAll(name, `"`, `""`) + `"`)
-	return `(?:` + bare + `|` + quoted + `)`
+	if ir.NeedsQuoting(name) {
+		return quoted
+	}
+	return `(?:(?i:` + regexp.QuoteMeta(name) + `)|` + quoted + `)`
 }
 
 // identifierRegexp returns a pattern matching name as a whole identifier in
@@ -74,7 +82,7 @@ func identifierRegexp(mode identifierMatchMode, parts ...string) *regexp.Regexp 
 		before = before[:len(before)-1] + `:]`
 		after = after[:len(after)-1] + `(]`
 	}
-	re := regexp.MustCompile(`(?i)(?:^|` + before + `)` + body + `(?:` + after + `|$)`)
+	re := regexp.MustCompile(`(?:^|` + before + `)` + body + `(?:` + after + `|$)`)
 	identifierRegexpCache.Store(key, re)
 	return re
 }

@@ -24,7 +24,13 @@ func TestContainsIdentifier(t *testing.T) {
 		{"SELECT a.b FROM t", "a.b", true},
 		{"SELECT id FROM foo_bar", "foo", false},
 		{"SELECT id FROM foo$bar", "foo", false},
-		{"SELECT 'users' FROM t", "users", false}, // string literal
+		{"SELECT 'users' FROM t", "users", false},  // string literal
+		{`SELECT "select" FROM t`, "select", true}, // reserved word is only ever quoted
+		{"SELECT a FROM t", "select", false},       // ... so the keyword is not a match
+		{`SELECT "Foo" FROM t`, "foo", false},      // quoted identifiers are case-sensitive
+		{`SELECT "Foo" FROM t`, "Foo", true},
+		{"SELECT foo FROM t", "Foo", false},
+		{"SELECT FOO FROM t", "foo", true}, // bare spelling stays case-insensitive
 		{"SELECT (row)::users FROM t", "users", true},
 		{"", "users", false},
 	}
@@ -68,7 +74,9 @@ func TestExprReferencesAnyColumn(t *testing.T) {
 		{`("a"b" + 1)`, false},
 		{"(b$x + 1)", false}, // $ is part of the identifier
 		{"(x$b + 1)", false},
-		{"((a)::b)", false}, // type cast, not a column
+		{"((a)::b)", false},  // type cast, not a column
+		{"(B + 1)", true},    // bare spelling is case-insensitive
+		{`("B" + 1)`, false}, // a quoted "B" is a different column
 		{"", false},
 	}
 	for _, c := range cases {
