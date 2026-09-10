@@ -1493,22 +1493,25 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 
 	for _, dbSchema := range oldIR.Schemas {
 		for _, cp := range dbSchema.ColumnPrivileges {
-			// DROP COLUMN discards the column's ACL, so a grant touching a
-			// re-created column is gone once the migration runs; leaving it
-			// out of the old state makes the desired grant come back as an
-			// addition after the column exists again (#591).
-			if columnPrivilegeTouchesColumns(cp, recreatedColumnsByTable[dbSchema.Name+"."+cp.TableName]) {
-				continue
-			}
 			key := cp.GetFullKey()
 			oldColPrivs[key] = cp
 		}
 	}
 
+	// Desired grants that touch a column this migration re-creates, keyed
+	// like newColPrivs. DROP COLUMN discards that column's ACL, so such a
+	// grant must be issued again after the column exists, even when the old
+	// and desired grants match (#591). The old grant stays in the old state
+	// so that removals on surviving columns of a grouped grant are still
+	// revoked by the normal comparison.
+	newColPrivsOnRecreated := make(map[string]bool)
 	for _, dbSchema := range newIR.Schemas {
 		for _, cp := range dbSchema.ColumnPrivileges {
 			key := cp.GetFullKey()
 			newColPrivs[key] = cp
+			if columnPrivilegeTouchesColumns(cp, recreatedColumnsByTable[dbSchema.Name+"."+cp.TableName]) {
+				newColPrivsOnRecreated[key] = true
+			}
 		}
 	}
 
@@ -1565,9 +1568,10 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 		}
 	}
 
-	// Find added column privileges
+	// Find added column privileges. A matched grant on a re-created column is
+	// added as well: it is re-issued after the column is back (#591).
 	for fullKey, cp := range newColPrivs {
-		if !matchedNewColPrivs[fullKey] {
+		if !matchedNewColPrivs[fullKey] || newColPrivsOnRecreated[fullKey] {
 			diff.addedColumnPrivileges = append(diff.addedColumnPrivileges, cp)
 		}
 	}

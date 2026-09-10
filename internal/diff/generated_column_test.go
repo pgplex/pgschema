@@ -67,6 +67,7 @@ func TestGeneratedExpressionChange_VersionGate(t *testing.T) {
 		want := strings.Join([]string{
 			"ALTER TABLE metrics DROP COLUMN doubled;",
 			"ALTER TABLE metrics ADD COLUMN doubled integer GENERATED ALWAYS AS ((a * 2)) STORED;",
+			"DROP INDEX IF EXISTS metrics_doubled_idx;",
 			"CREATE INDEX IF NOT EXISTS metrics_doubled_idx ON metrics (doubled);",
 			"",
 		}, "\n")
@@ -88,6 +89,7 @@ func TestExprReferencesAnyColumn(t *testing.T) {
 		{`("a""b" + 1)`, true}, // embedded quote doubled by pg_get_expr
 		{`("a"b" + 1)`, false},
 		{"(b$x + 1)", false}, // $ is part of the identifier
+		{"((a)::b)", false},  // type cast, not a column
 		{"(x$b + 1)", false},
 		{"(b > 10)", true},
 		{"(bb + 1)", false},

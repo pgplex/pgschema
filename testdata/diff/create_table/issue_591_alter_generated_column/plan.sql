@@ -16,7 +16,7 @@ ADD CONSTRAINT metrics_tripled_check CHECK (tripled > 0) NOT VALID;
 
 ALTER TABLE metrics VALIDATE CONSTRAINT metrics_tripled_check;
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS metrics_tripled_idx ON metrics ((tripled + 1)) WHERE (tripled > 10);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS metrics_tripled_idx_pgschema_new ON metrics ((tripled + 1)) WHERE (tripled > 10);
 
 -- pgschema:wait
 SELECT 
@@ -28,7 +28,11 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'metrics_tripled_idx';
+WHERE c.relname = 'metrics_tripled_idx_pgschema_new';
+
+DROP INDEX IF EXISTS metrics_tripled_idx;
+
+ALTER INDEX metrics_tripled_idx_pgschema_new RENAME TO metrics_tripled_idx;
 
 ALTER TABLE metric_refs
 ADD CONSTRAINT metric_refs_tripled_fkey FOREIGN KEY (tripled) REFERENCES metrics (tripled) NOT VALID;

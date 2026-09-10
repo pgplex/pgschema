@@ -26,6 +26,24 @@ CREATE OR REPLACE TRIGGER orders_total_trg
 
 CREATE POLICY orders_big ON orders TO PUBLIC USING (total > 100);
 
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key_pgschema_new ON orders (code);
+
+-- pgschema:wait
+SELECT 
+    COALESCE(i.indisvalid, false) as done,
+    CASE 
+        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total
+        ELSE 0
+    END as progress
+FROM pg_class c
+LEFT JOIN pg_index i ON c.oid = i.indexrelid
+LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
+WHERE c.relname = 'orders_code_key_pgschema_new';
+
+DROP INDEX IF EXISTS orders_code_key;
+
+ALTER INDEX orders_code_key_pgschema_new RENAME TO orders_code_key;
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_lookup_idx_pgschema_new ON orders (total);
 
 -- pgschema:wait
@@ -43,20 +61,6 @@ WHERE c.relname = 'orders_lookup_idx_pgschema_new';
 DROP INDEX IF EXISTS orders_lookup_idx;
 
 ALTER INDEX orders_lookup_idx_pgschema_new RENAME TO orders_lookup_idx;
-
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key ON orders (code);
-
--- pgschema:wait
-SELECT 
-    COALESCE(i.indisvalid, false) as done,
-    CASE 
-        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total
-        ELSE 0
-    END as progress
-FROM pg_class c
-LEFT JOIN pg_index i ON c.oid = i.indexrelid
-LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'orders_code_key';
 
 ALTER TABLE shipments
 ADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;

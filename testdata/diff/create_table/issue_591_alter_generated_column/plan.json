@@ -65,9 +65,9 @@
     {
       "steps": [
         {
-          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS metrics_tripled_idx ON metrics ((tripled + 1)) WHERE (tripled > 10);",
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS metrics_tripled_idx_pgschema_new ON metrics ((tripled + 1)) WHERE (tripled > 10);",
           "type": "table.index",
-          "operation": "create",
+          "operation": "alter",
           "path": "public.metrics.metrics_tripled_idx"
         }
       ]
@@ -75,19 +75,31 @@
     {
       "steps": [
         {
-          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'metrics_tripled_idx';",
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'metrics_tripled_idx_pgschema_new';",
           "directive": {
             "type": "wait",
-            "message": "Creating index metrics_tripled_idx"
+            "message": "Creating index metrics_tripled_idx_pgschema_new"
           },
           "type": "table.index",
-          "operation": "create",
+          "operation": "alter",
           "path": "public.metrics.metrics_tripled_idx"
         }
       ]
     },
     {
       "steps": [
+        {
+          "sql": "DROP INDEX IF EXISTS metrics_tripled_idx;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.metrics.metrics_tripled_idx"
+        },
+        {
+          "sql": "ALTER INDEX metrics_tripled_idx_pgschema_new RENAME TO metrics_tripled_idx;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.metrics.metrics_tripled_idx"
+        },
         {
           "sql": "ALTER TABLE metric_refs\nADD CONSTRAINT metric_refs_tripled_fkey FOREIGN KEY (tripled) REFERENCES metrics (tripled) NOT VALID;",
           "type": "table.constraint",

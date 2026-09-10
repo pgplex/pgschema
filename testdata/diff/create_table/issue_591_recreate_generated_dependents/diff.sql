@@ -26,11 +26,13 @@ CREATE OR REPLACE TRIGGER orders_total_trg
 
 CREATE POLICY orders_big ON orders TO PUBLIC USING (total > 100);
 
+DROP INDEX IF EXISTS orders_code_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS orders_code_key ON orders (code);
+
 DROP INDEX IF EXISTS orders_lookup_idx;
 
 CREATE INDEX IF NOT EXISTS orders_lookup_idx ON orders (total);
-
-CREATE UNIQUE INDEX IF NOT EXISTS orders_code_key ON orders (code);
 
 ALTER TABLE shipments
 ADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code);

@@ -12,7 +12,7 @@ Tables:
     + code (column)
     - total (column)
     + total (column)
-    + orders_code_key (index)
+    ~ orders_code_key (index - concurrent rebuild)
     ~ orders_lookup_idx (index - concurrent rebuild)
     - orders_big (policy)
     + orders_big (policy)
@@ -66,7 +66,7 @@ CREATE OR REPLACE TRIGGER orders_total_trg
 CREATE POLICY orders_big ON orders TO PUBLIC USING (total > 100);
 
 -- Transaction Group #2
-CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_lookup_idx_pgschema_new ON orders (total);
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key_pgschema_new ON orders (code);
 
 -- Transaction Group #3
 -- pgschema:wait
@@ -79,15 +79,15 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'orders_lookup_idx_pgschema_new';
+WHERE c.relname = 'orders_code_key_pgschema_new';
 
 -- Transaction Group #4
-DROP INDEX IF EXISTS orders_lookup_idx;
+DROP INDEX IF EXISTS orders_code_key;
 
-ALTER INDEX orders_lookup_idx_pgschema_new RENAME TO orders_lookup_idx;
+ALTER INDEX orders_code_key_pgschema_new RENAME TO orders_code_key;
 
 -- Transaction Group #5
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key ON orders (code);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_lookup_idx_pgschema_new ON orders (total);
 
 -- Transaction Group #6
 -- pgschema:wait
@@ -100,9 +100,13 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'orders_code_key';
+WHERE c.relname = 'orders_lookup_idx_pgschema_new';
 
 -- Transaction Group #7
+DROP INDEX IF EXISTS orders_lookup_idx;
+
+ALTER INDEX orders_lookup_idx_pgschema_new RENAME TO orders_lookup_idx;
+
 ALTER TABLE shipments
 ADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;
 

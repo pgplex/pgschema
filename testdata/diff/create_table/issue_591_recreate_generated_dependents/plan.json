@@ -85,6 +85,46 @@
     {
       "steps": [
         {
+          "sql": "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key_pgschema_new ON orders (code);",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_code_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'orders_code_key_pgschema_new';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index orders_code_key_pgschema_new"
+          },
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_code_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "DROP INDEX IF EXISTS orders_code_key;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_code_key"
+        },
+        {
+          "sql": "ALTER INDEX orders_code_key_pgschema_new RENAME TO orders_code_key;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.orders.orders_code_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
           "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_lookup_idx_pgschema_new ON orders (total);",
           "type": "table.index",
           "operation": "alter",
@@ -119,35 +159,7 @@
           "type": "table.index",
           "operation": "alter",
           "path": "public.orders.orders_lookup_idx"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_code_key ON orders (code);",
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.orders.orders_code_key"
-        }
-      ]
-    },
-    {
-      "steps": [
-        {
-          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'orders_code_key';",
-          "directive": {
-            "type": "wait",
-            "message": "Creating index orders_code_key"
-          },
-          "type": "table.index",
-          "operation": "create",
-          "path": "public.orders.orders_code_key"
-        }
-      ]
-    },
-    {
-      "steps": [
+        },
         {
           "sql": "ALTER TABLE shipments\nADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;",
           "type": "table.constraint",
