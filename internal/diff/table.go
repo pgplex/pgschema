@@ -751,7 +751,8 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 			// was bound elsewhere.
 			newBound := newFK != nil && !constraintsEqual(fk, newFK) &&
 				(fkReferencesAnyConstraint(newFK, replaced[fkReferencedTableKey(newFK)]) ||
-					fkReferencesAnyUniqueIndex(newFK, replacedUniqueIndexes[fkReferencedTableKey(newFK)]))
+					fkReferencesAnyUniqueIndex(newFK, replacedUniqueIndexes[fkReferencedTableKey(newFK)]) ||
+					fkReferencesAnyUniqueIndex(newFK, addedUniqueIndexes[fkReferencedTableKey(newFK)]))
 			if !oldBound && !newBound {
 				continue
 			}
@@ -785,16 +786,19 @@ func planFKRecreationForReplacedConstraints(modifiedTables []*tableDiff, addedTa
 		}
 	}
 
-	// FKs newly added to existing tables that target a unique index rebuilt
-	// with a re-created column: the ALTER TABLE ... ADD CONSTRAINT would run
-	// before the index is back (always for a self-reference, and depending
-	// on table order otherwise), so they are deferred the same way. (#591)
+	// FKs newly added to existing tables that target a unique index this
+	// migration creates, whether rebuilt with a re-created column or new: the
+	// ALTER TABLE ... ADD CONSTRAINT would run before the index exists
+	// (always for a self-reference, and depending on table order otherwise),
+	// so they are deferred the same way. (#591, #506)
 	for _, td := range modifiedTables {
 		for _, fk := range td.AddedConstraints {
 			if fk.Type != ir.ConstraintTypeForeignKey {
 				continue
 			}
-			if !fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[fkReferencedTableKey(fk)]) {
+			refKey := fkReferencedTableKey(fk)
+			if !fkReferencesAnyUniqueIndex(fk, replacedUniqueIndexes[refKey]) &&
+				!fkReferencesAnyUniqueIndex(fk, addedUniqueIndexes[refKey]) {
 				continue
 			}
 			suppressedInlineFKs[constraintPathKey(fk)] = true

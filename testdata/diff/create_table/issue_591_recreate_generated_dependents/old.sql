@@ -30,6 +30,7 @@ CREATE TABLE public.shipments (
 
 CREATE TABLE public.returns (
     id integer PRIMARY KEY,
+    order_total integer,
     order_code text
 );
 
@@ -50,3 +51,5 @@ CREATE TRIGGER orders_total_trg AFTER UPDATE ON public.orders FOR EACH ROW WHEN 
 GRANT SELECT (id, total) ON public.orders TO app_reader;
 
 GRANT SELECT ON public.order_totals TO app_reader;
+
+GRANT SELECT (id) ON public.big_orders TO app_reader;

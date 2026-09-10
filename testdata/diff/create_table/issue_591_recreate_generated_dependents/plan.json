@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "8c9711295d6cb9aae61a1a685ce7b7060849c2c394261f84b1ab57f92bdd0f21"
+    "hash": "9b049588f0373a22af4f2a06007f3c35b1f0bd7dcc3827d2c73456ef55009af2"
   },
   "groups": [
     {
@@ -171,7 +171,35 @@
           "type": "table.index",
           "operation": "alter",
           "path": "public.orders.orders_lookup_idx"
-        },
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_total_key ON orders (total);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.orders_total_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'orders_total_key';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index orders_total_key"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.orders_total_key"
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE returns\nADD CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;",
           "type": "table.constraint",
@@ -187,6 +215,26 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.returns.returns_order_code_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE returns\nADD CONSTRAINT returns_order_total_fkey FOREIGN KEY (order_total) REFERENCES orders (total) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.returns.returns_order_total_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE returns VALIDATE CONSTRAINT returns_order_total_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.returns.returns_order_total_fkey"
         }
       ]
     },
@@ -235,6 +283,12 @@
           "type": "privilege",
           "operation": "create",
           "path": "privileges.VIEW.order_totals.app_reader"
+        },
+        {
+          "sql": "GRANT SELECT (id) ON TABLE big_orders TO app_reader;",
+          "type": "column_privilege",
+          "operation": "create",
+          "path": "column_privileges.TABLE.big_orders.id.app_reader"
         },
         {
           "sql": "GRANT SELECT (id, total) ON TABLE orders TO app_reader;",

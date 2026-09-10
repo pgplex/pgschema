@@ -39,8 +39,13 @@ DROP INDEX IF EXISTS orders_lookup_idx;
 
 CREATE INDEX IF NOT EXISTS orders_lookup_idx ON orders (total);
 
+CREATE UNIQUE INDEX IF NOT EXISTS orders_total_key ON orders (total);
+
 ALTER TABLE returns
 ADD CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code);
+
+ALTER TABLE returns
+ADD CONSTRAINT returns_order_total_fkey FOREIGN KEY (order_total) REFERENCES orders (total);
 
 ALTER TABLE shipments
 ADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code);
@@ -61,5 +66,7 @@ CREATE OR REPLACE VIEW big_orders AS
   WHERE total > 100;
 
 GRANT SELECT ON TABLE order_totals TO app_reader;
+
+GRANT SELECT (id) ON TABLE big_orders TO app_reader;
 
 GRANT SELECT (id, total) ON TABLE orders TO app_reader;

@@ -1,10 +1,10 @@
-Plan: 2 to add, 6 to modify.
+Plan: 3 to add, 6 to modify.
 
 Summary by type:
   tables: 3 to modify
   views: 3 to modify
   privileges: 1 to add
-  column privileges: 1 to add
+  column privileges: 2 to add
 
 Tables:
   ~ orders
@@ -16,12 +16,14 @@ Tables:
     + orders_total_excl (constraint)
     ~ orders_code_key (index - concurrent rebuild)
     ~ orders_lookup_idx (index - concurrent rebuild)
+    + orders_total_key (index)
     - orders_big (policy)
     + orders_big (policy)
     - orders_total_trg (trigger)
     + orders_total_trg (trigger)
   ~ returns
     + returns_order_code_fkey (constraint)
+    + returns_order_total_fkey (constraint)
   ~ shipments
     - shipments_order_code_fkey (constraint)
     + shipments_order_code_fkey (constraint)
@@ -35,6 +37,7 @@ Privileges:
   + app_reader
 
 Column privileges:
+  + app_reader
   + app_reader
 
 DDL to be executed:
@@ -116,20 +119,44 @@ DROP INDEX IF EXISTS orders_lookup_idx;
 
 ALTER INDEX orders_lookup_idx_pgschema_new RENAME TO orders_lookup_idx;
 
+-- Transaction Group #8
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_total_key ON orders (total);
+
+-- Transaction Group #9
+-- pgschema:wait
+SELECT 
+    COALESCE(i.indisvalid, false) as done,
+    CASE 
+        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total
+        ELSE 0
+    END as progress
+FROM pg_class c
+LEFT JOIN pg_index i ON c.oid = i.indexrelid
+LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
+WHERE c.relname = 'orders_total_key';
+
+-- Transaction Group #10
 ALTER TABLE returns
 ADD CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;
 
--- Transaction Group #8
+-- Transaction Group #11
 ALTER TABLE returns VALIDATE CONSTRAINT returns_order_code_fkey;
 
--- Transaction Group #9
+-- Transaction Group #12
+ALTER TABLE returns
+ADD CONSTRAINT returns_order_total_fkey FOREIGN KEY (order_total) REFERENCES orders (total) NOT VALID;
+
+-- Transaction Group #13
+ALTER TABLE returns VALIDATE CONSTRAINT returns_order_total_fkey;
+
+-- Transaction Group #14
 ALTER TABLE shipments
 ADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;
 
--- Transaction Group #10
+-- Transaction Group #15
 ALTER TABLE shipments VALIDATE CONSTRAINT shipments_order_code_fkey;
 
--- Transaction Group #11
+-- Transaction Group #16
 CREATE OR REPLACE VIEW order_labels AS
  SELECT id,
     'x'::text AS label
@@ -146,5 +173,7 @@ CREATE OR REPLACE VIEW big_orders AS
   WHERE total > 100;
 
 GRANT SELECT ON TABLE order_totals TO app_reader;
+
+GRANT SELECT (id) ON TABLE big_orders TO app_reader;
 
 GRANT SELECT (id, total) ON TABLE orders TO app_reader;

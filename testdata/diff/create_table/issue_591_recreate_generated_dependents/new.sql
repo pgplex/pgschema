@@ -22,6 +22,8 @@ CREATE UNIQUE INDEX orders_code_key ON public.orders (code);
 
 CREATE INDEX orders_lookup_idx ON public.orders (total);
 
+CREATE UNIQUE INDEX orders_total_key ON public.orders (total);
+
 CREATE TABLE public.shipments (
     id integer PRIMARY KEY,
     order_code text,
@@ -30,8 +32,10 @@ CREATE TABLE public.shipments (
 
 CREATE TABLE public.returns (
     id integer PRIMARY KEY,
+    order_total integer,
     order_code text,
-    CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES public.orders (code)
+    CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES public.orders (code),
+    CONSTRAINT returns_order_total_fkey FOREIGN KEY (order_total) REFERENCES public.orders (total)
 );
 
 CREATE VIEW public.order_totals AS SELECT id, total FROM public.orders;
@@ -51,3 +55,5 @@ CREATE TRIGGER orders_total_trg AFTER UPDATE ON public.orders FOR EACH ROW WHEN 
 GRANT SELECT (id, total) ON public.orders TO app_reader;
 
 GRANT SELECT ON public.order_totals TO app_reader;
+
+GRANT SELECT (id) ON public.big_orders TO app_reader;

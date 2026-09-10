@@ -1498,18 +1498,20 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 		}
 	}
 
-	// Desired grants that touch a column this migration re-creates, keyed
-	// like newColPrivs. DROP COLUMN discards that column's ACL, so such a
-	// grant must be issued again after the column exists, even when the old
-	// and desired grants match (#591). The old grant stays in the old state
-	// so that removals on surviving columns of a grouped grant are still
-	// revoked by the normal comparison.
+	// Desired grants that touch a column this migration re-creates, or sit on
+	// a view it drops and creates again, keyed like newColPrivs. DROP COLUMN
+	// discards that column's ACL and DROP VIEW the whole relation's, so such
+	// a grant must be issued again afterwards even when the old and desired
+	// grants match (#591). The old grant stays in the old state so that
+	// removals on surviving columns of a grouped grant are still revoked by
+	// the normal comparison.
 	newColPrivsOnRecreated := make(map[string]bool)
 	for _, dbSchema := range newIR.Schemas {
 		for _, cp := range dbSchema.ColumnPrivileges {
 			key := cp.GetFullKey()
 			newColPrivs[key] = cp
-			if columnPrivilegeTouchesColumns(cp, recreatedColumnsByTable[dbSchema.Name+"."+cp.TableName]) {
+			relationKey := dbSchema.Name + "." + cp.TableName
+			if recreatedViewKeys[relationKey] || columnPrivilegeTouchesColumns(cp, recreatedColumnsByTable[relationKey]) {
 				newColPrivsOnRecreated[key] = true
 			}
 		}

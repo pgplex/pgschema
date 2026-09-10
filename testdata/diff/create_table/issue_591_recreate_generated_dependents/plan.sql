@@ -67,10 +67,29 @@ DROP INDEX IF EXISTS orders_lookup_idx;
 
 ALTER INDEX orders_lookup_idx_pgschema_new RENAME TO orders_lookup_idx;
 
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS orders_total_key ON orders (total);
+
+-- pgschema:wait
+SELECT 
+    COALESCE(i.indisvalid, false) as done,
+    CASE 
+        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total
+        ELSE 0
+    END as progress
+FROM pg_class c
+LEFT JOIN pg_index i ON c.oid = i.indexrelid
+LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
+WHERE c.relname = 'orders_total_key';
+
 ALTER TABLE returns
 ADD CONSTRAINT returns_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;
 
 ALTER TABLE returns VALIDATE CONSTRAINT returns_order_code_fkey;
+
+ALTER TABLE returns
+ADD CONSTRAINT returns_order_total_fkey FOREIGN KEY (order_total) REFERENCES orders (total) NOT VALID;
+
+ALTER TABLE returns VALIDATE CONSTRAINT returns_order_total_fkey;
 
 ALTER TABLE shipments
 ADD CONSTRAINT shipments_order_code_fkey FOREIGN KEY (order_code) REFERENCES orders (code) NOT VALID;
@@ -93,5 +112,7 @@ CREATE OR REPLACE VIEW big_orders AS
   WHERE total > 100;
 
 GRANT SELECT ON TABLE order_totals TO app_reader;
+
+GRANT SELECT (id) ON TABLE big_orders TO app_reader;
 
 GRANT SELECT (id, total) ON TABLE orders TO app_reader;
