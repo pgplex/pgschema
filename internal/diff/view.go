@@ -2,7 +2,6 @@ package diff
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -806,36 +805,6 @@ func viewDependsOnView(viewA *ir.View, viewBName string) bool {
 	return containsIdentifier(viewA.Definition, viewBName)
 }
 
-// containsIdentifier checks if the given SQL text contains the identifier as a whole word.
-// This uses word boundary matching to avoid false positives (e.g., "user" matching "users").
-func containsIdentifier(sqlText, identifier string) bool {
-	if sqlText == "" || identifier == "" {
-		return false
-	}
-
-	// Build a regex pattern that matches the identifier as a whole word.
-	// Word boundaries in SQL are: start/end of string, whitespace, punctuation, operators.
-	// We use a pattern that matches the identifier not preceded/followed by word characters.
-	//
-	// For schema-qualified identifiers (containing a dot), treat '.' as part of the word
-	// to avoid matching inside longer qualified paths like "other.schema.name".
-	// Use [^a-zA-Z0-9_] to exclude both upper and lowercase letters as word boundaries.
-	var pattern string
-	if strings.Contains(identifier, ".") {
-		pattern = `(?i)(?:^|[^a-zA-Z0-9_.])` + regexp.QuoteMeta(identifier) + `(?:[^a-zA-Z0-9_.]|$)`
-	} else {
-		pattern = `(?i)(?:^|[^a-zA-Z0-9_])` + regexp.QuoteMeta(identifier) + `(?:[^a-zA-Z0-9_]|$)`
-	}
-	matched, err := regexp.MatchString(pattern, sqlText)
-	if err != nil {
-		// This should never happen since regexp.QuoteMeta ensures valid pattern,
-		// but log it rather than silently ignoring
-		fmt.Printf("containsIdentifier: regexp error for pattern %q: %v\n", pattern, err)
-		return false
-	}
-	return matched
-}
-
 // viewDependsOnTable checks if a view depends on a specific table
 // by checking if the table name appears in the view definition.
 // Uses whole-word identifier matching (not plain substring) so that a table
@@ -851,7 +820,7 @@ func viewDependsOnTable(view *ir.View, tableSchema, tableName string) bool {
 	}
 
 	// Check for qualified table name (schema.table)
-	if containsIdentifier(view.Definition, tableSchema+"."+tableName) {
+	if containsQualifiedIdentifier(view.Definition, tableSchema, tableName) {
 		return true
 	}
 

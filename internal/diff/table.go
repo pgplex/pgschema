@@ -2,7 +2,6 @@ package diff
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -1173,35 +1172,6 @@ func indexReferencesColumns(index *ir.Index, columns map[string]bool) bool {
 		}
 	}
 	return index.IsPartial && exprReferencesAnyColumn(index.Where, columns)
-}
-
-// sqlStringLiteralRegex matches a single-quoted SQL string literal, including
-// doubled-quote escapes.
-var sqlStringLiteralRegex = regexp.MustCompile(`'(?:[^']|'')*'`)
-
-// exprReferencesAnyColumn reports whether a SQL expression as rendered by
-// pg_get_expr mentions any of the columns as a bare or quoted identifier.
-// String literals are blanked out first; a name directly followed by "(" is a
-// function call and a name directly preceded by ":" is a type cast, not a
-// column. Callers pair a positive result with IF EXISTS drops and a re-create
-// from the desired state, so a false positive costs a redundant drop + create
-// while a miss would leave a dependent object behind. (#591)
-func exprReferencesAnyColumn(expr string, columns map[string]bool) bool {
-	if expr == "" || len(columns) == 0 {
-		return false
-	}
-	expr = sqlStringLiteralRegex.ReplaceAllString(expr, "''")
-	for column := range columns {
-		bare := regexp.QuoteMeta(column)
-		// pg_get_expr doubles embedded quotes inside a quoted identifier.
-		quoted := regexp.QuoteMeta(`"` + strings.ReplaceAll(column, `"`, `""`) + `"`)
-		// \w plus $ covers every character of an unquoted identifier.
-		re := regexp.MustCompile(`(?:^|[^\w$":])(?:` + bare + `|` + quoted + `)(?:[^\w$"(]|$)`)
-		if re.MatchString(expr) {
-			return true
-		}
-	}
-	return false
 }
 
 // generateAlterTableStatements generates SQL statements for table modifications
