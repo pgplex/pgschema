@@ -447,12 +447,23 @@ func normalizeFunctionDefinition(def string) string {
 // StripSchemaPrefixFromBody removes the current schema qualifier from identifiers
 // in a function or procedure body. For example, "public.users" becomes "users".
 // It skips single-quoted string literals to avoid modifying string constants.
+// A schema name that needs quoting is recognized in the form the deparsers
+// render it, e.g. "My Schema".calc(a) becomes calc(a).
 func StripSchemaPrefixFromBody(body, schema string) string {
 	if body == "" || schema == "" {
 		return body
 	}
 
-	prefix := schema + "."
+	if quoted := QuoteIdentifier(schema); quoted != schema {
+		body = stripSchemaPrefixOccurrences(body, quoted+".")
+	}
+	return stripSchemaPrefixOccurrences(body, schema+".")
+}
+
+// stripSchemaPrefixOccurrences removes every occurrence of prefix ("schema."
+// in bare or quote_ident form) that starts an identifier reference outside
+// string literals, quoting the remaining identifier when it is a reserved word.
+func stripSchemaPrefixOccurrences(body, prefix string) string {
 	prefixLen := len(prefix)
 
 	// Fast path: if the prefix doesn't appear at all, return as-is

@@ -60,9 +60,14 @@ func identifierRegexp(mode identifierMatchMode, parts ...string) *regexp.Regexp 
 
 	// Identifier characters never border a whole-identifier match, and a
 	// quote cannot either, so a bare spelling never matches inside a quoted
-	// identifier. A qualified name must not sit inside a longer path.
+	// identifier. A qualified name (or a name that itself contains a dot)
+	// must not sit inside a longer path such as other.schema.name.
+	dotted := len(parts) > 1
+	for _, part := range parts {
+		dotted = dotted || strings.Contains(part, ".")
+	}
 	before, after := `[^\w$"]`, `[^\w$"]`
-	if len(parts) > 1 {
+	if dotted {
 		before, after = `[^\w$".]`, `[^\w$".]`
 	}
 	if mode == columnMatch {
@@ -84,17 +89,23 @@ func stripStringLiterals(sqlText string) string {
 }
 
 // containsIdentifier reports whether sqlText mentions identifier as a whole
-// relation name, in bare or quoted form. A "schema.name" identifier is
-// matched segment by segment, so "my schema"."a""b" is found for
-// `my schema.a"b`, and "foo" does not match "foobar" or "other.foo.bar".
+// relation name, in bare or quoted form; "foo" does not match "foobar". An
+// identifier containing a dot is tried both as one name (a quoted "a.b") and
+// as "schema.name" matched segment by segment, so "my schema"."a""b" is found
+// for `my schema.a"b` and "other.foo.bar" does not match "foo.bar". Callers
+// that hold schema and name separately should use containsQualifiedIdentifier.
 func containsIdentifier(sqlText, identifier string) bool {
 	if sqlText == "" || identifier == "" {
 		return false
 	}
-	if schema, name, ok := strings.Cut(identifier, "."); ok {
-		return containsQualifiedIdentifier(sqlText, schema, name)
+	sqlText = stripStringLiterals(sqlText)
+	if identifierRegexp(relationMatch, identifier).MatchString(sqlText) {
+		return true
 	}
-	return identifierRegexp(relationMatch, identifier).MatchString(stripStringLiterals(sqlText))
+	if schema, name, ok := strings.Cut(identifier, "."); ok {
+		return identifierRegexp(relationMatch, schema, name).MatchString(sqlText)
+	}
+	return false
 }
 
 // containsQualifiedIdentifier reports whether sqlText mentions schema.name as

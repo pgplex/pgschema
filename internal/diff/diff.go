@@ -948,7 +948,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			// COLUMN) would block the DROP with SQLSTATE 2BP01, so it goes
 			// through the pre-drop/recreate cycle even when unchanged (#591).
 			// The live (old) definition is what holds the dependency.
-			dependsOnRecreated := viewDependsOnRecreatedColumn(oldView, recreatedColumnsByTable)
+			dependsOnRecreated := viewDependsOnRecreatedColumn(oldView, diff.modifiedTables)
 			// Check if the view definition itself changed (excluding options).
 			// This is used to decide if materialized views need DROP+CREATE:
 			// option-only changes should use ALTER VIEW SET/RESET, not recreation.
@@ -2420,13 +2420,12 @@ func collectRecreatedColumns(modifiedTables []*tableDiff) map[string]map[string]
 // column and created again afterwards. The column check is a textual match on
 // the view definition, so a same-named column of another table the view also
 // reads can cause a redundant recreation. (#591)
-func viewDependsOnRecreatedColumn(view *ir.View, recreatedColumnsByTable map[string]map[string]bool) bool {
-	for tableKey, columns := range recreatedColumnsByTable {
-		schema, table, ok := strings.Cut(tableKey, ".")
-		if !ok {
+func viewDependsOnRecreatedColumn(view *ir.View, modifiedTables []*tableDiff) bool {
+	for _, td := range modifiedTables {
+		if len(td.RecreatedColumns) == 0 {
 			continue
 		}
-		if viewDependsOnTable(view, schema, table) && exprReferencesAnyColumn(view.Definition, columns) {
+		if viewDependsOnTable(view, td.Table.Schema, td.Table.Name) && exprReferencesAnyColumn(view.Definition, td.RecreatedColumns) {
 			return true
 		}
 	}

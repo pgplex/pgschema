@@ -20,6 +20,8 @@ func TestContainsIdentifier(t *testing.T) {
 		{`SELECT id FROM "a"b"`, `a"b`, false},
 		{`SELECT id FROM "my schema"."a""b"`, `my schema.a"b`, true},
 		{"SELECT id FROM foobar", "foo", false},
+		{`SELECT "a.b" FROM t`, "a.b", true}, // dotted name is one identifier when quoted
+		{"SELECT a.b FROM t", "a.b", true},
 		{"SELECT id FROM foo_bar", "foo", false},
 		{"SELECT id FROM foo$bar", "foo", false},
 		{"SELECT 'users' FROM t", "users", false}, // string literal
