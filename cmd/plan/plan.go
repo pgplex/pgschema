@@ -396,8 +396,10 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	}
 
 	// Extract the target database's major version (e.g. "PostgreSQL 18.1" -> 18)
-	// to gate version-specific DDL and rewrites. Zero (unknown) falls back to
-	// the version-portable patterns.
+	// to gate version-specific DDL and rewrites. Zero (unknown) is handled
+	// differently by the two consumers: the diff assumes a current server and
+	// may emit DDL that older servers reject (e.g. SET EXPRESSION AS, PG17+),
+	// while the plan rewrites fall back to their version-portable patterns.
 	targetMajorVersion := 0
 	if v, ok := strings.CutPrefix(currentStateIR.Metadata.DatabaseVersion, "PostgreSQL "); ok {
 		fmt.Sscanf(v, "%d", &targetMajorVersion)
