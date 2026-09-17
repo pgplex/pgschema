@@ -232,8 +232,10 @@ func normalizeSQL(sql string) string {
 	var normalizedLines []string
 
 	for _, line := range lines {
-		// Preserve leading whitespace (indentation) but trim trailing whitespace
-		trimmed := strings.TrimRight(line, " \t")
+		// Preserve leading whitespace (indentation) but trim trailing whitespace.
+		// Includes \r so CRLF fixtures (e.g. checked out on Windows with
+		// core.autocrlf=true) compare equal to LF-only runtime output.
+		trimmed := strings.TrimRight(line, " \t\r")
 		if trimmed != "" {
 			normalizedLines = append(normalizedLines, trimmed)
 		}

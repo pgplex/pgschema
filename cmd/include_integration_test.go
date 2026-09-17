@@ -293,9 +293,15 @@ func compareFileContents(t *testing.T, sourceFilePath, dumpFilePath, displayName
 		return
 	}
 
-	if string(sourceContent) != string(dumpContent) {
+	// Normalize CRLF to LF so checked-in source fixtures that git converted to
+	// CRLF on checkout (e.g. Windows with core.autocrlf=true) compare equal to
+	// LF-only runtime dump output.
+	normalizedSource := strings.ReplaceAll(string(sourceContent), "\r\n", "\n")
+	normalizedDump := strings.ReplaceAll(string(dumpContent), "\r\n", "\n")
+
+	if normalizedSource != normalizedDump {
 		t.Errorf("Content mismatch for %s", displayName)
-		t.Logf("\n\nExpected:\n%s\n\n", string(sourceContent))
-		t.Logf("\n\nActual:\n%s\n\n", string(dumpContent))
+		t.Logf("\n\nExpected:\n%s\n\n", normalizedSource)
+		t.Logf("\n\nActual:\n%s\n\n", normalizedDump)
 	}
 }

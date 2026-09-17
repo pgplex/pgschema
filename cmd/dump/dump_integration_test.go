@@ -660,6 +660,10 @@ var tzOffsetRe = regexp.MustCompile(`(\d{2}:\d{2}:\d{2})[-+]\d{2}(:\d{2})?`)
 // normalizeSchemaOutput removes version-specific lines and normalizes
 // timezone offsets in partition bounds for cross-platform comparison.
 func normalizeSchemaOutput(output string) string {
+	// Normalize CRLF to LF so checked-in fixtures that git converted to CRLF
+	// on checkout (e.g. Windows with core.autocrlf=true) compare equal to
+	// LF-only runtime output.
+	output = strings.ReplaceAll(output, "\r\n", "\n")
 	lines := strings.Split(output, "\n")
 	var normalizedLines []string
 
