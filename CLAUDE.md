@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Plan**: Compare desired state with current database and generate migration plan
 - **Apply**: Execute the migration with safety features like concurrent change detection, transaction-adaptive execution, and lock timeout control
 
-The tool is written in Go 1.24.0 (toolchain go1.24.7) and uses:
+The tool is written in Go 1.25.0 and uses:
 
 - Cobra for CLI commands
 - embedded-postgres v1.33.0 for plan command (temporary instances) and testing (no Docker required)

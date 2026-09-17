@@ -125,7 +125,7 @@ The typical workflow follows a review-then-apply pattern that ensures all schema
           
           - uses: actions/setup-go@v5
             with:
-              go-version: '1.24'
+              go-version: '1.25'
           
           - name: Install pgschema
             run: go install github.com/pgplex/pgschema@latest
@@ -212,7 +212,7 @@ The typical workflow follows a review-then-apply pattern that ensures all schema
           
           - uses: actions/setup-go@v5
             with:
-              go-version: '1.24'
+              go-version: '1.25'
           
           - name: Install pgschema
             run: go install github.com/pgplex/pgschema@latest
@@ -290,7 +290,7 @@ variables:
 # Plan job - runs on merge requests and main branch
 pgschema-plan:
   stage: plan
-  image: golang:1.24
+  image: golang:1.25
   script:
     - go install github.com/pgplex/pgschema@latest
     - |
@@ -331,7 +331,7 @@ pgschema-plan:
 # Apply job - manual trigger on main branch
 pgschema-apply:
   stage: apply
-  image: golang:1.24
+  image: golang:1.25
   needs: ["pgschema-plan"]
   dependencies:
     - pgschema-plan
@@ -399,7 +399,7 @@ stages:
         steps:
           - task: GoTool@0
             inputs:
-              version: '1.24'
+              version: '1.25'
           
           - script: |
               go install github.com/pgplex/pgschema@latest
@@ -449,7 +449,7 @@ stages:
               steps:
                 - task: GoTool@0
                   inputs:
-                    version: '1.24'
+                    version: '1.25'
                 
                 - script: |
                     go install github.com/pgplex/pgschema@latest

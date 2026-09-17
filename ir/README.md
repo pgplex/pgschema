@@ -150,7 +150,7 @@ go test -short -v ./...
 
 ## Compatibility
 
-- **Go**: 1.24.0+
+- **Go**: 1.25.0+
 - **PostgreSQL**: 14, 15, 16, 17, 18
 
 ## License

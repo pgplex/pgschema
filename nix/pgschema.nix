@@ -10,8 +10,8 @@ pkgs.buildGoModule {
   inherit version;
 
   src = lib.cleanSource ../.;
-  # Prefer Go 1.24 when available; fall back to the closest newer toolchain.
-  go = if pkgs ? go_1_24 then pkgs.go_1_24 else pkgs.go_1_25;
+  # Prefer Go 1.25 when available; fall back to the closest newer toolchain.
+  go = if pkgs ? go_1_25 then pkgs.go_1_25 else pkgs.go_1_26;
   subPackages = [ "." ];
   proxyVendor = true;
   # buildGoModule runs `go test ./...` by default; disable checks because
