@@ -13,7 +13,7 @@
 CREATE TABLE IF NOT EXISTS session (
     id bigint,
     started_at timestamptz,
-    CONSTRAINT session_pkey PRIMARY KEY (started_at, id)
+    CONSTRAINT session_pkey PRIMARY KEY (id, started_at)
 ) PARTITION BY RANGE (started_at);
 
 --
