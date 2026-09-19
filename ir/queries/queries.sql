@@ -2264,3 +2264,44 @@ WHERE d.classid = 'pg_proc'::regclass
   AND d.refclassid = 'pg_proc'::regclass
   AND d.deptype = 'n'
   AND dependent_ns.nspname = $1;
+
+-- GetUnhealthyIndexesForSchema includes constraint-backed indexes, whose
+-- definitions are otherwise represented by pg_constraint. Partitioned
+-- parents can be intentionally invalid; retain catalog state rather
+-- than treating every indisvalid=false index as an abandoned build.
+-- name: GetUnhealthyIndexesForSchema :many
+SELECT
+    i.relname AS index_name,
+    t.relname AS table_name,
+    i.relkind::text AS index_kind,
+    t.relkind::text AS table_kind,
+    idx.indisvalid AS is_valid,
+    idx.indisready AS is_ready,
+    idx.indislive AS is_live,
+    COALESCE(con.conname, '')::text AS constraint_name,
+    EXISTS (
+        SELECT 1 FROM pg_catalog.pg_stat_progress_create_index p
+        WHERE p.datid = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+          AND p.relid = t.oid
+    ) AS build_in_progress,
+    EXISTS (
+        SELECT 1 FROM pg_catalog.pg_locks l
+        WHERE l.database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+          AND l.relation = t.oid AND l.mode = 'ShareUpdateExclusiveLock'
+          AND l.granted AND l.pid IS DISTINCT FROM pg_backend_pid()
+    ) AS conflicting_operation
+FROM pg_catalog.pg_index idx
+JOIN pg_catalog.pg_class i ON i.oid = idx.indexrelid
+JOIN pg_catalog.pg_class t ON t.oid = idx.indrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+LEFT JOIN pg_catalog.pg_constraint con ON con.conindid = idx.indexrelid AND con.contype IN ('p', 'u', 'x')
+WHERE n.nspname = $1
+  AND (NOT idx.indisvalid OR NOT idx.indisready OR NOT idx.indislive)
+  AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_depend dep
+      WHERE dep.classid = 'pg_catalog.pg_class'::regclass
+        AND dep.objid IN (t.oid, i.oid) AND dep.objsubid = 0
+        AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
+        AND dep.refobjsubid = 0 AND dep.deptype = 'e'
+  )
+ORDER BY i.relname;

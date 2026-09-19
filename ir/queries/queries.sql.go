@@ -4049,6 +4049,95 @@ func (q *Queries) GetTypesForSchema(ctx context.Context, dollar_1 sql.NullString
 	return items, nil
 }
 
+const getUnhealthyIndexesForSchema = `-- name: GetUnhealthyIndexesForSchema :many
+SELECT
+    i.relname AS index_name,
+    t.relname AS table_name,
+    i.relkind::text AS index_kind,
+    t.relkind::text AS table_kind,
+    idx.indisvalid AS is_valid,
+    idx.indisready AS is_ready,
+    idx.indislive AS is_live,
+    COALESCE(con.conname, '')::text AS constraint_name,
+    EXISTS (
+        SELECT 1 FROM pg_catalog.pg_stat_progress_create_index p
+        WHERE p.datid = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+          AND p.relid = t.oid
+    ) AS build_in_progress,
+    EXISTS (
+        SELECT 1 FROM pg_catalog.pg_locks l
+        WHERE l.database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+          AND l.relation = t.oid AND l.mode = 'ShareUpdateExclusiveLock'
+          AND l.granted AND l.pid IS DISTINCT FROM pg_backend_pid()
+    ) AS conflicting_operation
+FROM pg_catalog.pg_index idx
+JOIN pg_catalog.pg_class i ON i.oid = idx.indexrelid
+JOIN pg_catalog.pg_class t ON t.oid = idx.indrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+LEFT JOIN pg_catalog.pg_constraint con ON con.conindid = idx.indexrelid AND con.contype IN ('p', 'u', 'x')
+WHERE n.nspname = $1
+  AND (NOT idx.indisvalid OR NOT idx.indisready OR NOT idx.indislive)
+  AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_depend dep
+      WHERE dep.classid = 'pg_catalog.pg_class'::regclass
+        AND dep.objid IN (t.oid, i.oid) AND dep.objsubid = 0
+        AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
+        AND dep.refobjsubid = 0 AND dep.deptype = 'e'
+  )
+ORDER BY i.relname
+`
+
+type GetUnhealthyIndexesForSchemaRow struct {
+	IndexName            string `db:"index_name" json:"index_name"`
+	TableName            string `db:"table_name" json:"table_name"`
+	IndexKind            string `db:"index_kind" json:"index_kind"`
+	TableKind            string `db:"table_kind" json:"table_kind"`
+	IsValid              bool   `db:"is_valid" json:"is_valid"`
+	IsReady              bool   `db:"is_ready" json:"is_ready"`
+	IsLive               bool   `db:"is_live" json:"is_live"`
+	ConstraintName       string `db:"constraint_name" json:"constraint_name"`
+	BuildInProgress      bool   `db:"build_in_progress" json:"build_in_progress"`
+	ConflictingOperation bool   `db:"conflicting_operation" json:"conflicting_operation"`
+}
+
+// GetUnhealthyIndexesForSchema includes constraint-backed indexes, whose
+// definitions are otherwise represented by pg_constraint. Partitioned
+// parents can be intentionally invalid; retain catalog state rather
+// than treating every indisvalid=false index as an abandoned build.
+func (q *Queries) GetUnhealthyIndexesForSchema(ctx context.Context, nspname string) ([]GetUnhealthyIndexesForSchemaRow, error) {
+	rows, err := q.db.QueryContext(ctx, getUnhealthyIndexesForSchema, nspname)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUnhealthyIndexesForSchemaRow
+	for rows.Next() {
+		var i GetUnhealthyIndexesForSchemaRow
+		if err := rows.Scan(
+			&i.IndexName,
+			&i.TableName,
+			&i.IndexKind,
+			&i.TableKind,
+			&i.IsValid,
+			&i.IsReady,
+			&i.IsLive,
+			&i.ConstraintName,
+			&i.BuildInProgress,
+			&i.ConflictingOperation,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getViewDependencies = `-- name: GetViewDependencies :many
 SELECT DISTINCT
     vtu.view_schema AS dependent_schema,
