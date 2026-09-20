@@ -40,7 +40,8 @@ We plan to support most schema-level commands in the future. Please check other 
 
 This applies to every `OWNER TO` form on schema-level objects:
 
-- `ALTER TABLE ... OWNER TO`
+- `ALTER TABLE ... OWNER TO` / `ALTER FOREIGN TABLE ... OWNER TO`
+- `ALTER INDEX ... OWNER TO`
 - `ALTER VIEW ... OWNER TO` / `ALTER MATERIALIZED VIEW ... OWNER TO`
 - `ALTER FUNCTION ... OWNER TO` / `ALTER PROCEDURE ... OWNER TO`
 - `ALTER AGGREGATE ... OWNER TO`
@@ -48,7 +49,7 @@ This applies to every `OWNER TO` form on schema-level objects:
 - `ALTER TYPE ... OWNER TO` / `ALTER DOMAIN ... OWNER TO`
 
 <Warning>
-An `OWNER TO` statement in your schema files has no effect on the plan. `plan` and `apply` print a warning for it and skip it, and the owner on the target database stays as it is. When `OWNER TO` shares an `ALTER TABLE` with other actions, the statement is kept for those actions and the owner part is still ignored.
+An `OWNER TO` statement in your schema files has no effect on the plan. `plan` and `apply` print a warning for it and skip it, and the owner on the target database stays as it is. When `OWNER TO` shares an `ALTER TABLE` with other actions, only the `OWNER TO` action is skipped.
 </Warning>
 
 Objects created by `apply` are owned by the role that runs it. To get a specific owner, run `apply` as that role, or change the owner outside of `pgschema`:

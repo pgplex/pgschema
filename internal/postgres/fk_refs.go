@@ -265,8 +265,15 @@ func walkSQLCodeSpans(text string, fn func(start, end int)) {
 
 		if ch == '\'' {
 			flushCode(i)
+			// E'...' escape strings also end-escape a quote with a backslash.
+			escapeString := i > 0 && (text[i-1] == 'E' || text[i-1] == 'e') &&
+				(i == 1 || !isIdentChar(rune(text[i-2])))
 			i++
 			for i < len(text) {
+				if escapeString && text[i] == '\\' && i+1 < len(text) {
+					i += 2
+					continue
+				}
 				if text[i] == '\'' {
 					if i+1 < len(text) && text[i+1] == '\'' {
 						i += 2

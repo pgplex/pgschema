@@ -22,14 +22,20 @@ const (
 type NoEffectStatement struct {
 	Kind NoEffectKind
 	SQL  string // statement text with whitespace collapsed, without the trailing ';'
+	// Partial is set when only one action of the statement has no effect: an
+	// OWNER TO sharing an ALTER TABLE with other actions. The rest still plans.
+	Partial bool
 }
 
-// ownerAlterKinds are the ALTER targets whose OWNER TO is reported. ALTER SCHEMA,
-// ALTER DATABASE and the like are left alone: they are not schema-level objects.
-var ownerAlterKinds = map[string]bool{
-	"table": true, "view": true, "materialized": true, "foreign": true,
-	"function": true, "procedure": true, "routine": true, "aggregate": true,
-	"sequence": true, "type": true, "domain": true,
+// ownerAlterKinds are the ALTER targets whose OWNER TO is reported, mapped to the
+// keyword that must follow for two-word kinds. ALTER SCHEMA, ALTER DATABASE,
+// ALTER FOREIGN DATA WRAPPER and the like are left alone: they are not
+// schema-level objects.
+var ownerAlterKinds = map[string]string{
+	"table": "", "view": "", "index": "", "sequence": "",
+	"function": "", "procedure": "", "routine": "", "aggregate": "",
+	"type": "", "domain": "",
+	"materialized": "view", "foreign": "table",
 }
 
 // ownerNameIntroducers precede an identifier, so an `owner` that follows one is
@@ -45,8 +51,8 @@ var ownerNameIntroducers = map[string]bool{
 //
 // The scan is textual and best-effort: string literals, comments and
 // dollar-quoted bodies are skipped, so statements inside a DO block or function
-// body are not seen. An OWNER TO combined with other actions in one ALTER TABLE
-// is reported but kept, since the other actions still matter.
+// body are not seen. When OWNER TO shares an ALTER TABLE with other actions, only
+// that action is removed.
 func StripNoEffectStatements(sql string) (string, []NoEffectStatement) {
 	masked := maskNonCode(sql)
 
@@ -54,68 +60,82 @@ func StripNoEffectStatements(sql string) (string, []NoEffectStatement) {
 	out := []byte(sql)
 	for _, span := range splitStatementSpans(masked) {
 		tokens := tokenize(masked[span.start:span.end])
-		kind, removable := classifyNoEffect(tokens)
+		kind, cut, partial := classifyNoEffect(tokens)
 		if kind == "" {
 			continue
 		}
 		first := span.start + tokens[0].pos
 		found = append(found, NoEffectStatement{
-			Kind: kind,
-			SQL:  strings.Join(strings.Fields(masked[first:span.end]), " "),
+			Kind:    kind,
+			SQL:     strings.Join(strings.Fields(masked[first:span.end]), " "),
+			Partial: partial,
 		})
-		if !removable {
-			continue
+		// Blank in place, so leading comments stay and PostgreSQL error
+		// positions still point into the user's file.
+		from, to := span.start+cut.start, span.start+cut.end
+		if !partial {
+			to = span.end
+			if to < len(sql) && sql[to] == ';' {
+				to++
+			}
 		}
-		// Blank from the first token through the ';' in place, so leading
-		// comments stay and PostgreSQL error positions still point into the
-		// user's file.
-		end := span.end
-		if end < len(sql) && sql[end] == ';' {
-			end++
-		}
-		copy(out[first:end], blankKeepingNewlines(sql[first:end]))
+		copy(out[from:to], blankKeepingNewlines(sql[from:to]))
 	}
 	return string(out), found
 }
 
 // classifyNoEffect reports whether the statement is one pgschema never plans,
-// and whether the whole statement can be dropped from the plan database SQL.
-func classifyNoEffect(tokens []sqlToken) (kind NoEffectKind, removable bool) {
+// and the range of it to drop from the plan database SQL: the whole statement,
+// or with partial set, just the OWNER TO action among others.
+func classifyNoEffect(tokens []sqlToken) (kind NoEffectKind, cut span, partial bool) {
 	if len(tokens) < 3 || !tokens[0].isKeyword("alter") {
-		return "", false
+		return "", span{}, false
 	}
+	whole := span{tokens[0].pos, tokens[len(tokens)-1].end}
 
 	if tokens[1].isKeyword("default") && tokens[2].isKeyword("privileges") {
 		for i := 3; i+1 < len(tokens); i++ {
 			if tokens[i].isKeyword("in") && tokens[i+1].isKeyword("schema") {
-				return "", false
+				return "", span{}, false
 			}
 		}
-		return NoEffectGlobalDefaultPrivileges, true
+		return NoEffectGlobalDefaultPrivileges, whole, false
 	}
 
-	if tokens[1].quoted || !ownerAlterKinds[tokens[1].text] {
-		return "", false
+	second, ok := ownerAlterKinds[tokens[1].text]
+	if !ok || tokens[1].quoted || (second != "" && !tokens[2].isKeyword(second)) {
+		return "", span{}, false
 	}
-	owner := false
+	isComma := func(i int) bool {
+		return i < len(tokens) && tokens[i].depth == 0 && tokens[i].isKeyword(",")
+	}
+	owner := -1
 	multiAction := false
 	for i := 2; i < len(tokens); i++ {
-		t := tokens[i]
-		if t.depth != 0 {
-			continue
-		}
-		if t.text == "," && !t.quoted {
+		if isComma(i) {
 			multiAction = true
 		}
-		if t.isKeyword("owner") && i+1 < len(tokens) && tokens[i+1].isKeyword("to") &&
+		// OWNER TO <role>: the role is one token (name, quoted name, CURRENT_USER).
+		if owner < 0 && tokens[i].depth == 0 && tokens[i].isKeyword("owner") &&
+			i+2 < len(tokens) && tokens[i+1].isKeyword("to") &&
 			!(ownerNameIntroducers[tokens[i-1].text] && !tokens[i-1].quoted) {
-			owner = true
+			owner = i
 		}
 	}
-	if !owner {
-		return "", false
+	if owner < 0 {
+		return "", span{}, false
 	}
-	return NoEffectOwner, !multiAction
+	if !multiAction {
+		return NoEffectOwner, whole, false
+	}
+	// Drop the action together with the comma that joined it to its neighbor.
+	cut = span{tokens[owner].pos, tokens[owner+2].end}
+	if isComma(owner + 3) {
+		cut.end = tokens[owner+3].end
+	} else if isComma(owner - 1) {
+		cut.start = tokens[owner-1].pos
+	}
+	return NoEffectOwner, cut, true
 }
 
 // maskNonCode returns sql with string literals, comments and dollar-quoted
@@ -175,7 +195,8 @@ func splitStatementSpans(masked string) []span {
 type sqlToken struct {
 	text   string
 	quoted bool
-	pos    int
+	pos    int // offset of the first byte
+	end    int // offset past the last byte
 	depth  int
 }
 
@@ -189,20 +210,20 @@ func tokenize(s string) []sqlToken {
 	for i := skipSpace(s, 0); i < len(s); i = skipSpace(s, i) {
 		if s[i] == '"' {
 			if text, next, ok := parseQuotedIdent(s, i); ok {
-				tokens = append(tokens, sqlToken{text: text, quoted: true, pos: i, depth: depth})
+				tokens = append(tokens, sqlToken{text: text, quoted: true, pos: i, end: next, depth: depth})
 				i = next
 				continue
 			}
 		}
 		if text, next, ok := parseUnquotedIdent(s, i); ok {
-			tokens = append(tokens, sqlToken{text: text, pos: i, depth: depth})
+			tokens = append(tokens, sqlToken{text: text, pos: i, end: next, depth: depth})
 			i = next
 			continue
 		}
 		if s[i] == ')' && depth > 0 {
 			depth--
 		}
-		tokens = append(tokens, sqlToken{text: s[i : i+1], pos: i, depth: depth})
+		tokens = append(tokens, sqlToken{text: s[i : i+1], pos: i, end: i + 1, depth: depth})
 		if s[i] == '(' {
 			depth++
 		}

@@ -24,7 +24,11 @@ var warningWriter io.Writer = os.Stderr
 func stripNoEffectStatements(w io.Writer, desiredSQL string) string {
 	stripped, found := postgres.StripNoEffectStatements(desiredSQL)
 	for _, stmt := range found {
-		fmt.Fprintf(w, "Warning: statement has no effect: %s\n  %s\n", stmt.SQL, noEffectReasons[stmt.Kind])
+		subject := "statement has"
+		if stmt.Partial {
+			subject = "OWNER TO action has"
+		}
+		fmt.Fprintf(w, "Warning: %s no effect: %s\n  %s\n", subject, stmt.SQL, noEffectReasons[stmt.Kind])
 	}
 	return stripped
 }

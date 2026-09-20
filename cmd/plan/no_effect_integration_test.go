@@ -29,13 +29,18 @@ func TestPlan_WarnsAboutNoEffectStatements(t *testing.T) {
 	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, targetDB)
 	defer conn.Close()
 
-	_, err := conn.ExecContext(ctx, `CREATE TABLE item (id integer PRIMARY KEY, value integer NOT NULL);`)
+	_, err := conn.ExecContext(ctx, `
+		CREATE TABLE item (id integer PRIMARY KEY, value integer NOT NULL);
+		CREATE TABLE note (id integer PRIMARY KEY);
+	`)
 	require.NoError(t, err)
 
 	file := filepath.Join(t.TempDir(), "schema.sql")
 	require.NoError(t, os.WriteFile(file, []byte(`
 		CREATE TABLE item (id integer PRIMARY KEY, value integer NOT NULL);
 		ALTER TABLE item OWNER TO absent_role;
+		CREATE TABLE note (id integer);
+		ALTER TABLE note OWNER TO absent_role, ADD PRIMARY KEY (id);
 		ALTER DEFAULT PRIVILEGES FOR ROLE absent_role GRANT SELECT ON TABLES TO absent_role;
 	`), 0644))
 
@@ -58,6 +63,9 @@ func TestPlan_WarnsAboutNoEffectStatements(t *testing.T) {
 	out := warnings.String()
 	require.Contains(t, out, "Warning: statement has no effect: ALTER TABLE item OWNER TO absent_role")
 	require.Contains(t, out, "unsupported#object-ownership")
+	// Only the OWNER TO action is dropped: the primary key still reaches the
+	// plan database, or the plan above would not be empty.
+	require.Contains(t, out, "Warning: OWNER TO action has no effect: ALTER TABLE note OWNER TO absent_role, ADD PRIMARY KEY (id)")
 	require.Contains(t, out, "Warning: statement has no effect: ALTER DEFAULT PRIVILEGES FOR ROLE absent_role GRANT SELECT ON TABLES TO absent_role")
 	require.Contains(t, out, "unsupported#global-default-privileges")
 }

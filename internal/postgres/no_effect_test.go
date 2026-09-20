@@ -25,12 +25,12 @@ ALTER FUNCTION calculate(integer, text) OWNER TO eval_other;
 ALTER SEQUENCE counter OWNER TO CURRENT_USER;
 ALTER TYPE mood OWNER TO "Mixed Role";`,
 			want: []NoEffectStatement{
-				{NoEffectOwner, `ALTER TABLE public.item OWNER TO eval_other`},
-				{NoEffectOwner, `ALTER VIEW item_view OWNER TO eval_other`},
-				{NoEffectOwner, `ALTER MATERIALIZED VIEW item_mv OWNER TO eval_other`},
-				{NoEffectOwner, `ALTER FUNCTION calculate(integer, text) OWNER TO eval_other`},
-				{NoEffectOwner, `ALTER SEQUENCE counter OWNER TO CURRENT_USER`},
-				{NoEffectOwner, `ALTER TYPE mood OWNER TO "Mixed Role"`},
+				{Kind: NoEffectOwner, SQL: `ALTER TABLE public.item OWNER TO eval_other`},
+				{Kind: NoEffectOwner, SQL: `ALTER VIEW item_view OWNER TO eval_other`},
+				{Kind: NoEffectOwner, SQL: `ALTER MATERIALIZED VIEW item_mv OWNER TO eval_other`},
+				{Kind: NoEffectOwner, SQL: `ALTER FUNCTION calculate(integer, text) OWNER TO eval_other`},
+				{Kind: NoEffectOwner, SQL: `ALTER SEQUENCE counter OWNER TO CURRENT_USER`},
+				{Kind: NoEffectOwner, SQL: `ALTER TYPE mood OWNER TO "Mixed Role"`},
 			},
 			kept: []string{"CREATE TABLE item (id int);"},
 			gone: []string{"OWNER TO"},
@@ -42,8 +42,8 @@ ALTER TYPE mood OWNER TO "Mixed Role";`,
 ALTER DEFAULT PRIVILEGES FOR ROLE eval_owner IN SCHEMA public GRANT SELECT ON TABLES TO eval_reader;
 alter default privileges revoke execute on functions from public;`,
 			want: []NoEffectStatement{
-				{NoEffectGlobalDefaultPrivileges, `ALTER DEFAULT PRIVILEGES FOR ROLE eval_owner GRANT SELECT ON TABLES TO eval_reader`},
-				{NoEffectGlobalDefaultPrivileges, `alter default privileges revoke execute on functions from public`},
+				{Kind: NoEffectGlobalDefaultPrivileges, SQL: `ALTER DEFAULT PRIVILEGES FOR ROLE eval_owner GRANT SELECT ON TABLES TO eval_reader`},
+				{Kind: NoEffectGlobalDefaultPrivileges, SQL: `alter default privileges revoke execute on functions from public`},
 			},
 			kept: []string{"IN SCHEMA public GRANT SELECT ON TABLES TO eval_reader;"},
 			gone: []string{"eval_owner\n", "revoke execute"},
@@ -62,14 +62,48 @@ ALTER SEQUENCE counter OWNED BY item.id;`,
 		{
 			name: "table named owner still reports its OWNER TO",
 			sql:  `ALTER TABLE owner OWNER TO eval_other;`,
-			want: []NoEffectStatement{{NoEffectOwner, `ALTER TABLE owner OWNER TO eval_other`}},
+			want: []NoEffectStatement{{Kind: NoEffectOwner, SQL: `ALTER TABLE owner OWNER TO eval_other`}},
 			gone: []string{"eval_other"},
 		},
 		{
-			name: "owner to combined with another action is reported but kept",
-			sql:  `ALTER TABLE item OWNER TO eval_other, ADD COLUMN note text;`,
-			want: []NoEffectStatement{{NoEffectOwner, `ALTER TABLE item OWNER TO eval_other, ADD COLUMN note text`}},
-			kept: []string{"ADD COLUMN note text"},
+			name: "owner to among other actions: only that action is dropped",
+			sql: `ALTER TABLE item OWNER TO eval_other, ADD COLUMN note text;
+ALTER TABLE item ADD COLUMN a int, OWNER TO eval_other;
+ALTER TABLE item ADD COLUMN b numeric(10, 2), OWNER TO eval_other, ADD COLUMN c int;`,
+			want: []NoEffectStatement{
+				{Kind: NoEffectOwner, SQL: `ALTER TABLE item OWNER TO eval_other, ADD COLUMN note text`, Partial: true},
+				{Kind: NoEffectOwner, SQL: `ALTER TABLE item ADD COLUMN a int, OWNER TO eval_other`, Partial: true},
+				{Kind: NoEffectOwner, SQL: `ALTER TABLE item ADD COLUMN b numeric(10, 2), OWNER TO eval_other, ADD COLUMN c int`, Partial: true},
+			},
+			kept: []string{"ADD COLUMN note text;", "ADD COLUMN a int", "ADD COLUMN b numeric(10, 2),", "ADD COLUMN c int;"},
+			gone: []string{"eval_other", "int,  "},
+		},
+		{
+			name: "index owner, and two-word kinds need their second keyword",
+			sql: `ALTER INDEX item_idx OWNER TO eval_other;
+ALTER FOREIGN TABLE remote_item OWNER TO eval_other;
+ALTER FOREIGN DATA WRAPPER fdw OWNER TO fdw_owner;
+ALTER MATERIALIZED VIEW mv OWNER TO eval_other;`,
+			want: []NoEffectStatement{
+				{Kind: NoEffectOwner, SQL: `ALTER INDEX item_idx OWNER TO eval_other`},
+				{Kind: NoEffectOwner, SQL: `ALTER FOREIGN TABLE remote_item OWNER TO eval_other`},
+				{Kind: NoEffectOwner, SQL: `ALTER MATERIALIZED VIEW mv OWNER TO eval_other`},
+			},
+			kept: []string{"ALTER FOREIGN DATA WRAPPER fdw OWNER TO fdw_owner;"},
+			gone: []string{"eval_other"},
+		},
+		{
+			name: "E-string with a backslash-escaped quote stays one literal",
+			sql:  `COMMENT ON TABLE item IS E'prefix \'; ALTER TABLE victim OWNER TO app_owner; suffix';`,
+			want: nil,
+			kept: []string{`E'prefix \'; ALTER TABLE victim OWNER TO app_owner; suffix'`},
+		},
+		{
+			name: "trailing comment before the terminator",
+			sql:  "ALTER TABLE item OWNER TO eval_other /* later */ ;\nCREATE TABLE t (id int);",
+			want: []NoEffectStatement{{Kind: NoEffectOwner, SQL: `ALTER TABLE item OWNER TO eval_other`}},
+			kept: []string{"CREATE TABLE t (id int);"},
+			gone: []string{"eval_other", ";\nCREATE"},
 		},
 		{
 			name: "literals, comments and dollar-quoted bodies are not scanned",
@@ -87,7 +121,7 @@ END $$;`,
 			sql: `-- hand ownership to the app role
 ALTER TABLE item /* why */ OWNER TO eval_other;
 CREATE INDEX idx ON item (id);`,
-			want: []NoEffectStatement{{NoEffectOwner, `ALTER TABLE item OWNER TO eval_other`}},
+			want: []NoEffectStatement{{Kind: NoEffectOwner, SQL: `ALTER TABLE item OWNER TO eval_other`}},
 			kept: []string{"-- hand ownership to the app role", "CREATE INDEX idx ON item (id);"},
 			gone: []string{"eval_other"},
 		},
@@ -101,13 +135,13 @@ ALTER DATABASE app OWNER TO eval_other;`,
 		{
 			name: "semicolon inside a quoted identifier does not split",
 			sql:  `ALTER TABLE "odd;name" OWNER TO eval_other;`,
-			want: []NoEffectStatement{{NoEffectOwner, `ALTER TABLE "odd;name" OWNER TO eval_other`}},
+			want: []NoEffectStatement{{Kind: NoEffectOwner, SQL: `ALTER TABLE "odd;name" OWNER TO eval_other`}},
 			gone: []string{"odd;name"},
 		},
 		{
 			name: "last statement without a terminator",
 			sql:  "CREATE TABLE item (id int);\nALTER TABLE item OWNER TO eval_other",
-			want: []NoEffectStatement{{NoEffectOwner, `ALTER TABLE item OWNER TO eval_other`}},
+			want: []NoEffectStatement{{Kind: NoEffectOwner, SQL: `ALTER TABLE item OWNER TO eval_other`}},
 			gone: []string{"OWNER TO"},
 		},
 	}
