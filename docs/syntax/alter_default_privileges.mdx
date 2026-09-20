@@ -36,6 +36,10 @@ pgschema understands the following `ALTER DEFAULT PRIVILEGES` features:
 - **WITH GRANT OPTION**: Allow grantee to grant the same privileges to others
 - **PUBLIC**: Special grantee representing all roles
 
+<Warning>
+`IN SCHEMA` is required. `ALTER DEFAULT PRIVILEGES` without `IN SCHEMA` sets a database-wide default for the role, which is outside the schema `pgschema` manages. `plan` prints a warning for such a statement and skips it, so apply it outside of `pgschema`. See [Unsupported](/syntax/unsupported#global-default-privileges).
+</Warning>
+
 ## Examples
 
 ### Grant default table privileges

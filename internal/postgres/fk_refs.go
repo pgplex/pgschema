@@ -243,11 +243,19 @@ func walkSQLCode(sql string, fn func(code string)) {
 }
 
 func walkSQLCodePreservingStringsAndComments(text string, fn func(code string)) {
+	walkSQLCodeSpans(text, func(start, end int) {
+		fn(text[start:end])
+	})
+}
+
+// walkSQLCodeSpans reports the [start, end) byte ranges of text that are code,
+// i.e. outside string literals and comments.
+func walkSQLCodeSpans(text string, fn func(start, end int)) {
 	i := 0
 	segStart := 0
 	flushCode := func(end int) {
 		if end > segStart {
-			fn(text[segStart:end])
+			fn(segStart, end)
 		}
 		segStart = end
 	}
@@ -257,8 +265,15 @@ func walkSQLCodePreservingStringsAndComments(text string, fn func(code string)) 
 
 		if ch == '\'' {
 			flushCode(i)
+			// E'...' escape strings also end-escape a quote with a backslash.
+			escapeString := i > 0 && (text[i-1] == 'E' || text[i-1] == 'e') &&
+				(i == 1 || !isIdentChar(rune(text[i-2])))
 			i++
 			for i < len(text) {
+				if escapeString && text[i] == '\\' && i+1 < len(text) {
+					i += 2
+					continue
+				}
 				if text[i] == '\'' {
 					if i+1 < len(text) && text[i+1] == '\'' {
 						i += 2
