@@ -2008,6 +2008,8 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 				functionsWithoutViewDeps = append(functionsWithoutViewDeps, fn)
 			}
 		}
+		// A SQL function calling a view-dependent function waits for it too.
+		functionsWithoutViewDeps, functionsWithViewDeps = holdBackCallers(functionsWithoutViewDeps, functionsWithViewDeps)
 	}
 
 	// Functions whose return/parameter type references a view being recreated
@@ -2069,6 +2071,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
 			}
 		}
+		// A SQL function calling a function from a later batch is validated against
+		// it at creation, so it moves to that batch even if it touches no new table.
+		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
 	}
 
 	// Create functions WITHOUT view dependencies AND WITHOUT table dependencies
@@ -2918,12 +2923,37 @@ func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.
 		}
 	}
 	// Transitive closure: a function that calls a held-back function waits too.
+	return holdBackCallers(now, later)
+}
+
+// holdBackCallersAcrossBatches applies holdBackCallers to three consecutive function
+// batches until none changes. A single round is not enough: a function that joins a
+// later batch in one step can strand a caller that an earlier step already examined.
+func holdBackCallersAcrossBatches(first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	for {
+		secondLen, thirdLen := len(second), len(third)
+		second, third = holdBackCallers(second, third)
+		first, third = holdBackCallers(first, third)
+		first, second = holdBackCallers(first, second)
+		// Functions only ever move to a later batch, so unchanged sizes mean a fixpoint.
+		if len(second) == secondLen && len(third) == thirdLen {
+			return first, second, third
+		}
+	}
+}
+
+// holdBackCallers moves every SQL-language function in now that calls a function
+// in later over to later, transitively. A SQL-language body is validated when the
+// function is created, so a caller cannot be created in an earlier batch than its
+// callee; topologicallySortFunctions only orders functions within one batch.
+// Order within now is preserved.
+func holdBackCallers(now, later []*ir.Function) ([]*ir.Function, []*ir.Function) {
 	for changed := len(later) > 0; changed; {
 		changed = false
 		lateLookup := buildFunctionLookup(later)
 		var still []*ir.Function
 		for _, fn := range now {
-			if calls(fn, lateLookup) {
+			if strings.EqualFold(fn.Language, "sql") && referencesNewFunction(fn.Definition, fn.Schema, lateLookup) {
 				later = append(later, fn)
 				changed = true
 			} else {

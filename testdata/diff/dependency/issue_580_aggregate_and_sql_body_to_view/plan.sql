@@ -95,6 +95,13 @@ VOLATILE
 AS $$ SELECT count(*) FROM v
 $$;
 
+CREATE OR REPLACE FUNCTION count_v_twice()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT 2 * count_v()
+$$;
+
 CREATE OR REPLACE FUNCTION ob_sfunc(
     state integer,
     r "Order By V"

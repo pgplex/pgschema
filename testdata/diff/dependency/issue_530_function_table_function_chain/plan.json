@@ -31,6 +31,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.x_is_flagged"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION first_is_flagged()\nRETURNS boolean\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT x_is_flagged(1);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.first_is_flagged"
         }
       ]
     }
