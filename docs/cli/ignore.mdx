@@ -63,6 +63,10 @@ patterns = ["deploy_bot", "admin_*"]
 patterns = ["deploy_bot"]
 ```
 
+<Note>
+Unknown sections or keys (for example a misspelled `patterhs`) are rejected with an error rather than silently ignored, so a typo can't leave a section without effect.
+</Note>
+
 ## Pattern Syntax
 
 ### Wildcard Patterns

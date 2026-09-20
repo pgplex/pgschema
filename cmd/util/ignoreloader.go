@@ -1,8 +1,10 @@
 package util
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pgplex/pgschema/internal/logger"
@@ -143,8 +145,19 @@ func LoadIgnoreFileWithStructureFromPath(filePath string) (*ir.IgnoreConfig, err
 
 	// File exists, parse it
 	var tomlConfig TomlConfig
-	if _, err := toml.DecodeFile(filePath, &tomlConfig); err != nil {
+	md, err := toml.DecodeFile(filePath, &tomlConfig)
+	if err != nil {
 		return nil, err
+	}
+
+	// Reject unknown sections/keys. A typo such as "patterhs" would otherwise be
+	// dropped silently, leaving the section empty and nothing ignored.
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, len(undecoded))
+		for i, key := range undecoded {
+			keys[i] = key.String()
+		}
+		return nil, fmt.Errorf("unknown key(s) in %s: %s", absPath, strings.Join(keys, ", "))
 	}
 
 	logger.Get().Debug("loaded ignore file", "file", absPath)

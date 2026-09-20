@@ -3,6 +3,7 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -305,5 +306,48 @@ patterns = ["temp_*"]
 	}
 	if len(config.Functions) != 0 {
 		t.Errorf("Expected empty functions patterns, got %v", config.Functions)
+	}
+}
+
+func TestLoadIgnoreFile_UnknownKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantKey string
+	}{
+		{
+			name: "misspelled patterns key",
+			content: `[views]
+patterhs = ["batch_stack_v"]
+`,
+			wantKey: "views.patterhs",
+		},
+		{
+			name: "unknown section",
+			content: `[veiws]
+patterns = ["batch_stack_v"]
+`,
+			wantKey: "veiws",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testFile := filepath.Join(t.TempDir(), ".pgschemaignore")
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			config, err := LoadIgnoreFileFromPath(testFile)
+			if err == nil {
+				t.Fatal("LoadIgnoreFileFromPath() should return error for unknown keys")
+			}
+			if !strings.Contains(err.Error(), tt.wantKey) {
+				t.Errorf("error %q should mention %q", err.Error(), tt.wantKey)
+			}
+			if config != nil {
+				t.Error("LoadIgnoreFileFromPath() should return nil config for unknown keys")
+			}
+		})
 	}
 }
