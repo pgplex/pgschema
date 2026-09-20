@@ -34,6 +34,29 @@ Roles stay out of your schema files, but you can still grant to them: `plan` stu
 
 We plan to support most schema-level commands in the future. Please check other sections for the schema-level database objects that we support right now.
 
+## Object Ownership
+
+`pgschema` does not manage which role owns an object. Like `pg_dump --no-owner`, `dump` never emits `ALTER ... OWNER TO`, and `plan` does not compare owners, so the same schema file stays portable across environments where owners differ.
+
+This applies to every `OWNER TO` form on schema-level objects:
+
+- `ALTER TABLE ... OWNER TO`
+- `ALTER VIEW ... OWNER TO` / `ALTER MATERIALIZED VIEW ... OWNER TO`
+- `ALTER FUNCTION ... OWNER TO` / `ALTER PROCEDURE ... OWNER TO`
+- `ALTER AGGREGATE ... OWNER TO`
+- `ALTER SEQUENCE ... OWNER TO`
+- `ALTER TYPE ... OWNER TO` / `ALTER DOMAIN ... OWNER TO`
+
+<Warning>
+An `OWNER TO` statement in your schema files has no effect on the plan. A file whose only change is an owner produces an empty plan and the owner on the target database stays as it is. The owner role is also not [stubbed](/cli/plan-db#roles) in the plan database, so the statement can fail there with `role "x" does not exist`.
+</Warning>
+
+Objects created by `apply` are owned by the role that runs it. To get a specific owner, run `apply` as that role, or change the owner outside of `pgschema`:
+
+```sql
+ALTER TABLE orders OWNER TO app_owner;
+```
+
 ## Rename
 
 `RENAME` is not supported.
