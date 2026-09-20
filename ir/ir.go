@@ -60,13 +60,13 @@ type Table struct {
 	Dependencies      []TableDependency      `json:"dependencies"`
 	Comment           string                 `json:"comment,omitempty"`
 	IsPartitioned     bool                   `json:"is_partitioned"`
-	PartitionStrategy string                 `json:"partition_strategy,omitempty"` // RANGE, LIST, HASH
-	PartitionKey      string                 `json:"partition_key,omitempty"`      // Column(s) used for partitioning
-	PartitionOf       string                 `json:"partition_of,omitempty"`       // Parent table name (partition children)
+	PartitionStrategy string                 `json:"partition_strategy,omitempty"`  // RANGE, LIST, HASH
+	PartitionKey      string                 `json:"partition_key,omitempty"`       // Column(s) used for partitioning
+	PartitionOf       string                 `json:"partition_of,omitempty"`        // Parent table name (partition children)
 	PartitionOfSchema string                 `json:"partition_of_schema,omitempty"` // Parent table schema (partition children)
-	PartitionBound    string                 `json:"partition_bound,omitempty"`    // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
-	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`       // LIKE clauses in CREATE TABLE
-	Unlogged          bool                   `json:"unlogged,omitempty"`           // True for UNLOGGED tables
+	PartitionBound    string                 `json:"partition_bound,omitempty"`     // Partition bound expression (e.g. "FOR VALUES IN (1, 2)" or "DEFAULT")
+	LikeClauses       []LikeClause           `json:"like_clauses,omitempty"`        // LIKE clauses in CREATE TABLE
+	Unlogged          bool                   `json:"unlogged,omitempty"`            // True for UNLOGGED tables
 	// AllConstraintNames records every constraint name present on the table in
 	// the database, including constraints not represented in the IR (NOT NULL
 	// constraints on PG18+, redundant CHECK (col IS NOT NULL) constraints,
@@ -304,9 +304,9 @@ type Index struct {
 type IndexColumn struct {
 	Name      string `json:"name"`
 	Position  int    `json:"position"`
-	Direction string `json:"direction,omitempty"`   // ASC, DESC
-	NullOrder string `json:"null_order,omitempty"`  // NULLS FIRST, NULLS LAST (only when non-default)
-	Operator  string `json:"operator,omitempty"`    // operator class
+	Direction string `json:"direction,omitempty"`  // ASC, DESC
+	NullOrder string `json:"null_order,omitempty"` // NULLS FIRST, NULLS LAST (only when non-default)
+	Operator  string `json:"operator,omitempty"`   // operator class
 }
 
 // IndexType represents different types of database indexes
@@ -320,22 +320,22 @@ const (
 
 // Trigger represents a database trigger
 type Trigger struct {
-	Schema            string         `json:"schema"`
-	Table             string         `json:"table"`
-	Name              string         `json:"name"`
-	Timing            TriggerTiming  `json:"timing"`                   // BEFORE, AFTER, INSTEAD OF
-	Events            []TriggerEvent `json:"events"`                   // INSERT, UPDATE, DELETE
-	UpdateColumns     []string       `json:"update_columns,omitempty"` // Column names for UPDATE OF
-	Level             TriggerLevel   `json:"level"`                    // ROW, STATEMENT
-	Function          string         `json:"function"`
-	Condition         string         `json:"condition,omitempty"` // WHEN condition
-	Comment           string         `json:"comment,omitempty"`
-	IsConstraint      bool           `json:"is_constraint,omitempty"`      // Whether this is a constraint trigger
-	Deferrable        bool           `json:"deferrable,omitempty"`         // Can be deferred until end of transaction
-	InitiallyDeferred bool           `json:"initially_deferred,omitempty"` // Whether deferred by default
-	OldTable          string         `json:"old_table,omitempty"`          // REFERENCING OLD TABLE AS name
-	NewTable          string         `json:"new_table,omitempty"`          // REFERENCING NEW TABLE AS name
-	EnabledState      TriggerEnabledState `json:"enabled_state,omitempty"` // pg_trigger.tgenabled; omitted = enabled on origin (Postgres default)
+	Schema            string              `json:"schema"`
+	Table             string              `json:"table"`
+	Name              string              `json:"name"`
+	Timing            TriggerTiming       `json:"timing"`                   // BEFORE, AFTER, INSTEAD OF
+	Events            []TriggerEvent      `json:"events"`                   // INSERT, UPDATE, DELETE
+	UpdateColumns     []string            `json:"update_columns,omitempty"` // Column names for UPDATE OF
+	Level             TriggerLevel        `json:"level"`                    // ROW, STATEMENT
+	Function          string              `json:"function"`
+	Condition         string              `json:"condition,omitempty"` // WHEN condition
+	Comment           string              `json:"comment,omitempty"`
+	IsConstraint      bool                `json:"is_constraint,omitempty"`      // Whether this is a constraint trigger
+	Deferrable        bool                `json:"deferrable,omitempty"`         // Can be deferred until end of transaction
+	InitiallyDeferred bool                `json:"initially_deferred,omitempty"` // Whether deferred by default
+	OldTable          string              `json:"old_table,omitempty"`          // REFERENCING OLD TABLE AS name
+	NewTable          string              `json:"new_table,omitempty"`          // REFERENCING NEW TABLE AS name
+	EnabledState      TriggerEnabledState `json:"enabled_state,omitempty"`      // pg_trigger.tgenabled; omitted = enabled on origin (Postgres default)
 }
 
 // TriggerEnabledState represents when a trigger fires (pg_trigger.tgenabled)

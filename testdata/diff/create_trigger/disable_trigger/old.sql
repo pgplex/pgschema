@@ -33,3 +33,10 @@ CREATE TRIGGER employees_reset_trigger
     EXECUTE FUNCTION public.update_last_modified();
 
 ALTER TABLE public.employees ENABLE ALWAYS TRIGGER employees_reset_trigger;
+
+CREATE TRIGGER employees_recreate_trigger
+    BEFORE UPDATE ON public.employees
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_last_modified();
+
+ALTER TABLE public.employees ENABLE ALWAYS TRIGGER employees_recreate_trigger;

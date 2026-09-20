@@ -3,11 +3,23 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "2cede5893076007521e14a6e605c3c3434167bb6c5e5f592552ad5d6bd575092"
+    "hash": "229538078b0180a87bfa81617d0f33feae2a029f900836d7bf2e11afcf864711"
   },
   "groups": [
     {
       "steps": [
+        {
+          "sql": "CREATE OR REPLACE TRIGGER employees_new_replica_trigger\n    BEFORE UPDATE ON employees\n    FOR EACH ROW\n    EXECUTE FUNCTION update_last_modified();",
+          "type": "table.trigger",
+          "operation": "create",
+          "path": "public.employees.employees_new_replica_trigger"
+        },
+        {
+          "sql": "ALTER TABLE employees ENABLE REPLICA TRIGGER employees_new_replica_trigger;",
+          "type": "table.trigger",
+          "operation": "alter",
+          "path": "public.employees.employees_new_replica_trigger"
+        },
         {
           "sql": "ALTER TABLE employees ENABLE ALWAYS TRIGGER employees_always_trigger;",
           "type": "table.trigger",
@@ -19,6 +31,18 @@
           "type": "table.trigger",
           "operation": "alter",
           "path": "public.employees.employees_last_modified_trigger"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER employees_recreate_trigger\n    BEFORE INSERT OR UPDATE ON employees\n    FOR EACH ROW\n    EXECUTE FUNCTION update_last_modified();",
+          "type": "table.trigger",
+          "operation": "alter",
+          "path": "public.employees.employees_recreate_trigger"
+        },
+        {
+          "sql": "ALTER TABLE employees ENABLE ALWAYS TRIGGER employees_recreate_trigger;",
+          "type": "table.trigger",
+          "operation": "alter",
+          "path": "public.employees.employees_recreate_trigger"
         },
         {
           "sql": "ALTER TABLE employees ENABLE REPLICA TRIGGER employees_replica_trigger;",
