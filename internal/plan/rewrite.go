@@ -28,6 +28,10 @@ type RewriteStep struct {
 // (nil-safe); rewrites consult it to pick constraint names that don't collide
 // with existing constraints, including ones invisible to the IR.
 func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool, targetMajorVersion int, currentIR *ir.IR) []RewriteStep {
+	if recovery, ok := d.Source.(*diff.IndexRecovery); ok {
+		return generateIndexRecovery(recovery.Index)
+	}
+
 	// Dispatch to specific rewrite generators based on diff type and source
 	switch d.Type {
 	case diff.DiffTypeTableIndex:

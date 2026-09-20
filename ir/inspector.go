@@ -152,6 +152,10 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, fmt.Errorf("failed to build indexes: %w", err)
 	}
 
+	if err := i.buildIndexStates(ctx, schema, targetSchema); err != nil {
+		return nil, fmt.Errorf("failed to inspect index state: %w", err)
+	}
+
 	// Normalize the IR
 	normalizeIR(schema)
 

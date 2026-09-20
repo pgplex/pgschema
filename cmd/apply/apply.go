@@ -178,15 +178,13 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 		return fmt.Errorf("failed to load .pgschemaignore: %w", err)
 	}
 
-	// Validate schema fingerprint if plan has one
+	// Reject a stale saved plan before presenting it for approval.
 	if migrationPlan.SourceFingerprint != nil {
-		err := validateSchemaFingerprint(migrationPlan, config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
-		if err != nil {
+		if err := validateSchemaFingerprint(migrationPlan, config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig); err != nil {
 			return err
 		}
 	}
 
-	// Check if there are any changes to apply by examining the plan diffs
 	if !migrationPlan.HasAnyChanges() {
 		fmt.Println("No changes to apply. Database schema is already up to date.")
 		return nil
@@ -210,6 +208,15 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 		if response != "yes" && response != "y" {
 			fmt.Println("Apply cancelled.")
 			return nil
+		}
+	}
+
+	// An interactive approval may have waited arbitrarily long. Automatic
+	// approval already has the fresh check above and needs no duplicate scan.
+	if !config.AutoApprove && migrationPlan.SourceFingerprint != nil {
+		err := validateSchemaFingerprint(migrationPlan, config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -288,6 +295,11 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 
 		err = executeGroup(ctx, conn, group, i+1, config.Quiet, retry)
 		if err != nil {
+			for _, step := range group.Steps {
+				if strings.HasPrefix(strings.TrimSpace(step.SQL), "REINDEX INDEX CONCURRENTLY ") {
+					return indexRecoveryError(err)
+				}
+			}
 			return err
 		}
 	}
@@ -460,6 +472,27 @@ func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, 
 	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig)
 	if err != nil {
 		return fmt.Errorf("failed to get current database state for fingerprint validation: %w", err)
+	}
+
+	if currentSchema := currentStateIR.Schemas[schema]; currentSchema != nil {
+		for name, state := range currentSchema.IndexStates {
+			indexPath := schema + "." + state.Table + "." + name
+			tablePath := schema + "." + state.Table
+			for _, group := range migrationPlan.Groups {
+				for _, step := range group.Steps {
+					// Ignore comments and unrelated changes, particularly on a
+					// legitimate invalid ON ONLY partition parent.
+					affectsIndex := (step.Type == "table.index" || step.Type == "materialized_view.index") && step.Path == indexPath
+					affectsConstraint := state.Constraint != "" && step.Type == "table.constraint" && step.Path == tablePath+"."+state.Constraint
+					removesParent := (step.Operation == "drop" || step.Operation == "recreate") && step.Path == tablePath
+					if affectsIndex || affectsConstraint || removesParent {
+						if err := state.CheckOperation(schema, name); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Compute current fingerprint
@@ -636,4 +669,20 @@ func truncateSQL(sql string, maxLen int) string {
 	}
 
 	return cleaned[:maxLen-3] + "..."
+}
+
+// Recovery must not retry a partly committed concurrent operation in place.
+// Keep PostgreSQL's error and direct the caller to a fresh state-aware plan.
+func indexRecoveryError(err error) error {
+	advice := "inspect the interrupted operation and regenerate the plan before retrying"
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			advice = "resolve the duplicate data explicitly, then regenerate the plan; recovery has not removed the existing index or changed table rows"
+		case "42501":
+			advice = "run recovery as the table owner or a role with the required PostgreSQL maintenance privileges, then regenerate the plan"
+		}
+	}
+	return fmt.Errorf("concurrent index recovery failed: %w; %s", err, advice)
 }

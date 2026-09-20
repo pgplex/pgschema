@@ -34,7 +34,10 @@ type Schema struct {
 	Privileges               []*Privilege               `json:"privileges,omitempty"`                 // Explicit privilege grants on objects
 	ColumnPrivileges         []*ColumnPrivilege         `json:"column_privileges,omitempty"`          // Column-level privilege grants
 	RevokedDefaultPrivileges []*RevokedDefaultPrivilege `json:"revoked_default_privileges,omitempty"` // Explicit revokes of default PUBLIC privileges
-	mu                       sync.RWMutex               // Protects concurrent access to all maps
+	// IndexStates contains only unhealthy indexes, including constraint-backed ones.
+	// Healthy schemas retain their existing serialization and fingerprints.
+	IndexStates map[string]*IndexState `json:"index_states,omitempty"`
+	mu          sync.RWMutex           // Protects concurrent access to all maps
 }
 
 // LikeClause represents a LIKE clause in CREATE TABLE statement

@@ -381,8 +381,14 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		fmt.Sscanf(v, "%d", &targetMajorVersion)
 	}
 
+	// Repair abandoned concurrent builds before ordinary changes or cleanup.
+	repairs, err := diff.IndexRecoveryDiffs(currentStateIR, desiredStateIR, config.Schema)
+	if err != nil {
+		return nil, err
+	}
+
 	// Generate diff (current -> desired) using IR directly
-	diffs := diff.GenerateMigrationForTarget(currentStateIR, desiredStateIR, config.Schema, targetMajorVersion)
+	diffs := append(repairs, diff.GenerateMigrationForTarget(currentStateIR, desiredStateIR, config.Schema, targetMajorVersion)...)
 
 	// Create plan from diffs with fingerprint
 	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint, targetMajorVersion, currentStateIR)
