@@ -3,16 +3,34 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "6aa4d2eb121345da38a1de455a5840b523fc30982164d0c2569cb1518c020033"
+    "hash": "2cede5893076007521e14a6e605c3c3434167bb6c5e5f592552ad5d6bd575092"
   },
   "groups": [
     {
       "steps": [
         {
+          "sql": "ALTER TABLE employees ENABLE ALWAYS TRIGGER employees_always_trigger;",
+          "type": "table.trigger",
+          "operation": "alter",
+          "path": "public.employees.employees_always_trigger"
+        },
+        {
           "sql": "ALTER TABLE employees DISABLE TRIGGER employees_last_modified_trigger;",
           "type": "table.trigger",
           "operation": "alter",
           "path": "public.employees.employees_last_modified_trigger"
+        },
+        {
+          "sql": "ALTER TABLE employees ENABLE REPLICA TRIGGER employees_replica_trigger;",
+          "type": "table.trigger",
+          "operation": "alter",
+          "path": "public.employees.employees_replica_trigger"
+        },
+        {
+          "sql": "ALTER TABLE employees ENABLE TRIGGER employees_reset_trigger;",
+          "type": "table.trigger",
+          "operation": "alter",
+          "path": "public.employees.employees_reset_trigger"
         }
       ]
     }

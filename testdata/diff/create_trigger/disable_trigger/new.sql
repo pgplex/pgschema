@@ -18,3 +18,22 @@ CREATE TRIGGER employees_last_modified_trigger
     EXECUTE FUNCTION public.update_last_modified();
 
 ALTER TABLE public.employees DISABLE TRIGGER employees_last_modified_trigger;
+
+CREATE TRIGGER employees_always_trigger
+    BEFORE UPDATE ON public.employees
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_last_modified();
+
+CREATE TRIGGER employees_replica_trigger
+    BEFORE UPDATE ON public.employees
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_last_modified();
+
+CREATE TRIGGER employees_reset_trigger
+    BEFORE UPDATE ON public.employees
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_last_modified();
+
+ALTER TABLE public.employees ENABLE ALWAYS TRIGGER employees_always_trigger;
+
+ALTER TABLE public.employees ENABLE REPLICA TRIGGER employees_replica_trigger;

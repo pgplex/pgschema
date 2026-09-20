@@ -335,8 +335,18 @@ type Trigger struct {
 	InitiallyDeferred bool           `json:"initially_deferred,omitempty"` // Whether deferred by default
 	OldTable          string         `json:"old_table,omitempty"`          // REFERENCING OLD TABLE AS name
 	NewTable          string         `json:"new_table,omitempty"`          // REFERENCING NEW TABLE AS name
-	Disabled          bool           `json:"disabled,omitempty"`           // true = DISABLED (tgenabled='D'); omitted/false = enabled (Postgres default)
+	EnabledState      TriggerEnabledState `json:"enabled_state,omitempty"` // pg_trigger.tgenabled; omitted = enabled on origin (Postgres default)
 }
+
+// TriggerEnabledState represents when a trigger fires (pg_trigger.tgenabled)
+type TriggerEnabledState string
+
+const (
+	TriggerEnabledOrigin   TriggerEnabledState = ""         // tgenabled='O': ENABLE TRIGGER (Postgres default)
+	TriggerEnabledDisabled TriggerEnabledState = "DISABLED" // tgenabled='D': DISABLE TRIGGER
+	TriggerEnabledReplica  TriggerEnabledState = "REPLICA"  // tgenabled='R': ENABLE REPLICA TRIGGER
+	TriggerEnabledAlways   TriggerEnabledState = "ALWAYS"   // tgenabled='A': ENABLE ALWAYS TRIGGER
+)
 
 // TriggerTiming represents the timing of trigger execution
 type TriggerTiming string
