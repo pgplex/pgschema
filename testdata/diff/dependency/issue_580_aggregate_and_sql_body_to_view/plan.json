@@ -99,6 +99,12 @@
           "path": "public.count_v"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION count_v_twice()\nRETURNS bigint\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT 2 * count_v()\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_v_twice"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION ob_sfunc(\n    state integer,\n    r \"Order By V\"\n)\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT state + r.id\n$$;",
           "type": "function",
           "operation": "create",

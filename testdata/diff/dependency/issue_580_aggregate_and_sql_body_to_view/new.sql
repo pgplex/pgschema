@@ -153,3 +153,11 @@ CREATE FUNCTION count_sub_v()
 RETURNS bigint
 LANGUAGE sql
 AS $$ SELECT count(*) FROM (SELECT 1) AS s, v $$;
+
+-- SQL-language function that never mentions the view but calls count_v, which
+-- is held for the view batch: its body is validated at creation, so it must
+-- follow count_v (issue #596).
+CREATE FUNCTION count_v_twice()
+RETURNS bigint
+LANGUAGE sql
+AS $$ SELECT 2 * count_v() $$;

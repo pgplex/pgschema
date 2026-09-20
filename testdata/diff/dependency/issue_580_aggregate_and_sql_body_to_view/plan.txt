@@ -1,7 +1,7 @@
-Plan: 25 to add.
+Plan: 26 to add.
 
 Summary by type:
-  functions: 15 to add
+  functions: 16 to add
   aggregates: 5 to add
   tables: 1 to add
   views: 4 to add
@@ -16,6 +16,7 @@ Functions:
   + count_sub_v
   + count_unnest_v
   + count_v
+  + count_v_twice
   + get_total
   + ob_sfunc
   + total_v
@@ -138,6 +139,13 @@ RETURNS bigint
 LANGUAGE sql
 VOLATILE
 AS $$ SELECT count(*) FROM v
+$$;
+
+CREATE OR REPLACE FUNCTION count_v_twice()
+RETURNS bigint
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT 2 * count_v()
 $$;
 
 CREATE OR REPLACE FUNCTION ob_sfunc(
