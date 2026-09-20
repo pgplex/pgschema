@@ -331,8 +331,9 @@ func stripSchemaQualificationsFromText(text string, schemaName string) string {
 var (
 	// functionBodyPrefixRe matches unquoted SQL ending in the AS keyword, i.e. the text
 	// right before a dollar-quoted function/procedure body (as opposed to a DO block,
-	// a COMMENT ... IS $$...$$ or a dollar-quoted string constant).
-	functionBodyPrefixRe = regexp.MustCompile(`(?i)\bAS\s*$`)
+	// a COMMENT ... IS $$...$$ or a dollar-quoted string constant). Comments may sit
+	// between AS and the opening dollar quote.
+	functionBodyPrefixRe = regexp.MustCompile(`(?is)\bAS\s*(?:(?:--[^\n]*\n|/\*.*?\*/)\s*)*$`)
 
 	// createdObjectRe captures the name of each schema-level object a CREATE statement
 	// defines. It runs on SQL whose target-schema qualifiers were already stripped.

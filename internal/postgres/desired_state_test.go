@@ -519,6 +519,11 @@ func TestQualifyFunctionBodiesWithTempSchema(t *testing.T) {
 			expected: "CREATE PROCEDURE p() LANGUAGE plpgsql as $body$ BEGIN DELETE FROM pgschema_tmp_x.t; END $body$;",
 		},
 		{
+			name:     "comments between AS and the body",
+			sql:      "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS -- note\n /* more */ $$ SELECT 1 FROM public.t $$;",
+			expected: "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS -- note\n /* more */ $$ SELECT 1 FROM pgschema_tmp_x.t $$;",
+		},
+		{
 			name:     "other schemas and longer identifiers are preserved",
 			sql:      `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM auth.users, notpublic.t $$;`,
 			expected: `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM auth.users, notpublic.t $$;`,
