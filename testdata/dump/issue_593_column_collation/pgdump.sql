@@ -11,6 +11,12 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: my_coll; Type: COLLATION; Schema: public; Owner: -
+--
+
+CREATE COLLATION public.my_coll (provider = libc, locale = 'C');
+
+--
 -- Name: recipient_search; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -18,7 +24,8 @@ CREATE TABLE public.recipient_search (
     id bigint NOT NULL,
     search_text text COLLATE pg_catalog."C" NOT NULL,
     display_name character varying(100) COLLATE pg_catalog."POSIX" DEFAULT ''::character varying,
-    note text
+    note text,
+    region text COLLATE public.my_coll
 );
 
 --

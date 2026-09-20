@@ -21,6 +21,7 @@ Tables:
     ~ status (column)
     ~ tags (column)
     ~ user_id (column)
+    ~ zone (column)
 
 DDL to be executed:
 --------------------------------------------------
@@ -62,3 +63,5 @@ ALTER TABLE user_pending_permissions ALTER COLUMN sort_key TYPE text COLLATE "C"
 ALTER TABLE user_pending_permissions ALTER COLUMN label TYPE varchar(50);
 
 ALTER TABLE user_pending_permissions ALTER COLUMN code TYPE text COLLATE "POSIX";
+
+ALTER TABLE user_pending_permissions ALTER COLUMN zone TYPE text COLLATE my_coll;

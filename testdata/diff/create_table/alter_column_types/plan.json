@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "bd6640cbeefa941e1da1fc7e8699121147d2fcb097006cf30ba8766035ed7067"
+    "hash": "d76f3ada9f39207b9f2e8a5ee8d23d63d1014af24fc0b1a48664b726fb52836e"
   },
   "groups": [
     {
@@ -109,6 +109,12 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.code"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN zone TYPE text COLLATE my_coll;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.zone"
         }
       ]
     }

@@ -103,11 +103,12 @@ WITH column_base AS (
         -- pending (issue #564).
         COALESCE(nn.conname, '') AS invalid_not_null_constraint,
         -- Explicit column collation, only when it differs from the data type's
-        -- default collation (same rule as pg_dump). Qualified unless the collation
-        -- lives in pg_catalog or the table's own schema (issue #593).
+        -- default collation (same rule as pg_dump). Always schema-qualified unless
+        -- the collation lives in pg_catalog; like column types, the target-schema
+        -- prefix is stripped at comparison/render time (issue #593).
         COALESCE(
             CASE
-                WHEN colln.nspname IN ('pg_catalog', c.table_schema) THEN quote_ident(coll.collname)
+                WHEN colln.nspname = 'pg_catalog' THEN quote_ident(coll.collname)
                 ELSE quote_ident(colln.nspname) || '.' || quote_ident(coll.collname)
             END,
             ''
@@ -247,11 +248,12 @@ WITH column_base AS (
         -- pending (issue #564).
         COALESCE(nn.conname, '') AS invalid_not_null_constraint,
         -- Explicit column collation, only when it differs from the data type's
-        -- default collation (same rule as pg_dump). Qualified unless the collation
-        -- lives in pg_catalog or the table's own schema (issue #593).
+        -- default collation (same rule as pg_dump). Always schema-qualified unless
+        -- the collation lives in pg_catalog; like column types, the target-schema
+        -- prefix is stripped at comparison/render time (issue #593).
         COALESCE(
             CASE
-                WHEN colln.nspname IN ('pg_catalog', c.table_schema) THEN quote_ident(coll.collname)
+                WHEN colln.nspname = 'pg_catalog' THEN quote_ident(coll.collname)
                 ELSE quote_ident(colln.nspname) || '.' || quote_ident(coll.collname)
             END,
             ''

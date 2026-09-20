@@ -21,10 +21,14 @@ import (
 const qualifySchemaSetupSQL = `
 CREATE TYPE color AS ENUM ('r', 'g', 'b');
 -- column type: same-schema enum (scalar and array)
+-- column collation: same-schema collation, plus a pg_catalog one that must stay bare (#593)
+CREATE COLLATION my_coll FROM "C";
 CREATE TABLE swatch (
     id     integer PRIMARY KEY,
     shade  color,
-    shades color[]
+    shades color[],
+    label  text COLLATE my_coll,
+    code   text COLLATE "C"
 );
 -- domain base type: same-schema enum (scalar and array)
 CREATE DOMAIN color_domain AS color;
@@ -79,6 +83,8 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 	for _, want := range []string{
 		"shade public.color",       // column type
 		"shades public.color[]",    // column type: same-schema array
+		"label text COLLATE public.my_coll", // column collation: same-schema (#593)
+		"code text COLLATE \"C\"",           // column collation: pg_catalog stays bare (#593)
 		"AS public.color;",         // domain base type: scalar (CREATE DOMAIN ... AS public.color)
 		"AS public.color[]",        // domain base type: array (CREATE DOMAIN ... AS public.color[])
 		"currency public.color",    // composite attribute: scalar
@@ -105,6 +111,7 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 	for _, want := range []string{
 		"shade color",
 		"shades color[]",
+		"label text COLLATE my_coll",
 		"AS color;",    // domain base type: scalar
 		"AS color[]",   // domain base type: array
 		"currency color",
@@ -115,7 +122,7 @@ func TestDumpCommand_QualifySchemaTypeReferences(t *testing.T) {
 			t.Errorf("default dump missing bare form %q\n---\n%s", want, def)
 		}
 	}
-	if strings.Contains(def, "public.color") || strings.Contains(def, "public.acc") {
+	if strings.Contains(def, "public.color") || strings.Contains(def, "public.acc") || strings.Contains(def, "public.my_coll") {
 		t.Errorf("default dump must not qualify same-schema type references:\n%s", def)
 	}
 }

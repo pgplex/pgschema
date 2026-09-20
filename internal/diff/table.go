@@ -1337,7 +1337,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 
 		// Build and append all column clauses
-		clauses := buildColumnClauses(column, isPartOfAnyPK, td.Table.Schema, targetSchema)
+		clauses := buildColumnClauses(column, isPartOfAnyPK, td.Table.Schema, targetSchema, false)
 
 		// Check for single-column constraints that can be added inline
 		var inlineConstraint string
@@ -1994,19 +1994,19 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 	}
 
 	// Build and append all column clauses
-	clauses := buildColumnClauses(column, isPartOfAnyPK, table.Schema, targetSchema)
+	clauses := buildColumnClauses(column, isPartOfAnyPK, table.Schema, targetSchema, qualifySchema)
 	builder.WriteString(clauses)
 }
 
 // buildColumnClauses builds the SQL clauses for a column definition (works for both CREATE TABLE and ALTER TABLE)
 // Returns the clauses as a string to be appended to the column name and type
 // Order follows PostgreSQL documentation: https://www.postgresql.org/docs/current/sql-altertable.html
-func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema string, targetSchema string) string {
+func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema string, targetSchema string, qualifySchema bool) string {
 	var parts []string
 
 	// 0. COLLATE directly follows the data type (issue #593)
 	if column.Collation != "" {
-		parts = append(parts, "COLLATE "+column.Collation)
+		parts = append(parts, "COLLATE "+stripSchemaPrefixMode(column.Collation, targetSchema, qualifySchema))
 	}
 
 	// 1. Identity columns (must come early, before DEFAULT)

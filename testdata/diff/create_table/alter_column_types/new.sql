@@ -1,5 +1,7 @@
 CREATE TYPE public.action_type AS ENUM ('pending', 'approved', 'rejected');
 
+CREATE COLLATION public.my_coll FROM "C";
+
 CREATE TABLE public.user_pending_permissions (
     id bigint NOT NULL,
     user_id bigint NOT NULL,
@@ -13,5 +15,7 @@ CREATE TABLE public.user_pending_permissions (
     priority integer,
     sort_key text COLLATE "C",
     label varchar(50),
-    code text COLLATE "POSIX"
+    code text COLLATE "POSIX",
+    region text COLLATE public.my_coll,
+    zone text COLLATE public.my_coll
 );

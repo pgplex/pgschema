@@ -98,8 +98,8 @@ type Column struct {
 	IsGenerated   bool      `json:"is_generated,omitempty"`   // True if this is a generated column
 	GeneratedKind string    `json:"generated_kind,omitempty"` // "s" for STORED, "v" for VIRTUAL (PG18+)
 	// Collation is the column's explicit collation, already quoted and
-	// schema-qualified as needed (e.g. "C", other_schema.my_coll). Empty when the
-	// column uses its data type's default collation (issue #593).
+	// schema-qualified unless it lives in pg_catalog (e.g. "C", public.my_coll).
+	// Empty when the column uses its data type's default collation (issue #593).
 	Collation string `json:"collation,omitempty"`
 	// InvalidNotNullConstraint is the name of a NOT NULL constraint on this
 	// column that was added NOT VALID and has not been validated yet (PG18+).

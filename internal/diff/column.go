@@ -27,10 +27,11 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	// because PostgreSQL can't automatically cast default values during type changes with USING
 	// A collation change has no ALTER form of its own; it rides on ALTER COLUMN
 	// TYPE, where an omitted COLLATE resets to the type's default (issue #593).
-	hasTypeChange := oldType != newType || cd.Old.Collation != cd.New.Collation
+	newCollation := stripSchemaPrefix(cd.New.Collation, targetSchema)
+	hasTypeChange := oldType != newType || stripSchemaPrefix(cd.Old.Collation, targetSchema) != newCollation
 	newTypeClause := newType
-	if cd.New.Collation != "" {
-		newTypeClause += " COLLATE " + cd.New.Collation
+	if newCollation != "" {
+		newTypeClause += " COLLATE " + newCollation
 	}
 	oldDefault := cd.Old.DefaultValue
 	newDefault := cd.New.DefaultValue
@@ -203,7 +204,7 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 	if oldType != newType {
 		return false
 	}
-	if old.Collation != new.Collation {
+	if stripSchemaPrefix(old.Collation, targetSchema) != stripSchemaPrefix(new.Collation, targetSchema) {
 		return false
 	}
 	if old.IsNullable != new.IsNullable {

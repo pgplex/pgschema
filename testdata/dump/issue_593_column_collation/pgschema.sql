@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS recipient_search (
     search_text text COLLATE "C" NOT NULL,
     display_name varchar(100) COLLATE "POSIX" DEFAULT '',
     note text,
+    region text COLLATE my_coll,
     CONSTRAINT recipient_search_pkey PRIMARY KEY (id)
 );
 

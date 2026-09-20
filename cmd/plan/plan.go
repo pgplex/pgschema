@@ -553,6 +553,7 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			// Normalize column data types and expressions
 			for _, column := range table.Columns {
 				column.DataType = replaceString(column.DataType)
+				column.Collation = replaceString(column.Collation)
 				if column.DefaultValue != nil {
 					*column.DefaultValue = stripQualifiers(replaceString(*column.DefaultValue))
 				}
