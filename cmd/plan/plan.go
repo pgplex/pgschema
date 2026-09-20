@@ -291,7 +291,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	desiredState = stripNoEffectStatements(warningWriter, desiredState)
 
 	// Get current state from target database
-	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
+	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current state from database: %w", err)
 	}
@@ -361,7 +361,13 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 			providerSSLMode = "prefer"
 		}
 	}
-	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig)
+	// managedSchema is config.Schema (not schemaToInspect): when the provider
+	// uses a temporary comparison schema, schemaToInspect is that temp
+	// schema's literal name, but config.Schema is the real schema it stands
+	// in for - the Inspector needs both to correctly scope extension-owned
+	// type handling to the real schema, not the temp one (PR #608 review
+	// feedback; see Inspector.SetManagedSchema).
+	desiredStateIR, err := util.GetIRFromDatabase(providerHost, providerPort, providerDB, providerUsername, providerPassword, providerSSLMode, schemaToInspect, config.ApplicationName, ignoreConfig, config.Schema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get desired state: %w", err)
 	}

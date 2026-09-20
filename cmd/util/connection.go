@@ -94,8 +94,12 @@ func ValidateSSLMode(mode string) error {
 	}
 }
 
-// GetIRFromDatabase gets the IR from a database with ignore configuration
-func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig) (*ir.IR, error) {
+// GetIRFromDatabase gets the IR from a database with ignore configuration.
+// managedSchema is the logical schema this IR represents when it differs
+// from schemaName - the schema actually being connected to and introspected
+// (see Inspector.SetManagedSchema). Pass "" when they're the same, which is
+// every caller except the desired-state/temp-schema comparison path.
+func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig, managedSchema string) (*ir.IR, error) {
 	if sslmode == "" {
 		sslmode = "prefer"
 	}
@@ -121,6 +125,9 @@ func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schem
 
 	// Build IR using the IR system with ignore config
 	inspector := ir.NewInspector(conn, ignoreConfig)
+	if managedSchema != "" {
+		inspector.SetManagedSchema(managedSchema)
+	}
 
 	// Default to public schema if none specified
 	targetSchema := schemaName

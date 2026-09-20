@@ -24,6 +24,14 @@ type ExternalDatabase struct {
 	tempSchema         string   // Temporary schema name with timestamp suffix
 	targetMajorVersion int      // Expected major version (from target database)
 	stubRoles          []string // Roles created for ALTER DEFAULT PRIVILEGES (issue #553)
+	// targetExtensions is ExternalDatabaseConfig.TargetExtensions, kept for
+	// ApplySchema: getExtensionSchemas(ed.db) only sees what's installed on
+	// the plan database, so without cross-checking against what's actually
+	// on the target, an extension installed only on the plan side (e.g. for
+	// local testing convenience) would let a bare type reference resolve
+	// during planning that the real target could never resolve at apply
+	// time - plan succeeds, apply fails (PR #608 review feedback).
+	targetExtensions map[string]string
 }
 
 // ExternalDatabaseConfig holds configuration for connecting to an external database
@@ -106,6 +114,7 @@ func NewExternalDatabase(config *ExternalDatabaseConfig) (*ExternalDatabase, err
 		password:           config.Password,
 		tempSchema:         tempSchema,
 		targetMajorVersion: config.TargetMajorVersion,
+		targetExtensions:   config.TargetExtensions,
 	}, nil
 }
 
@@ -142,8 +151,78 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	}
 
 	// Set search_path to the temporary schema, with public as fallback
-	// for resolving extension types installed in public schema (issue #197)
-	setSearchPathSQL := fmt.Sprintf("SET search_path TO \"%s\", public", ed.tempSchema)
+	// for resolving extension types installed in public schema (issue #197).
+	//
+	// Also append the managed schema itself, if (and only if) it hosts an
+	// installed extension (e.g. pgvector's "vector" living in a non-public
+	// schema like "domain"). Desired-state SQL for an extension-owned column
+	// is written unqualified, same as any other same-schema reference (e.g.
+	// "embedding vector(384)"), and stripSchemaQualifications only strips -
+	// it never adds - a schema prefix. Without the extension's real schema in
+	// this search_path, such a bare reference cannot resolve inside the temp
+	// schema at all, since the temp schema has no copy of the type and
+	// "public" may not either (issue #518's apply-time failure mode, not
+	// addressed by #544's pre-flight schema-consistency check alone). This is
+	// safe: NewExternalDatabase already validated that every extension shared
+	// between the plan and target databases lives in the same schema on
+	// both, so resolving a bare extension reference against the plan
+	// database's copy here is exactly equivalent to how it resolves on the
+	// real target.
+	//
+	// Deliberately NOT every extension schema in the database: the real
+	// apply session against the target only ever uses "<schema>, public"
+	// (see cmd/apply/apply.go), so adding an unrelated extension's schema
+	// here would let a cross-schema type resolve during planning that the
+	// real apply could never resolve, and would explicitly relocate
+	// pg_catalog out of its default implicit-first search position for the
+	// common case of a bundled extension (e.g. plpgsql) living there (PR
+	// #608 review feedback).
+	//
+	// Inserted before "public" (not after): the real apply session's
+	// search_path is "<schema>, public", so the managed schema takes
+	// priority over public there. Appending it after public here would flip
+	// that priority for the plan-side lookup, letting a same-named object in
+	// public shadow the managed schema's extension type on the plan side
+	// while the real target resolves it the other way around (PR #608
+	// review feedback).
+	extraSchemas, err := getExtensionSchemas(ed.db)
+	if err != nil {
+		return fmt.Errorf("failed to query extension schemas: %w", err)
+	}
+	// getExtensionSchemas only sees the plan database. validateExtensionSchemas
+	// (in NewExternalDatabase) explicitly permits an extension present on only
+	// one side, so an extension installed on the plan database alone (e.g. for
+	// local testing convenience) is not itself an error - but it would be
+	// wrong to add its schema to search_path here: a bare type reference would
+	// then resolve during planning that the real target, lacking the
+	// extension entirely, could never resolve at apply time. Only trust an
+	// extension confirmed present on both sides (PR #608 review feedback).
+	//
+	// Known limitation, deliberately not "fixed" further (PR #608 review
+	// feedback): adding the managed schema to search_path exposes every bare
+	// reference to that schema's whole namespace, not just the confirmed
+	// extension member - if the plan database's copy of that schema also had
+	// some other object the target lacks, a bare reference could resolve on
+	// the plan side and then fail to apply on the real target. There is no
+	// narrower alternative that's actually safer:
+	//   - Postgres's search_path has no per-object granularity - it's
+	//     schema-wide or nothing.
+	//   - Rewriting the desired-state SQL text to explicitly qualify bare
+	//     extension-type references instead of expanding search_path would
+	//     reintroduce exactly the ambiguity issue #354's design already
+	//     rejected: text can't reliably distinguish a type reference from an
+	//     identically-named column/parameter, so a rewrite risks silently
+	//     qualifying the wrong token rather than just failing loudly.
+	//   - Rejecting any dependency from the temp schema on a non-extension
+	//     object in the managed schema isn't viable either: this whole
+	//     scenario (ddms's domain schema) legitimately co-locates the
+	//     extension with ordinary user tables/functions in the same schema,
+	//     which is exactly the case #518 needs to keep working.
+	// The practical mitigation is operational, not code: keep the plan
+	// database's copy of an extension-hosting schema free of objects that
+	// don't also exist on the real target.
+	confirmedSchemas := filterConfirmedExtensionSchemas(extraSchemas, ed.targetExtensions)
+	setSearchPathSQL := fmt.Sprintf("SET search_path TO %s", buildDesiredStateSearchPath(ed.tempSchema, schema, confirmedSchemas))
 	if _, err := util.ExecContextWithLogging(ctx, conn, setSearchPathSQL, "set search_path for desired state"); err != nil {
 		return fmt.Errorf("failed to set search_path: %w", err)
 	}
@@ -312,6 +391,47 @@ func getExtensionSchemas(db *sql.DB) (map[string]string, error) {
 
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// buildDesiredStateSearchPath builds the search_path used when applying
+// desired-state SQL to the temporary comparison schema: the temp schema
+// first, then the managed schema itself if it hosts an installed extension,
+// then public - in that order, to mirror the real apply session's
+// "<schema>, public" priority (see cmd/apply/apply.go). extensionSchemas is
+// the extname -> schema map from getExtensionSchemas. Not every extension
+// schema in the database is included, only the managed one, or a same-named
+// object in public could shadow the extension type on the plan side while
+// resolving the other way on the real target (PR #608 review feedback).
+func buildDesiredStateSearchPath(tempSchema, schema string, extensionSchemas map[string]string) string {
+	parts := []string{quoteIdent(tempSchema)}
+	if schema != "public" {
+		for _, extSchema := range extensionSchemas {
+			if extSchema == schema {
+				parts = append(parts, quoteIdent(schema))
+				break
+			}
+		}
+	}
+	parts = append(parts, "public")
+	return strings.Join(parts, ", ")
+}
+
+// filterConfirmedExtensionSchemas keeps only the entries of planSchemas
+// (extname -> schema, from getExtensionSchemas on the plan database) whose
+// extension name also appears in targetExtensions (extname -> schema, from
+// the real target). getExtensionSchemas only sees the plan database, and
+// validateExtensionSchemas explicitly permits an extension present on only
+// one side - so without this filter, a plan-only extension would let a bare
+// type reference resolve during planning that the real target could never
+// resolve at apply time (PR #608 review feedback).
+func filterConfirmedExtensionSchemas(planSchemas, targetExtensions map[string]string) map[string]string {
+	confirmed := make(map[string]string, len(planSchemas))
+	for extName, extSchema := range planSchemas {
+		if _, onTarget := targetExtensions[extName]; onTarget {
+			confirmed[extName] = extSchema
+		}
+	}
+	return confirmed
 }
 
 // detectMajorVersion queries the database to determine its PostgreSQL major version

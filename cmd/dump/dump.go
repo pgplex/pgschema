@@ -79,7 +79,7 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	}
 
 	// Get IR from database using the shared utility
-	schemaIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, "pgschema", ignoreConfig)
+	schemaIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, "pgschema", ignoreConfig, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get database schema: %w", err)
 	}

@@ -457,7 +457,7 @@ func RunApply(cmd *cobra.Command, args []string) error {
 func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, db, user, password, sslmode, schema, applicationName string, ignoreConfig *ir.IgnoreConfig) error {
 	// Get current state from target database with ignore config
 	// This ensures ignored objects are excluded from fingerprint calculation
-	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig)
+	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig, "")
 	if err != nil {
 		return fmt.Errorf("failed to get current database state for fingerprint validation: %w", err)
 	}
