@@ -1637,6 +1637,13 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 // collectMigrationSQL populates the collector with SQL statements for the diff
 // The collector must not be nil
 func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollector) {
+	// Enum label additions run first. They must precede the create phase, since
+	// a newly created object (e.g. a table column default) may use the new label.
+	// And because ADD VALUE forces a commit right after it, nothing destructive
+	// may come before it: a later failure could then no longer roll that back.
+	// ADD VALUE only depends on the enum itself, which already exists.
+	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
+
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
 	preDroppedViews := d.generatePreDropMaterializedViewsSQL(targetSchema, collector)
@@ -1649,11 +1656,6 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 
 	// First: Drop operations (in reverse dependency order)
 	d.generateDropSQL(targetSchema, collector, preDroppedViews)
-
-	// Enum label additions run before the create phase: a newly created object
-	// (e.g. a table column default) may use a label being added to an existing
-	// enum. ADD VALUE only depends on the enum itself, which already exists.
-	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
 
 	// Then: Create operations (in dependency order)
 	d.generateCreateSQL(targetSchema, collector)
