@@ -1780,15 +1780,23 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			comment = triggerRow.TriggerComment.String
 		}
 
-		// Extract disabled state: tgenabled 'D' = disabled, anything else = enabled (Postgres default).
-		// pg_trigger.tgenabled can also be 'R' (replica) or 'A' (always); pgschema's model only
-		// expresses enabled vs disabled, so those session-replication modes are treated as enabled.
-		disabled := false
+		// Extract enabled state from tgenabled: 'O' = origin (Postgres default), 'D' = disabled,
+		// 'R' = replica, 'A' = always.
+		var tgenabled string
 		switch v := triggerRow.TriggerEnabled.(type) {
 		case string:
-			disabled = v == "D"
+			tgenabled = v
 		case []byte:
-			disabled = string(v) == "D"
+			tgenabled = string(v)
+		}
+		enabledState := TriggerEnabledOrigin
+		switch tgenabled {
+		case "D":
+			enabledState = TriggerEnabledDisabled
+		case "R":
+			enabledState = TriggerEnabledReplica
+		case "A":
+			enabledState = TriggerEnabledAlways
 		}
 
 		// Determine if this is a constraint trigger
@@ -1814,7 +1822,7 @@ func (i *Inspector) buildTriggers(ctx context.Context, schema *IR, targetSchema 
 			Deferrable:        deferrable,
 			InitiallyDeferred: initDeferred,
 			Comment:           comment,
-			Disabled:          disabled,
+			EnabledState:      enabledState,
 		}
 
 		// Add trigger to the appropriate map

@@ -135,7 +135,7 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff, recreatedColumn
 			}
 			structurallyEqual := triggersEqual(oldTrigger, newTrigger)
 			commentChanged := oldTrigger.Comment != newTrigger.Comment
-			enabledChanged := oldTrigger.Disabled != newTrigger.Disabled
+			enabledChanged := oldTrigger.EnabledState != newTrigger.EnabledState
 			if !structurallyEqual || commentChanged || enabledChanged {
 				diff.ModifiedTriggers = append(diff.ModifiedTriggers, &triggerDiff{
 					Old: oldTrigger,
@@ -1739,7 +1739,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			generateTriggerComment(trigger, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
 		}
 
-		if trigger.Disabled {
+		if trigger.EnabledState != ir.TriggerEnabledOrigin {
 			generateTriggerEnabledState(trigger, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
 		}
 	}
@@ -1762,7 +1762,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	for _, triggerDiff := range td.ModifiedTriggers {
 		structurallyEqual := triggersEqual(triggerDiff.Old, triggerDiff.New)
 		commentChanged := triggerDiff.Old.Comment != triggerDiff.New.Comment
-		enabledChanged := triggerDiff.Old.Disabled != triggerDiff.New.Disabled
+		enabledChanged := triggerDiff.Old.EnabledState != triggerDiff.New.EnabledState
 
 		if !structurallyEqual {
 			// Constraint triggers don't support CREATE OR REPLACE, so we need to DROP and CREATE
@@ -1812,8 +1812,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		}
 
 		// Emit ENABLE/DISABLE TRIGGER when the state changed, or after structural recreation
-		// so disabled triggers stay disabled.
-		if enabledChanged || (!structurallyEqual && triggerDiff.New.Disabled) {
+		// so non-default states (DISABLE, ENABLE REPLICA, ENABLE ALWAYS) are preserved.
+		if enabledChanged || (!structurallyEqual && triggerDiff.New.EnabledState != ir.TriggerEnabledOrigin) {
 			generateTriggerEnabledState(triggerDiff.New, td.Table.Schema, td.Table.Name, targetSchema, DiffTypeTableTrigger, collector)
 		}
 	}

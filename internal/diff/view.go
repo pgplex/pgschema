@@ -419,7 +419,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			// (matching the table-trigger path in table.go).
 			structurallyEqual := triggersEqual(triggerDiff.Old, triggerDiff.New)
 			commentChanged := triggerDiff.Old.Comment != triggerDiff.New.Comment
-			enabledChanged := triggerDiff.Old.Disabled != triggerDiff.New.Disabled
+			enabledChanged := triggerDiff.Old.EnabledState != triggerDiff.New.EnabledState
 
 			if !structurallyEqual {
 				if triggerDiff.New.IsConstraint {
@@ -465,7 +465,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			// Emit ENABLE/DISABLE for enabled-state changes. Note PostgreSQL does
 			// not allow disabling triggers on views, so this is effectively a
 			// no-op for view triggers, but kept symmetric with the table path.
-			if enabledChanged || (!structurallyEqual && triggerDiff.New.Disabled) {
+			if enabledChanged || (!structurallyEqual && triggerDiff.New.EnabledState != ir.TriggerEnabledOrigin) {
 				generateTriggerEnabledState(triggerDiff.New, diff.New.Schema, diff.New.Name, targetSchema, DiffTypeViewTrigger, collector)
 			}
 		}
@@ -716,7 +716,7 @@ func diffViewTriggers(oldView, newView *ir.View) ([]*ir.Trigger, []*ir.Trigger, 
 			// or state-only drift is still reported as a modification (matching
 			// the table-trigger path in table.go).
 			commentChanged := oldTrigger.Comment != newTrigger.Comment
-			enabledChanged := oldTrigger.Disabled != newTrigger.Disabled
+			enabledChanged := oldTrigger.EnabledState != newTrigger.EnabledState
 			if !triggersEqual(oldTrigger, newTrigger) || commentChanged || enabledChanged {
 				modified = append(modified, &triggerDiff{
 					Old: oldTrigger,

@@ -154,8 +154,8 @@ func generateCreateTriggersSQL(triggers []*ir.Trigger, targetSchema string, coll
 			generateTriggerComment(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeTableTrigger, collector)
 		}
 
-		// Emit DISABLE TRIGGER if the trigger is disabled
-		if trigger.Disabled {
+		// Emit the enabled state if it is not the Postgres default
+		if trigger.EnabledState != ir.TriggerEnabledOrigin {
 			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeTableTrigger, collector)
 		}
 	}
@@ -411,7 +411,7 @@ func generateCreateViewTriggersSQL(triggers []*ir.Trigger, targetSchema string, 
 			generateTriggerComment(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeViewTrigger, collector)
 		}
 
-		if trigger.Disabled {
+		if trigger.EnabledState != ir.TriggerEnabledOrigin {
 			generateTriggerEnabledState(trigger, trigger.Schema, trigger.Table, targetSchema, DiffTypeViewTrigger, collector)
 		}
 	}
@@ -436,12 +436,17 @@ func generateTriggerComment(trigger *ir.Trigger, schema, table, targetSchema str
 	collector.collect(context, sql)
 }
 
-// generateTriggerEnabledState emits ALTER TABLE DISABLE/ENABLE TRIGGER
+// generateTriggerEnabledState emits ALTER TABLE DISABLE/ENABLE [REPLICA | ALWAYS] TRIGGER
 func generateTriggerEnabledState(trigger *ir.Trigger, schema, table, targetSchema string, diffType DiffType, collector *diffCollector) {
 	tableName := getTableNameWithSchema(schema, table, targetSchema)
 	state := "ENABLE"
-	if trigger.Disabled {
+	switch trigger.EnabledState {
+	case ir.TriggerEnabledDisabled:
 		state = "DISABLE"
+	case ir.TriggerEnabledReplica:
+		state = "ENABLE REPLICA"
+	case ir.TriggerEnabledAlways:
+		state = "ENABLE ALWAYS"
 	}
 	sql := fmt.Sprintf("ALTER TABLE %s %s TRIGGER %s;", tableName, state, ir.QuoteIdentifier(trigger.Name))
 	context := &diffContext{
