@@ -1,0 +1,98 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "3b24c9669b6f933324755e2a0c44a6ea932c2bfdfabd137bfe2bd0d46aab1d44"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP VIEW IF EXISTS answer_doubled RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.answer_doubled"
+        },
+        {
+          "sql": "DROP MATERIALIZED VIEW IF EXISTS answer_cached RESTRICT;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.answer_cached"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS answer RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.answer"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS calculate(integer);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.calculate"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION calculate(\n    x integer\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT x + 2\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.calculate"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW answer AS\n SELECT calculate(4) AS answer;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.answer"
+        },
+        {
+          "sql": "COMMENT ON VIEW answer IS 'The answer';",
+          "type": "view.comment",
+          "operation": "create",
+          "path": "public.answer"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS answer_cached AS\n SELECT calculate(5) AS cached;",
+          "type": "materialized_view",
+          "operation": "create",
+          "path": "public.answer_cached"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS idx_answer_cached ON answer_cached (cached);",
+          "type": "materialized_view.index",
+          "operation": "create",
+          "path": "public.answer_cached.idx_answer_cached"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW answer_doubled AS\n SELECT answer * 2 AS doubled,\n    calculate(1) AS base\n   FROM answer;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.answer_doubled"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW answer_next AS\n SELECT calculate(6) AS next;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.answer_next"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS standalone(integer);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.standalone"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION standalone(\n    x integer\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT x\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.standalone"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE answer TO readonly_role;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.VIEW.answer.readonly_role"
+        }
+      ]
+    }
+  ]
+}

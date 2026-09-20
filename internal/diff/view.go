@@ -120,6 +120,15 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				diffType = DiffTypeMaterializedView
 			}
 
+			// A view that also depends on another view being recreated is
+			// dropped and rebuilt from the desired state with that view's
+			// dependents (Phase 2), once the views it reads exist again.
+			// Recreating it here too would emit its CREATE twice, the first
+			// possibly before the view it reads is back (#601).
+			if dependentViewsCtx.IsDependent(viewKey) {
+				continue
+			}
+
 			// Get dependent views for this view
 			var dependentViews []*ir.View
 			if dependentViewsCtx != nil {
@@ -907,6 +916,21 @@ func (ctx *dependentViewsContext) GetDependents(viewKey string) []*ir.View {
 		return nil
 	}
 	return ctx.dependents[viewKey]
+}
+
+// IsDependent reports whether the given view depends on a view being recreated
+func (ctx *dependentViewsContext) IsDependent(viewKey string) bool {
+	if ctx == nil {
+		return false
+	}
+	for _, dependents := range ctx.dependents {
+		for _, view := range dependents {
+			if view.Schema+"."+view.Name == viewKey {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // findDependentViewsForRecreatedViews finds all views that depend on views being recreated.
