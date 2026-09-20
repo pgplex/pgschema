@@ -46,7 +46,7 @@ Use "pgschema [command] --help" for more information about a command.`,
 
 func init() {
 	RootCmd.PersistentFlags().BoolVar(&Debug, "debug", false, "Enable debug logging")
-	// Print a clean, machine-parseable version line, e.g. "1.13.0"
+	// Print a clean, machine-parseable version line, e.g. "1.13.1"
 	RootCmd.SetVersionTemplate("{{.Version}}\n")
 	RootCmd.CompletionOptions.DisableDefaultCmd = true
 	RootCmd.AddCommand(dump.DumpCmd)
