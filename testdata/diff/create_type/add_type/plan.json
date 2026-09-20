@@ -19,6 +19,12 @@
     {
       "steps": [
         {
+          "sql": "CREATE TABLE IF NOT EXISTS work_archive (\n    id integer,\n    state status DEFAULT 'archived'::status NOT NULL,\n    CONSTRAINT work_archive_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.work_archive"
+        },
+        {
           "sql": "ALTER TABLE work ALTER COLUMN state SET DEFAULT 'archived'::status;",
           "type": "table.column",
           "operation": "alter",

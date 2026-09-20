@@ -11,3 +11,10 @@ CREATE TABLE public.work (
     id integer PRIMARY KEY,
     state public.status NOT NULL DEFAULT 'archived'
 );
+
+-- A newly created table using the new label: ADD VALUE must run (and commit)
+-- before the create phase, not after it
+CREATE TABLE public.work_archive (
+    id integer PRIMARY KEY,
+    state public.status NOT NULL DEFAULT 'archived'
+);

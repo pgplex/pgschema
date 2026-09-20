@@ -1650,6 +1650,11 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// First: Drop operations (in reverse dependency order)
 	d.generateDropSQL(targetSchema, collector, preDroppedViews)
 
+	// Enum label additions run before the create phase: a newly created object
+	// (e.g. a table column default) may use a label being added to an existing
+	// enum. ADD VALUE only depends on the enum itself, which already exists.
+	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
+
 	// Then: Create operations (in dependency order)
 	d.generateCreateSQL(targetSchema, collector)
 
@@ -2231,8 +2236,8 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Modify schemas
 	// Note: Schema modification is out of scope for schema-level comparisons
 
-	// Modify types
-	generateModifyTypesSQL(d.modifiedTypes, targetSchema, collector)
+	// Modify domains (enum label additions already ran before the create phase)
+	generateModifyDomainsSQL(d.modifiedTypes, targetSchema, collector)
 
 	// Modify sequences
 	generateModifySequencesSQL(d.modifiedSequences, targetSchema, collector)

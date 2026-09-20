@@ -1,8 +1,8 @@
-Plan: 2 to modify.
+Plan: 1 to add, 2 to modify.
 
 Summary by type:
   types: 1 to modify
-  tables: 1 to modify
+  tables: 1 to add, 1 to modify
 
 Types:
   ~ status
@@ -10,6 +10,7 @@ Types:
 Tables:
   ~ work
     ~ state (column)
+  + work_archive
 
 DDL to be executed:
 --------------------------------------------------
@@ -18,4 +19,10 @@ DDL to be executed:
 ALTER TYPE status ADD VALUE 'archived' AFTER 'pending';
 
 -- Transaction Group #2
+CREATE TABLE IF NOT EXISTS work_archive (
+    id integer,
+    state status DEFAULT 'archived'::status NOT NULL,
+    CONSTRAINT work_archive_pkey PRIMARY KEY (id)
+);
+
 ALTER TABLE work ALTER COLUMN state SET DEFAULT 'archived'::status;

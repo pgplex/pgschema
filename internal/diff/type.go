@@ -38,42 +38,42 @@ func generateCreateTypesSQL(types []*ir.Type, targetSchema string, collector *di
 	}
 }
 
-// generateModifyTypesSQL generates ALTER TYPE statements
-func generateModifyTypesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
+// generateModifyEnumsSQL generates ALTER TYPE ... ADD VALUE statements
+func generateModifyEnumsSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
 	for _, diff := range diffs {
-		switch diff.Old.Kind {
-		case ir.TypeKindEnum:
-			// ENUM types can be modified by adding values
-			if diff.New.Kind == ir.TypeKindEnum {
-				alterStatements := generateAlterTypeEnumStatements(diff.Old, diff.New, targetSchema)
-				for _, stmt := range alterStatements {
-					context := &diffContext{
-						Type:                DiffTypeType,
-						Operation:           DiffOperationAlter,
-						Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
-						Source:              diff,
-						CanRunInTransaction: true,
-						// A new enum label cannot be used until ADD VALUE commits
-						RequiresCommitAfter: true,
-					}
-					collector.collect(context, stmt)
-				}
+		if diff.Old.Kind != ir.TypeKindEnum || diff.New.Kind != ir.TypeKindEnum {
+			continue
+		}
+		for _, stmt := range generateAlterTypeEnumStatements(diff.Old, diff.New, targetSchema) {
+			context := &diffContext{
+				Type:                DiffTypeType,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+				Source:              diff,
+				CanRunInTransaction: true,
+				// A new enum label cannot be used until ADD VALUE commits
+				RequiresCommitAfter: true,
 			}
-		case ir.TypeKindDomain:
-			// Domain types can be modified with ALTER DOMAIN
-			if diff.New.Kind == ir.TypeKindDomain {
-				alterStatements := generateAlterDomainStatements(diff.Old, diff.New, targetSchema)
-				for _, stmt := range alterStatements {
-					context := &diffContext{
-						Type:                DiffTypeDomain,
-						Operation:           DiffOperationAlter,
-						Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
-						Source:              diff,
-						CanRunInTransaction: true,
-					}
-					collector.collect(context, stmt)
-				}
+			collector.collect(context, stmt)
+		}
+	}
+}
+
+// generateModifyDomainsSQL generates ALTER DOMAIN statements
+func generateModifyDomainsSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindDomain || diff.New.Kind != ir.TypeKindDomain {
+			continue
+		}
+		for _, stmt := range generateAlterDomainStatements(diff.Old, diff.New, targetSchema) {
+			context := &diffContext{
+				Type:                DiffTypeDomain,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+				Source:              diff,
+				CanRunInTransaction: true,
 			}
+			collector.collect(context, stmt)
 		}
 	}
 }
