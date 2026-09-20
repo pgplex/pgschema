@@ -2073,9 +2073,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		}
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
-		functionsWithTableDeps, functionsAfterAllTables = holdBackCallers(functionsWithTableDeps, functionsAfterAllTables)
-		functionsWithoutTableDeps, functionsAfterAllTables = holdBackCallers(functionsWithoutTableDeps, functionsAfterAllTables)
-		functionsWithoutTableDeps, functionsWithTableDeps = holdBackCallers(functionsWithoutTableDeps, functionsWithTableDeps)
+		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
 	}
 
 	// Create functions WITHOUT view dependencies AND WITHOUT table dependencies
@@ -2926,6 +2924,22 @@ func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.
 	}
 	// Transitive closure: a function that calls a held-back function waits too.
 	return holdBackCallers(now, later)
+}
+
+// holdBackCallersAcrossBatches applies holdBackCallers to three consecutive function
+// batches until none changes. A single round is not enough: a function that joins a
+// later batch in one step can strand a caller that an earlier step already examined.
+func holdBackCallersAcrossBatches(first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	for {
+		secondLen, thirdLen := len(second), len(third)
+		second, third = holdBackCallers(second, third)
+		first, third = holdBackCallers(first, third)
+		first, second = holdBackCallers(first, second)
+		// Functions only ever move to a later batch, so unchanged sizes mean a fixpoint.
+		if len(second) == secondLen && len(third) == thirdLen {
+			return first, second, third
+		}
+	}
 }
 
 // holdBackCallers moves every SQL-language function in now that calls a function
