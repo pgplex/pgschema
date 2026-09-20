@@ -3,3 +3,8 @@ CREATE TYPE public.status AS ENUM (
    'inactive',
    'pending'
 );
+
+CREATE TABLE public.work (
+    id integer PRIMARY KEY,
+    state public.status NOT NULL DEFAULT 'pending'
+);

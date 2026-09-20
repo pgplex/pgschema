@@ -253,6 +253,11 @@ type DiffSource interface {
 type SQLStatement struct {
 	SQL                 string `json:"sql,omitempty"`
 	CanRunInTransaction bool   `json:"can_run_in_transaction"`
+	// RequiresCommitAfter forces a transaction boundary right after this
+	// statement: later statements must not share its transaction. Used for
+	// ALTER TYPE ... ADD VALUE, whose new label is unusable until committed
+	// (SQLSTATE 55P04, issue #600).
+	RequiresCommitAfter bool `json:"-"`
 }
 
 // Diff represents one or more related SQL statements with their source change
@@ -1632,6 +1637,13 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 // collectMigrationSQL populates the collector with SQL statements for the diff
 // The collector must not be nil
 func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollector) {
+	// Enum label additions run first. They must precede the create phase, since
+	// a newly created object (e.g. a table column default) may use the new label.
+	// And because ADD VALUE forces a commit right after it, nothing destructive
+	// may come before it: a later failure could then no longer roll that back.
+	// ADD VALUE only depends on the enum itself, which already exists.
+	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
+
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
 	preDroppedViews := d.generatePreDropMaterializedViewsSQL(targetSchema, collector)
@@ -2231,8 +2243,8 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Modify schemas
 	// Note: Schema modification is out of scope for schema-level comparisons
 
-	// Modify types
-	generateModifyTypesSQL(d.modifiedTypes, targetSchema, collector)
+	// Modify domains (enum label additions already ran before the create phase)
+	generateModifyDomainsSQL(d.modifiedTypes, targetSchema, collector)
 
 	// Modify sequences
 	generateModifySequencesSQL(d.modifiedSequences, targetSchema, collector)

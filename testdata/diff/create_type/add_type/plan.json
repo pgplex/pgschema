@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "fbbc3bde12e51ab79c0bc379f1ffea7adea61a422b411965728218795aff819d"
+    "hash": "622c837726faeebaa1904d85018cb6ec670caf6422053b8524f8153230fe3ed1"
   },
   "groups": [
     {
@@ -13,6 +13,22 @@
           "type": "type",
           "operation": "alter",
           "path": "public.status"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS work_archive (\n    id integer,\n    state status DEFAULT 'archived'::status NOT NULL,\n    CONSTRAINT work_archive_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.work_archive"
+        },
+        {
+          "sql": "ALTER TABLE work ALTER COLUMN state SET DEFAULT 'archived'::status;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.work.state"
         }
       ]
     }
