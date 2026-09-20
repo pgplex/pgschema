@@ -2483,10 +2483,11 @@ func recreatedFunctions(modifiedFunctions []*functionDiff) []*ir.Function {
 }
 
 // splitFunctionsRecreatedUnderViews separates the modified functions that are
-// dropped and created again while a view calls them, either a live view (which
-// the diff marks RequiresRecreate) or a view this migration adds. The match is
-// by function name, so an overload of a recreated function counts as well and
-// costs a redundant view recreation. (#601)
+// dropped and created again while a view calls them: a live view (which the
+// diff marks RequiresRecreate), a modified view whose desired definition
+// starts calling them, or a view this migration adds. The match is by function
+// name, so an overload of a recreated function counts as well and costs a
+// redundant view recreation. (#601)
 func (d *ddlDiff) splitFunctionsRecreatedUnderViews() (underViews, others []*functionDiff) {
 	for _, fd := range d.modifiedFunctions {
 		if functionRequiresRecreate(fd.Old, fd.New) && d.viewCallsFunction(fd.New) {
@@ -2498,11 +2499,16 @@ func (d *ddlDiff) splitFunctionsRecreatedUnderViews() (underViews, others []*fun
 	return underViews, others
 }
 
-// viewCallsFunction reports whether a recreated or added view calls fn.
+// viewCallsFunction reports whether a recreated, modified or added view calls
+// fn. A modified view that only calls fn in its desired definition counts: if
+// it were modified first, it would bind to the old function and block its drop.
 func (d *ddlDiff) viewCallsFunction(fn *ir.Function) bool {
 	lookup := buildRoutineLookup([]*ir.Function{fn}, nil)
 	for _, viewDiff := range d.modifiedViews {
 		if viewDiff.RequiresRecreate && referencesNewFunction(viewDiff.Old.Definition, viewDiff.Old.Schema, lookup) {
+			return true
+		}
+		if referencesNewFunction(viewDiff.New.Definition, viewDiff.New.Schema, lookup) {
 			return true
 		}
 	}

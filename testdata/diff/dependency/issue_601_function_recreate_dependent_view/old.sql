@@ -23,3 +23,9 @@ CREATE INDEX idx_answer_cached ON answer_cached (cached);
 -- Function with a return type change but no dependent view
 CREATE FUNCTION standalone(x integer)
 RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT x $$;
+
+-- Function with a return type change that only a modified view starts calling:
+-- modified first, the view would bind to the old function and block its drop
+CREATE FUNCTION label_value(x integer)
+RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT x $$;
+CREATE VIEW answer_label AS SELECT 'answer'::text AS label;

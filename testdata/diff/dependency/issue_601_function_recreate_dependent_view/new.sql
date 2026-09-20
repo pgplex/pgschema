@@ -26,3 +26,9 @@ RETURNS bigint LANGUAGE sql IMMUTABLE AS $$ SELECT x $$;
 
 -- New view calling the recreated function: must not bind to the old function
 CREATE VIEW answer_next AS SELECT calculate(6) AS next;
+
+-- Function with a return type change that only a modified view starts calling:
+-- modified first, the view would bind to the old function and block its drop
+CREATE FUNCTION label_value(x integer)
+RETURNS bigint LANGUAGE sql IMMUTABLE AS $$ SELECT x $$;
+CREATE VIEW answer_label AS SELECT 'answer'::text AS label, label_value(7) AS value;

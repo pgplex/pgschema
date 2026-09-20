@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "3b24c9669b6f933324755e2a0c44a6ea932c2bfdfabd137bfe2bd0d46aab1d44"
+    "hash": "f1564c21d71730f1f66ac2e6329a62f7413fa110593f9b9b7a3825b077389ba6"
   },
   "groups": [
     {
@@ -39,6 +39,18 @@
           "path": "public.calculate"
         },
         {
+          "sql": "DROP FUNCTION IF EXISTS label_value(integer);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.label_value"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION label_value(\n    x integer\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT x\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.label_value"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW answer AS\n SELECT calculate(4) AS answer;",
           "type": "view",
           "operation": "create",
@@ -61,6 +73,12 @@
           "type": "materialized_view.index",
           "operation": "create",
           "path": "public.answer_cached.idx_answer_cached"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW answer_label AS\n SELECT 'answer'::text AS label,\n    label_value(7) AS value;",
+          "type": "view",
+          "operation": "alter",
+          "path": "public.answer_label"
         },
         {
           "sql": "CREATE OR REPLACE VIEW answer_doubled AS\n SELECT answer * 2 AS doubled,\n    calculate(1) AS base\n   FROM answer;",

@@ -15,6 +15,17 @@ IMMUTABLE
 AS $$ SELECT x + 2
 $$;
 
+DROP FUNCTION IF EXISTS label_value(integer);
+
+CREATE OR REPLACE FUNCTION label_value(
+    x integer
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT x
+$$;
+
 CREATE OR REPLACE VIEW answer AS
  SELECT calculate(4) AS answer;
 
@@ -24,6 +35,10 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS answer_cached AS
  SELECT calculate(5) AS cached;
 
 CREATE INDEX IF NOT EXISTS idx_answer_cached ON answer_cached (cached);
+
+CREATE OR REPLACE VIEW answer_label AS
+ SELECT 'answer'::text AS label,
+    label_value(7) AS value;
 
 CREATE OR REPLACE VIEW answer_doubled AS
  SELECT answer * 2 AS doubled,
