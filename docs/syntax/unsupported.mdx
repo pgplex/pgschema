@@ -57,6 +57,22 @@ Objects created by `apply` are owned by the role that runs it. To get a specific
 ALTER TABLE orders OWNER TO app_owner;
 ```
 
+## Global Default Privileges
+
+`ALTER DEFAULT PRIVILEGES` is supported only with `IN SCHEMA`. See [ALTER DEFAULT PRIVILEGES](/syntax/alter_default_privileges).
+
+Without `IN SCHEMA`, the statement sets a default for every schema in the database where the role creates objects. That is database-level state, not part of the schema `pgschema` manages, and several schemas managed separately would each claim it.
+
+<Warning>
+A global `ALTER DEFAULT PRIVILEGES` statement in your schema files has no effect on the plan. A file whose only change is a global default privilege produces an empty plan and the target database is not changed.
+</Warning>
+
+Apply global default privileges outside of `pgschema`, or scope them to the schema:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public GRANT SELECT ON TABLES TO app_reader;
+```
+
 ## Rename
 
 `RENAME` is not supported.
