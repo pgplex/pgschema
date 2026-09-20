@@ -6,8 +6,11 @@ Summary by type:
 Tables:
   ~ users
     + email (column)
+    + sort_key (column)
 
 DDL to be executed:
 --------------------------------------------------
 
 ALTER TABLE users ADD COLUMN email text;
+
+ALTER TABLE users ADD COLUMN sort_key text COLLATE "C" DEFAULT '' NOT NULL;

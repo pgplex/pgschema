@@ -29,3 +29,9 @@ ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl TYPE integer USING ar
 ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl SET DEFAULT 0;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN priority TYPE integer USING priority::integer;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN sort_key TYPE text COLLATE "C";
+
+ALTER TABLE user_pending_permissions ALTER COLUMN label TYPE varchar(50);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN code TYPE text COLLATE "POSIX";

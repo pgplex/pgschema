@@ -13,6 +13,12 @@
           "type": "table.column",
           "operation": "create",
           "path": "public.users.email"
+        },
+        {
+          "sql": "ALTER TABLE users ADD COLUMN sort_key text COLLATE \"C\" DEFAULT '' NOT NULL;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.users.sort_key"
         }
       ]
     }

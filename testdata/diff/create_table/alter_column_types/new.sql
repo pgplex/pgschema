@@ -10,5 +10,8 @@ CREATE TABLE public.user_pending_permissions (
     tags public.action_type[],
     amount numeric(20,6) NOT NULL DEFAULT 0,
     arfcn_dl integer DEFAULT 0,
-    priority integer
+    priority integer,
+    sort_key text COLLATE "C",
+    label varchar(50),
+    code text COLLATE "POSIX"
 );

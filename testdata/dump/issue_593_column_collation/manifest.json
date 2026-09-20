@@ -1,0 +1,10 @@
+{
+  "name": "issue_593_column_collation",
+  "description": "Test case for explicit non-default column collations being omitted from dump output (GitHub issue #593)",
+  "source": "https://github.com/pgplex/pgschema/issues/593",
+  "notes": [
+    "Reproduces the bug where COLLATE on a column was dropped, so the recreated column and its indexes silently used the database default collation",
+    "Tests that COLLATE is emitted only when it differs from the data type's default collation",
+    "Tests that an index inheriting the column collation stays unchanged"
+  ]
+}

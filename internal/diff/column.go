@@ -25,7 +25,13 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	// Check if there's a type change AND the column has a default value
 	// When a USING clause is needed, we must: DROP DEFAULT -> ALTER TYPE -> SET DEFAULT
 	// because PostgreSQL can't automatically cast default values during type changes with USING
-	hasTypeChange := oldType != newType
+	// A collation change has no ALTER form of its own; it rides on ALTER COLUMN
+	// TYPE, where an omitted COLLATE resets to the type's default (issue #593).
+	hasTypeChange := oldType != newType || cd.Old.Collation != cd.New.Collation
+	newTypeClause := newType
+	if cd.New.Collation != "" {
+		newTypeClause += " COLLATE " + cd.New.Collation
+	}
 	oldDefault := cd.Old.DefaultValue
 	newDefault := cd.New.DefaultValue
 	hasOldDefault := oldDefault != nil && *oldDefault != ""
@@ -56,11 +62,11 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 		// because PostgreSQL cannot implicitly cast these types
 		if needsUsing {
 			sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s USING %s::%s;",
-				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name), newType, ir.QuoteIdentifier(cd.New.Name), newType)
+				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name), newTypeClause, ir.QuoteIdentifier(cd.New.Name), newType)
 			statements = append(statements, sql)
 		} else {
 			sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s;",
-				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name), newType)
+				qualifiedTableName, ir.QuoteIdentifier(cd.New.Name), newTypeClause)
 			statements = append(statements, sql)
 		}
 	}
@@ -195,6 +201,9 @@ func columnsEqual(old, new *ir.Column, targetSchema string) bool {
 	oldType := stripSchemaPrefix(comparableColumnType(old), targetSchema)
 	newType := stripSchemaPrefix(comparableColumnType(new), targetSchema)
 	if oldType != newType {
+		return false
+	}
+	if old.Collation != new.Collation {
 		return false
 	}
 	if old.IsNullable != new.IsNullable {

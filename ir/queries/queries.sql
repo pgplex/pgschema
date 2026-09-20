@@ -102,6 +102,16 @@ WITH column_base AS (
         -- a column, so this is the only signal that VALIDATE CONSTRAINT is still
         -- pending (issue #564).
         COALESCE(nn.conname, '') AS invalid_not_null_constraint,
+        -- Explicit column collation, only when it differs from the data type's
+        -- default collation (same rule as pg_dump). Qualified unless the collation
+        -- lives in pg_catalog or the table's own schema (issue #593).
+        COALESCE(
+            CASE
+                WHEN colln.nspname IN ('pg_catalog', c.table_schema) THEN quote_ident(coll.collname)
+                ELSE quote_ident(colln.nspname) || '.' || quote_ident(coll.collname)
+            END,
+            ''
+        ) AS column_collation,
         CASE
             WHEN dt.typtype = 'd' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
@@ -149,6 +159,8 @@ WITH column_base AS (
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
     LEFT JOIN pg_constraint nn ON nn.conrelid = cl.oid AND nn.contype = 'n' AND NOT nn.convalidated AND a.attnum = ANY(nn.conkey)
+    LEFT JOIN pg_collation coll ON coll.oid = a.attcollation AND a.attcollation <> dt.typcollation
+    LEFT JOIN pg_namespace colln ON colln.oid = coll.collnamespace
     WHERE
         c.table_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
         AND c.table_schema NOT LIKE 'pg_temp_%'
@@ -178,6 +190,7 @@ SELECT
     cb.udt_name,
     cb.column_comment,
     cb.invalid_not_null_constraint,
+    cb.column_collation,
     cb.resolved_type,
     cb.is_identity,
     cb.identity_generation,
@@ -233,6 +246,16 @@ WITH column_base AS (
         -- a column, so this is the only signal that VALIDATE CONSTRAINT is still
         -- pending (issue #564).
         COALESCE(nn.conname, '') AS invalid_not_null_constraint,
+        -- Explicit column collation, only when it differs from the data type's
+        -- default collation (same rule as pg_dump). Qualified unless the collation
+        -- lives in pg_catalog or the table's own schema (issue #593).
+        COALESCE(
+            CASE
+                WHEN colln.nspname IN ('pg_catalog', c.table_schema) THEN quote_ident(coll.collname)
+                ELSE quote_ident(colln.nspname) || '.' || quote_ident(coll.collname)
+            END,
+            ''
+        ) AS column_collation,
         CASE
             WHEN dt.typtype = 'd' THEN
                 quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
@@ -281,6 +304,8 @@ WITH column_base AS (
     LEFT JOIN pg_type et ON dt.typelem = et.oid
     LEFT JOIN pg_namespace en ON et.typnamespace = en.oid
     LEFT JOIN pg_constraint nn ON nn.conrelid = cl.oid AND nn.contype = 'n' AND NOT nn.convalidated AND a.attnum = ANY(nn.conkey)
+    LEFT JOIN pg_collation coll ON coll.oid = a.attcollation AND a.attcollation <> dt.typcollation
+    LEFT JOIN pg_namespace colln ON colln.oid = coll.collnamespace
     WHERE
         c.table_schema = $1
         AND NOT EXISTS (
@@ -308,6 +333,7 @@ SELECT
     cb.udt_name,
     cb.column_comment,
     cb.invalid_not_null_constraint,
+    cb.column_collation,
     cb.resolved_type,
     cb.is_identity,
     cb.identity_generation,

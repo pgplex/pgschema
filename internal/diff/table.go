@@ -2004,6 +2004,11 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 func buildColumnClauses(column *ir.Column, isPartOfAnyPK bool, tableSchema string, targetSchema string) string {
 	var parts []string
 
+	// 0. COLLATE directly follows the data type (issue #593)
+	if column.Collation != "" {
+		parts = append(parts, "COLLATE "+column.Collation)
+	}
+
 	// 1. Identity columns (must come early, before DEFAULT)
 	if column.Identity != nil {
 		switch column.Identity.Generation {

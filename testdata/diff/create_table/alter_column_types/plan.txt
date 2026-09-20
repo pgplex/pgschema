@@ -12,9 +12,12 @@ Tables:
     ~ action (column)
     ~ amount (column)
     ~ arfcn_dl (column)
+    ~ code (column)
     ~ id (column)
+    ~ label (column)
     ~ object_ids_ints (column)
     ~ priority (column)
+    ~ sort_key (column)
     ~ status (column)
     ~ tags (column)
     ~ user_id (column)
@@ -53,3 +56,9 @@ ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl TYPE integer USING ar
 ALTER TABLE user_pending_permissions ALTER COLUMN arfcn_dl SET DEFAULT 0;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN priority TYPE integer USING priority::integer;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN sort_key TYPE text COLLATE "C";
+
+ALTER TABLE user_pending_permissions ALTER COLUMN label TYPE varchar(50);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN code TYPE text COLLATE "POSIX";

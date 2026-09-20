@@ -1,1 +1,3 @@
 ALTER TABLE users ADD COLUMN email text;
+
+ALTER TABLE users ADD COLUMN sort_key text COLLATE "C" DEFAULT '' NOT NULL;
