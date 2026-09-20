@@ -217,6 +217,13 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []E
 				}
 				// Canonical statements don't have directives
 				transactionalSteps = append(transactionalSteps, step)
+
+				// Close the group so the statement commits before anything that
+				// follows (e.g. ADD VALUE before a default using the new label)
+				if stmt.RequiresCommitAfter {
+					groups = append(groups, ExecutionGroup{Steps: transactionalSteps})
+					transactionalSteps = nil
+				}
 			}
 		}
 	}

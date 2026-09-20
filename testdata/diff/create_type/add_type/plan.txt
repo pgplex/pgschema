@@ -1,12 +1,21 @@
-Plan: 1 to modify.
+Plan: 2 to modify.
 
 Summary by type:
   types: 1 to modify
+  tables: 1 to modify
 
 Types:
   ~ status
 
+Tables:
+  ~ work
+    ~ state (column)
+
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 ALTER TYPE status ADD VALUE 'archived' AFTER 'pending';
+
+-- Transaction Group #2
+ALTER TABLE work ALTER COLUMN state SET DEFAULT 'archived'::status;

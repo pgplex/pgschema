@@ -53,6 +53,8 @@ func generateModifyTypesSQL(diffs []*typeDiff, targetSchema string, collector *d
 						Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
 						Source:              diff,
 						CanRunInTransaction: true,
+						// A new enum label cannot be used until ADD VALUE commits
+						RequiresCommitAfter: true,
 					}
 					collector.collect(context, stmt)
 				}

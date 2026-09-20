@@ -7,6 +7,7 @@ type diffContext struct {
 	Path                string        // e.g., "schema.table" or "schema.table.column"
 	Source              DiffSource    // The ddlDiff element that generated this SQL
 	CanRunInTransaction bool          // Whether this SQL can run in a transaction
+	RequiresCommitAfter bool          // Whether later statements must run in a separate transaction
 }
 
 // diffCollector collects SQL statements with their context information
@@ -33,6 +34,7 @@ func (c *diffCollector) collect(context *diffContext, stmt string) {
 			Statements: []SQLStatement{{
 				SQL:                 stmt,
 				CanRunInTransaction: context.CanRunInTransaction,
+				RequiresCommitAfter: context.RequiresCommitAfter,
 			}},
 			Type:      context.Type,
 			Operation: context.Operation,

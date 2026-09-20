@@ -253,6 +253,11 @@ type DiffSource interface {
 type SQLStatement struct {
 	SQL                 string `json:"sql,omitempty"`
 	CanRunInTransaction bool   `json:"can_run_in_transaction"`
+	// RequiresCommitAfter forces a transaction boundary right after this
+	// statement: later statements must not share its transaction. Used for
+	// ALTER TYPE ... ADD VALUE, whose new label is unusable until committed
+	// (SQLSTATE 55P04, issue #600).
+	RequiresCommitAfter bool `json:"-"`
 }
 
 // Diff represents one or more related SQL statements with their source change
