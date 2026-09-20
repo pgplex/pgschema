@@ -1,0 +1,92 @@
+Plan: 2 to add, 7 to modify.
+
+Summary by type:
+  functions: 3 to modify
+  views: 1 to add, 3 to modify
+  materialized views: 1 to modify
+  privileges: 1 to add
+
+Functions:
+  ~ calculate
+  ~ label_value
+  ~ standalone
+
+Views:
+  ~ answer
+    + answer (comment)
+  ~ answer_doubled
+  ~ answer_label
+  + answer_next
+
+Materialized views:
+  ~ answer_cached
+    + idx_answer_cached (index)
+
+Privileges:
+  + readonly_role
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP VIEW IF EXISTS answer_doubled RESTRICT;
+
+DROP MATERIALIZED VIEW IF EXISTS answer_cached RESTRICT;
+
+DROP VIEW IF EXISTS answer RESTRICT;
+
+DROP FUNCTION IF EXISTS calculate(integer);
+
+CREATE OR REPLACE FUNCTION calculate(
+    x integer
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT x + 2
+$$;
+
+DROP FUNCTION IF EXISTS label_value(integer);
+
+CREATE OR REPLACE FUNCTION label_value(
+    x integer
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT x
+$$;
+
+CREATE OR REPLACE VIEW answer AS
+ SELECT calculate(4) AS answer;
+
+COMMENT ON VIEW answer IS 'The answer';
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS answer_cached AS
+ SELECT calculate(5) AS cached;
+
+CREATE INDEX IF NOT EXISTS idx_answer_cached ON answer_cached (cached);
+
+CREATE OR REPLACE VIEW answer_label AS
+ SELECT 'answer'::text AS label,
+    label_value(7) AS value;
+
+CREATE OR REPLACE VIEW answer_doubled AS
+ SELECT answer * 2 AS doubled,
+    calculate(1) AS base
+   FROM answer;
+
+CREATE OR REPLACE VIEW answer_next AS
+ SELECT calculate(6) AS next;
+
+DROP FUNCTION IF EXISTS standalone(integer);
+
+CREATE OR REPLACE FUNCTION standalone(
+    x integer
+)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT x
+$$;
+
+GRANT SELECT ON TABLE answer TO readonly_role;

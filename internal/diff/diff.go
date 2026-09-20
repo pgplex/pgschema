@@ -936,6 +936,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	}
 
 	// Find modified views in deterministic order
+	recreatedFunctionLookup := buildRoutineLookup(recreatedFunctions(diff.modifiedFunctions), nil)
 	for _, key := range viewKeys {
 		newView := newViews[key]
 		if oldView, exists := oldViews[key]; exists {
@@ -944,7 +945,10 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			// COLUMN) would block the DROP with SQLSTATE 2BP01, so it goes
 			// through the pre-drop/recreate cycle even when unchanged (#591).
 			// The live (old) definition is what holds the dependency.
-			dependsOnRecreated := viewDependsOnRecreatedColumn(oldView, diff.modifiedTables)
+			// Likewise for a view that calls a function being dropped and
+			// created again, e.g. for a return type change (#601).
+			dependsOnRecreated := viewDependsOnRecreatedColumn(oldView, diff.modifiedTables) ||
+				referencesNewFunction(oldView.Definition, oldView.Schema, recreatedFunctionLookup)
 			// Check if the view definition itself changed (excluding options).
 			// This is used to decide if materialized views need DROP+CREATE:
 			// option-only changes should use ALTER VIEW SET/RESET, not recreation.
@@ -1796,6 +1800,14 @@ func (d *ddlDiff) generatePreDropRecreatedRegularViewsSQL(targetSchema string, c
 			}
 		}
 	}
+	d.preDropViewsWithDependents(viewsToPreDrop, targetSchema, collector, preDropped)
+}
+
+// preDropViewsWithDependents drops the given old views ahead of the
+// modify-views phase, together with the views that transitively depend on
+// them, and records every drop in preDropped so that phase only emits the
+// CREATE.
+func (d *ddlDiff) preDropViewsWithDependents(viewsToPreDrop []*ir.View, targetSchema string, collector *diffCollector, preDropped map[string]bool) {
 	if len(viewsToPreDrop) == 0 {
 		return
 	}
@@ -2216,7 +2228,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// A new view that calls a routine held for a view recreation must wait for
 	// that routine too; it is created in the modify phase with that batch (#480).
-	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews))
+	// So must a new view that calls a function being dropped and created again:
+	// created now, it would bind to the old function and block its drop (#601).
+	heldRoutines := append(recreatedFunctions(d.modifiedFunctions), d.functionsAwaitingRecreatedViews...)
+	viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, d.aggregatesAwaitingRecreatedViews))
 
 	// Create views, then the functions and aggregates that reference views in
 	// their signature or SQL body (issue #300, #580).
@@ -2288,6 +2303,22 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// modifications would be processed (and correctly skipped).
 	sortModifiedViewsForProcessing(d.modifiedViews)
 
+	// Functions that are dropped and created again while views call them go
+	// first: the calling views are dropped, the functions recreated, and the
+	// modify-views phase below then creates the views again (#601).
+	functionsUnderViews, otherModifiedFunctions := d.splitFunctionsRecreatedUnderViews()
+	if len(functionsUnderViews) > 0 {
+		lookup := buildRoutineLookup(recreatedFunctions(functionsUnderViews), nil)
+		var callingViews []*ir.View
+		for _, viewDiff := range d.modifiedViews {
+			if viewDiff.RequiresRecreate && referencesNewFunction(viewDiff.Old.Definition, viewDiff.Old.Schema, lookup) {
+				callingViews = append(callingViews, viewDiff.Old)
+			}
+		}
+		d.preDropViewsWithDependents(callingViews, targetSchema, collector, preDroppedViews)
+		generateModifyFunctionsSQL(functionsUnderViews, targetSchema, collector)
+	}
+
 	// Modify views - pass preDroppedViews to skip DROP for already-dropped views
 	generateModifyViewsSQL(d.modifiedViews, targetSchema, collector, preDroppedViews, dependentViewsCtx, recreatedViews)
 
@@ -2300,7 +2331,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	generateViewsAndDependentRoutinesSQL(d.viewsAwaitingRecreatedViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews, targetSchema, collector)
 
 	// Modify functions
-	generateModifyFunctionsSQL(d.modifiedFunctions, targetSchema, collector)
+	generateModifyFunctionsSQL(otherModifiedFunctions, targetSchema, collector)
 
 	// Modify procedures
 	generateModifyProceduresSQL(d.modifiedProcedures, targetSchema, collector)
@@ -2433,6 +2464,56 @@ func viewDependsOnRecreatedColumn(view *ir.View, modifiedTables []*tableDiff) bo
 			continue
 		}
 		if viewDependsOnTable(view, td.Table.Schema, td.Table.Name) && exprReferencesAnyColumn(view.Definition, td.RecreatedColumns) {
+			return true
+		}
+	}
+	return false
+}
+
+// recreatedFunctions returns the desired state of the modified functions that
+// are applied as DROP FUNCTION + CREATE FUNCTION (see functionRequiresRecreate).
+func recreatedFunctions(modifiedFunctions []*functionDiff) []*ir.Function {
+	var functions []*ir.Function
+	for _, fd := range modifiedFunctions {
+		if functionRequiresRecreate(fd.Old, fd.New) {
+			functions = append(functions, fd.New)
+		}
+	}
+	return functions
+}
+
+// splitFunctionsRecreatedUnderViews separates the modified functions that are
+// dropped and created again while a view calls them: a live view (which the
+// diff marks RequiresRecreate), a modified view whose desired definition
+// starts calling them, or a view this migration adds. The match is by function
+// name, so an overload of a recreated function counts as well and costs a
+// redundant view recreation. (#601)
+func (d *ddlDiff) splitFunctionsRecreatedUnderViews() (underViews, others []*functionDiff) {
+	for _, fd := range d.modifiedFunctions {
+		if functionRequiresRecreate(fd.Old, fd.New) && d.viewCallsFunction(fd.New) {
+			underViews = append(underViews, fd)
+		} else {
+			others = append(others, fd)
+		}
+	}
+	return underViews, others
+}
+
+// viewCallsFunction reports whether a recreated, modified or added view calls
+// fn. A modified view that only calls fn in its desired definition counts: if
+// it were modified first, it would bind to the old function and block its drop.
+func (d *ddlDiff) viewCallsFunction(fn *ir.Function) bool {
+	lookup := buildRoutineLookup([]*ir.Function{fn}, nil)
+	for _, viewDiff := range d.modifiedViews {
+		if viewDiff.RequiresRecreate && referencesNewFunction(viewDiff.Old.Definition, viewDiff.Old.Schema, lookup) {
+			return true
+		}
+		if referencesNewFunction(viewDiff.New.Definition, viewDiff.New.Schema, lookup) {
+			return true
+		}
+	}
+	for _, view := range d.addedViews {
+		if referencesNewFunction(view.Definition, view.Schema, lookup) {
 			return true
 		}
 	}
