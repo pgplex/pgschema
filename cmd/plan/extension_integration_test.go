@@ -60,7 +60,7 @@ func TestEmbeddedPlanDB_InstallsTargetExtensions(t *testing.T) {
 
 		config := &PlanConfig{
 			Host: host, Port: port, DB: dbname, User: user, Password: password,
-			Schema: schema, File: file, ApplicationName: "pgschema-test", ConfigDir: dir,
+			Schema: schema, File: file, ApplicationName: "pgschema-test",
 		}
 		provider, err := CreateDesiredStateProvider(config)
 		require.NoError(t, err)

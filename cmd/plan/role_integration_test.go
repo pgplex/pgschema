@@ -55,7 +55,7 @@ func TestEmbeddedPlanDB_StubsReferencedRoles(t *testing.T) {
 
 		config := &PlanConfig{
 			Host: host, Port: port, DB: dbname, User: user, Password: password,
-			Schema: "public", File: file, ApplicationName: "pgschema-test", ConfigDir: dir,
+			Schema: "public", File: file, ApplicationName: "pgschema-test",
 		}
 		provider, err := CreateDesiredStateProvider(config)
 		require.NoError(t, err)

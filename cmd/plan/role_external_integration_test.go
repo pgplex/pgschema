@@ -53,7 +53,7 @@ func TestExternalDatabase_StubsReferencedRoles(t *testing.T) {
 
 	config := &PlanConfig{
 		Host: targetHost, Port: targetPort, DB: targetDatabase, User: targetUser, Password: targetPassword,
-		Schema: "public", File: file, ApplicationName: "pgschema-test", ConfigDir: dir,
+		Schema: "public", File: file, ApplicationName: "pgschema-test",
 		PlanDBHost: planHost, PlanDBPort: planPort, PlanDBDatabase: planDatabase, PlanDBUser: planUser, PlanDBPassword: planPassword,
 	}
 	provider, err := CreateDesiredStateProvider(config)

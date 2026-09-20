@@ -38,8 +38,6 @@ type Inspector struct {
 	db           *sql.DB
 	queries      *queries.Queries
 	ignoreConfig *IgnoreConfig
-	dataConfig   *DataConfig
-	loadRows     bool
 }
 
 // NewInspector creates a new schema inspector with optional ignore configuration
@@ -49,16 +47,6 @@ func NewInspector(db *sql.DB, ignoreConfig *IgnoreConfig) *Inspector {
 		queries:      queries.New(db),
 		ignoreConfig: ignoreConfig,
 	}
-}
-
-// WithDataConfig sets the [data] configuration. Tables matching it are marked
-// DataManaged by BuildIR and, when loadRows is true, get their rows loaded
-// into Table.Rows. Dump passes false: it only needs to know which tables to
-// export and reads the rows itself with COPY.
-func (i *Inspector) WithDataConfig(dataConfig *DataConfig, loadRows bool) *Inspector {
-	i.dataConfig = dataConfig
-	i.loadRows = loadRows
-	return i
 }
 
 // BuildIR builds the schema IR from the database for a specific schema
@@ -142,12 +130,6 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 
 	if err := i.buildPartitionParentColumns(ctx, schema, targetSchema); err != nil {
 		return nil, fmt.Errorf("failed to build partition parent columns: %w", err)
-	}
-
-	// Load rows of data-managed tables now that columns, constraints, and
-	// partitions are known.
-	if err := i.buildRows(ctx, schema, targetSchema); err != nil {
-		return nil, fmt.Errorf("failed to build rows: %w", err)
 	}
 
 	// Build function dependencies after functions are loaded
@@ -261,9 +243,6 @@ func (i *Inspector) buildTables(ctx context.Context, schema *IR, targetSchema st
 
 		// Check if table should be ignored
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreTable(tableName) {
-			if i.dataConfig.IsDataTable(tableName) {
-				return fmt.Errorf("table %q is listed under [data] in pgschema.toml and matched by [tables] in .pgschemaignore; a table cannot be both managed and ignored", tableName)
-			}
 			continue
 		}
 

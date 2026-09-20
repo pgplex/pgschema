@@ -33,7 +33,7 @@ func TestDumpExtensionMembers(t *testing.T) {
 	require.NoError(t, err)
 	config := &DumpConfig{
 		Host: host, Port: port, DB: name, User: user, Password: password,
-		Schema: "public", NoComments: true, ConfigDir: t.TempDir(),
+		Schema: "public", NoComments: true,
 	}
 	dumped, err := ExecuteDump(config)
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestDumpExtensionPartitionOverrides(t *testing.T) {
 			`, ir.QuoteIdentifier(tc.parentSchema), ir.QuoteIdentifier(tc.childSchema), parent, parent, child, parent))
 			require.NoError(t, err)
 			config := &DumpConfig{Host: host, Port: port, DB: name, User: user, Password: password,
-				Schema: tc.childSchema, NoComments: true, QualifySchema: true, ConfigDir: t.TempDir()}
+				Schema: tc.childSchema, NoComments: true, QualifySchema: true}
 			dumped, err := ExecuteDump(config)
 			require.NoError(t, err)
 			require.NotContains(t, dumped, `CREATE TABLE IF NOT EXISTS `+parent+` (`)

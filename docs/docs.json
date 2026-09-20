@@ -38,8 +38,7 @@
               "workflow/tenant-schema",
               "workflow/online-ddl",
               "workflow/rollback",
-              "workflow/custom-migration-steps",
-              "workflow/config-data",
+              "workflow/data-migration",
               "workflow/modular-schema-files",
               "workflow/gitops",
               "workflow/orm"
@@ -47,7 +46,7 @@
           },
           {
             "group": "Configuration",
-            "pages": ["cli/plan-db", "cli/config", "cli/ignore", "cli/dotenv"]
+            "pages": ["cli/plan-db", "cli/ignore", "cli/dotenv"]
           }
         ]
       },
@@ -57,7 +56,6 @@
           "syntax/unsupported",
           "syntax/alter_default_privileges",
           "syntax/comment_on",
-          "syntax/copy",
           "syntax/create_aggregate",
           "syntax/create_domain",
           "syntax/create_function",

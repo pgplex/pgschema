@@ -1,4 +1,0 @@
-ALTER TABLE country DROP COLUMN id;
-
-ALTER TABLE country
-ADD CONSTRAINT country_pkey PRIMARY KEY (code);

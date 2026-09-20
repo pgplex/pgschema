@@ -106,10 +106,9 @@ func TestDiffFromFiles(t *testing.T) {
 		relPath, _ := filepath.Rel(testdataDir, path)
 		testName := strings.ReplaceAll(relPath, string(os.PathSeparator), "_")
 
-		// Apply test filter if provided; a filtered-out case is still a case,
-		// so its subdirectories (e.g. data/) are not walked
+		// Apply test filter if provided
 		if testFilter != "" && !matchesFilter(relPath, testFilter) {
-			return filepath.SkipDir
+			return nil
 		}
 
 		// Increment test counter
@@ -120,8 +119,7 @@ func TestDiffFromFiles(t *testing.T) {
 			runFileBasedDiffTest(t, oldFile, newFile, diffFile, testName)
 		})
 
-		// A test case's subdirectories (e.g. data/ with CSV files) are not test cases
-		return filepath.SkipDir
+		return nil
 	})
 
 	if err != nil {
@@ -162,20 +160,28 @@ func runFileBasedDiffTest(t *testing.T, oldFile, newFile, diffFile, testName str
 		setupSQL = string(setupContent)
 	}
 
+	// Read old DDL
+	oldDDL, err := os.ReadFile(oldFile)
+	if err != nil {
+		t.Fatalf("Failed to read old.sql: %v", err)
+	}
+
+	// Read new DDL
+	newDDL, err := os.ReadFile(newFile)
+	if err != nil {
+		t.Fatalf("Failed to read new.sql: %v", err)
+	}
+
 	// Read expected plan
 	expectedPlan, err := os.ReadFile(diffFile)
 	if err != nil {
 		t.Fatalf("Failed to read plan.sql: %v", err)
 	}
 
-	// Config tables listed in the test case's pgschema.toml, if any
-	dataConfig := testutil.LoadDataConfig(t, filepath.Dir(oldFile))
-
 	// Parse DDL to IR with optional setup SQL
-	// setup.sql runs after schema recreation so extensions in public schema aren't dropped.
-	// Files are processed for \i and \copy directives, like the plan command does.
-	oldIR := testutil.ParseFileToIR(t, sharedTestPostgres, oldFile, "public", setupSQL, dataConfig)
-	newIR := testutil.ParseFileToIR(t, sharedTestPostgres, newFile, "public", setupSQL, dataConfig)
+	// setup.sql runs after schema recreation so extensions in public schema aren't dropped
+	oldIR := testutil.ParseSQLToIRWithSetup(t, sharedTestPostgres, string(oldDDL), "public", setupSQL)
+	newIR := testutil.ParseSQLToIRWithSetup(t, sharedTestPostgres, string(newDDL), "public", setupSQL)
 
 	// Run diff
 	diffs := GenerateMigration(oldIR, newIR, "public")
