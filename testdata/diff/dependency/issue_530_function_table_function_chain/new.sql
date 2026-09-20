@@ -23,3 +23,10 @@ BEGIN
     RETURN row_x.flag;
 END;
 $$;
+
+-- SQL function that never touches table x itself but calls x_is_flagged, which is
+-- created after x. Its body is validated at creation, so it must follow x_is_flagged.
+CREATE FUNCTION public.first_is_flagged()
+RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT x_is_flagged(1);
+$$;

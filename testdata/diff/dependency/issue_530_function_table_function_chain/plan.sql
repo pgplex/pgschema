@@ -37,3 +37,11 @@ STABLE
 AS $$
     SELECT x.flag FROM x WHERE x.id = id;
 $$;
+
+CREATE OR REPLACE FUNCTION first_is_flagged()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT x_is_flagged(1);
+$$;

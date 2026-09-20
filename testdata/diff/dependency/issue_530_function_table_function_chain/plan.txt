@@ -1,10 +1,11 @@
-Plan: 4 to add.
+Plan: 5 to add.
 
 Summary by type:
-  functions: 3 to add
+  functions: 4 to add
   tables: 1 to add
 
 Functions:
+  + first_is_flagged
   + random_id
   + x_check
   + x_is_flagged
@@ -53,4 +54,12 @@ LANGUAGE sql
 STABLE
 AS $$
     SELECT x.flag FROM x WHERE x.id = id;
+$$;
+
+CREATE OR REPLACE FUNCTION first_is_flagged()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT x_is_flagged(1);
 $$;
