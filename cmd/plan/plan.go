@@ -286,6 +286,10 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		return nil, fmt.Errorf("failed to process desired state schema file: %w", err)
 	}
 
+	// Warn about and drop statements that cannot change the plan, before they
+	// reach role validation or the plan database (issues #602, #603).
+	desiredState = stripNoEffectStatements(warningWriter, desiredState)
+
 	// Get current state from target database
 	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
 	if err != nil {

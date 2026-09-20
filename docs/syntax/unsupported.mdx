@@ -48,7 +48,7 @@ This applies to every `OWNER TO` form on schema-level objects:
 - `ALTER TYPE ... OWNER TO` / `ALTER DOMAIN ... OWNER TO`
 
 <Warning>
-An `OWNER TO` statement in your schema files has no effect on the plan. A file whose only change is an owner produces an empty plan and the owner on the target database stays as it is. The owner role is also not [stubbed](/cli/plan-db#roles) in the plan database, so the statement can fail there with `role "x" does not exist`.
+An `OWNER TO` statement in your schema files has no effect on the plan. `plan` and `apply` print a warning for it and skip it, and the owner on the target database stays as it is. When `OWNER TO` shares an `ALTER TABLE` with other actions, the statement is kept for those actions and the owner part is still ignored.
 </Warning>
 
 Objects created by `apply` are owned by the role that runs it. To get a specific owner, run `apply` as that role, or change the owner outside of `pgschema`:
@@ -64,7 +64,7 @@ ALTER TABLE orders OWNER TO app_owner;
 Without `IN SCHEMA`, the statement sets a default for every schema in the database where the role creates objects. That is database-level state, not part of the schema `pgschema` manages, and several schemas managed separately would each claim it.
 
 <Warning>
-A global `ALTER DEFAULT PRIVILEGES` statement in your schema files has no effect on the plan. A file whose only change is a global default privilege produces an empty plan and the target database is not changed.
+A global `ALTER DEFAULT PRIVILEGES` statement in your schema files has no effect on the plan. `plan` and `apply` print a warning for it and skip it, and the target database is not changed.
 </Warning>
 
 Apply global default privileges outside of `pgschema`, or scope them to the schema:
