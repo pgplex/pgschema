@@ -9,10 +9,22 @@
     {
       "steps": [
         {
+          "sql": "CREATE OR REPLACE FUNCTION employee_label(\n    emp_id integer\n)\nRETURNS text\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT e.name || ' (' || e.status || ')' FROM public.employees e WHERE e.id = emp_id\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.employee_label"
+        },
+        {
           "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS active_employees AS\n SELECT id,\n    name,\n    salary\n   FROM employees\n  WHERE status::text = 'active'::text;",
           "type": "materialized_view",
           "operation": "create",
           "path": "public.active_employees"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS employee_labels AS\n SELECT id,\n    employee_label(id) AS label\n   FROM employees;",
+          "type": "materialized_view",
+          "operation": "create",
+          "path": "public.employee_labels"
         }
       ]
     }

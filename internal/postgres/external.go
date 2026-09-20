@@ -171,6 +171,11 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// so we need to rewrite it to point to the temporary schema (issue #335)
 	schemaAgnosticSQL = replaceSchemaInSearchPath(schemaAgnosticSQL, schema, ed.tempSchema)
 
+	// Point target-schema qualifiers inside function bodies at the temporary schema so that
+	// SQL functions inlined by later statements resolve (issue #596). Only objects created by
+	// this SQL are rewritten: the plan database's own target schema may hold extensions.
+	schemaAgnosticSQL = qualifyFunctionBodiesWithTempSchema(schemaAgnosticSQL, schema, ed.tempSchema, extractCreatedObjectNames(schemaAgnosticSQL))
+
 	// Stub every role the desired state references so GRANT/POLICY/DEFAULT
 	// PRIVILEGES statements apply in the plan database (issue #450). A
 	// successful CREATE ROLE is the sole proof that a role is ours to drop on

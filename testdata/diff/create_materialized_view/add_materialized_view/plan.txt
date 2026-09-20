@@ -1,13 +1,28 @@
-Plan: 1 to add.
+Plan: 3 to add.
 
 Summary by type:
-  materialized views: 1 to add
+  functions: 1 to add
+  materialized views: 2 to add
+
+Functions:
+  + employee_label
 
 Materialized views:
   + active_employees
+  + employee_labels
 
 DDL to be executed:
 --------------------------------------------------
+
+CREATE OR REPLACE FUNCTION employee_label(
+    emp_id integer
+)
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT e.name || ' (' || e.status || ')' FROM public.employees e WHERE e.id = emp_id
+$$;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS active_employees AS
  SELECT id,
@@ -15,3 +30,8 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS active_employees AS
     salary
    FROM employees
   WHERE status::text = 'active'::text;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS employee_labels AS
+ SELECT id,
+    employee_label(id) AS label
+   FROM employees;

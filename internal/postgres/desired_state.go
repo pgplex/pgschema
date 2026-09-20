@@ -328,6 +328,95 @@ func stripSchemaQualificationsFromText(text string, schemaName string) string {
 	return result
 }
 
+var (
+	// functionBodyPrefixRe matches unquoted SQL ending in the AS keyword, i.e. the text
+	// right before a dollar-quoted function/procedure body (as opposed to a DO block,
+	// a COMMENT ... IS $$...$$ or a dollar-quoted string constant).
+	functionBodyPrefixRe = regexp.MustCompile(`(?i)\bAS\s*$`)
+
+	// createdObjectRe captures the name of each schema-level object a CREATE statement
+	// defines. It runs on SQL whose target-schema qualifiers were already stripped.
+	createdObjectRe = regexp.MustCompile(`(?i)\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:UNLOGGED\s+|RECURSIVE\s+)?` +
+		`(?:TABLE|VIEW|MATERIALIZED\s+VIEW|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN|SEQUENCE)\s+` +
+		`(?:IF\s+NOT\s+EXISTS\s+)?("[^"]+"|[a-zA-Z_][a-zA-Z0-9_$]*)`)
+)
+
+// extractCreatedObjectNames returns the names of the objects created by the given SQL,
+// folded the way PostgreSQL folds them (unquoted names lowercased, quotes removed).
+func extractCreatedObjectNames(sql string) map[string]bool {
+	names := make(map[string]bool)
+	for _, seg := range splitDollarQuotedSegments(sql) {
+		if seg.quoted {
+			continue
+		}
+		for _, m := range createdObjectRe.FindAllStringSubmatch(seg.text, -1) {
+			names[foldIdentifier(m[1])] = true
+		}
+	}
+	return names
+}
+
+func foldIdentifier(ident string) string {
+	if strings.HasPrefix(ident, `"`) {
+		return strings.Trim(ident, `"`)
+	}
+	return strings.ToLower(ident)
+}
+
+// qualifyFunctionBodiesWithTempSchema points target-schema qualifiers inside
+// dollar-quoted function/procedure bodies at the temporary schema.
+//
+// stripSchemaQualifications leaves bodies untouched (issue #354), and
+// check_function_bodies = off keeps CREATE FUNCTION from validating them. But a
+// LANGUAGE sql function is inlined whenever a later statement plans an expression
+// calling it (CREATE MATERIALIZED VIEW, an expression index, ...), and the body's
+// public.some_table then fails to resolve because some_table lives in the temporary
+// schema (issue #596). Qualifiers stay qualified, so bodies that run with an empty
+// search_path keep working, and normalizeSchemaNames maps the temporary schema name
+// back to the target schema after inspection, so the inspected body is unchanged.
+//
+// When objects is nil every qualifier is rewritten; this is right when everything of
+// the target schema lives in the temporary schema (embedded postgres, which also
+// installs the target schema's extensions there). Otherwise only qualifiers of the
+// named objects are rewritten, so references to things that really live in the
+// target schema of an external plan database (e.g. public.unaccent) are preserved.
+func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, objects map[string]bool) string {
+	if schemaName == "" || tempSchema == "" || !strings.Contains(sql, schemaName) {
+		return sql
+	}
+
+	sr := getSchemaRegexes(schemaName)
+	rewrite := func(re *regexp.Regexp, body string, objectGroup int, replacement string) string {
+		return re.ReplaceAllStringFunc(body, func(match string) string {
+			if objects != nil && !objects[foldIdentifier(re.FindStringSubmatch(match)[objectGroup])] {
+				return match
+			}
+			return re.ReplaceAllString(match, replacement)
+		})
+	}
+
+	segments := splitDollarQuotedSegments(sql)
+	var result strings.Builder
+	result.Grow(len(sql))
+	for i, seg := range segments {
+		if !seg.quoted || i == 0 || !functionBodyPrefixRe.MatchString(segments[i-1].text) {
+			result.WriteString(seg.text)
+			continue
+		}
+		body := seg.text
+		// Preserve the qualifier's quoting so the round trip through
+		// normalizeSchemaNames reproduces the original text.
+		quoted := `"` + tempSchema + `".$1`
+		unquoted := "${1}" + tempSchema + ".$2"
+		body = rewrite(sr.re1, body, 1, quoted)
+		body = rewrite(sr.re2, body, 1, quoted)
+		body = rewrite(sr.re3, body, 2, unquoted)
+		body = rewrite(sr.re4, body, 2, unquoted)
+		result.WriteString(body)
+	}
+	return result.String()
+}
+
 // replaceSchemaInSearchPath replaces the target schema name in SET search_path clauses
 // within function/procedure definitions.
 //

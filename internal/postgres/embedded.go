@@ -287,6 +287,11 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	// so we need to rewrite it to point to the temporary schema (issue #335)
 	schemaAgnosticSQL = replaceSchemaInSearchPath(schemaAgnosticSQL, schema, ep.tempSchema)
 
+	// Point target-schema qualifiers inside function bodies at the temporary schema so that
+	// SQL functions inlined by later statements resolve (issue #596). Everything of the target
+	// schema lives in the temporary schema here, so every qualifier is rewritten.
+	schemaAgnosticSQL = qualifyFunctionBodiesWithTempSchema(schemaAgnosticSQL, schema, ep.tempSchema, nil)
+
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY
 	// that cannot run in transactions. Those are migration details, not state declarations.

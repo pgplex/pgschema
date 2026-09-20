@@ -499,3 +499,69 @@ func TestHintCrossSchemaReference(t *testing.T) {
 		}
 	})
 }
+
+func TestQualifyFunctionBodiesWithTempSchema(t *testing.T) {
+	const tmp = "pgschema_tmp_x"
+	tests := []struct {
+		name     string
+		sql      string
+		objects  map[string]bool
+		expected string
+	}{
+		{
+			name:     "function body qualifiers point at temp schema",
+			sql:      `CREATE FUNCTION f() RETURNS text LANGUAGE sql AS $$ SELECT n FROM public.name JOIN "public"."Rank" r ON true $$;`,
+			expected: `CREATE FUNCTION f() RETURNS text LANGUAGE sql AS $$ SELECT n FROM pgschema_tmp_x.name JOIN "pgschema_tmp_x"."Rank" r ON true $$;`,
+		},
+		{
+			name:     "tagged dollar quote and lowercase as",
+			sql:      "CREATE PROCEDURE p() LANGUAGE plpgsql as $body$ BEGIN DELETE FROM public.t; END $body$;",
+			expected: "CREATE PROCEDURE p() LANGUAGE plpgsql as $body$ BEGIN DELETE FROM pgschema_tmp_x.t; END $body$;",
+		},
+		{
+			name:     "other schemas and longer identifiers are preserved",
+			sql:      `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM auth.users, notpublic.t $$;`,
+			expected: `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM auth.users, notpublic.t $$;`,
+		},
+		{
+			name:     "dollar-quoted text that is not a function body is preserved",
+			sql:      `COMMENT ON TABLE t IS $$see public.t$$; DO $$ BEGIN PERFORM 1 FROM public.t; END $$;`,
+			expected: `COMMENT ON TABLE t IS $$see public.t$$; DO $$ BEGIN PERFORM 1 FROM public.t; END $$;`,
+		},
+		{
+			name:     "only listed objects are rewritten",
+			sql:      `CREATE FUNCTION f(text) RETURNS text LANGUAGE sql AS $$ SELECT public.unaccent($1) FROM public.Name, public."Rank" $$;`,
+			objects:  map[string]bool{"name": true, "Rank": true},
+			expected: `CREATE FUNCTION f(text) RETURNS text LANGUAGE sql AS $$ SELECT public.unaccent($1) FROM pgschema_tmp_x.Name, pgschema_tmp_x."Rank" $$;`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := qualifyFunctionBodiesWithTempSchema(tt.sql, "public", tmp, tt.objects)
+			if got != tt.expected {
+				t.Errorf("got:\n%s\nexpected:\n%s", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractCreatedObjectNames(t *testing.T) {
+	sql := `
+CREATE TABLE IF NOT EXISTS name (id bigint);
+CREATE UNLOGGED TABLE "Rank" (id bigint);
+CREATE OR REPLACE FUNCTION Find_Rank(id bigint) RETURNS text LANGUAGE sql AS $$ CREATE TABLE ignored (id int) $$;
+CREATE MATERIALIZED VIEW IF NOT EXISTS name_mv AS SELECT 1;
+CREATE INDEX idx ON name (id);
+`
+	got := extractCreatedObjectNames(sql)
+	expected := []string{"name", "Rank", "find_rank", "name_mv"}
+	if len(got) != len(expected) {
+		t.Errorf("got %v, expected %v", got, expected)
+	}
+	for _, name := range expected {
+		if !got[name] {
+			t.Errorf("missing %q in %v", name, got)
+		}
+	}
+}
