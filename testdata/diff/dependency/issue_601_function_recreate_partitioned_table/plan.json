@@ -1,0 +1,96 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "29d912f084e43a71d3222e536f0a5ce25cc65258cf56241f9da79c2d70760581"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE measurements DROP CONSTRAINT IF EXISTS measurements_qty_check;",
+          "type": "table.constraint",
+          "operation": "recreate",
+          "path": "public.measurements.measurements_qty_check"
+        },
+        {
+          "sql": "DROP INDEX IF EXISTS measurements_qty_idx;",
+          "type": "table.index",
+          "operation": "recreate",
+          "path": "public.measurements.measurements_qty_idx"
+        },
+        {
+          "sql": "ALTER TABLE ONLY measurements ALTER COLUMN qty DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.measurements.qty"
+        },
+        {
+          "sql": "ALTER TABLE measurements_p2 ALTER COLUMN qty DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.measurements_p2.qty"
+        },
+        {
+          "sql": "ALTER TABLE measurements_p3 ALTER COLUMN qty DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.measurements_p3.qty"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS default_qty(integer);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_qty"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION default_qty(\n    x integer\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT x\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_qty"
+        },
+        {
+          "sql": "ALTER TABLE ONLY measurements ALTER COLUMN qty SET DEFAULT default_qty(1);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.measurements.qty"
+        },
+        {
+          "sql": "ALTER TABLE measurements\nADD CONSTRAINT measurements_qty_check CHECK (qty <= default_qty(100)) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.measurements.measurements_qty_check"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS measurements_qty_idx ON measurements ((qty + default_qty(0)));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.measurements.measurements_qty_idx"
+        },
+        {
+          "sql": "ALTER TABLE measurements_p2 ALTER COLUMN qty SET DEFAULT default_qty(1);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.measurements_p2.qty"
+        },
+        {
+          "sql": "ALTER TABLE measurements_p3 ALTER COLUMN qty SET DEFAULT default_qty(1);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.measurements_p3.qty"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE measurements VALIDATE CONSTRAINT measurements_qty_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.measurements.measurements_qty_check"
+        }
+      ]
+    }
+  ]
+}

@@ -1486,6 +1486,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.NoInherit {
 				suffix += " NO INHERIT"
 			}
+			if !constraint.IsValid {
+				suffix += " NOT VALID"
+			}
 			canonicalSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s%s;",
 				tableName, ir.QuoteIdentifier(constraint.Name), clause, suffix)
 
@@ -1612,6 +1615,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			suffix := ""
 			if constraint.NoInherit {
 				suffix += " NO INHERIT"
+			}
+			if !constraint.IsValid {
+				suffix += " NOT VALID"
 			}
 			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s%s;",
 				tableName, ir.QuoteIdentifier(constraint.Name), ensureCheckClauseParens(constraint.CheckClause), suffix)

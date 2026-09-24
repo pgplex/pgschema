@@ -1,0 +1,76 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "7ac709786f11de355879832efce9da01bc0732ab369ef694db3c8c882eaa2272"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TYPE ticket_state ADD VALUE 'pending' AFTER 'open';",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.ticket_state"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE tickets ALTER COLUMN state SET DEFAULT 'pending'::ticket_state;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tickets.state"
+        },
+        {
+          "sql": "ALTER TABLE tickets DROP CONSTRAINT IF EXISTS tickets_priority_check;",
+          "type": "table.constraint",
+          "operation": "recreate",
+          "path": "public.tickets.tickets_priority_check"
+        },
+        {
+          "sql": "ALTER TABLE tickets ALTER COLUMN priority DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tickets.priority"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS default_priority();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION default_priority()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 5\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "ALTER TABLE tickets ALTER COLUMN priority SET DEFAULT default_priority();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tickets.priority"
+        },
+        {
+          "sql": "ALTER TABLE tickets\nADD CONSTRAINT tickets_priority_check CHECK (priority <= (default_priority() * 10)) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.tickets.tickets_priority_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE tickets VALIDATE CONSTRAINT tickets_priority_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.tickets.tickets_priority_check"
+        }
+      ]
+    }
+  ]
+}

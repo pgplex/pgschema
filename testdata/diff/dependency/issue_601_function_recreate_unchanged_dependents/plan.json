@@ -1,0 +1,216 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "8792fb022bb6a32d3821a378a9070c708cc40ae435fe6a55ec2b7a7bec3c39c6"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP TRIGGER IF EXISTS orders_audit ON orders;",
+          "type": "table.trigger",
+          "operation": "recreate",
+          "path": "public.orders.orders_audit"
+        },
+        {
+          "sql": "DROP POLICY IF EXISTS orders_tenant ON orders;",
+          "type": "table.policy",
+          "operation": "recreate",
+          "path": "public.orders.orders_tenant"
+        },
+        {
+          "sql": "ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_qty_check;",
+          "type": "table.constraint",
+          "operation": "recreate",
+          "path": "public.orders.orders_qty_check"
+        },
+        {
+          "sql": "DROP INDEX IF EXISTS orders_code_key;",
+          "type": "table.index",
+          "operation": "recreate",
+          "path": "public.orders.orders_code_key"
+        },
+        {
+          "sql": "DROP INDEX IF EXISTS orders_large_idx;",
+          "type": "table.index",
+          "operation": "recreate",
+          "path": "public.orders.orders_large_idx"
+        },
+        {
+          "sql": "ALTER TABLE orders ALTER COLUMN tenant_id DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.orders.tenant_id"
+        },
+        {
+          "sql": "ALTER TABLE orders ALTER COLUMN priority DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.orders.priority"
+        },
+        {
+          "sql": "DROP MATERIALIZED VIEW IF EXISTS order_codes RESTRICT;",
+          "type": "materialized_view",
+          "operation": "recreate",
+          "path": "public.order_codes"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS my_orders RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.my_orders"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS current_tenant();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.current_tenant"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION current_tenant()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$ SELECT current_setting('app.tenant', true)::bigint\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.current_tenant"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS normalize_code(text);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.normalize_code"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION normalize_code(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT lower(input)\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.normalize_code"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW my_orders AS\n SELECT id,\n    code\n   FROM orders\n  WHERE tenant_id = current_tenant();",
+          "type": "view",
+          "operation": "create",
+          "path": "public.my_orders"
+        },
+        {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS order_codes AS\n SELECT id,\n    code\n   FROM orders;",
+          "type": "materialized_view",
+          "operation": "create",
+          "path": "public.order_codes"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS order_codes_normalized_idx ON order_codes (normalize_code(code));",
+          "type": "materialized_view.index",
+          "operation": "create",
+          "path": "public.order_codes.order_codes_normalized_idx"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS audit_threshold();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.audit_threshold"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION audit_threshold()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 10\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.audit_threshold"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS default_priority();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION default_priority()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 5\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS max_qty();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.max_qty"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION max_qty()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 100\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.max_qty"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS standalone();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.standalone"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION standalone()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 1\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.standalone"
+        },
+        {
+          "sql": "ALTER TABLE orders ALTER COLUMN tenant_id SET DEFAULT current_tenant();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.orders.tenant_id"
+        },
+        {
+          "sql": "ALTER TABLE orders ALTER COLUMN priority SET DEFAULT default_priority();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.orders.priority"
+        },
+        {
+          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_qty_check CHECK (qty <= max_qty()) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.orders.orders_qty_check"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER orders_audit\n    BEFORE INSERT ON orders\n    FOR EACH ROW\n    WHEN (((NEW.qty > audit_threshold())))\n    EXECUTE FUNCTION mark_audited();",
+          "type": "table.trigger",
+          "operation": "create",
+          "path": "public.orders.orders_audit"
+        },
+        {
+          "sql": "CREATE POLICY orders_tenant ON orders TO tenant_reader USING (tenant_id = current_tenant());",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.orders.orders_tenant"
+        },
+        {
+          "sql": "CREATE UNIQUE INDEX IF NOT EXISTS orders_code_key ON orders (normalize_code(code));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.orders_code_key"
+        },
+        {
+          "sql": "COMMENT ON INDEX orders_code_key IS 'Case-insensitive order code';",
+          "type": "table.index.comment",
+          "operation": "create",
+          "path": "public.orders.orders_code_key"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS orders_large_idx ON orders (id) WHERE qty > (max_qty() / 2);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.orders.orders_large_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE orders VALIDATE CONSTRAINT orders_qty_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.orders.orders_qty_check"
+        }
+      ]
+    }
+  ]
+}
