@@ -1,0 +1,98 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "6c38fbdfa73d9d1793aa3966dc6ea4f689852c2cd82832e126c3b65c7c0cad2a"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER DOMAIN quantity DROP DEFAULT;",
+          "type": "domain",
+          "operation": "alter",
+          "path": "public.quantity"
+        },
+        {
+          "sql": "ALTER DOMAIN quantity DROP CONSTRAINT IF EXISTS quantity_max;",
+          "type": "domain",
+          "operation": "alter",
+          "path": "public.quantity"
+        },
+        {
+          "sql": "ALTER TABLE slots DROP CONSTRAINT IF EXISTS slots_code_excl;",
+          "type": "table.constraint",
+          "operation": "recreate",
+          "path": "public.slots.slots_code_excl"
+        },
+        {
+          "sql": "ALTER TABLE slots DROP CONSTRAINT IF EXISTS slots_id_check;",
+          "type": "table.constraint",
+          "operation": "recreate",
+          "path": "public.slots.slots_id_check"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS default_qty();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_qty"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION default_qty()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 5\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_qty"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS max_qty();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.max_qty"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION max_qty()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 100\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.max_qty"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS normalize_code(text);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.normalize_code"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION normalize_code(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT lower(input)\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.normalize_code"
+        },
+        {
+          "sql": "ALTER DOMAIN quantity SET DEFAULT default_qty();",
+          "type": "domain",
+          "operation": "alter",
+          "path": "public.quantity"
+        },
+        {
+          "sql": "ALTER DOMAIN quantity ADD CONSTRAINT quantity_max CHECK (VALUE <= max_qty());",
+          "type": "domain",
+          "operation": "alter",
+          "path": "public.quantity"
+        },
+        {
+          "sql": "ALTER TABLE slots\nADD CONSTRAINT slots_id_check CHECK (id <= max_qty()) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.slots.slots_id_check"
+        },
+        {
+          "sql": "ALTER TABLE slots\nADD CONSTRAINT slots_code_excl EXCLUDE USING btree (normalize_code(code) WITH =);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.slots.slots_code_excl"
+        }
+      ]
+    }
+  ]
+}

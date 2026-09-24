@@ -1,0 +1,82 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "b08312b318569ac126ca0f5c33438430d26061fce659026089a034ead40dc856"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE ledger\nADD CONSTRAINT ledger_amount_check CHECK (amount >= 0) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.ledger.ledger_amount_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE ledger VALIDATE CONSTRAINT ledger_amount_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.ledger.ledger_amount_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS ledger_amount_idx ON ledger (amount);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.ledger.ledger_amount_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'ledger_amount_idx';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index ledger_amount_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.ledger.ledger_amount_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "DROP TRIGGER IF EXISTS audited_mark ON audited;",
+          "type": "table.trigger",
+          "operation": "recreate",
+          "path": "public.audited.audited_mark"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS audit_threshold();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.audit_threshold"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION audit_threshold()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 10\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.audit_threshold"
+        },
+        {
+          "sql": "CREATE OR REPLACE TRIGGER audited_mark\n    BEFORE INSERT ON audited\n    FOR EACH ROW\n    WHEN (((NEW.qty > audit_threshold())))\n    EXECUTE FUNCTION mark_audited();",
+          "type": "table.trigger",
+          "operation": "create",
+          "path": "public.audited.audited_mark"
+        }
+      ]
+    }
+  ]
+}

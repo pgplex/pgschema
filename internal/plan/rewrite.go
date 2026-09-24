@@ -27,7 +27,9 @@ type RewriteStep struct {
 // required version or unknown. currentIR is the target database's current state
 // (nil-safe); rewrites consult it to pick constraint names that don't collide
 // with existing constraints, including ones invisible to the IR.
-func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool, targetMajorVersion int, currentIR *ir.IR) []RewriteStep {
+// recreatedIndexes holds the paths of indexes the plan dropped earlier as part
+// of a drop + create cycle; they are rebuilt without CONCURRENTLY.
+func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreatedMaterializedViews map[string]bool, recreatedIndexes map[string]bool, targetMajorVersion int, currentIR *ir.IR) []RewriteStep {
 	// Dispatch to specific rewrite generators based on diff type and source
 	switch d.Type {
 	case diff.DiffTypeTableIndex:
@@ -38,6 +40,13 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 				tableKey := index.Schema + "." + index.Table
 				if newlyCreatedTables[tableKey] {
 					return nil // No rewrite needed for indexes on new tables
+				}
+				// An index dropped around a function that is dropped and
+				// created again is rebuilt in the same transaction, so the
+				// table is never without it (#601). CREATE INDEX CONCURRENTLY
+				// cannot run there.
+				if recreatedIndexes[d.Path] {
+					return nil
 				}
 				return generateIndexRewrite(index)
 			}
@@ -71,6 +80,13 @@ func generateRewrite(d diff.Diff, newlyCreatedTables map[string]bool, newlyCreat
 			}
 		}
 	case diff.DiffTypeTableConstraint:
+		// A standalone VALIDATE CONSTRAINT (completing a constraint added
+		// NOT VALID earlier in the plan, #601) scans the table; like the one
+		// following an ADD ... NOT VALID it runs in a transaction of its own.
+		if len(d.Statements) == 1 && strings.HasPrefix(d.Statements[0].SQL, "ALTER TABLE ") &&
+			!strings.Contains(d.Statements[0].SQL, "ADD CONSTRAINT") && strings.Contains(d.Statements[0].SQL, " VALIDATE CONSTRAINT ") {
+			return []RewriteStep{{SQL: d.Statements[0].SQL, CanRunInTransaction: true, RequiresIsolation: true}}
+		}
 		if d.Operation == diff.DiffOperationCreate {
 			if constraint, ok := d.Source.(*ir.Constraint); ok {
 				// Skip rewrite for constraints on newly created tables
@@ -272,6 +288,10 @@ func generateConstraintRewrite(constraint *ir.Constraint) []RewriteStep {
 	}
 	notValidSQL := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s%s NOT VALID;",
 		tableName, ir.QuoteIdentifier(constraint.Name), constraint.CheckClause, noInheritSuffix)
+	// A constraint the desired state leaves NOT VALID is not validated.
+	if !constraint.IsValid {
+		return []RewriteStep{{SQL: notValidSQL, CanRunInTransaction: true}}
+	}
 	validateSQL := fmt.Sprintf("ALTER TABLE %s VALIDATE CONSTRAINT %s;",
 		tableName, ir.QuoteIdentifier(constraint.Name))
 

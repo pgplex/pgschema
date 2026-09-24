@@ -267,6 +267,11 @@ type Diff struct {
 	Operation  DiffOperation  `json:"operation"` // create, alter, drop, replace
 	Path       string         `json:"path"`
 	Source     DiffSource     `json:"-"` // interface; not JSON-serializable (see #305)
+	// HeldDependent marks the drop or in-transaction restore of an object
+	// held around a function that is dropped and created again (#601). The
+	// plan must not put a transaction boundary between the first and the
+	// last of them.
+	HeldDependent bool `json:"-"`
 }
 
 type ddlDiff struct {
@@ -339,6 +344,11 @@ type ddlDiff struct {
 	fkPreDrops          []*ir.Constraint
 	fkPostAdds          []*deferredConstraint
 	suppressedInlineFKs map[string]bool
+
+	// Objects whose desired definition calls a function that is dropped and
+	// created again; see holdRecreatedFunctionDependents (#601).
+	heldTableDependents  []*heldTableDependents
+	heldDomainDependents []*heldDomainDependents
 }
 
 // schemaDiff represents changes to a schema
@@ -893,6 +903,10 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 		}
 	}
 
+	// Objects other than views that call a function dropped and created again
+	// are dropped before it and created after it (#601).
+	diff.holdRecreatedFunctionDependents(oldTables, newTables, oldTypes, newTypes)
+
 	// Compare views across all schemas
 	oldViews := make(map[string]*ir.View)
 	newViews := make(map[string]*ir.View)
@@ -948,7 +962,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			// Likewise for a view that calls a function being dropped and
 			// created again, e.g. for a return type change (#601).
 			dependsOnRecreated := viewDependsOnRecreatedColumn(oldView, diff.modifiedTables) ||
-				referencesNewFunction(oldView.Definition, oldView.Schema, recreatedFunctionLookup)
+				viewCallsRoutines(oldView, recreatedFunctionLookup)
 			// Check if the view definition itself changed (excluding options).
 			// This is used to decide if materialized views need DROP+CREATE:
 			// option-only changes should use ALTER VIEW SET/RESET, not recreation.
@@ -2303,6 +2317,11 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// modifications would be processed (and correctly skipped).
 	sortModifiedViewsForProcessing(d.modifiedViews)
 
+	// Drop the defaults, constraints, indexes, policies and triggers that call
+	// a function dropped and created again below; they are created again once
+	// it is back (#601).
+	d.generateDropHeldFunctionDependentsSQL(targetSchema, collector)
+
 	// Functions that are dropped and created again while views call them go
 	// first: the calling views are dropped, the functions recreated, and the
 	// modify-views phase below then creates the views again (#601).
@@ -2311,7 +2330,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 		lookup := buildRoutineLookup(recreatedFunctions(functionsUnderViews), nil)
 		var callingViews []*ir.View
 		for _, viewDiff := range d.modifiedViews {
-			if viewDiff.RequiresRecreate && referencesNewFunction(viewDiff.Old.Definition, viewDiff.Old.Schema, lookup) {
+			if viewDiff.RequiresRecreate && viewCallsRoutines(viewDiff.Old, lookup) {
 				callingViews = append(callingViews, viewDiff.Old)
 			}
 		}
@@ -2319,8 +2338,21 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 		generateModifyFunctionsSQL(functionsUnderViews, targetSchema, collector)
 	}
 
+	// Index changes on materialized views that are kept become CREATE INDEX
+	// CONCURRENTLY in the plan, which ends the transaction. While functions
+	// are dropped and created again, they wait until the objects held around
+	// that recreation are back, so everything from the first held drop to the
+	// last restore runs in one transaction (#601).
+	viewIndexCollector := collector
+	var deferredViewIndexes *diffCollector
+	if len(recreatedFunctions(d.modifiedFunctions)) > 0 {
+		deferredViewIndexes = newDiffCollector()
+		deferredViewIndexes.qualifySchema = collector.qualifySchema
+		viewIndexCollector = deferredViewIndexes
+	}
+
 	// Modify views - pass preDroppedViews to skip DROP for already-dropped views
-	generateModifyViewsSQL(d.modifiedViews, targetSchema, collector, preDroppedViews, dependentViewsCtx, recreatedViews)
+	generateModifyViewsSQL(d.modifiedViews, targetSchema, collector, viewIndexCollector, preDroppedViews, dependentViewsCtx, recreatedViews)
 
 	// Create functions deferred from generateCreateSQL because their return/parameter
 	// type references a view just recreated above. Emitting them now (rather than in
@@ -2332,6 +2364,17 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Modify functions
 	generateModifyFunctionsSQL(otherModifiedFunctions, targetSchema, collector)
+
+	// Now that every recreated function exists again, create the objects that
+	// call it: the ones dropped before it and the ones the create phase left
+	// out of new tables and domains (#601). Then the steps that run in
+	// transactions of their own: the deferred materialized view index changes,
+	// VALIDATE CONSTRAINT for re-added CHECK constraints, and new indexes.
+	d.generateRestoreHeldFunctionDependentsSQL(targetSchema, collector)
+	if deferredViewIndexes != nil {
+		collector.diffs = append(collector.diffs, deferredViewIndexes.diffs...)
+	}
+	d.generateCompleteHeldFunctionDependentsSQL(targetSchema, collector)
 
 	// Modify procedures
 	generateModifyProceduresSQL(d.modifiedProcedures, targetSchema, collector)
@@ -2470,6 +2513,21 @@ func viewDependsOnRecreatedColumn(view *ir.View, modifiedTables []*tableDiff) bo
 	return false
 }
 
+// viewCallsRoutines reports whether a view calls a routine in the lookup, in
+// its query or, for a materialized view, in an index expression or predicate:
+// either way the view is created after the routine and blocks its DROP. (#601)
+func viewCallsRoutines(view *ir.View, routines map[string]struct{}) bool {
+	if referencesNewFunction(view.Definition, view.Schema, routines) {
+		return true
+	}
+	for _, name := range sortedKeys(view.Indexes) {
+		if indexCallsFunction(view.Indexes[name], routines) {
+			return true
+		}
+	}
+	return false
+}
+
 // recreatedFunctions returns the desired state of the modified functions that
 // are applied as DROP FUNCTION + CREATE FUNCTION (see functionRequiresRecreate).
 func recreatedFunctions(modifiedFunctions []*functionDiff) []*ir.Function {
@@ -2505,15 +2563,15 @@ func (d *ddlDiff) splitFunctionsRecreatedUnderViews() (underViews, others []*fun
 func (d *ddlDiff) viewCallsFunction(fn *ir.Function) bool {
 	lookup := buildRoutineLookup([]*ir.Function{fn}, nil)
 	for _, viewDiff := range d.modifiedViews {
-		if viewDiff.RequiresRecreate && referencesNewFunction(viewDiff.Old.Definition, viewDiff.Old.Schema, lookup) {
+		if viewDiff.RequiresRecreate && viewCallsRoutines(viewDiff.Old, lookup) {
 			return true
 		}
-		if referencesNewFunction(viewDiff.New.Definition, viewDiff.New.Schema, lookup) {
+		if viewCallsRoutines(viewDiff.New, lookup) {
 			return true
 		}
 	}
 	for _, view := range d.addedViews {
-		if referencesNewFunction(view.Definition, view.Schema, lookup) {
+		if viewCallsRoutines(view, lookup) {
 			return true
 		}
 	}
@@ -3124,7 +3182,7 @@ func splitViewsReferencingRoutines(views []*ir.View, routines map[string]struct{
 		return views, nil
 	}
 	for _, v := range views {
-		if referencesNewFunction(v.Definition, v.Schema, routines) || viewReferencesAnyDeferredView(v, later) {
+		if viewCallsRoutines(v, routines) || viewReferencesAnyDeferredView(v, later) {
 			later = append(later, v)
 		} else {
 			now = append(now, v)
