@@ -250,6 +250,12 @@ The main `schema.sql` file contains:
 \i procedures/cleanup_old_data.sql
 ```
 
+For circular foreign keys, `pgschema` writes postponed constraints to separate
+files under `constraints/`, such as `constraints/0001_orders.sql`. The numeric
+prefix distinguishes multiple constraints on the same table. The exporter keeps
+these files in dependency order in `schema.sql`, after the required tables.
+Load files in the generated include order to preserve these dependencies.
+
 Each individual file (e.g., `tables/users.sql`) contains the specific object definition:
 ```sql
 --

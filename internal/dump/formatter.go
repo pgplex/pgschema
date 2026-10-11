@@ -91,6 +91,7 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	type fileKey struct{ dir, name string }
 	stepsByFile := make(map[fileKey][]diff.Diff)
 	var fileOrder []fileKey
+	constraintIndex := 0
 	var tables []*ir.Table
 	var views []*ir.View
 
@@ -103,6 +104,14 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			dir = f.getObjectDirectory(step.Type.String())
 		}
 		key := fileKey{dir: dir, name: f.getGroupingName(step)}
+		if step.Type == diff.DiffTypeTableConstraint {
+			// Keep postponed constraints at their position in the diff sequence.
+			// Bundling them with CREATE TABLE can put an FK before its target.
+			// A sequence number also avoids collisions between constraint names
+			// on different tables and names that sanitize to the same filename.
+			constraintIndex++
+			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+		}
 
 		if _, exists := stepsByFile[key]; !exists {
 			fileOrder = append(fileOrder, key)
@@ -119,8 +128,8 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 
 	// Compute the include order. The diff package already emits statements in
 	// dependency order, so the first appearance of each file is the baseline.
-	// One adjustment is needed because a table's triggers, policies, and
-	// deferred constraints are bundled into the table's file even though the
+	// One adjustment is needed because a table's triggers and policies
+	// are bundled into the table's file even though the
 	// diff emits them after functions: any function whose signature does not
 	// reference a table or view is hoisted ahead of the first table file so
 	// the bundled statements can resolve it. Functions that do use a relation's

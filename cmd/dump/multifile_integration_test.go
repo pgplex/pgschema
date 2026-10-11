@@ -2,11 +2,14 @@ package dump
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/pgplex/pgschema/cmd/plan"
 	"github.com/pgplex/pgschema/testutil"
 )
 
@@ -164,4 +167,160 @@ CREATE AGGREGATE sum_tnu(tnu_index_v) (SFUNC = tnu_sfunc, STYPE = int, INITCOND 
 			t.Errorf("replaying %s failed: %v", inc, err)
 		}
 	}
+}
+
+// TestDumpCommand_MultiFileForeignKeyOrder replays circular, composite,
+// self-referencing, and acyclic foreign keys without editing the dump.
+func TestDumpCommand_MultiFileForeignKeyOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+	ctx := context.Background()
+
+	const setup = `
+CREATE TABLE records (id int PRIMARY KEY, current_revision int, active_run_id int);
+CREATE TABLE runs (
+    id int PRIMARY KEY, record_id int, snapshot_revision int,
+    UNIQUE (record_id, id),
+    CONSTRAINT owner_fk FOREIGN KEY (record_id) REFERENCES records (id) ON DELETE RESTRICT
+);
+CREATE TABLE snapshots (
+    record_id int, revision int, run_id int,
+    PRIMARY KEY (record_id, revision),
+    CONSTRAINT owner_fk FOREIGN KEY (record_id) REFERENCES records (id) ON DELETE CASCADE,
+    CONSTRAINT run_fk FOREIGN KEY (record_id, run_id) REFERENCES runs (record_id, id)
+);
+ALTER TABLE records ADD CONSTRAINT snapshot_fk
+    FOREIGN KEY (id, current_revision) REFERENCES snapshots (record_id, revision)
+    ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE records ADD CONSTRAINT run_fk
+    FOREIGN KEY (id, active_run_id) REFERENCES runs (record_id, id)
+    DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE runs ADD CONSTRAINT snapshot_fk
+    FOREIGN KEY (record_id, snapshot_revision) REFERENCES snapshots (record_id, revision);
+CREATE TABLE tree (
+    id int PRIMARY KEY, parent_id int,
+    CONSTRAINT parent_fk FOREIGN KEY (parent_id) REFERENCES tree (id)
+);
+CREATE TABLE tags (
+    id int PRIMARY KEY, record_id int,
+    CONSTRAINT owner_fk FOREIGN KEY (record_id) REFERENCES records (id)
+);
+COMMENT ON TABLE records IS 'Records with circular references';
+`
+	for _, flags := range []struct {
+		name          string
+		noComments    bool
+		qualifySchema bool
+	}{
+		{name: "default"},
+		{name: "no_comments", noComments: true},
+		{name: "qualified", qualifySchema: true},
+		{name: "qualified_no_comments", noComments: true, qualifySchema: true},
+	} {
+		t.Run(flags.name, func(t *testing.T) {
+			if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`+setup); err != nil {
+				t.Fatalf("Failed to set up schema: %v", err)
+			}
+			wantFKs := foreignKeyCatalog(t, conn)
+			if len(wantFKs) != 8 {
+				t.Fatalf("Expected 8 fixture foreign keys, got %d", len(wantFKs))
+			}
+			outDir := t.TempDir()
+			mainPath := filepath.Join(outDir, "schema.sql")
+			config := &DumpConfig{
+				Host: host, Port: port, DB: dbname, User: user, Password: password,
+				Schema: "public", SSLMode: "disable", MultiFile: true, File: mainPath,
+				NoComments: flags.noComments, QualifySchema: flags.qualifySchema,
+			}
+			if _, err := ExecuteDump(config); err != nil {
+				t.Fatalf("Dump command failed: %v", err)
+			}
+			mainContent, err := os.ReadFile(mainPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
+				t.Fatal(err)
+			}
+			for line := range strings.SplitSeq(string(mainContent), "\n") {
+				inc, ok := strings.CutPrefix(line, `\i `)
+				if !ok {
+					continue
+				}
+				sqlBytes, err := os.ReadFile(filepath.Join(outDir, inc))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := conn.ExecContext(ctx, string(sqlBytes)); err != nil {
+					t.Fatalf("Replaying %s failed: %v", inc, err)
+				}
+			}
+			if got := foreignKeyCatalog(t, conn); !reflect.DeepEqual(got, wantFKs) {
+				t.Fatalf("Foreign key catalog changed after replay:\ngot: %v\nwant: %v", got, wantFKs)
+			}
+
+			planConfig := &plan.PlanConfig{
+				Host: host, Port: port, DB: dbname, User: user, Password: password,
+				Schema: "public", SSLMode: "disable", File: mainPath,
+			}
+			provider, err := plan.CreateDesiredStateProvider(planConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer provider.Stop()
+			migrationPlan, err := plan.GeneratePlan(planConfig, provider)
+			if err != nil {
+				t.Fatalf("Follow-up plan failed: %v", err)
+			}
+			if len(migrationPlan.Groups) != 0 {
+				t.Fatalf("Expected empty follow-up plan, got: %+v", migrationPlan.Groups)
+			}
+
+			// Single-file output uses the same SQL generation and must still replay.
+			config.MultiFile = false
+			singleSQL, err := ExecuteDump(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`+singleSQL); err != nil {
+				t.Fatalf("Single-file replay failed: %v", err)
+			}
+			if got := foreignKeyCatalog(t, conn); !reflect.DeepEqual(got, wantFKs) {
+				t.Fatalf("Foreign key catalog changed after single-file replay: %v", got)
+			}
+		})
+	}
+}
+
+// foreignKeyCatalog includes names, owning/referenced relations, column order,
+// match type, update/delete actions, validation, and deferrability.
+func foreignKeyCatalog(t *testing.T, conn *sql.DB) []string {
+	t.Helper()
+	rows, err := conn.QueryContext(context.Background(), `
+SELECT c.conrelid::regclass::text, c.conname, pg_get_constraintdef(c.oid)
+FROM pg_constraint c
+JOIN pg_namespace n ON n.oid = c.connamespace
+WHERE n.nspname = 'public' AND c.contype = 'f'
+ORDER BY c.conrelid::regclass::text, c.conname`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var catalog []string
+	for rows.Next() {
+		var table, name, definition string
+		if err := rows.Scan(&table, &name, &definition); err != nil {
+			t.Fatal(err)
+		}
+		catalog = append(catalog, table+"."+name+": "+definition)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
 }
