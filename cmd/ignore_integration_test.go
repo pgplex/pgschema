@@ -16,6 +16,7 @@ import (
 	"github.com/pgplex/pgschema/cmd/apply"
 	"github.com/pgplex/pgschema/cmd/dump"
 	planCmd "github.com/pgplex/pgschema/cmd/plan"
+	"github.com/pgplex/pgschema/internal/include"
 	"github.com/pgplex/pgschema/testutil"
 	"github.com/spf13/cobra"
 )
@@ -443,21 +444,22 @@ JOIN supplier_contracts c ON s.id = c.supplier_id;
 			t.Fatalf("Failed to execute multi-file dump: %v", err)
 		}
 
-		// Read supplier_contracts table file (should have FK)
-		tablesDir := filepath.Join(tmpDir, "tables")
-		contractsFile := filepath.Join(tablesDir, "supplier_contracts.sql")
-		contractsContent, err := os.ReadFile(contractsFile)
+		// Resolve the generated includes so postponed constraints are checked too.
+		output, err := include.NewProcessor(tmpDir).ProcessFile(outputFile)
 		if err != nil {
-			t.Fatalf("Failed to read supplier_contracts.sql: %v", err)
+			t.Fatalf("Failed to resolve multi-file dump: %v", err)
 		}
-		contractsOutput := string(contractsContent)
 
-		// Verify FK constraint is in the table file
-		if !strings.Contains(contractsOutput, "fk_supplier") {
-			t.Error("Multi-file dump should include FK constraint fk_supplier in supplier_contracts.sql")
+		if !strings.Contains(output, "CREATE TABLE IF NOT EXISTS supplier_contracts") {
+			t.Error("Multi-file dump should include managed table supplier_contracts")
 		}
-		if !strings.Contains(contractsOutput, "temp_external_suppliers") {
-			t.Error("FK constraint should reference temp_external_suppliers in multi-file dump")
+		if strings.Contains(output, "CREATE TABLE IF NOT EXISTS temp_external_suppliers") {
+			t.Error("Multi-file dump should not include ignored table temp_external_suppliers")
+		}
+
+		// Verify the FK itself, rather than a reference in a view or comment.
+		if !strings.Contains(output, "ADD CONSTRAINT fk_supplier FOREIGN KEY (supplier_id) REFERENCES temp_external_suppliers (id)") {
+			t.Error("Multi-file dump should preserve fk_supplier referencing temp_external_suppliers")
 		}
 
 		// Verify view file exists and references ignored table
