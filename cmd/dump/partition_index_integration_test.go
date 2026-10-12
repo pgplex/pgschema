@@ -59,6 +59,19 @@ ALTER INDEX "Event.Lookup" ATTACH PARTITION "Early.Lookup";
 ALTER INDEX "Event.Lookup" ATTACH PARTITION "Late.Lookup";
 CREATE TABLE empty_events (id int) PARTITION BY RANGE (id);
 CREATE INDEX empty_lookup ON empty_events (id);
+-- The root index sorts before its partitioned child to exercise recursive ordering.
+CREATE TABLE archive_events (bucket int, label text) PARTITION BY RANGE (bucket);
+CREATE TABLE archive_events_early PARTITION OF archive_events FOR VALUES FROM (0) TO (10) PARTITION BY RANGE (bucket);
+CREATE TABLE archive_events_first PARTITION OF archive_events_early FOR VALUES FROM (0) TO (5);
+CREATE TABLE archive_events_second PARTITION OF archive_events_early FOR VALUES FROM (5) TO (10);
+CREATE INDEX a_archive_lookup ON ONLY archive_events (label);
+CREATE INDEX z_archive_lookup ON ONLY archive_events_early (label);
+CREATE INDEX first_custom_lookup ON archive_events_first (label);
+CREATE INDEX second_custom_lookup ON archive_events_second (label);
+ALTER INDEX z_archive_lookup ATTACH PARTITION first_custom_lookup;
+ALTER INDEX z_archive_lookup ATTACH PARTITION second_custom_lookup;
+ALTER INDEX a_archive_lookup ATTACH PARTITION z_archive_lookup;
+CREATE INDEX first_unattached_lookup ON archive_events_first (label);
 COMMENT ON INDEX event_lookup IS 'Parent lookup';
 COMMENT ON INDEX early_custom_lookup IS 'Named child lookup';
 `

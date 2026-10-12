@@ -922,6 +922,11 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 
+	partitionClause := ""
+	if table.IsPartitioned && table.PartitionStrategy != "" && table.PartitionKey != "" {
+		partitionClause = fmt.Sprintf(" PARTITION BY %s (%s)", table.PartitionStrategy, table.PartitionKey)
+	}
+
 	// Partition children: emit PARTITION OF instead of standalone CREATE TABLE.
 	// Columns and inherited constraints come from the parent automatically;
 	// only child-specific constraints (conparentid = 0) remain in the IR.
@@ -1003,10 +1008,10 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		allParts := append(elementParts, constraintParts...)
 		var sql string
 		if len(allParts) > 0 {
-			sql = fmt.Sprintf("%s %s PARTITION OF %s (\n%s\n) %s;",
-				createPrefix, tableName, parentName, strings.Join(allParts, ",\n"), table.PartitionBound)
+			sql = fmt.Sprintf("%s %s PARTITION OF %s (\n%s\n) %s%s;",
+				createPrefix, tableName, parentName, strings.Join(allParts, ",\n"), table.PartitionBound, partitionClause)
 		} else {
-			sql = fmt.Sprintf("%s %s PARTITION OF %s %s;", createPrefix, tableName, parentName, table.PartitionBound)
+			sql = fmt.Sprintf("%s %s PARTITION OF %s %s%s;", createPrefix, tableName, parentName, table.PartitionBound, partitionClause)
 		}
 		return sql, deferred
 	}
@@ -1063,12 +1068,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 
 	parts = append(parts, strings.Join(columnParts, ",\n"))
 
-	// Add partition clause for partitioned tables
-	if table.IsPartitioned && table.PartitionStrategy != "" && table.PartitionKey != "" {
-		parts = append(parts, fmt.Sprintf(") PARTITION BY %s (%s);", table.PartitionStrategy, table.PartitionKey))
-	} else {
-		parts = append(parts, ");")
-	}
+	parts = append(parts, ")"+partitionClause+";")
 
 	return strings.Join(parts, "\n"), deferred
 }

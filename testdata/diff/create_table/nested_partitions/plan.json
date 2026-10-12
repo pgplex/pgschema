@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events (\n    bucket integer NOT NULL,\n    label text\n) PARTITION BY RANGE (bucket);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.events"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events_early PARTITION OF events (\n    label DEFAULT 'pending'\n) FOR VALUES FROM (0) TO (10) PARTITION BY RANGE (bucket);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.events_early"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events_first PARTITION OF events_early FOR VALUES FROM (0) TO (5);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.events_first"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events_second PARTITION OF events_early FOR VALUES FROM (5) TO (10);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.events_second"
+        }
+      ]
+    }
+  ]
+}
