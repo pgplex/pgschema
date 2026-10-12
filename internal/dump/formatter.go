@@ -92,6 +92,8 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	stepsByFile := make(map[fileKey][]diff.Diff)
 	var fileOrder []fileKey
 	constraintIndex := 0
+	type indexKey struct{ schema, name string }
+	partitionIndexFiles := make(map[indexKey]fileKey)
 	var tables []*ir.Table
 	var views []*ir.View
 
@@ -111,6 +113,20 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			// on different tables and names that sanitize to the same filename.
 			constraintIndex++
 			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+		}
+
+		if index, ok := step.Source.(*ir.Index); ok && index.IsPartitioned &&
+			(step.Type == diff.DiffTypeTableIndex || step.Type == diff.DiffTypeTableIndexComment) {
+			// Parent indexes and their attachments follow all partition tables.
+			// Keep each parent's statements together without moving them back
+			// into the table file. Numbering avoids sanitized-name collisions.
+			identity := indexKey{index.Schema, index.Name}
+			if existing, exists := partitionIndexFiles[identity]; exists {
+				key = existing
+			} else {
+				key = fileKey{dir: "indexes", name: fmt.Sprintf("%04d_%s", len(partitionIndexFiles)+1, index.Name)}
+				partitionIndexFiles[identity] = key
+			}
 		}
 
 		if _, exists := stepsByFile[key]; !exists {

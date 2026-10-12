@@ -495,7 +495,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables)
+		sql, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables, collector.dump)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -917,7 +917,7 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table) (string, []*deferredConstraint) {
+func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table, dump bool) (string, []*deferredConstraint) {
 	// Only include table name without schema if it's in the target schema (unless
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
@@ -982,7 +982,8 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 			if suppressedInlineFKs[constraintPathKey(constraint)] {
 				continue
 			}
-			if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) {
+			if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) ||
+				(dump && referencesPartitionedUniqueIndex(table, constraint, allTables)) {
 				deferred = append(deferred, &deferredConstraint{
 					table:      table,
 					constraint: constraint,
@@ -1046,7 +1047,8 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		if suppressedInlineFKs[constraintPathKey(constraint)] {
 			continue
 		}
-		if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) {
+		if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) ||
+			(dump && referencesPartitionedUniqueIndex(table, constraint, allTables)) {
 			deferred = append(deferred, &deferredConstraint{
 				table:      table,
 				constraint: constraint,

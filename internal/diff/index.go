@@ -28,35 +28,44 @@ func generateCreateIndexesSQLWithType(indexes []*ir.Index, targetSchema string, 
 			continue
 		}
 
-		canonicalSQL := generateIndexSQLMode(index, targetSchema, false, collector.qualifySchema) // Always generate canonical form
+		if collector.dump && index.IsPartitioned {
+			// Export these after every table exists. Creating a partition after
+			// its parent's index would make PostgreSQL generate child indexes.
+			continue
+		}
+		generateCreateIndexSQL(index, targetSchema, collector, indexType, commentType, false)
+	}
+}
+
+func generateCreateIndexSQL(index *ir.Index, targetSchema string, collector *diffCollector, indexType DiffType, commentType DiffType, only bool) {
+	canonicalSQL := generateIndexSQLWithOptions(index, index.Name, targetSchema, false, collector.qualifySchema, only)
+
+	// Create context for this statement
+	context := &diffContext{
+		Type:                indexType,
+		Operation:           DiffOperationCreate,
+		Path:                fmt.Sprintf("%s.%s.%s", index.Schema, index.Table, index.Name),
+		Source:              index,
+		CanRunInTransaction: true,
+	}
+
+	collector.collect(context, canonicalSQL)
+
+	// Add index comment
+	if index.Comment != "" {
+		indexName := qualifyEntityNameMode(index.Schema, index.Name, targetSchema, collector.qualifySchema)
+		sql := fmt.Sprintf("COMMENT ON INDEX %s IS %s;", indexName, quoteString(index.Comment))
 
 		// Create context for this statement
 		context := &diffContext{
-			Type:                indexType,
+			Type:                commentType,
 			Operation:           DiffOperationCreate,
 			Path:                fmt.Sprintf("%s.%s.%s", index.Schema, index.Table, index.Name),
 			Source:              index,
-			CanRunInTransaction: true,
+			CanRunInTransaction: true, // Comments can always run in a transaction
 		}
 
-		collector.collect(context, canonicalSQL)
-
-		// Add index comment
-		if index.Comment != "" {
-			indexName := qualifyEntityNameMode(index.Schema, index.Name, targetSchema, collector.qualifySchema)
-			sql := fmt.Sprintf("COMMENT ON INDEX %s IS %s;", indexName, quoteString(index.Comment))
-
-			// Create context for this statement
-			context := &diffContext{
-				Type:                commentType,
-				Operation:           DiffOperationCreate,
-				Path:                fmt.Sprintf("%s.%s.%s", index.Schema, index.Table, index.Name),
-				Source:              index,
-				CanRunInTransaction: true, // Comments can always run in a transaction
-			}
-
-			collector.collect(context, sql)
-		}
+		collector.collect(context, sql)
 	}
 }
 
@@ -79,6 +88,10 @@ func generateIndexSQLWithName(index *ir.Index, indexName string, targetSchema st
 // generateIndexSQLWithNameMode is like generateIndexSQLWithName, but when qualifySchema
 // is true the ON-table reference is always schema-qualified, even within the target schema.
 func generateIndexSQLWithNameMode(index *ir.Index, indexName string, targetSchema string, isConcurrent bool, qualifySchema bool) string {
+	return generateIndexSQLWithOptions(index, indexName, targetSchema, isConcurrent, qualifySchema, false)
+}
+
+func generateIndexSQLWithOptions(index *ir.Index, indexName string, targetSchema string, isConcurrent bool, qualifySchema bool, only bool) string {
 	var builder strings.Builder
 
 	// CREATE [UNIQUE] INDEX [CONCURRENTLY] IF NOT EXISTS
@@ -95,6 +108,10 @@ func generateIndexSQLWithNameMode(index *ir.Index, indexName string, targetSchem
 	// Index name
 	builder.WriteString(ir.QuoteIdentifier(indexName))
 	builder.WriteString(" ON ")
+
+	if only {
+		builder.WriteString("ONLY ")
+	}
 
 	// Table name with proper schema qualification
 	tableName := getTableNameWithSchemaMode(index.Schema, index.Table, targetSchema, qualifySchema)

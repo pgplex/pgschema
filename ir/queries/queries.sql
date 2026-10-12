@@ -564,6 +564,8 @@ WITH index_base AS (
         n.nspname as schemaname,
         t.relname as tablename,
         i.relname as indexname,
+        pi.relname AS parent_index,
+        pn.nspname AS parent_index_schema,
         idx.indisunique as is_unique,
         idx.indisprimary as is_primary,
         (idx.indpred IS NOT NULL) as is_partial,
@@ -617,6 +619,9 @@ WITH index_base AS (
     JOIN pg_namespace n ON n.oid = t.relnamespace
     JOIN pg_am am ON am.oid = i.relam
     LEFT JOIN pg_description d ON d.objoid = i.oid AND d.objsubid = 0
+    LEFT JOIN pg_inherits inh ON inh.inhrelid = i.oid
+    LEFT JOIN pg_class pi ON pi.oid = inh.inhparent
+    LEFT JOIN pg_namespace pn ON pn.oid = pi.relnamespace
     WHERE
         NOT idx.indisprimary
         AND NOT EXISTS (
@@ -648,6 +653,8 @@ SELECT
     ib.schemaname,
     ib.tablename,
     ib.indexname,
+    ib.parent_index,
+    ib.parent_index_schema,
     ib.is_unique,
     ib.is_primary,
     ib.is_partial,

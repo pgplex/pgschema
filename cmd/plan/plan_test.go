@@ -289,3 +289,21 @@ func TestNormalizeSchemaNames_PreservesViewTableAliasesMatchingTargetSchema(t *t
 		t.Fatalf("expected table alias to be preserved in view definition %q, got %q", expected, view.Definition)
 	}
 }
+
+func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
+	const temporary = "pgschema_tmp_index_attachment"
+	local := &ir.Index{Schema: temporary, ParentIndex: "parent", ParentIndexSchema: temporary}
+	external := &ir.Index{Schema: temporary, ParentIndex: "outside_parent", ParentIndexSchema: "other"}
+	data := &ir.IR{Schemas: map[string]*ir.Schema{
+		temporary: {Name: temporary, Tables: map[string]*ir.Table{
+			"child": {Schema: temporary, Name: "child", Indexes: map[string]*ir.Index{"local": local, "external": external}},
+		}},
+	}}
+	normalizeSchemaNames(data, temporary, "public")
+	if local.Schema != "public" || local.ParentIndexSchema != "public" || local.ParentIndex != "parent" {
+		t.Fatalf("Same-schema index attachment was not normalized: %+v", local)
+	}
+	if external.ParentIndexSchema != "other" || external.ParentIndex != "outside_parent" {
+		t.Fatalf("Cross-schema index attachment changed: %+v", external)
+	}
+}

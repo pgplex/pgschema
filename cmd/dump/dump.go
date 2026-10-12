@@ -7,7 +7,6 @@ import (
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/dump"
-	"github.com/pgplex/pgschema/ir"
 	"github.com/spf13/cobra"
 )
 
@@ -84,11 +83,8 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 		return "", fmt.Errorf("failed to get database schema: %w", err)
 	}
 
-	// Create an empty schema for comparison to generate a dump diff
-	emptyIR := ir.NewIR()
-
-	// Generate diff between empty schema and target schema (this represents a complete dump)
-	diffs := diff.GenerateMigrationWithOptions(emptyIR, schemaIR, config.Schema, config.QualifySchema)
+	// Generate the complete schema, preserving partitioned index identities.
+	diffs := diff.GenerateDump(schemaIR, config.Schema, config.QualifySchema)
 
 	// Create dump formatter
 	formatter := dump.NewDumpFormatter(schemaIR.Metadata.DatabaseVersion, config.Schema, config.NoComments, config.QualifySchema)

@@ -296,6 +296,8 @@ type Index struct {
 	Where             string         `json:"where,omitempty"`              // partial index condition
 	NullsNotDistinct  bool           `json:"nulls_not_distinct,omitempty"` // NULLS NOT DISTINCT (PG15+)
 	IsPartitioned     bool           `json:"is_partitioned,omitempty"`     // index target is a partitioned parent (relkind 'p')
+	ParentIndex       string         `json:"parent_index,omitempty"`       // attached parent index, empty for unattached indexes
+	ParentIndexSchema string         `json:"parent_index_schema,omitempty"`
 	StorageParameters []string       `json:"storage_parameters,omitempty"` // WITH (fillfactor=100, ...)
 	Comment           string         `json:"comment,omitempty"`
 }

@@ -18,6 +18,9 @@ type diffCollector struct {
 	// for the target schema (set by `dump --qualify-schema`). Default false preserves
 	// the standard "smart qualification" (omit the target-schema prefix).
 	qualifySchema bool
+
+	// dump preserves explicit partitioned index creation and attachment order.
+	dump bool
 }
 
 // newDiffCollector creates a new diffCollector

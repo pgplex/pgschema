@@ -256,6 +256,13 @@ prefix distinguishes multiple constraints on the same table. The exporter keeps
 these files in dependency order in `schema.sql`, after the required tables.
 Load files in the generated include order to preserve these dependencies.
 
+For partitioned indexes, `pgschema` creates the tables and leaf indexes first.
+The exporter then creates each parent index with `ON ONLY` and attaches its
+recorded child indexes with `ALTER INDEX ... ATTACH PARTITION`. This preserves
+custom child names and leaves intentionally unattached indexes separate.
+Multi-file dumps put parent indexes and their attachments under `indexes/`,
+for example `indexes/0001_events_lookup.sql`, after the table includes.
+
 Each individual file (e.g., `tables/users.sql`) contains the specific object definition:
 ```sql
 --

@@ -484,7 +484,7 @@ type rlsChange struct {
 // GenerateMigration generates the migration diff using standard "smart qualification"
 // (the target-schema prefix is omitted on entity names).
 func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
-	return generateMigration(oldIR, newIR, targetSchema, false, 0)
+	return generateMigration(oldIR, newIR, targetSchema, false, 0, false)
 }
 
 // GenerateMigrationForTarget is GenerateMigration for a target database whose
@@ -493,7 +493,7 @@ func GenerateMigration(oldIR, newIR *ir.IR, targetSchema string) []Diff {
 // ALTER COLUMN ... SET EXPRESSION AS (PostgreSQL 17+); older targets get a
 // version-portable equivalent instead (issue #591).
 func GenerateMigrationForTarget(oldIR, newIR *ir.IR, targetSchema string, targetMajorVersion int) []Diff {
-	return generateMigration(oldIR, newIR, targetSchema, false, targetMajorVersion)
+	return generateMigration(oldIR, newIR, targetSchema, false, targetMajorVersion, false)
 }
 
 // GenerateMigrationWithOptions is like GenerateMigration, but when qualifySchema is
@@ -506,10 +506,16 @@ func GenerateMigrationForTarget(oldIR, newIR *ir.IR, targetSchema string, target
 // stay bare because the IR stores them without schema identity (#493). Default
 // behavior (false) is unchanged for plan/apply.
 func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool) []Diff {
-	return generateMigration(oldIR, newIR, targetSchema, qualifySchema, 0)
+	return generateMigration(oldIR, newIR, targetSchema, qualifySchema, 0, false)
 }
 
-func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool, targetMajorVersion int) []Diff {
+// GenerateDump creates an empty-to-target export while preserving partitioned
+// index identities. Migration entry points retain recursive index creation.
+func GenerateDump(schema *ir.IR, targetSchema string, qualifySchema bool) []Diff {
+	return generateMigration(ir.NewIR(), schema, targetSchema, qualifySchema, 0, true)
+}
+
+func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool, targetMajorVersion int, dump bool) []Diff {
 	diff := &ddlDiff{
 		targetMajorVersion:         targetMajorVersion,
 		addedSchemas:               []*ir.Schema{},
@@ -1634,6 +1640,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
 	collector.qualifySchema = qualifySchema
+	collector.dump = dump
 	diff.collectMigrationSQL(targetSchema, collector)
 	return collector.diffs
 }
@@ -2134,6 +2141,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// These were skipped from addedSequences but their comments must still be deployed.
 	for _, seq := range d.addedSerialSeqComments {
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
+	}
+
+	if collector.dump {
+		generatePartitionedIndexesSQL(d.addedTables, targetSchema, collector)
 	}
 
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
