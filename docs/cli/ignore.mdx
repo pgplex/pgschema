@@ -119,6 +119,22 @@ patterns = ["deploy_bot"]  # Ignore ALTER DEFAULT PRIVILEGES for deploy_bot
 
 The `[privileges]` section filters explicit grants (`GRANT ... TO role`), including column-level privileges. The `[default_privileges]` section filters `ALTER DEFAULT PRIVILEGES` statements.
 
+## Partitioned indexes
+
+When `dump` retains a partitioned index, it must also retain that index's attached
+children. If the inspector excludes an attached child because of an index or table
+ignore pattern, `dump` returns an error naming the parent and child before writing
+any output. Existing output files remain unchanged. `dump` performs the same check
+for nested partitions.
+
+For example, `event_unique` has an attached child named `early_custom_unique`.
+If `early_custom_unique` is ignored while `event_unique` is retained, `dump` returns
+an error.
+Remove the conflicting ignore pattern or add a negation pattern to retain the
+child index and its table. Ignoring an unattached index remains supported.
+
+`plan` and `apply` retain their existing ignore behavior.
+
 ## Constraints
 
 The `[constraints]` section matches table constraints by **constraint name** (primary keys, unique, foreign keys, check, and exclusion constraints). When a constraint is ignored, pgschema neither creates, drops, nor reports drift on it — it is left entirely to be managed out-of-band.

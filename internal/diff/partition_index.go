@@ -7,6 +7,38 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
+// validatePartitionIndexDependencies rejects filtered index families before any
+// dump statements are generated. Migration generation still honors filtering.
+func validatePartitionIndexDependencies(schema *ir.IR) error {
+	indexes := make(map[ir.IndexRef]*ir.Index)
+	var keys []ir.IndexRef
+	for _, namespace := range schema.Schemas {
+		for _, table := range namespace.Tables {
+			for _, index := range table.Indexes {
+				key := ir.IndexRef{Schema: index.Schema, Name: index.Name}
+				indexes[key] = index
+				keys = append(keys, key)
+			}
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Schema != keys[j].Schema {
+			return keys[i].Schema < keys[j].Schema
+		}
+		return keys[i].Name < keys[j].Name
+	})
+	for _, key := range keys {
+		for _, child := range indexes[key].AttachedPartitions {
+			if _, exists := indexes[child]; !exists {
+				return fmt.Errorf("cannot dump index %s: attached index %s is excluded; adjust .pgschemaignore to include the child index and its table",
+					ir.QuoteIdentifier(key.Schema)+"."+ir.QuoteIdentifier(key.Name),
+					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name))
+			}
+		}
+	}
+	return nil
+}
+
 // generatePartitionedIndexesSQL emits parent indexes after all partition tables
 // and leaf indexes exist. ON ONLY prevents PostgreSQL from creating or choosing
 // child indexes implicitly. Explicit attachments preserve names and validity.

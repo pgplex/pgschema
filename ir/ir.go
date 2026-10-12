@@ -282,6 +282,12 @@ const (
 	ConstraintTypeExclusion  ConstraintType = "EXCLUSION"
 )
 
+// IndexRef identifies an index within a schema.
+type IndexRef struct {
+	Schema string
+	Name   string
+}
+
 // Index represents a database index
 type Index struct {
 	Schema            string         `json:"schema"`
@@ -300,6 +306,10 @@ type Index struct {
 	ParentIndexSchema string         `json:"parent_index_schema,omitempty"`
 	StorageParameters []string       `json:"storage_parameters,omitempty"` // WITH (fillfactor=100, ...)
 	Comment           string         `json:"comment,omitempty"`
+	// AttachedPartitions records catalog attachments, including ignored children.
+	// Dump validation uses it to detect excluded dependencies. It is inspection
+	// metadata, not part of the managed schema or its fingerprint.
+	AttachedPartitions []IndexRef `json:"-"`
 }
 
 // IndexColumn represents a column within an index

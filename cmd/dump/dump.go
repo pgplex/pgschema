@@ -84,7 +84,10 @@ func ExecuteDump(config *DumpConfig) (string, error) {
 	}
 
 	// Generate the complete schema, preserving partitioned index identities.
-	diffs := diff.GenerateDump(schemaIR, config.Schema, config.QualifySchema)
+	diffs, err := diff.GenerateDump(schemaIR, config.Schema, config.QualifySchema)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate dump: %w", err)
+	}
 
 	// Create dump formatter
 	formatter := dump.NewDumpFormatter(schemaIR.Metadata.DatabaseVersion, config.Schema, config.NoComments, config.QualifySchema)

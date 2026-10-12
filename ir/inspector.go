@@ -811,6 +811,15 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		return err
 	}
 
+	// Capture attachments before filtering so dump can detect missing children.
+	attachedPartitions := make(map[IndexRef][]IndexRef)
+	for _, row := range indexes {
+		if row.ParentIndex.Valid {
+			parent := IndexRef{Schema: row.ParentIndexSchema.String, Name: row.ParentIndex.String}
+			attachedPartitions[parent] = append(attachedPartitions[parent], IndexRef{Schema: row.Schemaname, Name: row.Indexname})
+		}
+	}
+
 	for _, indexRow := range indexes {
 		schemaName := indexRow.Schemaname
 		tableName := indexRow.Tablename
@@ -845,20 +854,21 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		}
 
 		index := &Index{
-			Schema:            schemaName,
-			Table:             tableName,
-			Name:              indexName,
-			Type:              indexType,
-			Method:            method,
-			IncludeColumns:    indexRow.IncludeColumns,
-			IsPartial:         isPartial,
-			IsExpression:      hasExpressions,
-			Where:             "",
-			StorageParameters: indexRow.Reloptions,
-			ParentIndex:       indexRow.ParentIndex.String,
-			ParentIndexSchema: indexRow.ParentIndexSchema.String,
-			Comment:           comment,
-			Columns:           []*IndexColumn{},
+			Schema:             schemaName,
+			Table:              tableName,
+			Name:               indexName,
+			Type:               indexType,
+			Method:             method,
+			IncludeColumns:     indexRow.IncludeColumns,
+			IsPartial:          isPartial,
+			IsExpression:       hasExpressions,
+			Where:              "",
+			StorageParameters:  indexRow.Reloptions,
+			ParentIndex:        indexRow.ParentIndex.String,
+			ParentIndexSchema:  indexRow.ParentIndexSchema.String,
+			AttachedPartitions: attachedPartitions[IndexRef{Schema: schemaName, Name: indexName}],
+			Comment:            comment,
+			Columns:            []*IndexColumn{},
 		}
 
 		// Check for NULLS NOT DISTINCT (PostgreSQL 15+)

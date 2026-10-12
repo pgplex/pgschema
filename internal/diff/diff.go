@@ -511,8 +511,11 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 
 // GenerateDump creates an empty-to-target export while preserving partitioned
 // index identities. Migration entry points retain recursive index creation.
-func GenerateDump(schema *ir.IR, targetSchema string, qualifySchema bool) []Diff {
-	return generateMigration(ir.NewIR(), schema, targetSchema, qualifySchema, 0, true)
+func GenerateDump(schema *ir.IR, targetSchema string, qualifySchema bool) ([]Diff, error) {
+	if err := validatePartitionIndexDependencies(schema); err != nil {
+		return nil, err
+	}
+	return generateMigration(ir.NewIR(), schema, targetSchema, qualifySchema, 0, true), nil
 }
 
 func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema bool, targetMajorVersion int, dump bool) []Diff {
