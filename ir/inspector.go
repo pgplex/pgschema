@@ -752,6 +752,13 @@ func (i *Inspector) populatePartitionChildMetadata(ctx context.Context, schema *
 	dbSchema := schema.getOrCreateSchema(targetSchema)
 
 	for _, child := range partitionChildren {
+		if child.ParentSchema == targetSchema {
+			if parent := dbSchema.Tables[child.ParentTable]; parent != nil {
+				parent.AllPartitionChildren = append(parent.AllPartitionChildren, TableDependency{
+					Schema: child.ChildSchema, Name: child.ChildTable, Type: DependencyTypeTable,
+				})
+			}
+		}
 		// Only process children in the target schema
 		if child.ChildSchema != targetSchema {
 			continue

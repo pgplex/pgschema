@@ -39,57 +39,161 @@ func validatePartitionIndexDependencies(schema *ir.IR) error {
 	return nil
 }
 
-// generatePartitionedIndexesSQL emits parent indexes after all partition tables
-// and leaf indexes exist. ON ONLY prevents PostgreSQL from creating or choosing
-// child indexes implicitly. Explicit attachments preserve names and validity.
-func generatePartitionedIndexesSQL(tables []*ir.Table, targetSchema string, collector *diffCollector) {
-	type indexKey struct{ schema, name string }
-	parents := make(map[indexKey]*ir.Index)
-	children := make(map[indexKey][]*ir.Index)
-	var keys []indexKey
-	for _, table := range tables {
+// partitionIndexCreationPlan belongs to ddlDiff. It schedules explicit index
+// creation only after the tables and named leaf indexes are available.
+// Migrations select complete, entirely new table hierarchies. Existing or
+// filtered hierarchies retain recursive creation for compatibility.
+// Dump selects every managed partitioned index after its strict validation.
+type partitionIndexCreationPlan struct {
+	indexes      map[ir.IndexRef]*ir.Index
+	children     map[ir.IndexRef][]*ir.Index
+	uniqueTables map[string]bool
+}
+
+func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[string]*ir.Table, dump bool) *partitionIndexCreationPlan {
+	plan := &partitionIndexCreationPlan{
+		indexes:      make(map[ir.IndexRef]*ir.Index),
+		children:     make(map[ir.IndexRef][]*ir.Index),
+		uniqueTables: make(map[string]bool),
+	}
+	added := make(map[string]*ir.Table)
+	indexes := make(map[ir.IndexRef]*ir.Index)
+	for _, table := range addedTables {
+		added[table.Schema+"."+table.Name] = table
 		for _, index := range table.Indexes {
-			if index.Type == ir.IndexTypePrimary {
-				continue // Primary indexes are created by constraints.
-			}
-			key := indexKey{index.Schema, index.Name}
-			if index.IsPartitioned {
-				parents[key] = index
-				keys = append(keys, key)
-			}
-			if index.ParentIndex != "" {
-				parent := indexKey{index.ParentIndexSchema, index.ParentIndex}
-				children[parent] = append(children[parent], index)
+			if index.Type != ir.IndexTypePrimary {
+				indexes[ir.IndexRef{Schema: index.Schema, Name: index.Name}] = index
 			}
 		}
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].schema != keys[j].schema {
-			return keys[i].schema < keys[j].schema
+
+	roots := make(map[string]string)
+	blocked := make(map[string]bool)
+	if !dump {
+		for key, table := range desiredTables {
+			root := partitionHierarchyRoot(table, desiredTables)
+			roots[key] = root
+			if root == "" {
+				continue
+			}
+			if added[key] == nil || table.IsExternal {
+				blocked[root] = true
+			}
+			// A missing table can change index validity even when it has no
+			// attached index. Check table membership as well as index edges.
+			for _, child := range table.AllPartitionChildren {
+				if added[child.Schema+"."+child.Name] == nil {
+					blocked[root] = true
+				}
+			}
+			for _, index := range table.Indexes {
+				for _, child := range index.AttachedPartitions {
+					if indexes[child] == nil {
+						blocked[root] = true
+					}
+				}
+				if index.ParentIndex != "" && indexes[ir.IndexRef{Schema: index.ParentIndexSchema, Name: index.ParentIndex}] == nil {
+					blocked[root] = true
+				}
+			}
 		}
-		return keys[i].name < keys[j].name
+	}
+
+	for _, table := range addedTables {
+		key := table.Schema + "." + table.Name
+		if !dump && (roots[key] == "" || blocked[roots[key]]) {
+			continue
+		}
+		for _, index := range table.Indexes {
+			if index.IsPartitioned && index.Type != ir.IndexTypePrimary {
+				plan.indexes[ir.IndexRef{Schema: index.Schema, Name: index.Name}] = index
+				if index.Type == ir.IndexTypeUnique {
+					plan.uniqueTables[key] = true
+				}
+			}
+		}
+	}
+	for _, index := range indexes {
+		parent := ir.IndexRef{Schema: index.ParentIndexSchema, Name: index.ParentIndex}
+		if plan.indexes[parent] != nil {
+			plan.children[parent] = append(plan.children[parent], index)
+		}
+	}
+	return plan
+}
+
+// partitionHierarchyRoot returns an empty key for incomplete or cyclic ancestry.
+func partitionHierarchyRoot(table *ir.Table, tables map[string]*ir.Table) string {
+	seen := make(map[string]bool)
+	for table != nil && !table.IsExternal {
+		key := table.Schema + "." + table.Name
+		if seen[key] {
+			return ""
+		}
+		seen[key] = true
+		if table.PartitionOf == "" {
+			return key
+		}
+		parentSchema := table.PartitionOfSchema
+		if parentSchema == "" {
+			parentSchema = table.Schema
+		}
+		table = tables[parentSchema+"."+table.PartitionOf]
+	}
+	return ""
+}
+
+func (p *partitionIndexCreationPlan) contains(index *ir.Index) bool {
+	return p != nil && p.indexes[ir.IndexRef{Schema: index.Schema, Name: index.Name}] != nil
+}
+
+func (p *partitionIndexCreationPlan) defersForeignKey(table *ir.Table, constraint *ir.Constraint) bool {
+	if p == nil || constraint == nil || constraint.Type != ir.ConstraintTypeForeignKey {
+		return false
+	}
+	schema := constraint.ReferencedSchema
+	if schema == "" {
+		schema = table.Schema
+	}
+	return p.uniqueTables[schema+"."+constraint.ReferencedTable]
+}
+
+// generateSQL creates partitioned children before their parents. ON ONLY avoids
+// implicitly creating or choosing leaf indexes; only recorded children attach.
+func (p *partitionIndexCreationPlan) generateSQL(targetSchema string, collector *diffCollector) {
+	if p == nil {
+		return
+	}
+	keys := make([]ir.IndexRef, 0, len(p.indexes))
+	for key := range p.indexes {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Schema != keys[j].Schema {
+			return keys[i].Schema < keys[j].Schema
+		}
+		return keys[i].Name < keys[j].Name
 	})
-	created := make(map[indexKey]bool)
-	var create func(indexKey)
-	create = func(key indexKey) {
+	created := make(map[ir.IndexRef]bool)
+	var create func(ir.IndexRef)
+	create = func(key ir.IndexRef) {
 		if created[key] {
 			return
 		}
 		created[key] = true
-		attached := children[key]
+		attached := p.children[key]
 		sort.Slice(attached, func(i, j int) bool {
 			if attached[i].Schema != attached[j].Schema {
 				return attached[i].Schema < attached[j].Schema
 			}
 			return attached[i].Name < attached[j].Name
 		})
-		// A partitioned child must exist before its own attachment is emitted.
 		for _, child := range attached {
 			if child.IsPartitioned {
-				create(indexKey{child.Schema, child.Name})
+				create(ir.IndexRef{Schema: child.Schema, Name: child.Name})
 			}
 		}
-		index := parents[key]
+		index := p.indexes[key]
 		generateCreateIndexSQL(index, targetSchema, collector, DiffTypeTableIndex, DiffTypeTableIndexComment, true)
 		for _, child := range attached {
 			sql := fmt.Sprintf("ALTER INDEX %s ATTACH PARTITION %s;",
@@ -105,26 +209,4 @@ func generatePartitionedIndexesSQL(tables []*ir.Table, targetSchema string, coll
 	for _, key := range keys {
 		create(key)
 	}
-}
-
-// referencesPartitionedUniqueIndex identifies FKs that may need a postponed
-// unique index. Those FKs must wait until the index and its attachments exist.
-func referencesPartitionedUniqueIndex(table *ir.Table, constraint *ir.Constraint, tables map[string]*ir.Table) bool {
-	if constraint == nil || constraint.Type != ir.ConstraintTypeForeignKey {
-		return false
-	}
-	schema := constraint.ReferencedSchema
-	if schema == "" {
-		schema = table.Schema
-	}
-	parent := tables[schema+"."+constraint.ReferencedTable]
-	if parent == nil || !parent.IsPartitioned {
-		return false
-	}
-	for _, index := range parent.Indexes {
-		if index.Type == ir.IndexTypeUnique {
-			return true
-		}
-	}
-	return false
 }

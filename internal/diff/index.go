@@ -28,11 +28,6 @@ func generateCreateIndexesSQLWithType(indexes []*ir.Index, targetSchema string, 
 			continue
 		}
 
-		if collector.dump && index.IsPartitioned {
-			// Export these after every table exists. Creating a partition after
-			// its parent's index would make PostgreSQL generate child indexes.
-			continue
-		}
 		generateCreateIndexSQL(index, targetSchema, collector, indexType, commentType, false)
 	}
 }

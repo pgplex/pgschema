@@ -80,6 +80,9 @@ type Table struct {
 	// child DEFAULT/NOT NULL overrides without managing or fingerprinting the
 	// parent itself.
 	PartitionParentColumns []*Column `json:"-"`
+	// AllPartitionChildren records catalog children, including ignored or external
+	// tables. Creation planning uses this metadata to identify complete hierarchies.
+	AllPartitionChildren []TableDependency `json:"-"`
 }
 
 // Column represents a table column

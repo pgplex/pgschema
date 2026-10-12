@@ -7,9 +7,7 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
-// TestGenerateDumpPartitionIndexOrder keeps the export-only index strategy out
-// of migration generation and checks ordering independently of the formatter.
-func TestGenerateDumpPartitionIndexOrder(t *testing.T) {
+func partitionIndexTestSchema() *ir.IR {
 	parent := &ir.Index{
 		Schema: "public", Table: "events", Name: "parent_lookup",
 		Type: ir.IndexTypeRegular, Method: "btree", IsPartitioned: true,
@@ -37,6 +35,13 @@ func TestGenerateDumpPartitionIndexOrder(t *testing.T) {
 			Indexes:        map[string]*ir.Index{child.Name: child},
 		},
 	}}
+	return schema
+}
+
+// TestGenerateDumpPartitionIndexOrder checks the shared creation order for a
+// complete new hierarchy independently of the dump formatter.
+func TestGenerateDumpPartitionIndexOrder(t *testing.T) {
+	schema := partitionIndexTestSchema()
 	wantOrder := []string{
 		"CREATE TABLE IF NOT EXISTS events (",
 		"CREATE TABLE IF NOT EXISTS events_early PARTITION OF events",
@@ -66,11 +71,8 @@ func TestGenerateDumpPartitionIndexOrder(t *testing.T) {
 		}
 	}
 	migration := buildSQLFromSteps(GenerateMigration(ir.NewIR(), schema, "public"))
-	if strings.Contains(migration, "ON ONLY") || strings.Contains(migration, "ATTACH PARTITION") {
-		t.Fatalf("Dump-only index strategy changed migration generation:\n%s", migration)
-	}
-	if !strings.Contains(migration, "CREATE INDEX IF NOT EXISTS parent_lookup ON events (id);") {
-		t.Fatalf("Expected existing recursive migration strategy:\n%s", migration)
+	if migration != first {
+		t.Fatalf("New hierarchy migration differs from dump:\n%s", migration)
 	}
 }
 
@@ -111,6 +113,77 @@ func TestGenerateDumpExcludedPartitionIndex(t *testing.T) {
 				if !strings.Contains(migration, "CREATE INDEX IF NOT EXISTS parent_lookup ON events (id);") {
 					t.Fatalf("Dump validation changed migration generation:\n%s", migration)
 				}
+			}
+		})
+	}
+}
+
+func TestPartitionIndexCreationEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{name: "complete", want: true},
+		{name: "unrelated_existing_hierarchy", want: true},
+		{name: "intentionally_unattached", want: true},
+		{name: "ignored_child"},
+		{name: "ignored_parent"},
+		{name: "ignored_table_without_attachments"},
+		{name: "external_child"},
+		{name: "existing_root"},
+		{name: "existing_child"},
+		{name: "unmanaged_ancestor"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := partitionIndexTestSchema()
+			root := schema.Schemas["public"].Tables["events"]
+			child := schema.Schemas["public"].Tables["events_early"]
+			parentIndex := root.Indexes["parent_lookup"]
+			childIndex := child.Indexes["custom_lookup"]
+			parentIndex.Type = ir.IndexTypeUnique
+			root.AllPartitionChildren = []ir.TableDependency{{Schema: "public", Name: "events_early"}}
+			desired := map[string]*ir.Table{"public.events": root, "public.events_early": child}
+			added := []*ir.Table{root, child}
+			switch tc.name {
+			case "unrelated_existing_hierarchy":
+				desired["public.old_events"] = &ir.Table{Schema: "public", Name: "old_events", IsPartitioned: true}
+			case "intentionally_unattached":
+				parentIndex.AttachedPartitions = nil
+				childIndex.ParentIndex = ""
+				childIndex.ParentIndexSchema = ""
+			case "ignored_child":
+				delete(child.Indexes, childIndex.Name)
+			case "ignored_parent":
+				delete(root.Indexes, parentIndex.Name)
+			case "ignored_table_without_attachments":
+				parentIndex.AttachedPartitions = nil
+				delete(desired, "public.events_early")
+				added = []*ir.Table{root}
+			case "external_child":
+				root.AllPartitionChildren = append(root.AllPartitionChildren, ir.TableDependency{Schema: "other", Name: "external_events"})
+			case "existing_root":
+				added = []*ir.Table{child}
+			case "existing_child":
+				added = []*ir.Table{root}
+			case "unmanaged_ancestor":
+				root.PartitionOf = "outside"
+				root.PartitionOfSchema = "other"
+			}
+			plan := planPartitionIndexCreation(added, desired, false)
+			if got := plan.contains(parentIndex); got != tc.want {
+				t.Fatalf("Expected scheduled parent = %v, got %v", tc.want, got)
+			}
+			fk := &ir.Constraint{Type: ir.ConstraintTypeForeignKey, ReferencedTable: "events"}
+			if got := plan.defersForeignKey(&ir.Table{Schema: "public"}, fk); got != tc.want {
+				t.Fatalf("FK deferral must match scheduled unique indexes: got %v, want %v", got, tc.want)
+			}
+			collector := newDiffCollector()
+			plan.generateSQL("public", collector)
+			if !tc.want && len(collector.diffs) != 0 {
+				t.Fatalf("Excluded hierarchy emitted scheduled SQL: %+v", collector.diffs)
+			}
+			if tc.name == "intentionally_unattached" && strings.Contains(buildSQLFromSteps(collector.diffs), "ATTACH PARTITION") {
+				t.Fatal("Unattached child was attached implicitly")
 			}
 		})
 	}

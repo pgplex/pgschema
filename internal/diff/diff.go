@@ -278,6 +278,7 @@ type ddlDiff struct {
 	droppedTables             []*ir.Table
 	modifiedTables            []*tableDiff
 	allNewTables              map[string]*ir.Table
+	partitionIndexes          *partitionIndexCreationPlan
 	addedViews                []*ir.View
 	droppedViews              []*ir.View
 	modifiedViews             []*viewDiff
@@ -510,7 +511,7 @@ func GenerateMigrationWithOptions(oldIR, newIR *ir.IR, targetSchema string, qual
 }
 
 // GenerateDump creates an empty-to-target export while preserving partitioned
-// index identities. Migration entry points retain recursive index creation.
+// index identities. Migrations use the same schedule for complete new hierarchies.
 func GenerateDump(schema *ir.IR, targetSchema string, qualifySchema bool) ([]Diff, error) {
 	if err := validatePartitionIndexDependencies(schema); err != nil {
 		return nil, err
@@ -1643,7 +1644,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// Create a diffCollector and generate SQL
 	collector := newDiffCollector()
 	collector.qualifySchema = qualifySchema
-	collector.dump = dump
+	diff.partitionIndexes = planPartitionIndexCreation(diff.addedTables, newTables, dump)
 	diff.collectMigrationSQL(targetSchema, collector)
 	return collector.diffs
 }
@@ -2024,7 +2025,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
-	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -2123,7 +2124,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
-	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
 
 	// Create functions WITHOUT view deps that reference new tables (now that all tables exist)
 	// These functions query tables that were created in tablesWithDeps above (issue #530)
@@ -2135,7 +2136,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
-	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables)
+	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
 
 	// Create functions that reference tables in the last table batch above.
 	generateCreateFunctionsSQL(functionsAfterAllTables, targetSchema, collector)
@@ -2146,9 +2147,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
 
-	if collector.dump {
-		generatePartitionedIndexesSQL(d.addedTables, targetSchema, collector)
-	}
+	d.partitionIndexes.generateSQL(targetSchema, collector)
 
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created
 	// This ensures FK references to tables in any batch work correctly

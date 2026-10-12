@@ -16,6 +16,23 @@ The plan command follows infrastructure-as-code principles similar to Terraform:
 
 By default, pgschema uses an embedded PostgreSQL instance to validate your desired state SQL. Cross-schema foreign keys to unmanaged tables (for example Supabase `auth.users`) work with the default embedded instance when you [ignore those schemas](/cli/ignore). For PostgreSQL extensions, or when referenced tables are not on the target, see [External Plan Database](/cli/plan-db).
 
+## Creating partitioned indexes
+
+When `plan` creates an entirely new managed partition hierarchy and all recorded
+table and index dependencies are present, it preserves standalone index names and
+attachments. It creates the tables and leaf indexes first, then parent indexes
+with `ON ONLY`, explicit attachments, and dependent foreign keys.
+
+For example, creating new `events` tables preserves the attachment of a named
+child index `early_custom_lookup` to `event_lookup`. An equivalent unattached index
+stays unattached. The same creation order applies when unrelated tables already
+exist in the target schema.
+
+For hierarchies containing existing tables, unmanaged ancestors, or excluded
+dependencies, migration generation retains recursive index creation. This does
+not reconcile index attachments on existing tables. Constraint-backed indexes
+remain under constraint management.
+
 ## Basic Usage
 
 ```bash

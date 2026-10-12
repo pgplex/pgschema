@@ -292,11 +292,15 @@ func TestNormalizeSchemaNames_PreservesViewTableAliasesMatchingTargetSchema(t *t
 
 func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 	const temporary = "pgschema_tmp_index_attachment"
-	local := &ir.Index{Schema: temporary, ParentIndex: "parent", ParentIndexSchema: temporary}
+	local := &ir.Index{Schema: temporary, ParentIndex: "parent", ParentIndexSchema: temporary,
+		AttachedPartitions: []ir.IndexRef{{Schema: temporary, Name: "leaf"}, {Schema: "other", Name: "outside_leaf"}},
+	}
 	external := &ir.Index{Schema: temporary, ParentIndex: "outside_parent", ParentIndexSchema: "other"}
 	data := &ir.IR{Schemas: map[string]*ir.Schema{
 		temporary: {Name: temporary, Tables: map[string]*ir.Table{
-			"child": {Schema: temporary, Name: "child", Indexes: map[string]*ir.Index{"local": local, "external": external}},
+			"child": {Schema: temporary, Name: "child", Indexes: map[string]*ir.Index{"local": local, "external": external},
+				AllPartitionChildren: []ir.TableDependency{{Schema: temporary, Name: "leaf"}, {Schema: "other", Name: "outside_leaf"}},
+			},
 		}},
 	}}
 	normalizeSchemaNames(data, temporary, "public")
@@ -305,5 +309,12 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 	}
 	if external.ParentIndexSchema != "other" || external.ParentIndex != "outside_parent" {
 		t.Fatalf("Cross-schema index attachment changed: %+v", external)
+	}
+	if local.AttachedPartitions[0].Schema != "public" || local.AttachedPartitions[1].Schema != "other" {
+		t.Fatalf("Incorrect attached-index metadata normalization: %+v", local.AttachedPartitions)
+	}
+	children := data.Schemas["public"].Tables["child"].AllPartitionChildren
+	if children[0].Schema != "public" || children[1].Schema != "other" {
+		t.Fatalf("Incorrect partition-table metadata normalization: %+v", children)
 	}
 }
