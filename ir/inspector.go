@@ -818,13 +818,11 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 		return err
 	}
 
-	// Capture attachments before filtering so dump can detect missing children.
-	attachedPartitions := make(map[IndexRef][]IndexRef)
-	for _, row := range indexes {
-		if row.ParentIndex.Valid {
-			parent := IndexRef{Schema: row.ParentIndexSchema.String, Name: row.ParentIndex.String}
-			attachedPartitions[parent] = append(attachedPartitions[parent], IndexRef{Schema: row.Schemaname, Name: row.Indexname})
-		}
+	// Read all attachment edges, including children owned by constraints and
+	// excluded objects. The managed-index query deliberately omits those rows.
+	attachedPartitions, err := i.buildIndexAttachments(ctx, schema, targetSchema)
+	if err != nil {
+		return err
 	}
 
 	for _, indexRow := range indexes {

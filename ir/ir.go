@@ -246,6 +246,9 @@ type Sequence struct {
 
 // Constraint represents a table constraint
 type Constraint struct {
+	// BackingIndex identifies the index created by this constraint. Inspection
+	// records it for attached indexes; it does not change constraint generation.
+	BackingIndex        *IndexRef           `json:"-"`
 	Schema              string              `json:"schema"`
 	Table               string              `json:"table"`
 	Name                string              `json:"name"`

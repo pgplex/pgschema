@@ -7,13 +7,40 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
+// availablePartitionIndexes includes indexes created by retained constraints.
+// Those indexes remain outside standalone index creation and comparison.
+func availablePartitionIndexes(tables []*ir.Table) map[ir.IndexRef]bool {
+	available := make(map[ir.IndexRef]bool)
+	for _, table := range tables {
+		for _, index := range table.Indexes {
+			available[ir.IndexRef{Schema: index.Schema, Name: index.Name}] = true
+		}
+		for _, constraint := range table.Constraints {
+			if constraint.BackingIndex != nil {
+				available[*constraint.BackingIndex] = true
+			}
+		}
+	}
+	return available
+}
+
 // validatePartitionIndexDependencies rejects filtered index families before any
 // dump statements are generated. Migration generation still honors filtering.
 func validatePartitionIndexDependencies(schema *ir.IR) error {
 	indexes := make(map[ir.IndexRef]*ir.Index)
 	var keys []ir.IndexRef
+	var tables []*ir.Table
+	tablesByName := make(map[string]*ir.Table)
+	constraintIndexes := make(map[ir.IndexRef]*ir.Table)
 	for _, namespace := range schema.Schemas {
 		for _, table := range namespace.Tables {
+			tables = append(tables, table)
+			tablesByName[table.Schema+"."+table.Name] = table
+			for _, constraint := range table.Constraints {
+				if constraint.BackingIndex != nil {
+					constraintIndexes[*constraint.BackingIndex] = table
+				}
+			}
 			for _, index := range table.Indexes {
 				key := ir.IndexRef{Schema: index.Schema, Name: index.Name}
 				indexes[key] = index
@@ -27,13 +54,47 @@ func validatePartitionIndexDependencies(schema *ir.IR) error {
 		}
 		return keys[i].Name < keys[j].Name
 	})
+	available := availablePartitionIndexes(tables)
 	for _, key := range keys {
 		for _, child := range indexes[key].AttachedPartitions {
-			if _, exists := indexes[child]; !exists {
-				return fmt.Errorf("cannot dump index %s: attached index %s is excluded; adjust .pgschemaignore to include the child index and its table",
+			if !available[child] {
+				return fmt.Errorf("cannot dump index %s: attached index %s is excluded; adjust .pgschemaignore to include the child index, its table, and any owning constraint",
 					ir.QuoteIdentifier(key.Schema)+"."+ir.QuoteIdentifier(key.Name),
 					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name))
 			}
+			if table := constraintIndexes[child]; table != nil {
+				if err := validateConstraintIndexPartitions(key, child, table, tablesByName); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// Constraint generation recursively creates an index on every table partition.
+// An attached constraint-owned index therefore requires all of those tables,
+// including descendants whose inherited constraints are not separate IR objects.
+func validateConstraintIndexPartitions(parent, child ir.IndexRef, table *ir.Table, tables map[string]*ir.Table) error {
+	pending := []*ir.Table{table}
+	seen := make(map[string]bool)
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		key := current.Schema + "." + current.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		for _, partition := range current.AllPartitionChildren {
+			next := tables[partition.Schema+"."+partition.Name]
+			if next == nil || next.IsExternal {
+				return fmt.Errorf("cannot dump index %s: attached constraint-backed index %s requires excluded partition table %s; adjust .pgschemaignore to include the partition table",
+					ir.QuoteIdentifier(parent.Schema)+"."+ir.QuoteIdentifier(parent.Name),
+					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name),
+					ir.QuoteIdentifier(partition.Schema)+"."+ir.QuoteIdentifier(partition.Name))
+			}
+			pending = append(pending, next)
 		}
 	}
 	return nil
@@ -46,17 +107,18 @@ func validatePartitionIndexDependencies(schema *ir.IR) error {
 // Dump selects every managed partitioned index after its strict validation.
 type partitionIndexCreationPlan struct {
 	indexes      map[ir.IndexRef]*ir.Index
-	children     map[ir.IndexRef][]*ir.Index
+	children     map[ir.IndexRef]map[ir.IndexRef]bool
 	uniqueTables map[string]bool
 }
 
 func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[string]*ir.Table, dump bool) *partitionIndexCreationPlan {
 	plan := &partitionIndexCreationPlan{
 		indexes:      make(map[ir.IndexRef]*ir.Index),
-		children:     make(map[ir.IndexRef][]*ir.Index),
+		children:     make(map[ir.IndexRef]map[ir.IndexRef]bool),
 		uniqueTables: make(map[string]bool),
 	}
 	added := make(map[string]*ir.Table)
+	available := availablePartitionIndexes(addedTables)
 	indexes := make(map[ir.IndexRef]*ir.Index)
 	for _, table := range addedTables {
 		added[table.Schema+"."+table.Name] = table
@@ -88,11 +150,11 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 			}
 			for _, index := range table.Indexes {
 				for _, child := range index.AttachedPartitions {
-					if indexes[child] == nil {
+					if !available[child] {
 						blocked[root] = true
 					}
 				}
-				if index.ParentIndex != "" && indexes[ir.IndexRef{Schema: index.ParentIndexSchema, Name: index.ParentIndex}] == nil {
+				if index.ParentIndex != "" && !available[ir.IndexRef{Schema: index.ParentIndexSchema, Name: index.ParentIndex}] {
 					blocked[root] = true
 				}
 			}
@@ -113,10 +175,18 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 			}
 		}
 	}
+	for parent, index := range plan.indexes {
+		plan.children[parent] = make(map[ir.IndexRef]bool)
+		for _, child := range index.AttachedPartitions {
+			plan.children[parent][child] = true
+		}
+	}
+	// ParentIndex also preserves standalone edges in IR without transient
+	// inspection metadata, such as an IR restored from JSON.
 	for _, index := range indexes {
 		parent := ir.IndexRef{Schema: index.ParentIndexSchema, Name: index.ParentIndex}
-		if plan.indexes[parent] != nil {
-			plan.children[parent] = append(plan.children[parent], index)
+		if children := plan.children[parent]; children != nil {
+			children[ir.IndexRef{Schema: index.Schema, Name: index.Name}] = true
 		}
 	}
 	return plan
@@ -181,7 +251,10 @@ func (p *partitionIndexCreationPlan) generateSQL(targetSchema string, collector 
 			return
 		}
 		created[key] = true
-		attached := p.children[key]
+		attached := make([]ir.IndexRef, 0, len(p.children[key]))
+		for child := range p.children[key] {
+			attached = append(attached, child)
+		}
 		sort.Slice(attached, func(i, j int) bool {
 			if attached[i].Schema != attached[j].Schema {
 				return attached[i].Schema < attached[j].Schema
@@ -189,8 +262,8 @@ func (p *partitionIndexCreationPlan) generateSQL(targetSchema string, collector 
 			return attached[i].Name < attached[j].Name
 		})
 		for _, child := range attached {
-			if child.IsPartitioned {
-				create(ir.IndexRef{Schema: child.Schema, Name: child.Name})
+			if p.indexes[child] != nil {
+				create(child)
 			}
 		}
 		index := p.indexes[key]

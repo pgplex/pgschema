@@ -8,11 +8,14 @@ import (
 func TestPartitionInspectionMetadataNotSerialized(t *testing.T) {
 	index := &Index{Schema: "public", Table: "events", Name: "event_lookup"}
 	table := &Table{Schema: "public", Name: "events", Indexes: map[string]*Index{index.Name: index}}
+	constraint := &Constraint{Schema: "public", Table: "events", Name: "unique_constraint", Type: ConstraintTypeUnique}
+	table.Constraints = map[string]*Constraint{constraint.Name: constraint}
 	before, err := json.Marshal(table)
 	if err != nil {
 		t.Fatal(err)
 	}
 	index.AttachedPartitions = []IndexRef{{Schema: "public", Name: "ignored_child"}}
+	constraint.BackingIndex = &IndexRef{Schema: "public", Name: "unique_constraint"}
 	table.AllPartitionChildren = []TableDependency{{Schema: "public", Name: "ignored_partition"}}
 	after, err := json.Marshal(table)
 	if err != nil {

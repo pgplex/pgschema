@@ -42,14 +42,19 @@ CREATE INDEX late_partial_lookup ON events_late (id);
 ALTER INDEX partial_lookup ATTACH PARTITION late_partial_lookup;
 `
 	for _, tc := range []struct {
-		name   string
-		ignore string
-		parent string
-		child  string
-		dropFK bool
-		absent string
+		name            string
+		ignore          string
+		parent          string
+		child           string
+		dropFK          bool
+		absent          string
+		constraintChild bool
 	}{
 		{name: "complete_family"},
+		{name: "constraint_owned_leaf", constraintChild: true},
+		{name: "ignored_constraint", constraintChild: true, ignore: "[constraints]\npatterns = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique"},
+		{name: "ignored_constraint_table", constraintChild: true, ignore: "[tables]\npatterns = [\"events_late\"]\n", parent: "event_unique", child: "late_custom_unique"},
+		{name: "constraint_owned_index_pattern", constraintChild: true, ignore: "[indexes]\npatterns = [\"late_custom_unique\"]\n"},
 		{name: "ignored_leaf", ignore: "[indexes]\npatterns = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique"},
 		{name: "ignored_intermediate", ignore: "[indexes]\npatterns = [\"early_custom_unique\"]\n", parent: "event_unique", child: "early_custom_unique"},
 		{name: "ignored_nested_leaf", ignore: "[indexes]\npatterns = [\"first_custom_unique\"]\n", parent: "early_custom_unique", child: "first_custom_unique"},
@@ -67,7 +72,11 @@ ALTER INDEX partial_lookup ATTACH PARTITION late_partial_lookup;
 			for _, multiFile := range []bool{false, true} {
 				for _, existingOutput := range []bool{false, true} {
 					t.Run(fmt.Sprintf("multi=%v/existing=%v", multiFile, existingOutput), func(t *testing.T) {
-						if _, err := conn.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` + setup); err != nil {
+						fixture := setup
+						if tc.constraintChild {
+							fixture = strings.Replace(fixture, "CREATE UNIQUE INDEX late_custom_unique ON events_late (bucket, id);", "ALTER TABLE events_late ADD CONSTRAINT late_custom_unique UNIQUE (bucket, id);", 1)
+						}
+						if _, err := conn.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` + fixture); err != nil {
 							t.Fatal(err)
 						}
 						if tc.dropFK {
@@ -131,5 +140,73 @@ ALTER INDEX partial_lookup ATTACH PARTITION late_partial_lookup;
 				}
 			}
 		})
+	}
+}
+
+// The ignored leaf has only an inherited constraint index. No standalone leaf
+// index can cause an unrelated dependency error and mask this regression.
+func TestDumpCommand_IgnoredConstraintIndexDescendant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(".pgschemaignore", []byte("[tables]\npatterns = [\"events_leaf\"]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source := testutil.SetupPostgres(t)
+	defer source.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, source)
+	defer conn.Close()
+	const setup = `
+CREATE TABLE events (bucket int, id int) PARTITION BY RANGE (bucket);
+CREATE TABLE events_mid PARTITION OF events FOR VALUES FROM (0) TO (10) PARTITION BY RANGE (id);
+CREATE TABLE events_branch PARTITION OF events_mid FOR VALUES FROM (0) TO (10) PARTITION BY RANGE (bucket);
+CREATE TABLE events_leaf PARTITION OF events_branch FOR VALUES FROM (0) TO (10);
+ALTER TABLE events_mid ADD CONSTRAINT mid_unique UNIQUE (bucket, id);
+CREATE UNIQUE INDEX event_unique ON ONLY events (bucket, id);
+ALTER INDEX event_unique ATTACH PARTITION mid_unique;
+CREATE TABLE event_links (bucket int, id int, FOREIGN KEY (bucket, id) REFERENCES events (bucket, id));
+`
+	if _, err := conn.Exec(setup); err != nil {
+		t.Fatal(err)
+	}
+	for _, multiFile := range []bool{false, true} {
+		for _, existingOutput := range []bool{false, true} {
+			t.Run(fmt.Sprintf("multi=%v/existing=%v", multiFile, existingOutput), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "schema.sql")
+				const original = "-- preserve existing output\n"
+				if existingOutput {
+					if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				output, err := ExecuteDump(&DumpConfig{
+					Host: host, Port: port, DB: dbname, User: user, Password: password,
+					Schema: "public", SSLMode: "disable", MultiFile: multiFile, File: path,
+				})
+				if err == nil || !strings.Contains(err.Error(), "event_unique") || !strings.Contains(err.Error(), "mid_unique") || !strings.Contains(err.Error(), "events_leaf") || !strings.Contains(err.Error(), ".pgschemaignore") {
+					t.Fatalf("Expected actionable nested dependency error, got %v", err)
+				}
+				if output != "" {
+					t.Fatal("Failed dump returned partial SQL")
+				}
+				entries, err := os.ReadDir(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantFiles := 0
+				if existingOutput {
+					wantFiles = 1
+					content, err := os.ReadFile(path)
+					if err != nil || string(content) != original {
+						t.Fatalf("Failed dump changed existing output: %q, %v", content, err)
+					}
+				}
+				if len(entries) != wantFiles {
+					t.Fatalf("Failed dump created files: %v", entries)
+				}
+			})
+		}
 	}
 }

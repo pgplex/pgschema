@@ -124,6 +124,9 @@ func TestPartitionIndexCreationEligibility(t *testing.T) {
 		want bool
 	}{
 		{name: "complete", want: true},
+		{name: "constraint_owned_child", want: true},
+		{name: "ignored_constraint"},
+		{name: "serialized_standalone_edges", want: true},
 		{name: "unrelated_existing_hierarchy", want: true},
 		{name: "intentionally_unattached", want: true},
 		{name: "ignored_child"},
@@ -145,6 +148,17 @@ func TestPartitionIndexCreationEligibility(t *testing.T) {
 			desired := map[string]*ir.Table{"public.events": root, "public.events_early": child}
 			added := []*ir.Table{root, child}
 			switch tc.name {
+			case "constraint_owned_child", "ignored_constraint":
+				delete(child.Indexes, childIndex.Name)
+				if tc.name == "constraint_owned_child" {
+					child.Constraints = map[string]*ir.Constraint{childIndex.Name: {
+						Schema: child.Schema, Table: child.Name, Name: childIndex.Name, Type: ir.ConstraintTypeUnique,
+						BackingIndex: &ir.IndexRef{Schema: child.Schema, Name: childIndex.Name},
+						Columns:      []*ir.ConstraintColumn{{Name: "id", Position: 1}},
+					}}
+				}
+			case "serialized_standalone_edges":
+				parentIndex.AttachedPartitions = nil
 			case "unrelated_existing_hierarchy":
 				desired["public.old_events"] = &ir.Table{Schema: "public", Name: "old_events", IsPartitioned: true}
 			case "intentionally_unattached":
@@ -179,6 +193,23 @@ func TestPartitionIndexCreationEligibility(t *testing.T) {
 			}
 			collector := newDiffCollector()
 			plan.generateSQL("public", collector)
+			if tc.name == "constraint_owned_child" || tc.name == "serialized_standalone_edges" {
+				if strings.Count(buildSQLFromSteps(collector.diffs), "ATTACH PARTITION custom_lookup;") != 1 {
+					t.Fatal("Expected exactly one attachment to the existing child index")
+				}
+			}
+			if tc.name == "constraint_owned_child" || tc.name == "ignored_constraint" {
+				diffs, err := GenerateDump(schema, "public", false)
+				if (err == nil) != tc.want {
+					t.Fatalf("Dump validation must follow constraint ownership: %v", err)
+				}
+				if tc.want {
+					sqlText := buildSQLFromSteps(diffs)
+					if !strings.Contains(sqlText, "CONSTRAINT custom_lookup UNIQUE") || strings.Contains(sqlText, "CREATE UNIQUE INDEX IF NOT EXISTS custom_lookup") {
+						t.Fatalf("Child index must be created by its constraint:\n%s", sqlText)
+					}
+				}
+			}
 			if !tc.want && len(collector.diffs) != 0 {
 				t.Fatalf("Excluded hierarchy emitted scheduled SQL: %+v", collector.diffs)
 			}

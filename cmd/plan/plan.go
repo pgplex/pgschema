@@ -527,6 +527,9 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 
 			// Normalize constraint schemas
 			for _, constraint := range table.Constraints {
+				if constraint.BackingIndex != nil && constraint.BackingIndex.Schema == fromSchema {
+					constraint.BackingIndex.Schema = toSchema
+				}
 				// Normalize the constraint's own schema field
 				if constraint.Schema == fromSchema {
 					constraint.Schema = toSchema

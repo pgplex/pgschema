@@ -296,9 +296,12 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 		AttachedPartitions: []ir.IndexRef{{Schema: temporary, Name: "leaf"}, {Schema: "other", Name: "outside_leaf"}},
 	}
 	external := &ir.Index{Schema: temporary, ParentIndex: "outside_parent", ParentIndexSchema: "other"}
+	localConstraint := &ir.Constraint{BackingIndex: &ir.IndexRef{Schema: temporary, Name: "local_constraint"}}
+	externalConstraint := &ir.Constraint{BackingIndex: &ir.IndexRef{Schema: "other", Name: "external_constraint"}}
 	data := &ir.IR{Schemas: map[string]*ir.Schema{
 		temporary: {Name: temporary, Tables: map[string]*ir.Table{
 			"child": {Schema: temporary, Name: "child", Indexes: map[string]*ir.Index{"local": local, "external": external},
+				Constraints:          map[string]*ir.Constraint{"local": localConstraint, "external": externalConstraint},
 				AllPartitionChildren: []ir.TableDependency{{Schema: temporary, Name: "leaf"}, {Schema: "other", Name: "outside_leaf"}},
 			},
 		}},
@@ -312,6 +315,9 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 	}
 	if local.AttachedPartitions[0].Schema != "public" || local.AttachedPartitions[1].Schema != "other" {
 		t.Fatalf("Incorrect attached-index metadata normalization: %+v", local.AttachedPartitions)
+	}
+	if localConstraint.BackingIndex.Schema != "public" || externalConstraint.BackingIndex.Schema != "other" {
+		t.Fatalf("Incorrect constraint-index normalization: %+v, %+v", localConstraint.BackingIndex, externalConstraint.BackingIndex)
 	}
 	children := data.Schemas["public"].Tables["child"].AllPartitionChildren
 	if children[0].Schema != "public" || children[1].Schema != "other" {
