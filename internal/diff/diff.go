@@ -199,6 +199,8 @@ const (
 	// for dependency handling. The object will be recreated, so this should be
 	// counted as a modification in summaries, not a destruction.
 	DiffOperationRecreate
+	// DiffOperationAttach indicates an explicit partition index attachment.
+	DiffOperationAttach
 )
 
 // String returns the string representation of DiffOperation
@@ -212,6 +214,8 @@ func (d DiffOperation) String() string {
 		return "drop"
 	case DiffOperationRecreate:
 		return "recreate"
+	case DiffOperationAttach:
+		return "attach"
 	default:
 		return "unknown"
 	}
@@ -238,6 +242,8 @@ func (d *DiffOperation) UnmarshalJSON(data []byte) error {
 		*d = DiffOperationDrop
 	case "recreate":
 		*d = DiffOperationRecreate
+	case "attach":
+		*d = DiffOperationAttach
 	default:
 		return fmt.Errorf("unknown diff operation: %s", s)
 	}

@@ -825,6 +825,11 @@ func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 				// Extract object name from source
 				objectName := getObjectNameFromSource(subRes.source)
 
+				if subRes.subType == diff.DiffTypeTableIndex.String() && subRes.operation == diff.DiffOperationAttach.String() {
+					fmt.Fprintf(summary, "    %s %s (index attachment)\n", c.PlanSymbol("change"), objectName)
+					continue
+				}
+
 				// Handle online index replacement display
 				if subRes.subType == diff.DiffTypeTableIndex.String() && subRes.operation == diff.DiffOperationAlter.String() {
 					subSymbol := c.PlanSymbol("change")

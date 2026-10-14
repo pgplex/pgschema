@@ -273,7 +273,7 @@ func (p *partitionIndexCreationPlan) generateSQL(targetSchema string, collector 
 				qualifyEntityNameMode(index.Schema, index.Name, targetSchema, collector.qualifySchema),
 				qualifyEntityNameMode(child.Schema, child.Name, targetSchema, collector.qualifySchema))
 			collector.collect(&diffContext{
-				Type: DiffTypeTableIndex, Operation: DiffOperationAlter,
+				Type: DiffTypeTableIndex, Operation: DiffOperationAttach,
 				Path:   fmt.Sprintf("%s.%s.%s", index.Schema, index.Table, index.Name),
 				Source: index, CanRunInTransaction: true,
 			}, sql)
