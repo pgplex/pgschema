@@ -337,7 +337,7 @@ WITH column_acls AS (
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
         )
-        AND c.relkind IN ('r', 'v', 'm')  -- tables, views, materialized views
+        AND c.relkind IN ('r', 'p', 'v', 'm')  -- ordinary/partitioned tables, views, materialized views
         AND a.attnum > 0                   -- skip system columns
         AND NOT a.attisdropped
         AND a.attacl IS NOT NULL           -- only columns with explicit ACL
@@ -2601,6 +2601,7 @@ WITH acl_data AS (
         c.relname::text AS object_name,
         CASE c.relkind
             WHEN 'r' THEN 'TABLE'
+            WHEN 'p' THEN 'TABLE'
             WHEN 'v' THEN 'VIEW'
             WHEN 'm' THEN 'VIEW'
             WHEN 'S' THEN 'SEQUENCE'
@@ -2619,7 +2620,7 @@ WITH acl_data AS (
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
         )
-        AND c.relkind IN ('r', 'v', 'm', 'S')
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
         AND c.relacl IS NOT NULL
         -- SERIAL/identity sequences inherit the owning extension table's boundary.
         AND NOT EXISTS (
