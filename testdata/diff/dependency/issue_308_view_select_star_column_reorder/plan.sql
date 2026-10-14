@@ -30,4 +30,5 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'item_summary_id_idx';
+WHERE c.relname = 'item_summary_id_idx'
+  AND c.relnamespace = 'public'::regnamespace;

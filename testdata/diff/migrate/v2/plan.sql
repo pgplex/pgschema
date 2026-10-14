@@ -46,7 +46,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_employee_hire_date';
+WHERE c.relname = 'idx_employee_hire_date'
+  AND c.relnamespace = 'public'::regnamespace;
 
 ALTER TABLE salary DROP CONSTRAINT salary_emp_no_fkey;
 
@@ -67,7 +68,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_salary_amount';
+WHERE c.relname = 'idx_salary_amount'
+  AND c.relnamespace = 'public'::regnamespace;
 
 ALTER TABLE title DROP CONSTRAINT title_emp_no_fkey;
 

@@ -10,7 +10,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_events_desc_pgschema_new';
+WHERE c.relname = 'idx_events_desc_pgschema_new'
+  AND c.relnamespace = 'public'::regnamespace;
 
 DROP INDEX IF EXISTS idx_events_desc;
 

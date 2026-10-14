@@ -58,7 +58,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_audit_operation';
+WHERE c.relname = 'idx_audit_operation'
+  AND c.relnamespace = 'public'::regnamespace;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_username ON audit (user_name);
 
@@ -72,7 +73,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_audit_username';
+WHERE c.relname = 'idx_audit_username'
+  AND c.relnamespace = 'public'::regnamespace;
 
 CREATE OR REPLACE TRIGGER salary_log_trigger
     AFTER UPDATE OR DELETE ON salary

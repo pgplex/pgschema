@@ -10,7 +10,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_users_email_pgschema_new';
+WHERE c.relname = 'idx_users_email_pgschema_new'
+  AND c.relnamespace = 'public'::regnamespace;
 
 DROP INDEX IF EXISTS idx_users_email;
 
@@ -28,7 +29,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_users_status_pgschema_new';
+WHERE c.relname = 'idx_users_status_pgschema_new'
+  AND c.relnamespace = 'public'::regnamespace;
 
 DROP INDEX IF EXISTS idx_users_status;
 

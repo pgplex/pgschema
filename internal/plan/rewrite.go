@@ -142,7 +142,7 @@ func generateIndexRewrite(index *ir.Index) []RewriteStep {
 
 	// Generate concurrent SQL
 	concurrentSQL := generateIndexSQL(index, true) // With CONCURRENTLY
-	waitSQL := generateIndexWaitQueryWithName(index.Name)
+	waitSQL := generateIndexWaitQueryWithName(index.Schema, index.Name)
 
 	return []RewriteStep{
 		{
@@ -176,7 +176,7 @@ func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
 	tempIndex := *index
 	tempIndex.Name = tempIndexName
 	concurrentSQL := generateIndexSQL(&tempIndex, true)
-	waitSQL := generateIndexWaitQueryWithName(tempIndexName)
+	waitSQL := generateIndexWaitQueryWithName(index.Schema, tempIndexName)
 
 	// Drop old index and rename new one. Use IF EXISTS because a same-plan
 	// DROP COLUMN step may already have implicitly dropped this index
@@ -227,7 +227,7 @@ func generateIndexChangeRewrite(indexDiff *diff.IndexDiff) []RewriteStep {
 	tempIndex := *indexDiff.New
 	tempIndex.Name = tempIndexName
 	concurrentSQL := generateIndexSQL(&tempIndex, true)
-	waitSQL := generateIndexWaitQueryWithName(tempIndexName)
+	waitSQL := generateIndexWaitQueryWithName(indexDiff.New.Schema, tempIndexName)
 
 	// Drop old index and rename new one. Use IF EXISTS because a same-plan
 	// DROP COLUMN step may already have implicitly dropped this index
@@ -550,8 +550,11 @@ func generateIndexSQL(index *ir.Index, isConcurrent bool) string {
 	return sql.String()
 }
 
-// generateIndexWaitQueryWithName creates a wait query for monitoring concurrent index creation
-func generateIndexWaitQueryWithName(indexName string) string {
+// generateIndexWaitQueryWithName creates a wait query for monitoring concurrent index creation.
+// The query is schema-qualified so an invalid index of the same name in another
+// schema (e.g. a failed CREATE INDEX CONCURRENTLY left behind in a sibling
+// tenant schema) cannot make apply hang forever. See issue #641.
+func generateIndexWaitQueryWithName(schemaName, indexName string) string {
 	return fmt.Sprintf(`SELECT 
     COALESCE(i.indisvalid, false) as done,
     CASE 
@@ -561,7 +564,8 @@ func generateIndexWaitQueryWithName(indexName string) string {
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = '%s';`, indexName)
+WHERE c.relname = '%s'
+  AND c.relnamespace = '%s'::regnamespace;`, indexName, schemaName)
 }
 
 // Helper functions

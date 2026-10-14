@@ -10,7 +10,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_users_email_include';
+WHERE c.relname = 'idx_users_email_include'
+  AND c.relnamespace = 'public'::regnamespace;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_status ON users (email, status DESC);
 
@@ -24,4 +25,5 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'idx_users_email_status';
+WHERE c.relname = 'idx_users_email_status'
+  AND c.relnamespace = 'public'::regnamespace;

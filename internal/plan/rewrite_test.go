@@ -215,3 +215,41 @@ func TestPendingNotNullValidateIsolated(t *testing.T) {
 		t.Errorf("isolated step SQL = %q, want %q", got, validate.Statements[0].SQL)
 	}
 }
+
+// TestGenerateIndexWaitQuerySchemaQualified verifies the wait query for
+// CREATE INDEX CONCURRENTLY is limited to the target schema (issue #641).
+// Without the namespace filter, an invalid index of the same name in another
+// schema makes apply hang forever because checkWaitStatus reads the first row.
+func TestGenerateIndexWaitQuerySchemaQualified(t *testing.T) {
+	sql := generateIndexWaitQueryWithName("tenant_b", "items_sku_idx")
+	if !strings.Contains(sql, "c.relname = 'items_sku_idx'") {
+		t.Fatalf("wait query missing index name filter:\n%s", sql)
+	}
+	if !strings.Contains(sql, "c.relnamespace = 'tenant_b'::regnamespace") {
+		t.Fatalf("wait query missing schema qualification (issue #641):\n%s", sql)
+	}
+}
+
+// TestGenerateIndexRewriteWaitIsSchemaQualified wires the schema through the
+// concurrent rewrite path so apply waits on the right index.
+func TestGenerateIndexRewriteWaitIsSchemaQualified(t *testing.T) {
+	index := &ir.Index{
+		Schema:  "tenant_b",
+		Table:   "items",
+		Name:    "items_sku_idx",
+		Type:    ir.IndexTypeRegular,
+		Method:  "btree",
+		Columns: []*ir.IndexColumn{{Name: "sku"}},
+	}
+	steps := generateIndexRewrite(index)
+	if len(steps) < 2 {
+		t.Fatalf("expected concurrent create + wait steps, got %d", len(steps))
+	}
+	wait := steps[1].SQL
+	if !strings.Contains(wait, "c.relnamespace = 'tenant_b'::regnamespace") {
+		t.Fatalf("rewrite wait step not schema-qualified:\n%s", wait)
+	}
+	if steps[1].Directive == nil || steps[1].Directive.Type != DirectiveTypeWait {
+		t.Fatalf("expected wait directive on step 1, got %#v", steps[1].Directive)
+	}
+}

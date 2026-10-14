@@ -38,7 +38,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'metrics_tripled_idx_pgschema_new';
+WHERE c.relname = 'metrics_tripled_idx_pgschema_new'
+  AND c.relnamespace = 'public'::regnamespace;
 
 DROP INDEX IF EXISTS metrics_tripled_idx;
 
@@ -79,7 +80,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'orders_code_key_pgschema_new';
+WHERE c.relname = 'orders_code_key_pgschema_new'
+  AND c.relnamespace = 'public'::regnamespace;
 
 DROP INDEX IF EXISTS orders_code_key;
 
@@ -97,7 +99,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'orders_lookup_idx_pgschema_new';
+WHERE c.relname = 'orders_lookup_idx_pgschema_new'
+  AND c.relnamespace = 'public'::regnamespace;
 
 DROP INDEX IF EXISTS orders_lookup_idx;
 
@@ -115,7 +118,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'orders_total_key';
+WHERE c.relname = 'orders_total_key'
+  AND c.relnamespace = 'public'::regnamespace;
 
 ALTER TABLE vt DROP COLUMN v2;
 

@@ -48,7 +48,8 @@ SELECT
 FROM pg_class c
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = 'parent2_id_tenant_key';
+WHERE c.relname = 'parent2_id_tenant_key'
+  AND c.relnamespace = 'public'::regnamespace;
 
 -- Transaction Group #4
 ALTER TABLE child
