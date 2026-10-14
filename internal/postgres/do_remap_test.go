@@ -43,7 +43,7 @@ SELECT 'DO', 'public.t'; COMMENT ON TABLE t IS $$ public.t $$;`},
 		{name: "unterminated_string_body", schema: "public", sql: `DO 'public.t`, want: `DO 'public.t`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := qualifyFunctionBodiesWithTempSchema(tc.sql, tc.schema, "pgschema_tmp_x", tc.objects)
+			got, err := qualifyFunctionBodiesWithTempSchema(tc.sql, tc.schema, "pgschema_tmp_x", schemaRemapNames{body: tc.objects, relations: tc.objects})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +66,7 @@ DO $$ BEGIN PERFORM 1; END $$;`
 		t.Fatalf("schema not stripped: %s", stripped)
 	}
 	objects := extractCreatedObjectNames(stripped)
-	if len(objects) != 1 || !objects[`t".'\$$`] {
+	if len(objects.body) != 1 || !objects.body[`t".'\$$`] || len(objects.relations) != 1 || !objects.relations[`t".'\$$`] {
 		t.Fatalf("incorrect created objects: %v", objects)
 	}
 }
@@ -92,7 +92,7 @@ func TestDORegclassRemappingPreservesAliasesAndRecords(t *testing.T) {
 				// record references in the first block must still remain verbatim.
 				original := "DO $$ " + body + " $$; DO $$ BEGIN PERFORM 'public.t'::regclass; END $$;"
 				want := "DO $$ " + body + " $$; DO $$ BEGIN PERFORM '\"pgschema_tmp_x\".t'::regclass; END $$;"
-				got, err := qualifyFunctionBodiesWithTempSchema(original, "public", "pgschema_tmp_x", objects)
+				got, err := qualifyFunctionBodiesWithTempSchema(original, "public", "pgschema_tmp_x", schemaRemapNames{body: objects, relations: objects})
 				if err != nil || got != want {
 					t.Fatalf("remapping changed an alias or record reference:\ngot: %s\nwant: %s\nerror: %v", got, want, err)
 				}

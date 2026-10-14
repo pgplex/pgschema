@@ -58,7 +58,7 @@ func TestRemapDOBodiesRejectsInvalidEscapeLiterals(t *testing.T) {
 		`DO E'BEGIN RAISE NOTICE ''\uD83D''; END';`,
 		`DO $$ BEGIN PERFORM E'public.\u12'::pg_catalog.regclass; END $$;`,
 	} {
-		got, err := qualifyFunctionBodiesWithTempSchema(sql, "public", "pgschema_tmp_x", nil)
+		got, err := qualifyFunctionBodiesWithTempSchema(sql, "public", "pgschema_tmp_x", schemaRemapNames{})
 		if err == nil || got != "" {
 			t.Fatalf("invalid DO literal was repaired to %q, error %v", got, err)
 		}
@@ -70,7 +70,7 @@ func TestRemapDOBodiesRejectsInvalidEscapeLiterals(t *testing.T) {
 
 func TestRemapDOSurrogatePairs(t *testing.T) {
 	const original = `DO E'BEGIN PERFORM ''public.t''::pg_catalog.regclass; RAISE NOTICE ''\uD83D\uDE00''; END';`
-	got, err := qualifyFunctionBodiesWithTempSchema(original, "public", "pgschema_tmp_x", nil)
+	got, err := qualifyFunctionBodiesWithTempSchema(original, "public", "pgschema_tmp_x", schemaRemapNames{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestRemapDOSurrogatePairs(t *testing.T) {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 	const untouched = `DO E'BEGIN RAISE NOTICE ''\uD83D\uDE00''; END';`
-	got, err = qualifyFunctionBodiesWithTempSchema(untouched, "public", "pgschema_tmp_x", nil)
+	got, err = qualifyFunctionBodiesWithTempSchema(untouched, "public", "pgschema_tmp_x", schemaRemapNames{})
 	if err != nil || got != untouched {
 		t.Fatalf("unchanged body re-encoded: %s, %v", got, err)
 	}
