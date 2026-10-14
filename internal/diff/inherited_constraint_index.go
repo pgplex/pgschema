@@ -36,7 +36,7 @@ func retainedInheritedConstraint(index ir.InheritedConstraintIndex, tables map[s
 // final renames. ALTER INDEX retains constraint ownership and renames the owning
 // constraint too. Catalog identities, never generated names, select the indexes.
 func (p *partitionIndexCreationPlan) restoreInheritedIndexesSQL(table *ir.Table, targetSchema string, qualify bool) string {
-	if p == nil {
+	if p == nil || p.constraintTables[table.Schema+"."+table.Name] {
 		return ""
 	}
 	indexes := append([]ir.InheritedConstraintIndex(nil), p.inherited[table.Schema+"."+table.Name]...)

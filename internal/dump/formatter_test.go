@@ -166,3 +166,39 @@ func TestFormatMultiFilePostponedConstraints(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatMultiFilePoliciesAfterNamedKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema.sql")
+	diffs := []diff.Diff{
+		{Type: diff.DiffTypeTable, Path: "public.events", Source: &ir.Table{Name: "events"}, Statements: []diff.SQLStatement{{SQL: "CREATE TABLE events (id int NOT NULL, a int);"}}},
+		{Type: diff.DiffTypeTableConstraint, Path: "public.events.pk", Source: &ir.Constraint{Table: "events", Name: "pk", Type: ir.ConstraintTypePrimaryKey}, Statements: []diff.SQLStatement{{SQL: "ALTER TABLE ONLY events ADD CONSTRAINT pk PRIMARY KEY (id);"}}},
+		{Type: diff.DiffTypeTableIndex, Operation: diff.DiffOperationAttach, Path: "public.events.pk", Source: &ir.Index{Table: "events", Name: "pk", IsPartitioned: true}, Statements: []diff.SQLStatement{{SQL: "ALTER INDEX pk ATTACH PARTITION leaf_pk;"}}},
+		{Type: diff.DiffTypeTableComment, Path: "public.events", Source: &ir.Constraint{Table: "events", Name: "pk", Type: ir.ConstraintTypePrimaryKey}, Statements: []diff.SQLStatement{{SQL: "COMMENT ON CONSTRAINT pk ON events IS 'key';"}}},
+		{Type: diff.DiffTypeTablePolicy, Path: "public.events.grouped", Source: &ir.RLSPolicy{Table: "events", Name: "grouped"}, Statements: []diff.SQLStatement{{SQL: "CREATE POLICY grouped ON events USING (id IN (SELECT id FROM events GROUP BY id HAVING a IS NOT NULL));"}}},
+	}
+	if err := NewDumpFormatter("PostgreSQL 18", "public", false, false).FormatMultiFile(diffs, path); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\\i tables/events.sql\n\\i constraints/0001_events.sql\n\\i indexes/0001_pk.sql\n\\i policies/0001_events.sql\n"
+	if !strings.HasSuffix(string(content), want) {
+		t.Fatalf("unexpected include order: %s", content)
+	}
+	table, err := os.ReadFile(filepath.Join(filepath.Dir(path), "tables", "events.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(table), "CREATE POLICY") {
+		t.Fatal("policy moved before its key")
+	}
+	constraint, err := os.ReadFile(filepath.Join(filepath.Dir(path), "constraints", "0001_events.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(constraint), "ADD CONSTRAINT pk PRIMARY KEY (id);\n\nCOMMENT ON CONSTRAINT pk ON events IS 'key';") {
+		t.Fatalf("constraint comment lost its creation order: %s", constraint)
+	}
+}

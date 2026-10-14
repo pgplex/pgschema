@@ -28,10 +28,19 @@ When part of the hierarchy already exists in the target, or part of it is
 ignored, `plan` falls back to recursive index creation and does not reconcile
 attachments on existing tables.
 
-For a complete new hierarchy, `plan` restores inherited `PRIMARY KEY` and `UNIQUE`
-index names immediately after creating each partition. It restores only indexes
-whose originating constraint remains managed. Native `apply` runs restoration
-with the table creation group, so a restoration failure rolls back that group.
+For a complete new hierarchy with catalog constraint definitions, `plan` can
+schedule named `PRIMARY KEY` and `UNIQUE` constraints after creating the tables.
+It then attaches each child index to its recorded parent index. This preserves
+source names without rename blocks. For example, PostgreSQL creates a child key
+named `custom_pk` directly, even if its usual generated name is `events_low_pkey`.
+
+If `plan` must create the hierarchy in separate batches because of function or
+domain dependencies, it retains recursive constraint creation and restores
+inherited index names after each partition. It also retains this path for
+unsupported constraint definitions or missing catalog metadata. It restores only
+indexes whose originating constraint remains managed. Native `apply` keeps creation and
+attachments or restoration in the table creation transaction, so a failure
+rolls back that group.
 
 ## Executable DO blocks in desired SQL
 

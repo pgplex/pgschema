@@ -120,10 +120,12 @@ func validateConstraintIndexPartitions(parent, child ir.IndexRef, table *ir.Tabl
 // filtered hierarchies retain recursive creation for compatibility.
 // Dump selects every managed partitioned index after its strict validation.
 type partitionIndexCreationPlan struct {
-	indexes      map[ir.IndexRef]*ir.Index
-	children     map[ir.IndexRef]map[ir.IndexRef]bool
-	uniqueTables map[string]bool
-	inherited    map[string][]ir.InheritedConstraintIndex
+	indexes          map[ir.IndexRef]*ir.Index
+	children         map[ir.IndexRef]map[ir.IndexRef]bool
+	uniqueTables     map[string]bool
+	inherited        map[string][]ir.InheritedConstraintIndex
+	constraints      map[ir.IndexRef]*explicitConstraintIndex
+	constraintTables map[string]bool
 }
 
 func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[string]*ir.Table, dump bool) *partitionIndexCreationPlan {

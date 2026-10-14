@@ -581,7 +581,7 @@ func generateCreateTablesSQL(
 			policyNames := sortedKeys(table.Policies)
 			for _, name := range policyNames {
 				policy := table.Policies[name]
-				if shouldDeferPolicy != nil && shouldDeferPolicy(policy) {
+				if (partitionIndexes != nil && partitionIndexes.constraintTables[table.Schema+"."+table.Name]) || (shouldDeferPolicy != nil && shouldDeferPolicy(policy)) {
 					deferredPolicies = append(deferredPolicies, policy)
 				} else {
 					inlinePolicies = append(inlinePolicies, policy)
@@ -596,6 +596,7 @@ func generateCreateTablesSQL(
 		createdTables[fmt.Sprintf("%s.%s", table.Schema, table.Name)] = true
 	}
 
+	partitionIndexes.generateExplicitConstraintsSQL(tables, targetSchema, collector)
 	return deferredPolicies, deferredConstraints
 }
 
@@ -991,7 +992,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		var deferred []*deferredConstraint
 		currentKey := fmt.Sprintf("%s.%s", table.Schema, table.Name)
 		for _, constraint := range inlineConstraints {
-			if suppressedInlineFKs[constraintPathKey(constraint)] {
+			if suppressedInlineFKs[constraintPathKey(constraint)] || partitionIndexes.explicitConstraint(constraint) {
 				continue
 			}
 			if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) ||
@@ -1035,7 +1036,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	for _, column := range table.Columns {
 		// Build column definition with SERIAL detection
 		var builder strings.Builder
-		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema)
+		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema, partitionIndexes)
 		columnParts = append(columnParts, fmt.Sprintf("    %s", builder.String()))
 	}
 
@@ -1056,7 +1057,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	for _, constraint := range inlineConstraints {
 		// FKs bound to a unique/PK constraint being replaced by this migration
 		// are created after the replacement instead (issue #439)
-		if suppressedInlineFKs[constraintPathKey(constraint)] {
+		if suppressedInlineFKs[constraintPathKey(constraint)] || partitionIndexes.explicitConstraint(constraint) {
 			continue
 		}
 		if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) ||
@@ -1973,7 +1974,7 @@ func ensureCheckClauseParens(s string) string {
 
 // writeColumnDefinitionToBuilder builds column definitions with SERIAL detection and proper formatting
 // This is moved from ir/table.go to consolidate SQL generation in the diff module
-func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string, qualifySchema bool) {
+func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, column *ir.Column, targetSchema string, qualifySchema bool, partitionIndexes *partitionIndexCreationPlan) {
 	builder.WriteString(ir.QuoteIdentifier(column.Name))
 	builder.WriteString(" ")
 
@@ -1989,7 +1990,7 @@ func writeColumnDefinitionToBuilder(builder *strings.Builder, table *ir.Table, c
 	// Check if column is part of any primary key constraint for NOT NULL handling
 	isPartOfAnyPK := false
 	for _, constraint := range table.Constraints {
-		if constraint.Type == ir.ConstraintTypePrimaryKey {
+		if constraint.Type == ir.ConstraintTypePrimaryKey && !partitionIndexes.explicitConstraint(constraint) {
 			for _, col := range constraint.Columns {
 				if col.Name == column.Name {
 					isPartOfAnyPK = true

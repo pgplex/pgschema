@@ -10,7 +10,8 @@ import (
 func (i *Inspector) buildIndexAttachments(ctx context.Context, schema *IR, targetSchema string) (map[IndexRef][]IndexRef, error) {
 	rows, err := i.db.QueryContext(ctx, `
 SELECT pn.nspname, parent.relname, cn.nspname, child.relname,
-       t.relname, c.conname, c.contype::text, pc.conname, pt.relname
+       t.relname, c.conname, c.contype::text, pc.conname, pt.relname,
+       pg_get_constraintdef(c.oid), obj_description(c.oid, 'pg_constraint')
 FROM pg_inherits inh
 JOIN pg_class parent ON parent.oid = inh.inhparent
 JOIN pg_namespace pn ON pn.oid = parent.relnamespace
@@ -34,8 +35,8 @@ ORDER BY pn.nspname, parent.relname, cn.nspname, child.relname`, targetSchema)
 		var parent, child IndexRef
 		var tableName string
 		var constraintName sql.NullString
-		var constraintType, parentConstraintName, parentTable sql.NullString
-		if err := rows.Scan(&parent.Schema, &parent.Name, &child.Schema, &child.Name, &tableName, &constraintName, &constraintType, &parentConstraintName, &parentTable); err != nil {
+		var constraintType, parentConstraintName, parentTable, definition, comment sql.NullString
+		if err := rows.Scan(&parent.Schema, &parent.Name, &child.Schema, &child.Name, &tableName, &constraintName, &constraintType, &parentConstraintName, &parentTable, &definition, &comment); err != nil {
 			return nil, err
 		}
 		attachments[parent] = append(attachments[parent], child)
@@ -48,6 +49,7 @@ ORDER BY pn.nspname, parent.relname, cn.nspname, child.relname`, targetSchema)
 					}
 					table.InheritedConstraintIndexes = append(table.InheritedConstraintIndexes, InheritedConstraintIndex{
 						Index: child, ConstraintName: constraintName.String, ConstraintType: kind,
+						Definition: definition.String, Comment: comment.String,
 						ParentIndex:      parent,
 						ParentConstraint: ConstraintRef{Schema: parent.Schema, Table: parentTable.String, Name: parentConstraintName.String},
 					})
@@ -61,5 +63,37 @@ ORDER BY pn.nspname, parent.relname, cn.nspname, child.relname`, targetSchema)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return attachments, nil
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// Keep complete PK/UNIQUE clauses, including INCLUDE, outside public IR.
+	locals, err := i.db.QueryContext(ctx, `
+SELECT t.relname, c.conname, idx.relname, pg_get_constraintdef(c.oid),
+       obj_description(c.oid, 'pg_constraint')
+FROM pg_constraint c
+JOIN pg_class t ON t.oid = c.conrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+JOIN pg_class idx ON idx.oid = c.conindid
+WHERE n.nspname = $1 AND c.contype IN ('p', 'u') AND c.conparentid = 0`, targetSchema)
+	if err != nil {
+		return nil, err
+	}
+	defer locals.Close()
+	for locals.Next() {
+		var tableName, name, indexName, definition string
+		var comment sql.NullString
+		if err := locals.Scan(&tableName, &name, &indexName, &definition, &comment); err != nil {
+			return nil, err
+		}
+		if namespace := schema.Schemas[targetSchema]; namespace != nil {
+			if table := namespace.Tables[tableName]; table != nil {
+				if constraint := table.Constraints[name]; constraint != nil {
+					constraint.CatalogDefinition = definition
+					constraint.BackingIndex = &IndexRef{Schema: targetSchema, Name: indexName}
+					constraint.CatalogComment = comment.String
+				}
+			}
+		}
+	}
+	return attachments, locals.Err()
 }

@@ -20,8 +20,12 @@ func TestInheritedConstraintIndexTemporaryNameCollisions(t *testing.T) {
 	defer pg.Stop()
 	db, h, p, d, u, w := testutil.ConnectToPostgres(t, pg)
 	defer db.Close()
-	const desired = `CREATE TABLE events (id int PRIMARY KEY) PARTITION BY RANGE(id);
+	// The child needs a new function, so this family crosses creation batches
+	// and deliberately exercises strict restoration.
+	const desired = `CREATE TABLE events (id int PRIMARY KEY, a int) PARTITION BY RANGE(id);
+CREATE FUNCTION event_value() RETURNS int LANGUAGE SQL AS 'SELECT a FROM events GROUP BY id';
 CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+ALTER TABLE events_leaf ALTER a SET DEFAULT event_value();
 ALTER INDEX events_leaf_pkey RENAME TO custom_leaf;`
 	path := filepath.Join(t.TempDir(), "schema.sql")
 	if err := os.WriteFile(path, []byte(desired), 0600); err != nil {

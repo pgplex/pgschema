@@ -37,9 +37,35 @@ func TestInheritedConstraintIndexRoundTrip(t *testing.T) {
 	targetDB, h, p, d, u, w := testutil.ConnectToPostgres(t, target)
 	defer targetDB.Close()
 	fixtures := []struct{ name, schema, sql string }{
+		{"dependency_sensitive", "public", `CREATE TABLE events (id int PRIMARY KEY, a int) PARTITION BY RANGE(id);
+CREATE FUNCTION event_value() RETURNS int LANGUAGE SQL AS 'SELECT a FROM events GROUP BY id';
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+ALTER TABLE events_leaf ALTER a SET DEFAULT event_value();
+ALTER INDEX events_leaf_pkey RENAME TO custom_leaf;`},
+		{"renamed_pk_timestamp", "public", `CREATE TABLE events (id int PRIMARY KEY, occurred_at timestamp) PARTITION BY RANGE(id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+ALTER INDEX events_leaf_pkey RENAME TO events_leaf_identity;
+CREATE INDEX events_leaf_pkey ON events_leaf(occurred_at);
+CREATE FUNCTION event_value() RETURNS timestamp LANGUAGE SQL AS 'SELECT occurred_at FROM events GROUP BY id';
+COMMENT ON CONSTRAINT events_pkey ON events IS 'root key';
+COMMENT ON CONSTRAINT events_leaf_identity ON events_leaf IS 'leaf key';
+CREATE TABLE event_refs (id int REFERENCES events(id), CONSTRAINT events_pkey CHECK(id > 0));
+CREATE POLICY grouped ON event_refs USING (id IN (SELECT id FROM events GROUP BY id HAVING occurred_at IS NOT NULL));
+CREATE POLICY grouped_self ON events USING (id IN (SELECT id FROM events GROUP BY id HAVING occurred_at IS NOT NULL));`},
+		{"identical_unique", "public", `CREATE TABLE events (id int, a int) PARTITION BY RANGE(id);
+ALTER TABLE events ADD CONSTRAINT first_unique UNIQUE(id,a) INCLUDE (id);
+ALTER TABLE events ADD CONSTRAINT second_unique UNIQUE(id,a) INCLUDE (id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);`},
+		{"deferrable", "public", `CREATE TABLE events (id int, a int, CONSTRAINT custom_unique UNIQUE(id,a) INCLUDE (id) DEFERRABLE INITIALLY DEFERRED) PARTITION BY RANGE(id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);`},
 		{"reported_primary_key", "public", `CREATE TABLE public.events (id int PRIMARY KEY) PARTITION BY RANGE(id);
 CREATE INDEX events_leaf_pkey ON public.events(id);
 CREATE TABLE public.events_leaf PARTITION OF public.events FOR VALUES FROM (0) TO (10);`},
+		{"nulls_not_distinct", "public", `CREATE TABLE events (id int, a int, UNIQUE NULLS NOT DISTINCT(id,a)) PARTITION BY RANGE(id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);`},
+		{"unicode_long_names", "public", `CREATE TABLE events (id int, a int, CONSTRAINT "ключ_длинное_имя_ограничения_таблицы" UNIQUE(id,a)) PARTITION BY RANGE(id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+ALTER INDEX events_leaf_id_a_key RENAME TO "ключ_раздела_с_длинным_именем_индекса";`},
 		{"unique_collision", "public", `CREATE TABLE events (id int UNIQUE) PARTITION BY RANGE(id);
 CREATE INDEX events_leaf_id_key ON events(id);
 CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);`},
@@ -62,6 +88,9 @@ ALTER INDEX "leaf.'\$$.$pgschema_restore_0$_id_a_key" RENAME TO "a_very_long_des
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.name, func(t *testing.T) {
+			if fixture.name == "nulls_not_distinct" && majorVersion < 15 {
+				t.Skip("NULLS NOT DISTINCT requires PostgreSQL 15")
+			}
 			reset := func(db *sql.DB) {
 				t.Helper()
 				_, err := db.Exec("DROP SCHEMA IF EXISTS " + ir.QuoteIdentifier(fixture.schema) + " CASCADE; CREATE SCHEMA " + ir.QuoteIdentifier(fixture.schema) + "; SET search_path TO " + ir.QuoteIdentifier(fixture.schema) + ";")
@@ -91,8 +120,12 @@ ALTER INDEX "leaf.'\$$.$pgschema_restore_0$_id_a_key" RENAME TO "a_very_long_des
 						if err != nil {
 							t.Fatal(err)
 						}
-						if !strings.Contains(text, "INTO STRICT") {
-							t.Fatal("dump omitted restoration")
+						fallback := fixture.name == "dependency_sensitive"
+						if strings.Contains(text, "INTO STRICT") != fallback {
+							t.Fatalf("unexpected restoration, fallback=%v", fallback)
+						}
+						if !fallback && !strings.Contains(text, "ALTER TABLE ONLY") {
+							t.Fatal("dump omitted explicit constraints")
 						}
 						sourcePlan, err := planCmd.GeneratePlan(&planCmd.PlanConfig{Host: sh, Port: sp, DB: sd, User: su, Password: sw, Schema: fixture.schema, SSLMode: "disable", File: path}, sharedEmbeddedPG)
 						if err != nil {
@@ -124,17 +157,34 @@ ALTER INDEX "leaf.'\$$.$pgschema_restore_0$_id_a_key" RENAME TO "a_very_long_des
 									if len(migration.Groups) != 1 {
 										t.Fatalf("expected single creation group, got %d", len(migration.Groups))
 									}
-									// Inject both strict-lookup and destination-name failures into the real
+									// Inject missing-object and occupied-name failures into the real
 									// creation group. Apply must propagate each failure and roll back tables.
 									for _, failure := range []string{"lookup", "occupied"} {
 										injected := false
 										for i := range migration.Groups[0].Steps {
 											step := &migration.Groups[0].Steps[i]
-											if !strings.Contains(step.SQL, "INTO STRICT") {
+											if !strings.Contains(step.SQL, "INTO STRICT") && !strings.HasPrefix(step.SQL, "ALTER TABLE ONLY") {
 												continue
 											}
 											original := step.SQL
-											if failure == "lookup" {
+											expected := "P0002"
+											if !fallback {
+												pos := strings.Index(original, " ADD CONSTRAINT ")
+												if failure == "lookup" {
+													step.SQL = "ALTER TABLE ONLY pgschema_missing_relation" + original[pos:]
+													expected = "42P01"
+												} else {
+													definition := strings.Index(original, " PRIMARY KEY")
+													if definition < 0 {
+														definition = strings.Index(original, " UNIQUE")
+													}
+													parentName := "events"
+													if fixture.name == "quoted_identifiers" {
+														parentName = `t.'\$$.$pgschema_restore_0$`
+													}
+													step.SQL = original[:pos] + " ADD CONSTRAINT " + ir.QuoteIdentifier(parentName) + original[definition:]
+												}
+											} else if failure == "lookup" {
 												step.SQL = strings.Replace(original, "WHERE c.conrelid =", "WHERE false AND c.conrelid =", 1)
 											} else {
 												// The parent table is a relation in the same namespace as the leaf.
@@ -147,7 +197,6 @@ ALTER INDEX "leaf.'\$$.$pgschema_restore_0$_id_a_key" RENAME TO "a_very_long_des
 											}
 											err = apply.ApplyMigration(&apply.ApplyConfig{Host: h, Port: p, DB: d, User: u, Password: w, Schema: fixture.schema, SSLMode: "disable", Plan: migration, AutoApprove: true, NoColor: true, Quiet: true}, nil)
 											step.SQL = original
-											expected := "P0002"
 											if failure == "occupied" {
 												expected = "42P07"
 											}
@@ -166,7 +215,7 @@ ALTER INDEX "leaf.'\$$.$pgschema_restore_0$_id_a_key" RENAME TO "a_very_long_des
 											break
 										}
 										if !injected {
-											t.Fatal("no restoration step for failure injection")
+											t.Fatal("no constraint creation step for failure injection")
 										}
 									}
 									err = apply.ApplyMigration(&apply.ApplyConfig{Host: h, Port: p, DB: d, User: u, Password: w, Schema: fixture.schema, SSLMode: "disable", Plan: migration, AutoApprove: true, NoColor: true, Quiet: true}, nil)
@@ -200,7 +249,9 @@ func inheritedIndexCatalog(t *testing.T, db *sql.DB, schema string) string {
 	var catalog string
 	err := db.QueryRow(`SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY table_name,index_name),'[]'::jsonb)::text FROM (
  SELECT t.relname AS table_name,i.relname AS index_name,pg_catalog.pg_get_indexdef(i.oid) AS definition,
-        idx.indisvalid,idx.indisready,idx.indislive,c.conname,c.contype,
+        idx.indisvalid,idx.indisready,idx.indislive,c.conname,c.contype,c.conislocal,c.coninhcount,
+        c.condeferrable,c.condeferred,pg_catalog.pg_get_constraintdef(c.oid) AS constraint_definition,
+        pg_catalog.obj_description(c.oid,'pg_constraint') AS constraint_comment,
         pc.conname AS parent_constraint,pt.relname AS parent_table,
         ARRAY(SELECT p.relname FROM pg_catalog.pg_inherits h JOIN pg_catalog.pg_class p ON p.oid=h.inhparent WHERE h.inhrelid=i.oid ORDER BY h.inhseqno) AS parent_indexes,
         ARRAY(SELECT dep.deptype::text FROM pg_catalog.pg_depend dep WHERE dep.classid='pg_catalog.pg_class'::pg_catalog.regclass AND dep.objid=i.oid AND dep.refclassid='pg_catalog.pg_constraint'::pg_catalog.regclass AND dep.refobjid=c.oid ORDER BY dep.deptype) AS ownership

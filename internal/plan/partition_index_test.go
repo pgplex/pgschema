@@ -142,3 +142,58 @@ func checkIndexPlanRoundTrips(t *testing.T, p *Plan) {
 		})
 	}
 }
+
+func TestConstraintOwnedPartitionIndexAttachments(t *testing.T) {
+	desired := parseSQL(t, `
+CREATE TABLE events (id integer PRIMARY KEY, a integer, UNIQUE(id,a)) PARTITION BY RANGE(id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+ALTER INDEX events_leaf_pkey RENAME TO leaf_identity;
+COMMENT ON CONSTRAINT events_pkey ON events IS 'root key';
+COMMENT ON CONSTRAINT leaf_identity ON events_leaf IS 'child key';
+`)
+	diffs := diff.GenerateMigration(ir.NewIR(), desired, "public")
+	p := NewPlan(diffs, 18, nil)
+	if len(p.Groups) != 1 {
+		t.Fatalf("expected one transaction, got %d groups", len(p.Groups))
+	}
+	var attachments []string
+	comments := 0
+	for _, d := range diffs {
+		for _, stmt := range d.Statements {
+			if d.Operation == diff.DiffOperationAttach {
+				index, ok := d.Source.(*ir.Index)
+				if !ok || d.Type != diff.DiffTypeTableIndex || d.Path != index.Schema+"."+index.Table+"."+index.Name || !index.IsPartitioned || !stmt.CanRunInTransaction {
+					t.Fatalf("invalid constraint-owned attachment metadata: %+v", d)
+				}
+				attachments = append(attachments, stmt.SQL)
+			}
+			if strings.HasPrefix(stmt.SQL, "COMMENT ON CONSTRAINT") {
+				comments++
+				if d.Type != diff.DiffTypeTableComment || d.Operation != diff.DiffOperationCreate {
+					t.Fatalf("invalid constraint comment metadata: %+v", d)
+				}
+			}
+		}
+	}
+	want := []string{"ALTER INDEX events_id_a_key ATTACH PARTITION events_leaf_id_a_key;", "ALTER INDEX events_pkey ATTACH PARTITION leaf_identity;"}
+	if !reflect.DeepEqual(attachments, want) {
+		t.Fatalf("attachments=%v, want %v", attachments, want)
+	}
+	if comments != 2 {
+		t.Fatalf("got %d constraint comments, want 2", comments)
+	}
+	summary := p.calculateSummaryFromSteps()
+	if summary.Total != 2 || summary.Add != 2 || summary.Change != 0 || summary.Destroy != 0 {
+		t.Fatalf("comments or attachments changed table counts: %+v", summary)
+	}
+	human := p.HumanColored(false)
+	for _, name := range []string{"events_pkey", "events_id_a_key"} {
+		if !strings.Contains(human, name+" (index attachment)") {
+			t.Errorf("missing attachment label for %s:\n%s", name, human)
+		}
+	}
+	if strings.Contains(human, "concurrent rebuild") || strings.Contains(p.ToSQL(SQLFormatRaw), "CONCURRENTLY") {
+		t.Fatal("new attachments classified as rebuild/concurrent creation")
+	}
+	checkIndexPlanRoundTrips(t, p)
+}
