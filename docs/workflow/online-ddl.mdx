@@ -189,3 +189,43 @@ ALTER TABLE orders VALIDATE CONSTRAINT orders_customer_fkey;
 ```
 
 For more examples, see the test cases in [testdata/diff/online](https://github.com/pgplex/pgschema/tree/main/testdata/diff/online) which demonstrate online DDL patterns for various PostgreSQL schema operations.
+
+## Recovering interrupted concurrent index builds
+
+An interrupted `CREATE INDEX CONCURRENTLY` can leave a named but invalid index.
+After the build has stopped, regenerate the plan against the same desired schema.
+For an unchanged ordinary index definition, pgschema plans a schema-qualified
+`REINDEX INDEX CONCURRENTLY` rather than reporting no changes. Apply the saved
+plan normally. Recovery checks the catalog before and after rebuilding and keeps
+PostgreSQL responsible for the definition, dependencies and uniqueness protection.
+Both invalid indexes already accepting writes and those not yet ready are covered.
+
+Recovery runs outside a transaction, before ordinary migration steps. It is not
+retried automatically within apply: after cancellation, lock timeout or another
+failure, generate a fresh plan. Failed-reindex artifacts remain visible and use
+ordinary dependency-respecting drop semantics when absent from the desired schema;
+pgschema does not infer ownership from `_ccnew` or `_ccold` names.
+
+A unique index whose data contains duplicates still fails. Recovery does not alter
+rows or remove the original index to force success. Resolve the data explicitly
+and replan. The applying role needs PostgreSQL's required ownership or maintenance
+privileges; pgschema does not escalate privileges.
+
+Planning refuses recovery of a desired invalid index whose definition is also
+being changed. Recover the original definition first or use an explicitly authored
+migration. Unhealthy required constraint-backed indexes and required indexes already being
+dropped need explicit investigation. Integrity constraints are never removed as a
+recovery strategy.
+
+An intentional invalid partition parent created with `CREATE INDEX ON ONLY` is
+preserved when the desired schema describes the same state. If the desired parent
+should be valid, attach the missing partition indexes explicitly; reindexing cannot
+complete attachment. This distinction uses the inspected desired-state database.
+
+For affected unhealthy indexes, observed active builds or conflicting maintenance
+locks cause a wait-and-replan error. The lock check also protects roles whose access
+to another backend's progress details is restricted. It may temporarily refuse
+recovery during maintenance such as VACUUM. Untouched intentional partition parents
+do not block unrelated changes. These checks and the saved-plan fingerprint reduce
+stale-state races; PostgreSQL's relation locks serialize the concurrent operation.
+They do not provide a global lock against arbitrary external DDL.
