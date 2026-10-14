@@ -28,6 +28,26 @@ When part of the hierarchy already exists in the target, or part of it is
 ignored, `plan` falls back to recursive index creation and does not reconcile
 attachments on existing tables.
 
+For a complete new hierarchy, `plan` restores inherited `PRIMARY KEY` and `UNIQUE`
+index names immediately after creating each partition. It restores only indexes
+whose originating constraint remains managed. Native `apply` runs restoration
+with the table creation group, so a restoration failure rolls back that group.
+
+## Executable DO blocks in desired SQL
+
+When loading desired SQL into its temporary schema, `plan` remaps explicit
+relation-valued literals cast to `regclass` inside executable `DO` bodies.
+For example, `'public.events'::pg_catalog.regclass` refers to the temporary copy
+of `events`. The loader preserves other code, ordinary strings, comments,
+destination index names, and references to other schemas. For example,
+`FROM public.events` remains unchanged inside a `DO` body. This preserves table
+aliases and record fields that have the same name as the managed schema.
+With an external plan database, the loader remaps only casts for objects created
+by the desired SQL, so extension references remain intact. The loader continues
+to remap function and procedure bodies as before.
+If the loader encounters an invalid escape literal while remapping a `DO` body,
+it returns a contextual error before executing the desired SQL.
+
 ## Basic Usage
 
 ```bash

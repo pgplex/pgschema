@@ -1,13 +1,16 @@
 package dump
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/include"
+	"github.com/pgplex/pgschema/ir"
 	"github.com/pgplex/pgschema/testutil"
 )
 
@@ -97,9 +100,13 @@ ALTER INDEX partial_lookup ATTACH PARTITION late_partial_lookup;
 							Schema: "public", SSLMode: "disable", MultiFile: multiFile, File: path,
 						})
 						if tc.child != "" {
-							want := "cannot dump index public." + tc.parent + ": attached index public." + tc.child + " is excluded"
-							if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), ".pgschemaignore") {
-								t.Fatalf("Expected actionable dependency error %q, got %v", want, err)
+							var dependencyErr *diff.PartitionIndexDependencyError
+							if !errors.As(err, &dependencyErr) {
+								t.Fatalf("Expected partition index dependency error, got %v", err)
+							}
+							if dependencyErr.ParentIndex != (ir.IndexRef{Schema: "public", Name: tc.parent}) ||
+								dependencyErr.AttachedIndex != (ir.IndexRef{Schema: "public", Name: tc.child}) || dependencyErr.ExcludedTable != nil {
+								t.Fatalf("Unexpected dependency context: %+v", dependencyErr)
 							}
 							if output != "" {
 								t.Fatal("Failed dump returned partial SQL")
@@ -185,8 +192,14 @@ CREATE TABLE event_links (bucket int, id int, FOREIGN KEY (bucket, id) REFERENCE
 					Host: host, Port: port, DB: dbname, User: user, Password: password,
 					Schema: "public", SSLMode: "disable", MultiFile: multiFile, File: path,
 				})
-				if err == nil || !strings.Contains(err.Error(), "event_unique") || !strings.Contains(err.Error(), "mid_unique") || !strings.Contains(err.Error(), "events_leaf") || !strings.Contains(err.Error(), ".pgschemaignore") {
-					t.Fatalf("Expected actionable nested dependency error, got %v", err)
+				var dependencyErr *diff.PartitionIndexDependencyError
+				if !errors.As(err, &dependencyErr) {
+					t.Fatalf("Expected nested partition index dependency error, got %v", err)
+				}
+				if dependencyErr.ParentIndex != (ir.IndexRef{Schema: "public", Name: "event_unique"}) ||
+					dependencyErr.AttachedIndex != (ir.IndexRef{Schema: "public", Name: "mid_unique"}) || dependencyErr.ExcludedTable == nil ||
+					dependencyErr.ExcludedTable.Schema != "public" || dependencyErr.ExcludedTable.Name != "events_leaf" {
+					t.Fatalf("Unexpected dependency context: %+v", dependencyErr)
 				}
 				if output != "" {
 					t.Fatal("Failed dump returned partial SQL")

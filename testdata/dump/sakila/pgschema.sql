@@ -433,6 +433,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_01 PARTITION OF payment (
     CONSTRAINT payment_p2022_01_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_01_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-01-01 00:00:00+00') TO ('2022-02-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_01'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_01_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_01_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -461,6 +518,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_02 PARTITION OF payment (
     CONSTRAINT payment_p2022_02_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_02_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-02-01 00:00:00+00') TO ('2022-03-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_02'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_02_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_02_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -489,6 +603,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_03 PARTITION OF payment (
     CONSTRAINT payment_p2022_03_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_03_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-03-01 00:00:00+00') TO ('2022-04-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_03'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_03_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_03_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -517,6 +688,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_04 PARTITION OF payment (
     CONSTRAINT payment_p2022_04_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_04_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-04-01 00:00:00+00') TO ('2022-05-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_04'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_04_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_04_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -545,6 +773,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_05 PARTITION OF payment (
     CONSTRAINT payment_p2022_05_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_05_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-05-01 00:00:00+00') TO ('2022-06-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_05'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_05_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_05_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -573,6 +858,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_06 PARTITION OF payment (
     CONSTRAINT payment_p2022_06_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_06_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-06-01 00:00:00+00') TO ('2022-07-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_06'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_06_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_06_customer_id; Type: INDEX; Schema: -; Owner: -
@@ -601,6 +943,63 @@ CREATE TABLE IF NOT EXISTS payment_p2022_07 PARTITION OF payment (
     CONSTRAINT payment_p2022_07_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES rental (rental_id),
     CONSTRAINT payment_p2022_07_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (staff_id)
 ) FOR VALUES FROM ('2022-07-01 00:00:00+00') TO ('2022-08-01 00:00:00+00');
+DO $pgschema_restore_0$
+DECLARE
+    index_ids pg_catalog.oid[] := ARRAY[]::pg_catalog.oid[];
+    desired_names pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+    found_id pg_catalog.oid;
+    current_name pg_catalog.text;
+    namespace_name pg_catalog.text;
+    namespace_id pg_catalog.oid;
+    table_id pg_catalog.oid;
+    temporary_name pg_catalog.text;
+    position pg_catalog.int4;
+    suffix pg_catalog.int4;
+BEGIN
+    SELECT c.conindid INTO STRICT found_id
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_constraint pc ON pc.oid = c.conparentid
+    JOIN pg_catalog.pg_class parent_index ON parent_index.oid = pc.conindid
+    JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.conindid AND inh.inhparent = pc.conindid
+    WHERE c.conrelid = E'payment_p2022_07'::pg_catalog.regclass AND c.contype = E'p'
+      AND pc.conrelid = E'payment'::pg_catalog.regclass AND pc.conname = E'payment_pkey'
+      AND parent_index.relname = E'payment_pkey';
+    index_ids := pg_catalog.array_append(index_ids, found_id);
+    desired_names := pg_catalog.array_append(desired_names, E'payment_p2022_07_pkey');
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname, n.oid, i.indrelid
+        INTO STRICT current_name, namespace_name, namespace_id, table_id
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            suffix := 0;
+            LOOP
+                temporary_name := pg_catalog.format('pgschema_inherited_%s_%s', index_ids[position], suffix);
+                EXIT WHEN NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_class
+                    WHERE relnamespace = namespace_id AND relname = temporary_name
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint
+                    WHERE conrelid = table_id AND conname = temporary_name
+                ) AND temporary_name <> ALL(desired_names);
+                suffix := suffix + 1;
+            END LOOP;
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, temporary_name);
+        END IF;
+    END LOOP;
+    FOR position IN 1..pg_catalog.array_length(index_ids, 1) LOOP
+        SELECT c.relname, n.nspname INTO STRICT current_name, namespace_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.oid = index_ids[position];
+        IF current_name <> desired_names[position] THEN
+            EXECUTE pg_catalog.format('ALTER INDEX %I.%I RENAME TO %I', namespace_name, current_name, desired_names[position]);
+        END IF;
+    END LOOP;
+END
+$pgschema_restore_0$;
 
 --
 -- Name: idx_fk_payment_p2022_07_customer_id; Type: INDEX; Schema: -; Owner: -

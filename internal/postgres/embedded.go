@@ -290,7 +290,10 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	// Point target-schema qualifiers inside function bodies at the temporary schema so that
 	// SQL functions inlined by later statements resolve (issue #596). Everything of the target
 	// schema lives in the temporary schema here, so every qualifier is rewritten.
-	schemaAgnosticSQL = qualifyFunctionBodiesWithTempSchema(schemaAgnosticSQL, schema, ep.tempSchema, nil)
+	schemaAgnosticSQL, err = qualifyFunctionBodiesWithTempSchema(schemaAgnosticSQL, schema, ep.tempSchema, nil)
+	if err != nil {
+		return fmt.Errorf("failed to remap desired state SQL to temporary schema %s: %w", ep.tempSchema, err)
+	}
 
 	// Execute the SQL directly
 	// Note: Desired state SQL should never contain operations like CREATE INDEX CONCURRENTLY

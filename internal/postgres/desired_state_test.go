@@ -274,16 +274,10 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 			expected: "/* drop public.t */ DROP TABLE t;",
 		},
 		{
-			// Known limitation: E'...' escape-string syntax with backslash-escaped quotes
-			// is not handled. The parser treats \' as ordinary char + string-closer,
-			// mistracking boundaries. Here it strips inside the string (wrong) and
-			// misses the identifier after (also wrong). Both are safe: the SQL remains
-			// valid, and the unstripped qualifier just means the object is looked up
-			// in the original schema. E'...' in DDL is extremely rare.
-			name:     "E-string with backslash-escaped quote (known limitation)",
+			name:     "E-string with backslash-escaped quote",
 			sql:      "SELECT E'it\\'s public.test' FROM public.t;",
 			schema:   "public",
-			expected: "SELECT E'it\\'s test' FROM public.t;",
+			expected: "SELECT E'it\\'s public.test' FROM t;",
 		},
 	}
 
@@ -529,7 +523,7 @@ func TestQualifyFunctionBodiesWithTempSchema(t *testing.T) {
 			expected: `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM auth.users, notpublic.t $$;`,
 		},
 		{
-			name:     "dollar-quoted text that is not a function body is preserved",
+			name:     "DO code and comments remain unchanged",
 			sql:      `COMMENT ON TABLE t IS $$see public.t$$; DO $$ BEGIN PERFORM 1 FROM public.t; END $$;`,
 			expected: `COMMENT ON TABLE t IS $$see public.t$$; DO $$ BEGIN PERFORM 1 FROM public.t; END $$;`,
 		},
@@ -543,7 +537,10 @@ func TestQualifyFunctionBodiesWithTempSchema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := qualifyFunctionBodiesWithTempSchema(tt.sql, "public", tmp, tt.objects)
+			got, err := qualifyFunctionBodiesWithTempSchema(tt.sql, "public", tmp, tt.objects)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got != tt.expected {
 				t.Errorf("got:\n%s\nexpected:\n%s", got, tt.expected)
 			}

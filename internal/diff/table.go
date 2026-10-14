@@ -508,7 +508,11 @@ func generateCreateTablesSQL(
 			CanRunInTransaction: true, // CREATE TABLE can run in a transaction
 		}
 
-		collector.collect(context, sql)
+		statements := []SQLStatement{{SQL: sql, CanRunInTransaction: true}}
+		if restoration := partitionIndexes.restoreInheritedIndexesSQL(table, targetSchema, collector.qualifySchema); restoration != "" {
+			statements = append(statements, SQLStatement{SQL: restoration, CanRunInTransaction: true})
+		}
+		collector.collectStatements(context, statements)
 
 		// Add table comment
 		if table.Comment != "" {

@@ -7,6 +7,25 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
+// PartitionIndexDependencyError identifies an excluded dependency of a retained
+// partitioned index. ExcludedTable is set when the attached constraint-backed
+// index requires a partition table that is outside the managed schema.
+type PartitionIndexDependencyError struct {
+	ParentIndex   ir.IndexRef
+	AttachedIndex ir.IndexRef
+	ExcludedTable *ir.TableDependency
+}
+
+func (e *PartitionIndexDependencyError) Error() string {
+	parent := ir.QuoteIdentifier(e.ParentIndex.Schema) + "." + ir.QuoteIdentifier(e.ParentIndex.Name)
+	child := ir.QuoteIdentifier(e.AttachedIndex.Schema) + "." + ir.QuoteIdentifier(e.AttachedIndex.Name)
+	if e.ExcludedTable != nil {
+		table := ir.QuoteIdentifier(e.ExcludedTable.Schema) + "." + ir.QuoteIdentifier(e.ExcludedTable.Name)
+		return fmt.Sprintf("cannot dump index %s: attached constraint-backed index %s requires excluded partition table %s; adjust .pgschemaignore to include the partition table", parent, child, table)
+	}
+	return fmt.Sprintf("cannot dump index %s: attached index %s is excluded; adjust .pgschemaignore to include the child index, its table, and any owning constraint", parent, child)
+}
+
 // availablePartitionIndexes includes indexes created by retained constraints.
 // Those indexes remain outside standalone index creation and comparison.
 func availablePartitionIndexes(tables []*ir.Table) map[ir.IndexRef]bool {
@@ -58,9 +77,7 @@ func validatePartitionIndexDependencies(schema *ir.IR) error {
 	for _, key := range keys {
 		for _, child := range indexes[key].AttachedPartitions {
 			if !available[child] {
-				return fmt.Errorf("cannot dump index %s: attached index %s is excluded; adjust .pgschemaignore to include the child index, its table, and any owning constraint",
-					ir.QuoteIdentifier(key.Schema)+"."+ir.QuoteIdentifier(key.Name),
-					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name))
+				return &PartitionIndexDependencyError{ParentIndex: key, AttachedIndex: child}
 			}
 			if table := constraintIndexes[child]; table != nil {
 				if err := validateConstraintIndexPartitions(key, child, table, tablesByName); err != nil {
@@ -89,10 +106,7 @@ func validateConstraintIndexPartitions(parent, child ir.IndexRef, table *ir.Tabl
 		for _, partition := range current.AllPartitionChildren {
 			next := tables[partition.Schema+"."+partition.Name]
 			if next == nil || next.IsExternal {
-				return fmt.Errorf("cannot dump index %s: attached constraint-backed index %s requires excluded partition table %s; adjust .pgschemaignore to include the partition table",
-					ir.QuoteIdentifier(parent.Schema)+"."+ir.QuoteIdentifier(parent.Name),
-					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name),
-					ir.QuoteIdentifier(partition.Schema)+"."+ir.QuoteIdentifier(partition.Name))
+				return &PartitionIndexDependencyError{ParentIndex: parent, AttachedIndex: child, ExcludedTable: &partition}
 			}
 			pending = append(pending, next)
 		}
@@ -109,6 +123,7 @@ type partitionIndexCreationPlan struct {
 	indexes      map[ir.IndexRef]*ir.Index
 	children     map[ir.IndexRef]map[ir.IndexRef]bool
 	uniqueTables map[string]bool
+	inherited    map[string][]ir.InheritedConstraintIndex
 }
 
 func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[string]*ir.Table, dump bool) *partitionIndexCreationPlan {
@@ -116,6 +131,7 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 		indexes:      make(map[ir.IndexRef]*ir.Index),
 		children:     make(map[ir.IndexRef]map[ir.IndexRef]bool),
 		uniqueTables: make(map[string]bool),
+		inherited:    make(map[string][]ir.InheritedConstraintIndex),
 	}
 	added := make(map[string]*ir.Table)
 	available := availablePartitionIndexes(addedTables)
@@ -165,6 +181,11 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 		key := table.Schema + "." + table.Name
 		if !dump && (roots[key] == "" || blocked[roots[key]]) {
 			continue
+		}
+		for _, index := range table.InheritedConstraintIndexes {
+			if retainedInheritedConstraint(index, desiredTables, make(map[ir.ConstraintRef]bool)) {
+				plan.inherited[key] = append(plan.inherited[key], index)
+			}
 		}
 		for _, index := range table.Indexes {
 			if index.IsPartitioned && index.Type != ir.IndexTypePrimary {

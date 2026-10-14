@@ -263,6 +263,13 @@ leaves unattached indexes unattached. Multi-file dumps write parent indexes and
 their attachments under `indexes/`, such as `indexes/0001_events_lookup.sql`,
 after the table includes.
 
+For retained constraint families, `dump` emits a `DO` block after each partition
+definition to restore inherited `PRIMARY KEY` and `UNIQUE` index names. During
+replay, PostgreSQL locates the indexes through their parent constraints and
+renames mismatches in two phases, preserving ownership and handling name swaps.
+Lookup and rename failures stop replay. Multi-file dumps keep each block with
+its table definition, before standalone indexes.
+
 Each individual file (e.g., `tables/users.sql`) contains the specific object definition:
 ```sql
 --

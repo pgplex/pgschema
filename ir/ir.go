@@ -83,6 +83,25 @@ type Table struct {
 	// AllPartitionChildren records catalog children, including ignored or external
 	// tables. Creation planning uses this metadata to identify complete hierarchies.
 	AllPartitionChildren []TableDependency `json:"-"`
+	// InheritedConstraintIndexes preserves names of automatically created PK and
+	// UNIQUE indexes without managing inherited constraints as standalone objects.
+	InheritedConstraintIndexes []InheritedConstraintIndex `json:"-"`
+}
+
+// ConstraintRef identifies the immediate parent of an inherited constraint.
+type ConstraintRef struct {
+	Schema string
+	Table  string
+	Name   string
+}
+
+// InheritedConstraintIndex is table-owned, transient inspection metadata.
+type InheritedConstraintIndex struct {
+	Index            IndexRef
+	ConstraintName   string
+	ConstraintType   ConstraintType
+	ParentIndex      IndexRef
+	ParentConstraint ConstraintRef
 }
 
 // Column represents a table column
