@@ -95,9 +95,9 @@ func GenerateTempSchemaName() string {
 //
 // Only qualifications matching the specified schemaName are stripped.
 // All other schema qualifications are preserved as intentional cross-schema references.
-func stripSchemaQualifications(sql string, schemaName string) string {
+func stripSchemaQualifications(sql string, schemaName string) (string, error) {
 	if schemaName == "" {
-		return sql
+		return sql, nil
 	}
 
 	// Split SQL into dollar-quoted and non-dollar-quoted segments.
@@ -110,11 +110,14 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	// body validation with SET check_function_bodies = off before executing
 	// the resulting SQL.
 	tokens := lexSQL(sql)
+	if err := unicodeTokenError(tokens); err != nil {
+		return "", err
+	}
 	significant := significantTokens(tokens)
 	for j := 0; j < len(significant); j++ {
 		i := significant[j]
 		if (j == 0 || tokens[significant[j-1]].text != ".") && tokenIdentifier(tokens[i]) == schemaName && j+2 < len(significant) && tokens[significant[j+1]].text == "." && tokens[significant[j+2]].kind == 'i' {
-			tokens[i].text = ""
+			tokens[i].text = tokens[i].trivia
 			tokens[significant[j+1]].text = ""
 			j += 2
 		}
@@ -124,7 +127,7 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	for _, token := range tokens {
 		result.WriteString(token.text)
 	}
-	return result.String()
+	return result.String(), nil
 }
 
 // dollarQuotedSegment represents a segment of SQL text, either inside or outside a dollar-quoted block.
@@ -210,22 +213,25 @@ type schemaRemapNames struct {
 // extractCreatedObjectNames reads SQL after managed-schema qualifiers have been
 // stripped. Indexes belong to their indexed table's schema, so only indexes on
 // relations created in the temporary schema qualify for regclass remapping.
-func extractCreatedObjectNames(sql string) schemaRemapNames {
+func extractCreatedObjectNames(sql string) (schemaRemapNames, error) {
 	names := schemaRemapNames{body: make(map[string]bool), relations: make(map[string]bool)}
 	indexableRelations := make(map[string]bool)
 	var indexedTables []struct{ index, table string }
 	tokens := lexSQL(sql)
+	if err := unicodeTokenError(tokens); err != nil {
+		return schemaRemapNames{}, err
+	}
 	indexes := significantTokens(tokens)
 	keyword := func(k int, word string) bool {
-		return k < len(indexes) && strings.EqualFold(tokens[indexes[k]].text, word)
+		return k < len(indexes) && (tokenKeyword(tokens[indexes[k]]) == word || word == "." && tokens[indexes[k]].text == ".")
 	}
 	for j, i := range indexes {
-		if tokens[i].text == "" || tokens[i].kind != 'i' || strings.HasPrefix(tokens[i].text, `"`) || tokenIdentifier(tokens[i]) != "create" {
+		if tokenKeyword(tokens[i]) != "create" {
 			continue
 		}
 		k := j + 1
 		for k < len(indexes) {
-			word := tokenIdentifier(tokens[indexes[k]])
+			word := tokenKeyword(tokens[indexes[k]])
 			if word != "or" && word != "replace" && word != "unlogged" && word != "recursive" && word != "materialized" && word != "unique" {
 				break
 			}
@@ -234,7 +240,7 @@ func extractCreatedObjectNames(sql string) schemaRemapNames {
 		if k >= len(indexes) {
 			continue
 		}
-		kind := tokenIdentifier(tokens[indexes[k]])
+		kind := tokenKeyword(tokens[indexes[k]])
 		switch kind {
 		case "table", "view", "function", "procedure", "aggregate", "type", "domain", "sequence", "index":
 		default:
@@ -281,7 +287,7 @@ func extractCreatedObjectNames(sql string) schemaRemapNames {
 			names.relations[index.index] = true
 		}
 	}
-	return names
+	return names, nil
 }
 
 func foldIdentifier(ident string) string {
@@ -326,6 +332,9 @@ func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, obj
 	}
 
 	tokens := lexSQL(sql)
+	if err := unicodeTokenError(tokens); err != nil {
+		return "", err
+	}
 	significant := significantTokens(tokens)
 	for j, i := range significant {
 		token := tokens[i]
@@ -333,10 +342,10 @@ func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, obj
 			continue
 		}
 		doPosition := j - 1
-		if j >= 3 && strings.EqualFold(tokens[significant[j-2]].text, "language") {
+		if j >= 3 && tokenKeyword(tokens[significant[j-2]]) == "language" {
 			doPosition = j - 3
 		}
-		isDO := doPosition >= 0 && strings.EqualFold(tokens[significant[doPosition]].text, "do") &&
+		isDO := doPosition >= 0 && tokenKeyword(tokens[significant[doPosition]]) == "do" &&
 			(doPosition == 0 || tokens[significant[doPosition-1]].text == ";")
 		if isDO {
 			body, err := literalContent(token)
@@ -352,7 +361,7 @@ func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, obj
 			}
 			continue
 		}
-		if token.kind != 'd' || j == 0 || tokenIdentifier(tokens[significant[j-1]]) != "as" {
+		if token.kind != 'd' || j == 0 || tokenKeyword(tokens[significant[j-1]]) != "as" {
 			continue
 		}
 		body := token.text

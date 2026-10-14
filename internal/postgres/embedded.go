@@ -276,7 +276,10 @@ func (ep *EmbeddedPostgres) ApplySchema(ctx context.Context, schema string, sql 
 	// Strip schema qualifications from SQL before applying to temporary schema
 	// This ensures that objects are created in the temporary schema via search_path
 	// rather than being explicitly qualified with the original schema name
-	schemaAgnosticSQL := stripSchemaQualifications(sql, schema)
+	schemaAgnosticSQL, err := stripSchemaQualifications(sql, schema)
+	if err != nil {
+		return fmt.Errorf("failed to strip desired state schema qualifications: %w", err)
+	}
 
 	// Replace schema names in ALTER DEFAULT PRIVILEGES statements
 	// These use "IN SCHEMA <schema>" syntax which isn't handled by stripSchemaQualifications

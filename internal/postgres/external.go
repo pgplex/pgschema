@@ -239,7 +239,10 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// Strip schema qualifications from SQL before applying to temporary schema
 	// This ensures that objects are created in the temporary schema via search_path
 	// rather than being explicitly qualified with the original schema name
-	schemaAgnosticSQL := stripSchemaQualifications(sql, schema)
+	schemaAgnosticSQL, err := stripSchemaQualifications(sql, schema)
+	if err != nil {
+		return fmt.Errorf("failed to strip desired state schema qualifications: %w", err)
+	}
 
 	// Replace schema names in ALTER DEFAULT PRIVILEGES statements
 	// These use "IN SCHEMA <schema>" syntax which isn't handled by stripSchemaQualifications
@@ -253,7 +256,11 @@ func (ed *ExternalDatabase) ApplySchema(ctx context.Context, schema string, sql 
 	// Point target-schema qualifiers inside function bodies at the temporary schema so that
 	// SQL functions inlined by later statements resolve (issue #596). Only objects created by
 	// this SQL are rewritten: the plan database's own target schema may hold extensions.
-	schemaAgnosticSQL, err = qualifyFunctionBodiesWithTempSchema(schemaAgnosticSQL, schema, ed.tempSchema, extractCreatedObjectNames(schemaAgnosticSQL))
+	objects, err := extractCreatedObjectNames(schemaAgnosticSQL)
+	if err != nil {
+		return err
+	}
+	schemaAgnosticSQL, err = qualifyFunctionBodiesWithTempSchema(schemaAgnosticSQL, schema, ed.tempSchema, objects)
 	if err != nil {
 		return fmt.Errorf("failed to remap desired state SQL to temporary schema %s: %w", ed.tempSchema, err)
 	}

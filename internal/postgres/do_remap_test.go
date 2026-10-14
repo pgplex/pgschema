@@ -61,11 +61,17 @@ CREATE TABLE "s"".'\$$"."t"".'\$$"(id int);
 COMMENT ON TABLE "s"".'\$$"."t"".'\$$" IS 'CREATE TABLE bogus2(id int)';
 CREATE TABLE other.external(id int);
 DO $$ BEGIN PERFORM 1; END $$;`
-	stripped := stripSchemaQualifications(sql, schema)
+	stripped, err := stripSchemaQualifications(sql, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(stripped, `CREATE TABLE "t"".'\$$"`) {
 		t.Fatalf("schema not stripped: %s", stripped)
 	}
-	objects := extractCreatedObjectNames(stripped)
+	objects, err := extractCreatedObjectNames(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(objects.body) != 1 || !objects.body[`t".'\$$`] || len(objects.relations) != 1 || !objects.relations[`t".'\$$`] {
 		t.Fatalf("incorrect created objects: %v", objects)
 	}
@@ -74,7 +80,11 @@ DO $$ BEGIN PERFORM 1; END $$;`
 func TestStripRepeatedSchemaIdentifier(t *testing.T) {
 	const sql = `COMMENT ON COLUMN public.public.id IS 'public.public.id'; SELECT other.public.id FROM other.public;`
 	const want = `COMMENT ON COLUMN public.id IS 'public.public.id'; SELECT other.public.id FROM other.public;`
-	if got := stripSchemaQualifications(sql, "public"); got != want {
+	got, err := stripSchemaQualifications(sql, "public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }

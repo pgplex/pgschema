@@ -32,6 +32,9 @@ func decodeUnicodeEscape(text string, start int) (rune, int, error) {
 // literalContent decodes PostgreSQL dollar, standard, and E-string literals.
 // Invalid escape literals fail at the remapping boundary before SQL execution.
 func literalContent(t schemaSQLToken) (string, error) {
+	if t.unicode {
+		return t.content, t.err
+	}
 	if t.kind == 'd' {
 		tag := dollarQuoteRe.FindString(t.text)
 		return t.text[len(tag) : len(t.text)-len(tag)], nil

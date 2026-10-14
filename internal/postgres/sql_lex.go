@@ -8,8 +8,12 @@ import (
 // schemaSQLToken retains original spelling so remapping can preserve comments,
 // whitespace, ordinary literals, and destination identifiers verbatim.
 type schemaSQLToken struct {
-	text string
-	kind byte
+	text    string
+	kind    byte
+	unicode bool
+	content string
+	trivia  string // Whitespace and comments around a consumed UESCAPE clause.
+	err     error
 }
 
 func sqlIdentifierByte(c byte) bool {
@@ -28,7 +32,7 @@ func lexSQL(text string) []schemaSQLToken {
 			}
 		case strings.HasPrefix(text[i:], "--"):
 			kind = 'c'
-			for i < len(text) && text[i] != '\n' {
+			for i < len(text) && text[i] != '\n' && text[i] != '\r' {
 				i++
 			}
 		case strings.HasPrefix(text[i:], "/*"):
@@ -45,6 +49,30 @@ func lexSQL(text string) []schemaSQLToken {
 				} else {
 					i++
 				}
+			}
+		case (text[i] == 'U' || text[i] == 'u') && i+2 < len(text) && text[i+1] == '&' && (text[i+2] == '\'' || text[i+2] == '"'):
+			quote := text[i+2]
+			kind = 's'
+			if quote == '"' {
+				kind = 'i'
+			}
+			i += 3
+			closed := false
+			for i < len(text) {
+				if text[i] == quote {
+					i++
+					if i < len(text) && text[i] == quote {
+						i++
+					} else {
+						closed = true
+						break
+					}
+				} else {
+					i++
+				}
+			}
+			if !closed {
+				kind = '!'
 			}
 		case text[i] == '\'' || (text[i] == 'E' || text[i] == 'e') && i+1 < len(text) && text[i+1] == '\'':
 			kind = 's'
@@ -105,14 +133,17 @@ func lexSQL(text string) []schemaSQLToken {
 		default:
 			i++
 		}
-		tokens = append(tokens, schemaSQLToken{text[start:i], kind})
+		tokens = append(tokens, schemaSQLToken{text: text[start:i], kind: kind})
 	}
-	return tokens
+	return decodeUnicodeTokens(tokens)
 }
 
 func tokenIdentifier(t schemaSQLToken) string {
 	if t.kind != 'i' {
 		return ""
+	}
+	if t.unicode {
+		return t.content
 	}
 	if strings.HasPrefix(t.text, `"`) {
 		name, _, _ := parseQuotedIdent(t.text, 0)
@@ -122,6 +153,9 @@ func tokenIdentifier(t schemaSQLToken) string {
 }
 
 func completeSQLLiteral(t schemaSQLToken) bool {
+	if t.unicode {
+		return t.kind == 's' && t.err == nil
+	}
 	if t.kind == 'd' {
 		tag := dollarQuoteRe.FindString(t.text)
 		return len(t.text) >= 2*len(tag) && strings.HasSuffix(t.text, tag)
@@ -137,9 +171,18 @@ func completeSQLLiteral(t schemaSQLToken) bool {
 }
 
 func encodeSQLLiteral(t schemaSQLToken, content string) string {
+	if t.unicode {
+		// Keep U& semantics, including PostgreSQL's rejection when
+		// standard_conforming_strings is off. Use the default escape and
+		// consume the original UESCAPE clause while retaining its trivia.
+		return t.text[:2] + "'" + strings.ReplaceAll(strings.ReplaceAll(content, `\`, `\\`), "'", "''") + "'" + t.trivia
+	}
 	if t.kind == 'd' {
 		tag := dollarQuoteRe.FindString(t.text)
-		// The temporary schema name cannot introduce a new delimiter.
+		// Decoding an inner Unicode literal can expose the body's delimiter.
+		for strings.Contains(content, tag) {
+			tag = strings.TrimSuffix(tag, "$") + "_$"
+		}
 		return tag + content + tag
 	}
 	if t.text[0] != '\'' {
@@ -163,6 +206,9 @@ func significantTokens(tokens []schemaSQLToken) []int {
 // table alias, or PL/pgSQL variable. Ordinary strings are never interpreted as SQL.
 func remapDOBody(body, schema, temp string, objects map[string]bool) (string, error) {
 	tokens := lexSQL(body)
+	if err := unicodeTokenError(tokens); err != nil {
+		return "", fmt.Errorf("decode DO body: %w", err)
+	}
 	significant := significantTokens(tokens)
 	allowed := func(name string) bool { return objects == nil || objects[name] }
 	for j := 0; j < len(significant); j++ {
@@ -176,7 +222,7 @@ func remapDOBody(body, schema, temp string, objects map[string]bool) (string, er
 		if next+2 < len(significant) && tokens[significant[next]].text == ":" && tokens[significant[next+1]].text == ":" {
 			next += 2
 			regclass = true
-		} else if j >= 2 && tokenIdentifier(tokens[significant[j-2]]) == "cast" && tokens[significant[j-1]].text == "(" && next < len(significant) && tokenIdentifier(tokens[significant[next]]) == "as" {
+		} else if j >= 2 && tokenKeyword(tokens[significant[j-2]]) == "cast" && tokens[significant[j-1]].text == "(" && next < len(significant) && tokenKeyword(tokens[significant[next]]) == "as" {
 			next++
 			regclass = true
 		}
@@ -193,15 +239,16 @@ func remapDOBody(body, schema, temp string, objects map[string]bool) (string, er
 		if err != nil {
 			return "", fmt.Errorf("decode regclass literal in DO body: %w", err)
 		}
-		relation := lexSQL(content)
-		parts := significantTokens(relation)
-		if len(parts) == 3 && tokenIdentifier(relation[parts[0]]) == schema && relation[parts[1]].text == "." && relation[parts[2]].kind == 'i' && allowed(tokenIdentifier(relation[parts[2]])) {
-			relation[parts[0]].text = `"` + strings.ReplaceAll(temp, `"`, `""`) + `"`
-			var b strings.Builder
-			for _, part := range relation {
-				b.WriteString(part.text)
-			}
-			tokens[i].text = encodeSQLLiteral(t, b.String())
+		start := skipSpace(content, 0)
+		name, end, ok := parseRegclassIdent(content, start)
+		dot := skipSpace(content, end)
+		if !ok || name != schema || dot >= len(content) || content[dot] != '.' {
+			continue
+		}
+		object, next, ok := parseRegclassIdent(content, dot+1)
+		if ok && skipSpace(content, next) == len(content) && allowed(object) {
+			remapped := content[:start] + quoteIdent(temp) + content[end:]
+			tokens[i].text = encodeSQLLiteral(t, remapped)
 		}
 	}
 	var result strings.Builder
@@ -209,4 +256,29 @@ func remapDOBody(body, schema, temp string, objects map[string]bool) (string, er
 		result.WriteString(t.text)
 	}
 	return result.String(), nil
+}
+
+// Regclass input uses PostgreSQL's qualified-name grammar, not SQL tokens.
+// In an unquoted component, characters such as &, / and embedded quotes are
+// part of the name. Only a dot or whitespace ends the component.
+func parseRegclassIdent(text string, start int) (string, int, bool) {
+	start = skipSpace(text, start)
+	if start == len(text) {
+		return "", start, false
+	}
+	if text[start] == '"' {
+		return parseQuotedIdent(text, start)
+	}
+	end := start
+	for end < len(text) && text[end] != '.' && !strings.ContainsRune(" \t\n\r\f\v", rune(text[end])) {
+		end++
+	}
+	name := []byte(text[start:end])
+	// PostgreSQL folds ASCII letters in UTF-8 unquoted names.
+	for i, c := range name {
+		if c >= 'A' && c <= 'Z' {
+			name[i] = c + ('a' - 'A')
+		}
+	}
+	return string(name), end, end > start
 }

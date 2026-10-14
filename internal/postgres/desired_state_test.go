@@ -283,7 +283,10 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := stripSchemaQualifications(tt.sql, tt.schema)
+			result, err := stripSchemaQualifications(tt.sql, tt.schema)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if result != tt.expected {
 				t.Errorf("stripSchemaQualifications(%q, %q)\n  got:  %q\n  want: %q", tt.sql, tt.schema, result, tt.expected)
 			}
@@ -556,7 +559,10 @@ CREATE OR REPLACE FUNCTION Find_Rank(id bigint) RETURNS text LANGUAGE sql AS $$ 
 CREATE MATERIALIZED VIEW IF NOT EXISTS name_mv AS SELECT 1;
 CREATE INDEX idx ON name (id);
 `
-	got := extractCreatedObjectNames(sql)
+	got, err := extractCreatedObjectNames(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
 	expected := []string{"name", "Rank", "find_rank", "name_mv"}
 	if len(got.body) != len(expected) {
 		t.Errorf("got %v, expected %v", got, expected)
@@ -588,7 +594,10 @@ func TestCreatedIndexNamesForRegclassRemapping(t *testing.T) {
 CREATE TABLE t(id int); COMMENT ON TABLE t IS 'CREATE INDEX fake2 ON t(id)'; DO $$ BEGIN PERFORM 'CREATE INDEX fake3 ON t(id)'; END $$;`, []string{"t"}, []string{"t"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := extractCreatedObjectNames(tc.sql)
+			got, err := extractCreatedObjectNames(tc.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
 			want := schemaRemapNames{body: make(map[string]bool), relations: make(map[string]bool)}
 			for _, name := range tc.body {
 				want.body[name] = true
@@ -609,7 +618,11 @@ CREATE INDEX idx ON t(id);
 CREATE UNIQUE INDEX IF NOT EXISTS "Unique.Index" ON ONLY t(id);
 CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT public.idx() $$;
 DO $$ BEGIN PERFORM 'public.idx'::regclass, 'public."Unique.Index"'::pg_catalog.regclass, 'public.untouched'::regclass; END $$;`
-	got, err := qualifyFunctionBodiesWithTempSchema(sql, "public", "pgschema_tmp_x", extractCreatedObjectNames(sql))
+	objects, err := extractCreatedObjectNames(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := qualifyFunctionBodiesWithTempSchema(sql, "public", "pgschema_tmp_x", objects)
 	if err != nil {
 		t.Fatal(err)
 	}
