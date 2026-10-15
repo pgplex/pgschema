@@ -18,20 +18,14 @@ By default, pgschema uses an embedded PostgreSQL instance to validate your desir
 
 ## Creating partitioned indexes
 
-When `plan` creates an entirely new managed partition hierarchy and all recorded
-table and index dependencies are present, it preserves standalone index names and
-attachments. It creates the tables and leaf indexes first, then parent indexes
-with `ON ONLY`, explicit attachments, and dependent foreign keys.
+When `plan` creates a partition hierarchy from scratch, it keeps the index names
+and attachments from the desired state: tables and leaf indexes first, then
+parent indexes with `ON ONLY`, then the attachments and any dependent foreign
+keys. An unattached index stays unattached.
 
-For example, creating new `events` tables preserves the attachment of a named
-child index `early_custom_lookup` to `event_lookup`. An equivalent unattached index
-stays unattached. The same creation order applies when unrelated tables already
-exist in the target schema.
-
-For hierarchies containing existing tables, unmanaged ancestors, or excluded
-dependencies, migration generation retains recursive index creation. This does
-not reconcile index attachments on existing tables. Constraint-backed indexes
-remain under constraint management.
+When part of the hierarchy already exists in the target, or part of it is
+ignored, `plan` falls back to recursive index creation and does not reconcile
+attachments on existing tables.
 
 ## Basic Usage
 

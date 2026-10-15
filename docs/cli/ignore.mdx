@@ -121,24 +121,14 @@ The `[privileges]` section filters explicit grants (`GRANT ... TO role`), includ
 
 ## Partitioned indexes
 
-When `dump` retains a partitioned index, it must also retain that index's attached
-children. If the inspector excludes an attached child because of an index, table,
-or owning constraint ignore pattern, `dump` returns an error naming the parent and child before writing
-any output. Existing output files remain unchanged. `dump` performs the same check
-for nested partitions.
+A retained partitioned index must keep all of its attached child indexes. If a
+pattern ignores an attached child (by index, table, or owning constraint) while
+its parent is retained, `dump` fails before writing any output. Remove the
+pattern or add a negation pattern to keep the child. Ignoring an unattached
+index is fine.
 
-For example, `event_unique` has an attached child named `early_custom_unique`.
-If `early_custom_unique` is ignored while `event_unique` is retained, `dump` returns
-an error.
-Remove the conflicting ignore pattern or add a negation pattern to retain the
-child index and its table. Ignoring an unattached index remains supported.
-
-For constraint-backed child indexes, use `[constraints]` to ignore the owning
-constraint. An `[indexes]` pattern does not exclude a constraint-backed index.
-For example, if `early_custom_unique` is a `UNIQUE` constraint, excluding it under
-`[constraints]` while retaining its parent index causes `dump` to reject the dump.
-
-`plan` and `apply` retain their existing ignore behavior.
+`[indexes]` patterns do not match constraint-backed indexes; use `[constraints]`
+to ignore those.
 
 ## Constraints
 
