@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pgplex/pgschema/internal/logger"
 	"github.com/pgplex/pgschema/ir/queries"
 	"golang.org/x/sync/errgroup"
 )
@@ -35,9 +36,13 @@ const (
 
 // Inspector builds IR from database queries
 type Inspector struct {
-	db           *sql.DB
+	// db is the connection wrapped in tracingDB, so every query is attributed
+	// to the BuildIR step that issued it (see trace.go).
+	db           queries.DBTX
 	queries      *queries.Queries
 	ignoreConfig *IgnoreConfig
+	// trace is the query call tree of the most recent BuildIR call.
+	trace *traceSpan
 	// managedSchema is the logical schema pgschema is planning/applying,
 	// which can differ from targetSchema (the schema this particular
 	// BuildIR call actually introspects): when introspecting pgschema's own
@@ -74,9 +79,10 @@ type Inspector struct {
 
 // NewInspector creates a new schema inspector with optional ignore configuration
 func NewInspector(db *sql.DB, ignoreConfig *IgnoreConfig) *Inspector {
+	traced := &tracingDB{inner: db}
 	return &Inspector{
-		db:           db,
-		queries:      queries.New(db),
+		db:           traced,
+		queries:      queries.New(traced),
 		ignoreConfig: ignoreConfig,
 	}
 }
@@ -94,68 +100,81 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		i.managedSchema = targetSchema
 	}
 
+	// Every query below is attributed to a named step of this call tree. With
+	// --debug the tree is logged when BuildIR returns, so the step responsible
+	// for most round trips over a slow connection is visible (see trace.go).
+	root := newTraceSpan("BuildIR schema=" + targetSchema)
+	i.trace = root
+	ctx = context.WithValue(ctx, traceSpanKey{}, root)
+	defer func() {
+		root.end()
+		if logger.IsDebug() {
+			root.log(logger.Get())
+		}
+	}()
+
 	schema := NewIR()
 
 	// Sequential prerequisites
-	if err := i.buildMetadata(ctx, schema); err != nil {
+	if err := traced(ctx, "metadata", func(ctx context.Context) error { return i.buildMetadata(ctx, schema) }); err != nil {
 		return nil, fmt.Errorf("failed to build metadata: %w", err)
 	}
 
-	if err := i.validateSchemaExists(ctx, targetSchema); err != nil {
+	if err := traced(ctx, "validate schema", func(ctx context.Context) error { return i.validateSchemaExists(ctx, targetSchema) }); err != nil {
 		return nil, err
 	}
 
-	if err := i.buildSchemas(ctx, schema, targetSchema); err != nil {
+	if err := traced(ctx, "schemas", func(ctx context.Context) error { return i.buildSchemas(ctx, schema, targetSchema) }); err != nil {
 		return nil, fmt.Errorf("failed to build schemas: %w", err)
 	}
 
-	if err := i.populateExtensionSchemas(ctx); err != nil {
+	if err := traced(ctx, "extension schemas", func(ctx context.Context) error { return i.populateExtensionSchemas(ctx) }); err != nil {
 		return nil, fmt.Errorf("failed to query extension schemas: %w", err)
 	}
 
-	if err := i.buildTables(ctx, schema, targetSchema); err != nil {
+	if err := traced(ctx, "tables", func(ctx context.Context) error { return i.buildTables(ctx, schema, targetSchema) }); err != nil {
 		return nil, fmt.Errorf("failed to build tables: %w", err)
 	}
 
 	// Concurrent Group 1: Table Details
 	group1 := queryGroup{
 		name: "table details",
-		funcs: []func(context.Context, *IR, string) error{
-			i.buildColumns,
-			i.buildConstraints,
-			i.buildPartitions,
+		steps: []buildStep{
+			{"columns", i.buildColumns},
+			{"constraints", i.buildConstraints},
+			{"partitions", i.buildPartitions},
 		},
 	}
 
 	// Concurrent Group 2: Independent Objects
 	group2 := queryGroup{
 		name: "independent objects",
-		funcs: []func(context.Context, *IR, string) error{
-			i.buildSequences,
-			i.buildFunctions,
-			i.buildProcedures,
-			i.buildAggregates,
-			i.buildTypes,
-			i.buildDefaultPrivileges,
-			i.buildPrivileges,
-			i.buildColumnPrivileges,
+		steps: []buildStep{
+			{"sequences", i.buildSequences},
+			{"functions", i.buildFunctions},
+			{"procedures", i.buildProcedures},
+			{"aggregates", i.buildAggregates},
+			{"types", i.buildTypes},
+			{"default privileges", i.buildDefaultPrivileges},
+			{"privileges", i.buildPrivileges},
+			{"column privileges", i.buildColumnPrivileges},
 		},
 	}
 
 	// Concurrent Group 3: View and table-dependent objects (views must load first)
 	group3 := queryGroup{
 		name: "views",
-		funcs: []func(context.Context, *IR, string) error{
-			i.buildViews,
+		steps: []buildStep{
+			{"views", i.buildViews},
 		},
 	}
 
 	// Group 4: Objects that depend on both tables AND views (must run after views are loaded)
 	group4 := queryGroup{
 		name: "table-and-view-dependent objects",
-		funcs: []func(context.Context, *IR, string) error{
-			i.buildTriggers,
-			i.buildRLSPolicies,
+		steps: []buildStep{
+			{"triggers", i.buildTriggers},
+			{"rls policies", i.buildRLSPolicies},
 		},
 	}
 
@@ -175,12 +194,12 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, err
 	}
 
-	if err := i.buildPartitionParentColumns(ctx, schema, targetSchema); err != nil {
+	if err := traced(ctx, "partition parent columns", func(ctx context.Context) error { return i.buildPartitionParentColumns(ctx, schema, targetSchema) }); err != nil {
 		return nil, fmt.Errorf("failed to build partition parent columns: %w", err)
 	}
 
 	// Build function dependencies after functions are loaded
-	if err := i.buildFunctionDependencies(ctx, schema, targetSchema); err != nil {
+	if err := traced(ctx, "function dependencies", func(ctx context.Context) error { return i.buildFunctionDependencies(ctx, schema, targetSchema) }); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +214,7 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 	}
 
 	// Build indexes after views are loaded (indexes can reference materialized views)
-	if err := i.buildIndexes(ctx, schema, targetSchema); err != nil {
+	if err := traced(ctx, "indexes", func(ctx context.Context) error { return i.buildIndexes(ctx, schema, targetSchema) }); err != nil {
 		return nil, fmt.Errorf("failed to build indexes: %w", err)
 	}
 
@@ -205,25 +224,40 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 	return schema, nil
 }
 
-// queryGroup represents a group of queries that can be executed concurrently
-type queryGroup struct {
-	name  string
-	funcs []func(context.Context, *IR, string) error
+// buildStep is one named introspection step of BuildIR. The name labels the
+// step's node in the query call tree.
+type buildStep struct {
+	name string
+	fn   func(context.Context, *IR, string) error
 }
 
-// executeConcurrentGroup executes a group of functions concurrently
-func (i *Inspector) executeConcurrentGroup(ctx context.Context, schema *IR, targetSchema string, group queryGroup) error {
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(group.funcs))
+// queryGroup represents a group of steps that can be executed concurrently
+type queryGroup struct {
+	name  string
+	steps []buildStep
+}
 
-	for _, fn := range group.funcs {
+// executeConcurrentGroup executes a group's steps concurrently, each in its
+// own trace span under a span for the group
+func (i *Inspector) executeConcurrentGroup(ctx context.Context, schema *IR, targetSchema string, group queryGroup) error {
+	ctx, groupSpan := startSpan(ctx, group.name+" (concurrent)")
+	groupSpan.concurrent = true
+	defer groupSpan.end()
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(group.steps))
+
+	for _, step := range group.steps {
 		wg.Add(1)
-		go func(f func(context.Context, *IR, string) error) {
+		go func(step buildStep) {
 			defer wg.Done()
-			if err := f(ctx, schema, targetSchema); err != nil {
+			err := traced(ctx, step.name, func(ctx context.Context) error {
+				return step.fn(ctx, schema, targetSchema)
+			})
+			if err != nil {
 				errChan <- err
 			}
-		}(fn)
+		}(step)
 	}
 
 	wg.Wait()
