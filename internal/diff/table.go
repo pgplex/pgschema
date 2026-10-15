@@ -418,6 +418,17 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 		diff.PersistenceChanged = true
 	}
 
+	// Check for partition attachment/bound changes. Postgres cannot alter a
+	// partition bound in place and attaching/detaching changes the table's
+	// identity, so any difference must force a statement (#639).
+	if oldTable.PartitionOf != newTable.PartitionOf ||
+		oldTable.PartitionOfSchema != newTable.PartitionOfSchema ||
+		oldTable.PartitionBound != newTable.PartitionBound {
+		diff.PartitionOfChanged = true
+		diff.OldPartitionOf = oldTable.PartitionOf
+		diff.OldPartitionOfSchema = oldTable.PartitionOfSchema
+	}
+
 	// Return nil if no changes
 	if len(diff.AddedColumns) == 0 && len(diff.DroppedColumns) == 0 &&
 		len(diff.ModifiedColumns) == 0 && len(diff.AddedConstraints) == 0 &&
@@ -427,7 +438,7 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 		len(diff.DroppedTriggers) == 0 && len(diff.ModifiedTriggers) == 0 &&
 		len(diff.AddedPolicies) == 0 && len(diff.DroppedPolicies) == 0 &&
 		len(diff.ModifiedPolicies) == 0 && len(diff.RLSChanges) == 0 &&
-		!diff.CommentChanged && !diff.PersistenceChanged {
+		!diff.CommentChanged && !diff.PersistenceChanged && !diff.PartitionOfChanged {
 		return nil
 	}
 
@@ -1251,6 +1262,48 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
+	}
+
+	// Partition attachment/bound change: Postgres cannot ALTER a bound in place,
+	// so re-attach with DETACH + ATTACH PARTITION. A table that is no longer a
+	// partition is simply detached and left standalone. (#639)
+	if td.PartitionOfChanged {
+		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+
+		// Detach from the old parent. The old schema may be empty for tables
+		// inspected before the parent schema was tracked; fall back to the
+		// table's own schema so the statement is still fully qualified.
+		if td.OldPartitionOf != "" {
+			oldSchema := td.OldPartitionOfSchema
+			if oldSchema == "" {
+				oldSchema = td.Table.Schema
+			}
+			oldParent := ir.QualifyEntityNameWithQuotesMode(oldSchema, td.OldPartitionOf, targetSchema, collector.qualifySchema)
+			collector.collect(&diffContext{
+				Type:                DiffTypeTable,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s", td.Table.Schema, td.Table.Name),
+				Source:              td.Table,
+				CanRunInTransaction: true,
+			}, fmt.Sprintf("ALTER TABLE %s DETACH PARTITION %s;", oldParent, tableName))
+		}
+
+		// Re-attach to the new parent with the new bound, unless the table is
+		// no longer a partition (detach-only leaves it standalone).
+		if td.Table.PartitionOf != "" && td.Table.PartitionBound != "" {
+			parentSchema := td.Table.PartitionOfSchema
+			if parentSchema == "" {
+				parentSchema = td.Table.Schema
+			}
+			parentName := ir.QualifyEntityNameWithQuotesMode(parentSchema, td.Table.PartitionOf, targetSchema, collector.qualifySchema)
+			collector.collect(&diffContext{
+				Type:                DiffTypeTable,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s", td.Table.Schema, td.Table.Name),
+				Source:              td.Table,
+				CanRunInTransaction: true,
+			}, fmt.Sprintf("ALTER TABLE %s ATTACH PARTITION %s %s;", parentName, tableName, td.Table.PartitionBound))
+		}
 	}
 
 	// Policies that reference a column being re-created must go before the
