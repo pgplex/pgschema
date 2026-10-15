@@ -1411,6 +1411,19 @@ func normalizeCheckClause(checkClause string) string {
 	return fmt.Sprintf("CHECK (%s)", normalizedClause)
 }
 
+// likeOperatorRe matches a PostgreSQL pattern-match operator followed by a
+// string literal cast to text, e.g. " ~~ 'p-%'::text" or " !~~* 'x''y'::text".
+var likeOperatorRe = regexp.MustCompile(`\s(!?~~\*?)\s('(?:[^']|'')*')::text`)
+
+// likeOperatorKeywords maps PostgreSQL's internal pattern-match operators to
+// the SQL keywords users write.
+var likeOperatorKeywords = map[string]string{
+	"~~":   "LIKE",
+	"!~~":  "NOT LIKE",
+	"~~*":  "ILIKE",
+	"!~~*": "NOT ILIKE",
+}
+
 // applyLegacyCheckNormalizations applies the existing normalization patterns
 func applyLegacyCheckNormalizations(clause string) string {
 	// Normalize unnecessary parentheses around simple identifiers before type casts.
@@ -1446,19 +1459,16 @@ func applyLegacyCheckNormalizations(clause string) string {
 		return convertAnyArrayToIn(clause)
 	}
 
-	// Convert "column ~~ 'pattern'::text" to "column LIKE 'pattern'"
-	if strings.Contains(clause, " ~~ ") {
-		parts := strings.Split(clause, " ~~ ")
-		if len(parts) == 2 {
-			columnName := strings.TrimSpace(parts[0])
-			pattern := strings.TrimSpace(parts[1])
-			// Remove type cast
-			if idx := strings.Index(pattern, "::"); idx != -1 {
-				pattern = pattern[:idx]
-			}
-			return fmt.Sprintf("%s LIKE %s", columnName, pattern)
-		}
-	}
+	// Convert PostgreSQL's internal pattern-match operators back to their SQL
+	// keywords: "x ~~ 'pattern'::text" → "x LIKE 'pattern'" (and NOT LIKE,
+	// ILIKE, NOT ILIKE). Only the operator and its literal operand are
+	// rewritten; the rest of the expression is left untouched so compound
+	// clauses such as "(a ~~ 'p-%'::text) AND (b IS NOT NULL)" keep every
+	// condition (issue #648).
+	clause = likeOperatorRe.ReplaceAllStringFunc(clause, func(m string) string {
+		sub := likeOperatorRe.FindStringSubmatch(m)
+		return " " + likeOperatorKeywords[sub[1]] + " " + sub[2]
+	})
 
 	return clause
 }

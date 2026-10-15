@@ -5,14 +5,28 @@ Summary by type:
 
 Tables:
   ~ code
+    + a (column)
+    + b (column)
+    + code_a_check (constraint)
     + code_check (constraint)
 
 DDL to be executed:
 --------------------------------------------------
 
 -- Transaction Group #1
+ALTER TABLE code ADD COLUMN a varchar(20);
+
+ALTER TABLE code ADD COLUMN b varchar(20);
+
+ALTER TABLE code
+ADD CONSTRAINT code_a_check CHECK (a IS NULL OR a::text LIKE 'p-%' AND b IS NOT NULL) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE code VALIDATE CONSTRAINT code_a_check;
+
+-- Transaction Group #3
 ALTER TABLE code
 ADD CONSTRAINT code_check CHECK (code > 0 AND code < 255) NOT VALID;
 
--- Transaction Group #2
+-- Transaction Group #4
 ALTER TABLE code VALIDATE CONSTRAINT code_check;
