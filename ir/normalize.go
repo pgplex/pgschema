@@ -1412,7 +1412,7 @@ func normalizeCheckClause(checkClause string) string {
 }
 
 // likeOperatorRe matches a PostgreSQL pattern-match operator followed by a
-// string literal cast to text, e.g. " ~~ 'p-%'::text" or " !~~* 'x''y'::text".
+// string literal cast to text, e.g. " ~~ 'p-%'::text" or " !~~* 'x%'::text".
 var likeOperatorRe = regexp.MustCompile(`\s(!?~~\*?)\s('(?:[^']|'')*')::text`)
 
 // likeOperatorKeywords maps PostgreSQL's internal pattern-match operators to
