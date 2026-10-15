@@ -1465,6 +1465,21 @@ func splitQuotedSegments(expr string) []string {
 	return segments
 }
 
+// hasExactTextCast reports whether s starts with a cast to the built-in text
+// type ("::text") rather than to a type whose name merely starts with "text",
+// such as "::text_status".
+func hasExactTextCast(s string) bool {
+	rest, ok := strings.CutPrefix(s, "::text")
+	if !ok {
+		return false
+	}
+	if rest == "" {
+		return true
+	}
+	c := rest[0]
+	return !(c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+}
+
 // rewriteLikeOperators converts PostgreSQL's internal pattern-match operators
 // back to their SQL keywords: "x ~~ 'pattern'::text" → "x LIKE 'pattern'"
 // (and NOT LIKE, ILIKE, NOT ILIKE). Only the operator and its literal operand
@@ -1480,7 +1495,7 @@ func rewriteLikeOperators(clause string) string {
 			continue
 		}
 		m := likeOperatorSuffixRe.FindStringSubmatchIndex(segments[i])
-		if m == nil || !strings.HasPrefix(segments[i+2], "::text") {
+		if m == nil || !hasExactTextCast(segments[i+2]) {
 			continue
 		}
 		segments[i] = segments[i][:m[0]] + " " + likeOperatorKeywords[segments[i][m[2]:m[3]]] + " "

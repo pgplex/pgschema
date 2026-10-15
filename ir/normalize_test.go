@@ -536,6 +536,11 @@ func TestNormalizeCheckClause(t *testing.T) {
 			expected: "CHECK ((((a LIKE 'x%') OR (b NOT LIKE 'y%')) AND (c IS NOT NULL)))",
 		},
 		{
+			name:     "cast to a type whose name starts with text is left alone",
+			input:    "CHECK ((status !~~ 'enabled'::text_status))",
+			expected: "CHECK ((status !~~ 'enabled'::text_status))",
+		},
+		{
 			name:     "operator text inside a string literal is left alone",
 			input:    "CHECK ((note <> 'a !~~ ''::text'::text))",
 			expected: "CHECK ((note <> 'a !~~ ''::text'::text))",
