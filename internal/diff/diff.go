@@ -454,6 +454,15 @@ type tableDiff struct {
 	OldComment         string
 	NewComment         string
 	PersistenceChanged bool
+	// PartitionOfChanged records a changed parent (attach/detach) or a changed
+	// partition bound. Postgres cannot change either in place, so the change is
+	// emitted as DETACH + ATTACH PARTITION.
+	PartitionOfChanged bool
+	// OldPartitionOf/OldPartitionOfSchema name the parent the table was attached
+	// to before this change, needed to emit DETACH for a re-bounded or
+	// un-partitioned table. Empty when the table was not a partition. (#639)
+	OldPartitionOf       string
+	OldPartitionOfSchema string
 }
 
 // ColumnDiff represents changes to a column
