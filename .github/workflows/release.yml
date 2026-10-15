@@ -176,6 +176,15 @@ jobs:
         with:
           path: binaries
 
+      # Each artifact is downloaded into binaries/<artifact-name>/<asset>, so */*
+      # covers every binary, .deb and .rpm. The sed strips the directory prefix so
+      # each line is "<sha256>  <asset name>", the format `sha256sum -c` expects.
+      - name: Generate checksums
+        working-directory: binaries
+        run: |
+          sha256sum */* | sed -E 's#  .*/#  #' > "pgschema-${{ steps.version.outputs.version }}-checksums.txt"
+          cat "pgschema-${{ steps.version.outputs.version }}-checksums.txt"
+
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
@@ -192,6 +201,7 @@ jobs:
             binaries/pgschema-deb-arm64/*.deb
             binaries/pgschema-rpm-amd64/*.rpm
             binaries/pgschema-rpm-arm64/*.rpm
+            binaries/pgschema-${{ steps.version.outputs.version }}-checksums.txt
 
   docker:
     needs: [build-binaries, packages]

@@ -139,7 +139,7 @@ Replace `v1.0.0` with the [latest release version](https://github.com/pgplex/pgs
   <Tab title="Linux AMD64">
     ```bash
     # Download the binary
-    curl -L https://github.com/pgplex/pgschema/releases/download/v1.0.0/pgschema-linux-amd64 -o pgschema
+    curl -L https://github.com/pgplex/pgschema/releases/download/v1.0.0/pgschema-1.0.0-linux-amd64 -o pgschema
 
     # Make it executable
     chmod +x pgschema
@@ -155,7 +155,7 @@ Replace `v1.0.0` with the [latest release version](https://github.com/pgplex/pgs
   <Tab title="Linux ARM64">
     ```bash
     # Download the binary
-    curl -L https://github.com/pgplex/pgschema/releases/download/v1.0.0/pgschema-linux-arm64 -o pgschema
+    curl -L https://github.com/pgplex/pgschema/releases/download/v1.0.0/pgschema-1.0.0-linux-arm64 -o pgschema
 
     # Make it executable
     chmod +x pgschema
@@ -168,6 +168,28 @@ Replace `v1.0.0` with the [latest release version](https://github.com/pgplex/pgs
     ```
   </Tab>
 </Tabs>
+
+## Verify Downloads
+
+Each release includes a `pgschema-<version>-checksums.txt` file with the SHA-256 checksum of every binary, DEB, and RPM asset. Download it next to the asset and verify before installing.
+
+<Note>
+Replace `v1.0.0` and `1.0.0` with the [latest release version](https://github.com/pgplex/pgschema/releases). Keep the original asset file name when downloading so it matches the checksums file.
+</Note>
+
+```bash
+# Download an asset and the checksums file
+curl -LO https://github.com/pgplex/pgschema/releases/download/v1.0.0/pgschema-1.0.0-linux-amd64
+curl -LO https://github.com/pgplex/pgschema/releases/download/v1.0.0/pgschema-1.0.0-checksums.txt
+
+# Verify on Linux
+sha256sum -c --ignore-missing pgschema-1.0.0-checksums.txt
+
+# Verify on macOS
+shasum -a 256 -c --ignore-missing pgschema-1.0.0-checksums.txt
+```
+
+`--ignore-missing` skips assets you did not download. A successful check prints `OK` for each downloaded asset; a mismatch prints `FAILED` and exits non-zero.
 
 ## Docker
 
