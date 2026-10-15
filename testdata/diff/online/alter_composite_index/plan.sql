@@ -8,10 +8,11 @@ SELECT
         ELSE 0
     END as progress
 FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_users_email_pgschema_new'
-  AND c.relnamespace = 'public'::regnamespace;
+  AND n.nspname = 'public';
 
 DROP INDEX IF EXISTS idx_users_email;
 
@@ -27,10 +28,11 @@ SELECT
         ELSE 0
     END as progress
 FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_users_status_pgschema_new'
-  AND c.relnamespace = 'public'::regnamespace;
+  AND n.nspname = 'public';
 
 DROP INDEX IF EXISTS idx_users_status;
 

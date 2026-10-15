@@ -554,6 +554,10 @@ func generateIndexSQL(index *ir.Index, isConcurrent bool) string {
 // The query is schema-qualified so an invalid index of the same name in another
 // schema (e.g. a failed CREATE INDEX CONCURRENTLY left behind in a sibling
 // tenant schema) cannot make apply hang forever. See issue #641.
+//
+// The schema is matched by pg_namespace.nspname against an escaped string
+// literal rather than a '...'::regnamespace cast, which would case-fold
+// unquoted mixed-case names and break on embedded quotes.
 func generateIndexWaitQueryWithName(schemaName, indexName string) string {
 	return fmt.Sprintf(`SELECT 
     COALESCE(i.indisvalid, false) as done,
@@ -562,10 +566,17 @@ func generateIndexWaitQueryWithName(schemaName, indexName string) string {
         ELSE 0
     END as progress
 FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
-WHERE c.relname = '%s'
-  AND c.relnamespace = '%s'::regnamespace;`, indexName, schemaName)
+WHERE c.relname = %s
+  AND n.nspname = %s;`, quoteSQLLiteral(indexName), quoteSQLLiteral(schemaName))
+}
+
+// quoteSQLLiteral returns s as a single-quoted SQL string literal, doubling
+// embedded single quotes.
+func quoteSQLLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // Helper functions

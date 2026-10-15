@@ -56,10 +56,11 @@ SELECT
         ELSE 0
     END as progress
 FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_audit_operation'
-  AND c.relnamespace = 'public'::regnamespace;
+  AND n.nspname = 'public';
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_username ON audit (user_name);
 
@@ -71,10 +72,11 @@ SELECT
         ELSE 0
     END as progress
 FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_audit_username'
-  AND c.relnamespace = 'public'::regnamespace;
+  AND n.nspname = 'public';
 
 CREATE OR REPLACE TRIGGER salary_log_trigger
     AFTER UPDATE OR DELETE ON salary

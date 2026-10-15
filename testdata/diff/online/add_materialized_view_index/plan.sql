@@ -8,7 +8,8 @@ SELECT
         ELSE 0
     END as progress
 FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
 LEFT JOIN pg_index i ON c.oid = i.indexrelid
 LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_user_summary_created_at'
-  AND c.relnamespace = 'public'::regnamespace;
+  AND n.nspname = 'public';
