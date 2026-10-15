@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "b05be3b0af838911e403c19285a04bf7c335de38f70d5d6d80ea24c7da3c1068"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE payout DROP CONSTRAINT payout_id_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.payout.payout_id_check"
+        },
+        {
+          "sql": "ALTER TABLE payout\nADD CONSTRAINT payout_id_check CHECK (id IS NULL OR id::text LIKE 'p-%' AND partner_id IS NOT NULL) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.payout.payout_id_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE payout VALIDATE CONSTRAINT payout_id_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.payout.payout_id_check"
+        }
+      ]
+    }
+  ]
+}

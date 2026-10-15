@@ -1,0 +1,21 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ payout
+    - payout_id_check (constraint)
+    + payout_id_check (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+-- Transaction Group #1
+ALTER TABLE payout DROP CONSTRAINT payout_id_check;
+
+ALTER TABLE payout
+ADD CONSTRAINT payout_id_check CHECK (id IS NULL OR id::text LIKE 'p-%' AND partner_id IS NOT NULL) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE payout VALIDATE CONSTRAINT payout_id_check;

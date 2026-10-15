@@ -1411,6 +1411,10 @@ func normalizeCheckClause(checkClause string) string {
 	return fmt.Sprintf("CHECK (%s)", normalizedClause)
 }
 
+// likeLiteralRe matches the right-hand side of PostgreSQL's "~~" (LIKE) operator
+// when it is a string literal with a text cast, e.g. " ~~ 'ptp-%'::text".
+var likeLiteralRe = regexp.MustCompile(`\s~~\s('(?:[^']|'')*')::(?:text|character varying|varchar)\b`)
+
 // applyLegacyCheckNormalizations applies the existing normalization patterns
 func applyLegacyCheckNormalizations(clause string) string {
 	// Normalize unnecessary parentheses around simple identifiers before type casts.
@@ -1446,17 +1450,14 @@ func applyLegacyCheckNormalizations(clause string) string {
 		return convertAnyArrayToIn(clause)
 	}
 
-	// Convert "column ~~ 'pattern'::text" to "column LIKE 'pattern'"
+	// Convert "column ~~ 'pattern'::text" to "column LIKE 'pattern'" in place,
+	// so anything around the LIKE (e.g. "AND other IS NOT NULL") is kept.
 	if strings.Contains(clause, " ~~ ") {
-		parts := strings.Split(clause, " ~~ ")
-		if len(parts) == 2 {
-			columnName := strings.TrimSpace(parts[0])
-			pattern := strings.TrimSpace(parts[1])
-			// Remove type cast
-			if idx := strings.Index(pattern, "::"); idx != -1 {
-				pattern = pattern[:idx]
-			}
-			return fmt.Sprintf("%s LIKE %s", columnName, pattern)
+		clause = likeLiteralRe.ReplaceAllString(clause, " LIKE $1")
+		clause = strings.ReplaceAll(clause, " ~~ ", " LIKE ")
+		clause = strings.TrimSpace(clause)
+		if len(clause) > 0 && clause[0] == '(' && clause[len(clause)-1] == ')' && isBalancedParentheses(clause[1:len(clause)-1]) {
+			clause = clause[1 : len(clause)-1]
 		}
 	}
 

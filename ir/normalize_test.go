@@ -505,6 +505,26 @@ func TestNormalizeCheckClause(t *testing.T) {
 			input:    "CHECK (status::text = ANY (ARRAY['pending'::character varying::text, 'shipped'::character varying::text, 'delivered'::character varying::text]))",
 			expected: "CHECK (status::text IN ('pending'::character varying, 'shipped'::character varying, 'delivered'::character varying))",
 		},
+		{
+			name:     "LIKE alone",
+			input:    "CHECK (((id)::text ~~ 'ptp-%'::text))",
+			expected: "CHECK (id::text LIKE 'ptp-%')",
+		},
+		{
+			name:     "LIKE followed by another condition keeps the condition",
+			input:    "CHECK (((partner_payout_id IS NULL) OR (((partner_payout_id)::text ~~ 'ptp-%'::text) AND (partner_id IS NOT NULL))))",
+			expected: "CHECK ((partner_payout_id IS NULL) OR ((partner_payout_id::text LIKE 'ptp-%') AND (partner_id IS NOT NULL)))",
+		},
+		{
+			name:     "two LIKEs",
+			input:    "CHECK ((((a)::text ~~ 'x-%'::text) OR ((b)::text ~~ 'y-%'::text)))",
+			expected: "CHECK ((a::text LIKE 'x-%') OR (b::text LIKE 'y-%'))",
+		},
+		{
+			name:     "LIKE pattern with escaped quote",
+			input:    "CHECK (((name)::text ~~ 'it''s-%'::text))",
+			expected: "CHECK (name::text LIKE 'it''s-%')",
+		},
 	}
 
 	for _, tt := range tests {
