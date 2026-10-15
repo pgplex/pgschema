@@ -505,6 +505,46 @@ func TestNormalizeCheckClause(t *testing.T) {
 			input:    "CHECK (status::text = ANY (ARRAY['pending'::character varying::text, 'shipped'::character varying::text, 'delivered'::character varying::text]))",
 			expected: "CHECK (status::text IN ('pending'::character varying, 'shipped'::character varying, 'delivered'::character varying))",
 		},
+		{
+			name:     "LIKE keeps conditions after the pattern (issue #648)",
+			input:    "CHECK (((a IS NULL) OR (((a)::text ~~ 'p-%'::text) AND (b IS NOT NULL))))",
+			expected: "CHECK (((a IS NULL) OR ((a::text LIKE 'p-%') AND (b IS NOT NULL))))",
+		},
+		{
+			name:     "simple LIKE",
+			input:    "CHECK ((type ~~ 'bb.risk.%'::text))",
+			expected: "CHECK ((type LIKE 'bb.risk.%'))",
+		},
+		{
+			name:     "NOT LIKE",
+			input:    "CHECK ((name !~~ 'tmp_%'::text))",
+			expected: "CHECK ((name NOT LIKE 'tmp_%'))",
+		},
+		{
+			name:     "ILIKE",
+			input:    "CHECK ((name ~~* 'abc%'::text))",
+			expected: "CHECK ((name ILIKE 'abc%'))",
+		},
+		{
+			name:     "NOT ILIKE with doubled quote in literal",
+			input:    "CHECK ((name !~~* 'it''s%'::text))",
+			expected: "CHECK ((name NOT ILIKE 'it''s%'))",
+		},
+		{
+			name:     "multiple LIKE operators with trailing condition",
+			input:    "CHECK ((((a ~~ 'x%'::text) OR (b !~~ 'y%'::text)) AND (c IS NOT NULL)))",
+			expected: "CHECK ((((a LIKE 'x%') OR (b NOT LIKE 'y%')) AND (c IS NOT NULL)))",
+		},
+		{
+			name:     "operator text inside a string literal is left alone",
+			input:    "CHECK ((note <> 'a !~~ ''::text'::text))",
+			expected: "CHECK ((note <> 'a !~~ ''::text'::text))",
+		},
+		{
+			name:     "operator text inside a quoted identifier is left alone",
+			input:    "CHECK ((\"a !~~ 'x'::text\" IS NOT NULL))",
+			expected: "CHECK ((\"a !~~ 'x'::text\" IS NOT NULL))",
+		},
 	}
 
 	for _, tt := range tests {

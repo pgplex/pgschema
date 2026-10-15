@@ -1411,9 +1411,9 @@ func normalizeCheckClause(checkClause string) string {
 	return fmt.Sprintf("CHECK (%s)", normalizedClause)
 }
 
-// likeOperatorRe matches a PostgreSQL pattern-match operator followed by a
-// string literal cast to text, e.g. " ~~ 'p-%'::text" or " !~~* 'x%'::text".
-var likeOperatorRe = regexp.MustCompile(`\s(!?~~\*?)\s('(?:[^']|'')*')::text`)
+// likeOperatorSuffixRe matches a PostgreSQL pattern-match operator at the end
+// of an unquoted stretch of a CHECK clause, e.g. "... AND (a ~~ ".
+var likeOperatorSuffixRe = regexp.MustCompile(`\s(!?~~\*?)\s$`)
 
 // likeOperatorKeywords maps PostgreSQL's internal pattern-match operators to
 // the SQL keywords users write.
@@ -1422,6 +1422,71 @@ var likeOperatorKeywords = map[string]string{
 	"!~~":  "NOT LIKE",
 	"~~*":  "ILIKE",
 	"!~~*": "NOT ILIKE",
+}
+
+// splitQuotedSegments splits a SQL expression into alternating segments of
+// unquoted text, single-quoted string literals and double-quoted identifiers.
+// Quoted segments keep their delimiters; doubled quotes inside a quoted
+// segment are treated as escapes and stay within that segment.
+func splitQuotedSegments(expr string) []string {
+	var segments []string
+	start := 0
+	for i := 0; i < len(expr); {
+		c := expr[i]
+		if c != '\'' && c != '"' {
+			i++
+			continue
+		}
+		if i > start {
+			segments = append(segments, expr[start:i])
+		}
+		// Find the matching closing quote, skipping doubled quotes.
+		j := i + 1
+		for j < len(expr) {
+			if expr[j] == c {
+				if j+1 < len(expr) && expr[j+1] == c {
+					j += 2
+					continue
+				}
+				break
+			}
+			j++
+		}
+		if j < len(expr) {
+			j++ // include the closing quote
+		}
+		segments = append(segments, expr[i:j])
+		start = j
+		i = j
+	}
+	if start < len(expr) {
+		segments = append(segments, expr[start:])
+	}
+	return segments
+}
+
+// rewriteLikeOperators converts PostgreSQL's internal pattern-match operators
+// back to their SQL keywords: "x ~~ 'pattern'::text" → "x LIKE 'pattern'"
+// (and NOT LIKE, ILIKE, NOT ILIKE). Only the operator and its literal operand
+// are rewritten; the rest of the expression is left untouched so compound
+// clauses such as "(a ~~ 'p-%'::text) AND (b IS NOT NULL)" keep every
+// condition (issue #648). Operator-looking text inside string literals or
+// quoted identifiers is never touched.
+func rewriteLikeOperators(clause string) string {
+	segments := splitQuotedSegments(clause)
+	for i := 0; i+2 < len(segments); i++ {
+		literal := segments[i+1]
+		if !strings.HasPrefix(literal, "'") {
+			continue
+		}
+		m := likeOperatorSuffixRe.FindStringSubmatchIndex(segments[i])
+		if m == nil || !strings.HasPrefix(segments[i+2], "::text") {
+			continue
+		}
+		segments[i] = segments[i][:m[0]] + " " + likeOperatorKeywords[segments[i][m[2]:m[3]]] + " "
+		segments[i+2] = strings.TrimPrefix(segments[i+2], "::text")
+	}
+	return strings.Join(segments, "")
 }
 
 // applyLegacyCheckNormalizations applies the existing normalization patterns
@@ -1459,16 +1524,7 @@ func applyLegacyCheckNormalizations(clause string) string {
 		return convertAnyArrayToIn(clause)
 	}
 
-	// Convert PostgreSQL's internal pattern-match operators back to their SQL
-	// keywords: "x ~~ 'pattern'::text" → "x LIKE 'pattern'" (and NOT LIKE,
-	// ILIKE, NOT ILIKE). Only the operator and its literal operand are
-	// rewritten; the rest of the expression is left untouched so compound
-	// clauses such as "(a ~~ 'p-%'::text) AND (b IS NOT NULL)" keep every
-	// condition (issue #648).
-	clause = likeOperatorRe.ReplaceAllStringFunc(clause, func(m string) string {
-		sub := likeOperatorRe.FindStringSubmatch(m)
-		return " " + likeOperatorKeywords[sub[1]] + " " + sub[2]
-	})
+	clause = rewriteLikeOperators(clause)
 
 	return clause
 }
