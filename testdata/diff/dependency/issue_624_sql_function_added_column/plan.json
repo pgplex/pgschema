@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "8bcb3308cfce5b98e6a142ca80fceb50a42d795c748a30d38c12ab945c3cd0d4"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE entry ADD COLUMN request_id integer;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.entry.request_id"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION open_requests()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$ SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.open_requests"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION has_open_requests()\nRETURNS boolean\nLANGUAGE sql\nSTABLE\nAS $$ SELECT open_requests() > 0;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.has_open_requests"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW request_stats AS\n SELECT open_requests() AS open_count;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.request_stats"
+        }
+      ]
+    }
+  ]
+}
