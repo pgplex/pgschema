@@ -1465,9 +1465,10 @@ func splitQuotedSegments(expr string) []string {
 	return segments
 }
 
-// hasExactTextCast reports whether s starts with a cast to the built-in text
-// type ("::text") rather than to a type whose name merely starts with "text",
-// such as "::text_status".
+// hasExactTextCast reports whether s starts with a cast to the scalar
+// built-in text type ("::text") rather than to a type whose name merely starts
+// with "text" ("::text_status"), a text array ("::text[]") or a type in a
+// schema named text ("::text.pattern").
 func hasExactTextCast(s string) bool {
 	rest, ok := strings.CutPrefix(s, "::text")
 	if !ok {
@@ -1477,7 +1478,7 @@ func hasExactTextCast(s string) bool {
 		return true
 	}
 	c := rest[0]
-	return !(c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+	return !(c == '_' || c == '[' || c == '.' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
 }
 
 // rewriteLikeOperators converts PostgreSQL's internal pattern-match operators

@@ -541,6 +541,16 @@ func TestNormalizeCheckClause(t *testing.T) {
 			expected: "CHECK ((status !~~ 'enabled'::text_status))",
 		},
 		{
+			name:     "cast to text array is left alone",
+			input:    "CHECK ((value !~~ '{blocked}'::text[]))",
+			expected: "CHECK ((value !~~ '{blocked}'::text[]))",
+		},
+		{
+			name:     "cast to a type in a schema named text is left alone",
+			input:    "CHECK ((value ~~ 'x'::text.pattern))",
+			expected: "CHECK ((value ~~ 'x'::text.pattern))",
+		},
+		{
 			name:     "operator text inside a string literal is left alone",
 			input:    "CHECK ((note <> 'a !~~ ''::text'::text))",
 			expected: "CHECK ((note <> 'a !~~ ''::text'::text))",
