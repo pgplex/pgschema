@@ -1,0 +1,21 @@
+Plan: 1 to add, 2 to modify.
+
+Summary by type:
+  privileges: 2 to modify
+  column privileges: 1 to add
+
+Privileges:
+  ~ reader
+  ~ reader
+
+Column privileges:
+  + reader
+
+DDL to be executed:
+--------------------------------------------------
+
+REVOKE INSERT ON TABLE events FROM reader;
+
+GRANT SELECT ON TABLE events TO reader;
+
+GRANT UPDATE (at) ON TABLE events TO reader;

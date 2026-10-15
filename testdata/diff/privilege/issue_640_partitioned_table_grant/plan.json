@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "c3d943f90b64cc5a2c206d2e949b575b0f2b0b4d6c2daf9cd3d525764d33eb36"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "REVOKE INSERT ON TABLE events FROM reader;",
+          "type": "privilege",
+          "operation": "alter",
+          "path": "privileges.TABLE.events.reader"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE events TO reader;",
+          "type": "privilege",
+          "operation": "alter",
+          "path": "privileges.TABLE.events.reader"
+        },
+        {
+          "sql": "GRANT UPDATE (at) ON TABLE events TO reader;",
+          "type": "column_privilege",
+          "operation": "create",
+          "path": "column_privileges.TABLE.events.at.reader"
+        }
+      ]
+    }
+  ]
+}
