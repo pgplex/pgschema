@@ -15,7 +15,111 @@ import (
 	"github.com/pgplex/pgschema/internal/postgres"
 	"github.com/pgplex/pgschema/ir"
 	"github.com/pgplex/pgschema/testutil"
+	"github.com/stretchr/testify/require"
 )
+
+func TestReviewToSQLRendersExecutionRole(t *testing.T) {
+	p := &Plan{Groups: []ExecutionGroup{{
+		ExecutionRole: "app_owner",
+		Steps:         []Step{{SQL: "CREATE INDEX CONCURRENTLY idx_documents ON documents (id);"}},
+	}}}
+
+	sql := p.ToSQL(SQLFormatRaw)
+	require.Equal(t, "SET ROLE app_owner;\nCREATE INDEX CONCURRENTLY idx_documents ON documents (id);\nRESET ROLE;\n", sql)
+}
+
+func TestReviewRoutineOwnerIdentityDoesNotChangePublicPath(t *testing.T) {
+	routine := &ir.Function{
+		Schema: "audit.log",
+		Name:   "calculate.total",
+		Parameters: []*ir.Parameter{{
+			DataType: "integer",
+			Mode:     "IN",
+		}},
+	}
+	diffs := []diff.Diff{{
+		Statements: []diff.SQLStatement{{SQL: "COMMENT ON FUNCTION calculate(integer) IS 'integer';"}},
+		Type:       diff.DiffTypeFunction,
+		Operation:  diff.DiffOperationAlter,
+		Path:       "audit.log.calculate.total",
+		Source:     routine,
+	}}
+
+	groups := groupDiffs(diffs, 15, nil)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0].Steps, 1)
+	require.Equal(t, "audit.log.calculate.total", groups[0].Steps[0].Path)
+	require.Equal(t, diff.OwnerIdentity{
+		Kind: diff.OwnerIdentityRoutine, Schema: "audit.log", Name: "calculate.total", Arguments: "integer", RoutineKind: "f",
+	}, groups[0].Steps[0].OwnerIdentity)
+}
+
+func TestReviewZeroArgumentAggregateUsesCatalogIdentity(t *testing.T) {
+	aggregate := &ir.Aggregate{Schema: "audit.log", Name: "row.count"}
+	diffs := []diff.Diff{{
+		Statements: []diff.SQLStatement{{SQL: `COMMENT ON AGGREGATE "row.count" (*) IS 'count';`}},
+		Type:       diff.DiffTypeAggregate,
+		Operation:  diff.DiffOperationAlter,
+		Path:       "audit.log.row.count",
+		Source:     aggregate,
+	}}
+
+	groups := groupDiffs(diffs, 15, nil)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0].Steps, 1)
+	require.Equal(t, diff.OwnerIdentity{
+		Kind:                   diff.OwnerIdentityRoutine,
+		Schema:                 "audit.log",
+		Name:                   "row.count()",
+		RoutineKind:            "a",
+		CatalogRoutineIdentity: true,
+	}, groups[0].Steps[0].OwnerIdentity)
+}
+
+func TestReviewOrderedSetAggregatePreservesOrderByIdentity(t *testing.T) {
+	aggregate := &ir.Aggregate{
+		Schema: "audit.log", Name: "ordered.dot", Arguments: "integer ORDER BY custom_type",
+	}
+	diffs := []diff.Diff{{
+		Statements: []diff.SQLStatement{{SQL: `COMMENT ON AGGREGATE "ordered.dot" (integer ORDER BY custom_type) IS 'ordered';`}},
+		Type:       diff.DiffTypeAggregate,
+		Operation:  diff.DiffOperationAlter,
+		Path:       "audit.log.ordered.dot",
+		Source:     aggregate,
+	}}
+
+	groups := groupDiffs(diffs, 15, nil)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0].Steps, 1)
+	require.Equal(t, diff.OwnerIdentity{
+		Kind:                   diff.OwnerIdentityRoutine,
+		Schema:                 "audit.log",
+		Name:                   "ordered.dot(integer ORDER BY custom_type)",
+		RoutineKind:            "a",
+		CatalogRoutineIdentity: true,
+	}, groups[0].Steps[0].OwnerIdentity)
+}
+
+func TestReviewRoutinePrivilegeQuotesRawDottedName(t *testing.T) {
+	privilege := &ir.Privilege{
+		ObjectType: ir.PrivilegeObjectTypeFunction,
+		ObjectName: `calculate.dot(value "custom.type")`,
+	}
+	diffs := []diff.Diff{{
+		Statements: []diff.SQLStatement{{SQL: `GRANT EXECUTE ON FUNCTION "calculate.dot"("custom.type") TO reader;`}},
+		Type:       diff.DiffTypePrivilege,
+		Operation:  diff.DiffOperationCreate,
+		Path:       "privileges.FUNCTION.calculate.dot.reader",
+		Source:     privilege,
+	}}
+
+	groups := groupDiffs(diffs, 15, nil)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0].Steps, 1)
+	require.Equal(t, diff.OwnerIdentity{
+		Kind: diff.OwnerIdentityRoutine, Name: `calculate.dot(value "custom.type")`, RoutineKind: "f", CatalogRoutineIdentity: true,
+	}, groups[0].Steps[0].OwnerIdentity)
+}
 
 // sharedTestPostgres is the shared embedded postgres instance for all tests in this package
 var sharedTestPostgres *postgres.EmbeddedPostgres

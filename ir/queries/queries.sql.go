@@ -459,7 +459,55 @@ WITH column_base AS (
         a.attgenerated,
         ad.adbin,
         ad.adrelid
-    FROM information_schema.columns c
+    FROM (
+        SELECT
+            ns.nspname AS table_schema,
+            cls.relname AS table_name,
+            attr.attname AS column_name,
+            attr.attnum::integer AS ordinal_position,
+            pg_get_expr(attrdef.adbin, attrdef.adrelid) AS column_default,
+            CASE WHEN attr.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+            format_type(attr.atttypid, attr.atttypmod) AS data_type,
+            information_schema._pg_char_max_length(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS character_maximum_length,
+            information_schema._pg_numeric_precision(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_precision,
+            information_schema._pg_numeric_scale(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_scale,
+            attrtype.typname AS udt_name,
+            CASE WHEN attr.attidentity <> '' THEN 'YES' ELSE 'NO' END AS is_identity,
+            CASE attr.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE NULL END AS identity_generation,
+            identity_seq.seqstart::text AS identity_start,
+            identity_seq.seqincrement::text AS identity_increment,
+            identity_seq.seqmax::text AS identity_maximum,
+            identity_seq.seqmin::text AS identity_minimum,
+            CASE WHEN identity_seq.seqcycle THEN 'YES' WHEN identity_seq.seqcycle IS NOT NULL THEN 'NO' ELSE NULL END AS identity_cycle
+        FROM pg_catalog.pg_attribute attr
+        JOIN pg_catalog.pg_class cls ON cls.oid = attr.attrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
+        JOIN pg_catalog.pg_type attrtype ON attrtype.oid = attr.atttypid
+        LEFT JOIN pg_catalog.pg_attrdef attrdef ON attrdef.adrelid = attr.attrelid AND attrdef.adnum = attr.attnum
+        LEFT JOIN LATERAL (
+            SELECT sequence.seqstart, sequence.seqincrement, sequence.seqmax, sequence.seqmin, sequence.seqcycle
+            FROM pg_catalog.pg_depend dependency
+            JOIN pg_catalog.pg_sequence sequence ON sequence.seqrelid = dependency.objid
+            WHERE dependency.refclassid = 'pg_catalog.pg_class'::regclass
+              AND dependency.refobjid = cls.oid
+              AND dependency.refobjsubid = attr.attnum
+              AND dependency.classid = 'pg_catalog.pg_class'::regclass
+              AND dependency.deptype = 'i'
+            LIMIT 1
+        ) identity_seq ON true
+        WHERE attr.attnum > 0
+          AND NOT attr.attisdropped
+          AND cls.relkind IN ('r', 'p', 'v', 'm', 'f')
+    ) c
     LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
     LEFT JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = n.oid
     LEFT JOIN pg_description d ON d.objoid = cl.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = c.ordinal_position
@@ -537,28 +585,28 @@ ORDER BY cb.table_schema, cb.table_name, cb.ordinal_position
 `
 
 type GetColumnsRow struct {
-	TableSchema              interface{}    `db:"table_schema" json:"table_schema"`
-	TableName                interface{}    `db:"table_name" json:"table_name"`
-	ColumnName               interface{}    `db:"column_name" json:"column_name"`
-	OrdinalPosition          interface{}    `db:"ordinal_position" json:"ordinal_position"`
+	TableSchema              string         `db:"table_schema" json:"table_schema"`
+	TableName                string         `db:"table_name" json:"table_name"`
+	ColumnName               string         `db:"column_name" json:"column_name"`
+	OrdinalPosition          sql.NullInt32  `db:"ordinal_position" json:"ordinal_position"`
 	ColumnDefault            sql.NullString `db:"column_default" json:"column_default"`
-	IsNullable               interface{}    `db:"is_nullable" json:"is_nullable"`
-	DataType                 interface{}    `db:"data_type" json:"data_type"`
-	CharacterMaximumLength   interface{}    `db:"character_maximum_length" json:"character_maximum_length"`
-	NumericPrecision         interface{}    `db:"numeric_precision" json:"numeric_precision"`
-	NumericScale             interface{}    `db:"numeric_scale" json:"numeric_scale"`
-	UdtName                  interface{}    `db:"udt_name" json:"udt_name"`
+	IsNullable               sql.NullString `db:"is_nullable" json:"is_nullable"`
+	DataType                 sql.NullString `db:"data_type" json:"data_type"`
+	CharacterMaximumLength   sql.NullInt32  `db:"character_maximum_length" json:"character_maximum_length"`
+	NumericPrecision         sql.NullInt32  `db:"numeric_precision" json:"numeric_precision"`
+	NumericScale             sql.NullInt32  `db:"numeric_scale" json:"numeric_scale"`
+	UdtName                  string         `db:"udt_name" json:"udt_name"`
 	ColumnComment            sql.NullString `db:"column_comment" json:"column_comment"`
 	InvalidNotNullConstraint sql.NullString `db:"invalid_not_null_constraint" json:"invalid_not_null_constraint"`
 	ColumnCollation          sql.NullString `db:"column_collation" json:"column_collation"`
 	ResolvedType             sql.NullString `db:"resolved_type" json:"resolved_type"`
-	IsIdentity               interface{}    `db:"is_identity" json:"is_identity"`
-	IdentityGeneration       interface{}    `db:"identity_generation" json:"identity_generation"`
-	IdentityStart            interface{}    `db:"identity_start" json:"identity_start"`
-	IdentityIncrement        interface{}    `db:"identity_increment" json:"identity_increment"`
-	IdentityMaximum          interface{}    `db:"identity_maximum" json:"identity_maximum"`
-	IdentityMinimum          interface{}    `db:"identity_minimum" json:"identity_minimum"`
-	IdentityCycle            interface{}    `db:"identity_cycle" json:"identity_cycle"`
+	IsIdentity               sql.NullString `db:"is_identity" json:"is_identity"`
+	IdentityGeneration       sql.NullString `db:"identity_generation" json:"identity_generation"`
+	IdentityStart            sql.NullString `db:"identity_start" json:"identity_start"`
+	IdentityIncrement        sql.NullString `db:"identity_increment" json:"identity_increment"`
+	IdentityMaximum          sql.NullString `db:"identity_maximum" json:"identity_maximum"`
+	IdentityMinimum          sql.NullString `db:"identity_minimum" json:"identity_minimum"`
+	IdentityCycle            sql.NullString `db:"identity_cycle" json:"identity_cycle"`
 	Attgenerated             interface{}    `db:"attgenerated" json:"attgenerated"`
 	GeneratedExpr            sql.NullString `db:"generated_expr" json:"generated_expr"`
 }
@@ -681,7 +729,55 @@ WITH column_base AS (
         ad.adbin,
         ad.adrelid,
         cl.oid AS table_oid
-    FROM information_schema.columns c
+    FROM (
+        SELECT
+            ns.nspname AS table_schema,
+            cls.relname AS table_name,
+            attr.attname AS column_name,
+            attr.attnum::integer AS ordinal_position,
+            pg_get_expr(attrdef.adbin, attrdef.adrelid) AS column_default,
+            CASE WHEN attr.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+            format_type(attr.atttypid, attr.atttypmod) AS data_type,
+            information_schema._pg_char_max_length(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS character_maximum_length,
+            information_schema._pg_numeric_precision(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_precision,
+            information_schema._pg_numeric_scale(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_scale,
+            attrtype.typname AS udt_name,
+            CASE WHEN attr.attidentity <> '' THEN 'YES' ELSE 'NO' END AS is_identity,
+            CASE attr.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE NULL END AS identity_generation,
+            identity_seq.seqstart::text AS identity_start,
+            identity_seq.seqincrement::text AS identity_increment,
+            identity_seq.seqmax::text AS identity_maximum,
+            identity_seq.seqmin::text AS identity_minimum,
+            CASE WHEN identity_seq.seqcycle THEN 'YES' WHEN identity_seq.seqcycle IS NOT NULL THEN 'NO' ELSE NULL END AS identity_cycle
+        FROM pg_catalog.pg_attribute attr
+        JOIN pg_catalog.pg_class cls ON cls.oid = attr.attrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
+        JOIN pg_catalog.pg_type attrtype ON attrtype.oid = attr.atttypid
+        LEFT JOIN pg_catalog.pg_attrdef attrdef ON attrdef.adrelid = attr.attrelid AND attrdef.adnum = attr.attnum
+        LEFT JOIN LATERAL (
+            SELECT sequence.seqstart, sequence.seqincrement, sequence.seqmax, sequence.seqmin, sequence.seqcycle
+            FROM pg_catalog.pg_depend dependency
+            JOIN pg_catalog.pg_sequence sequence ON sequence.seqrelid = dependency.objid
+            WHERE dependency.refclassid = 'pg_catalog.pg_class'::regclass
+              AND dependency.refobjid = cls.oid
+              AND dependency.refobjsubid = attr.attnum
+              AND dependency.classid = 'pg_catalog.pg_class'::regclass
+              AND dependency.deptype = 'i'
+            LIMIT 1
+        ) identity_seq ON true
+        WHERE attr.attnum > 0
+          AND NOT attr.attisdropped
+          AND cls.relkind IN ('r', 'p', 'v', 'm', 'f')
+    ) c
     LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
     LEFT JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = n.oid
     LEFT JOIN pg_description d ON d.objoid = cl.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = c.ordinal_position
@@ -769,35 +865,35 @@ ORDER BY cb.table_name, cb.ordinal_position
 `
 
 type GetColumnsForSchemaRow struct {
-	TableSchema              interface{}    `db:"table_schema" json:"table_schema"`
-	TableName                interface{}    `db:"table_name" json:"table_name"`
-	ColumnName               interface{}    `db:"column_name" json:"column_name"`
-	OrdinalPosition          interface{}    `db:"ordinal_position" json:"ordinal_position"`
+	TableSchema              string         `db:"table_schema" json:"table_schema"`
+	TableName                string         `db:"table_name" json:"table_name"`
+	ColumnName               string         `db:"column_name" json:"column_name"`
+	OrdinalPosition          sql.NullInt32  `db:"ordinal_position" json:"ordinal_position"`
 	ColumnDefault            sql.NullString `db:"column_default" json:"column_default"`
-	IsNullable               interface{}    `db:"is_nullable" json:"is_nullable"`
-	DataType                 interface{}    `db:"data_type" json:"data_type"`
-	CharacterMaximumLength   interface{}    `db:"character_maximum_length" json:"character_maximum_length"`
-	NumericPrecision         interface{}    `db:"numeric_precision" json:"numeric_precision"`
-	NumericScale             interface{}    `db:"numeric_scale" json:"numeric_scale"`
-	UdtName                  interface{}    `db:"udt_name" json:"udt_name"`
+	IsNullable               sql.NullString `db:"is_nullable" json:"is_nullable"`
+	DataType                 sql.NullString `db:"data_type" json:"data_type"`
+	CharacterMaximumLength   sql.NullInt32  `db:"character_maximum_length" json:"character_maximum_length"`
+	NumericPrecision         sql.NullInt32  `db:"numeric_precision" json:"numeric_precision"`
+	NumericScale             sql.NullInt32  `db:"numeric_scale" json:"numeric_scale"`
+	UdtName                  string         `db:"udt_name" json:"udt_name"`
 	ColumnComment            sql.NullString `db:"column_comment" json:"column_comment"`
 	InvalidNotNullConstraint sql.NullString `db:"invalid_not_null_constraint" json:"invalid_not_null_constraint"`
 	ColumnCollation          sql.NullString `db:"column_collation" json:"column_collation"`
 	ResolvedType             sql.NullString `db:"resolved_type" json:"resolved_type"`
-	IsIdentity               interface{}    `db:"is_identity" json:"is_identity"`
-	IdentityGeneration       interface{}    `db:"identity_generation" json:"identity_generation"`
-	IdentityStart            interface{}    `db:"identity_start" json:"identity_start"`
-	IdentityIncrement        interface{}    `db:"identity_increment" json:"identity_increment"`
-	IdentityMaximum          interface{}    `db:"identity_maximum" json:"identity_maximum"`
-	IdentityMinimum          interface{}    `db:"identity_minimum" json:"identity_minimum"`
-	IdentityCycle            interface{}    `db:"identity_cycle" json:"identity_cycle"`
+	IsIdentity               sql.NullString `db:"is_identity" json:"is_identity"`
+	IdentityGeneration       sql.NullString `db:"identity_generation" json:"identity_generation"`
+	IdentityStart            sql.NullString `db:"identity_start" json:"identity_start"`
+	IdentityIncrement        sql.NullString `db:"identity_increment" json:"identity_increment"`
+	IdentityMaximum          sql.NullString `db:"identity_maximum" json:"identity_maximum"`
+	IdentityMinimum          sql.NullString `db:"identity_minimum" json:"identity_minimum"`
+	IdentityCycle            sql.NullString `db:"identity_cycle" json:"identity_cycle"`
 	Attgenerated             interface{}    `db:"attgenerated" json:"attgenerated"`
 	GeneratedExpr            sql.NullString `db:"generated_expr" json:"generated_expr"`
 }
 
 // GetColumnsForSchema retrieves all columns for tables in a specific schema
-func (q *Queries) GetColumnsForSchema(ctx context.Context, tableSchema sql.NullString) ([]GetColumnsForSchemaRow, error) {
-	rows, err := q.db.QueryContext(ctx, getColumnsForSchema, tableSchema)
+func (q *Queries) GetColumnsForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetColumnsForSchemaRow, error) {
+	rows, err := q.db.QueryContext(ctx, getColumnsForSchema, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -1866,12 +1962,12 @@ func (q *Queries) GetFunctionDependencies(ctx context.Context, dollar_1 sql.Null
 
 const getFunctions = `-- name: GetFunctions :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     p.prosrc AS routine_definition,
-    r.routine_type,
-    COALESCE(pg_get_function_result(p.oid), r.data_type) AS data_type,
-    r.external_language,
+	'FUNCTION' AS routine_type,
+	pg_get_function_result(p.oid) AS data_type,
+	l.lanname AS external_language,
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
@@ -1883,16 +1979,15 @@ SELECT
     END AS volatility,
     p.proisstrict AS is_strict,
     p.prosecdef AS is_security_definer
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_func ON desc_func.objoid = p.oid AND desc_func.classoid = 'pg_proc'::regclass
 WHERE
-    r.routine_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND r.routine_schema NOT LIKE 'pg_temp_%'
-    AND r.routine_schema NOT LIKE 'pg_toast_temp_%'
-    AND r.routine_type = 'FUNCTION'
+	n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+	AND n.nspname NOT LIKE 'pg_temp_%'
+	AND n.nspname NOT LIKE 'pg_toast_temp_%'
+	AND p.prokind = 'f'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -1902,16 +1997,16 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name
+ORDER BY n.nspname, p.proname
 `
 
 type GetFunctionsRow struct {
-	RoutineSchema     interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName       interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineSchema     string         `db:"routine_schema" json:"routine_schema"`
+	RoutineName       string         `db:"routine_name" json:"routine_name"`
 	RoutineDefinition string         `db:"routine_definition" json:"routine_definition"`
-	RoutineType       interface{}    `db:"routine_type" json:"routine_type"`
+	RoutineType       sql.NullString `db:"routine_type" json:"routine_type"`
 	DataType          sql.NullString `db:"data_type" json:"data_type"`
-	ExternalLanguage  interface{}    `db:"external_language" json:"external_language"`
+	ExternalLanguage  string         `db:"external_language" json:"external_language"`
 	FunctionComment   sql.NullString `db:"function_comment" json:"function_comment"`
 	FunctionArguments sql.NullString `db:"function_arguments" json:"function_arguments"`
 	FunctionSignature sql.NullString `db:"function_signature" json:"function_signature"`
@@ -1959,17 +2054,17 @@ func (q *Queries) GetFunctions(ctx context.Context) ([]GetFunctionsRow, error) {
 
 const getFunctionsForSchema = `-- name: GetFunctionsForSchema :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     -- Use pg_get_function_sqlbody for RETURN clause syntax (PG14+)
     -- Fall back to prosrc for traditional AS $$ ... $$ syntax
     COALESCE(
         pg_get_function_sqlbody(p.oid),
         CASE WHEN p.prosrc ~ E'\n$' THEN p.prosrc ELSE p.prosrc || E'\n' END
     ) AS routine_definition,
-    r.routine_type,
-    COALESCE(pg_get_function_result(p.oid), r.data_type) AS data_type,
-    r.external_language,
+	'FUNCTION' AS routine_type,
+	pg_get_function_result(p.oid) AS data_type,
+	l.lanname AS external_language,
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
@@ -1984,13 +2079,12 @@ SELECT
     p.proleakproof AS is_leakproof,
     p.proparallel AS parallel_mode,
     COALESCE(p.proconfig, '{}') AS set_config
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_func ON desc_func.objoid = p.oid AND desc_func.classoid = 'pg_proc'::regclass
-WHERE r.routine_schema = $1
-    AND r.routine_type = 'FUNCTION'
+WHERE n.nspname = $1
+    AND p.prokind = 'f'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -2000,16 +2094,16 @@ WHERE r.routine_schema = $1
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name
+ORDER BY n.nspname, p.proname
 `
 
 type GetFunctionsForSchemaRow struct {
-	RoutineSchema     interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName       interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineSchema     string         `db:"routine_schema" json:"routine_schema"`
+	RoutineName       string         `db:"routine_name" json:"routine_name"`
 	RoutineDefinition sql.NullString `db:"routine_definition" json:"routine_definition"`
-	RoutineType       interface{}    `db:"routine_type" json:"routine_type"`
+	RoutineType       sql.NullString `db:"routine_type" json:"routine_type"`
 	DataType          sql.NullString `db:"data_type" json:"data_type"`
-	ExternalLanguage  interface{}    `db:"external_language" json:"external_language"`
+	ExternalLanguage  string         `db:"external_language" json:"external_language"`
 	FunctionComment   sql.NullString `db:"function_comment" json:"function_comment"`
 	FunctionArguments sql.NullString `db:"function_arguments" json:"function_arguments"`
 	FunctionSignature sql.NullString `db:"function_signature" json:"function_signature"`
@@ -2776,24 +2870,23 @@ func (q *Queries) GetPrivilegesForSchema(ctx context.Context, dollar_1 sql.NullS
 
 const getProcedures = `-- name: GetProcedures :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     p.prosrc AS routine_definition,
-    r.routine_type,
-    r.external_language,
+	'PROCEDURE' AS routine_type,
+	l.lanname AS external_language,
     COALESCE(desc_proc.description, '') AS procedure_comment,
     oidvectortypes(p.proargtypes) AS procedure_arguments,
     pg_get_function_arguments(p.oid) AS procedure_signature
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_proc ON desc_proc.objoid = p.oid AND desc_proc.classoid = 'pg_proc'::regclass
 WHERE
-    r.routine_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND r.routine_schema NOT LIKE 'pg_temp_%'
-    AND r.routine_schema NOT LIKE 'pg_toast_temp_%'
-    AND r.routine_type = 'PROCEDURE'
+	n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+	AND n.nspname NOT LIKE 'pg_temp_%'
+	AND n.nspname NOT LIKE 'pg_toast_temp_%'
+	AND p.prokind = 'p'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -2803,15 +2896,15 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name
+ORDER BY n.nspname, p.proname
 `
 
 type GetProceduresRow struct {
-	RoutineSchema      interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName        interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineSchema      string         `db:"routine_schema" json:"routine_schema"`
+	RoutineName        string         `db:"routine_name" json:"routine_name"`
 	RoutineDefinition  string         `db:"routine_definition" json:"routine_definition"`
-	RoutineType        interface{}    `db:"routine_type" json:"routine_type"`
-	ExternalLanguage   interface{}    `db:"external_language" json:"external_language"`
+	RoutineType        sql.NullString `db:"routine_type" json:"routine_type"`
+	ExternalLanguage   string         `db:"external_language" json:"external_language"`
 	ProcedureComment   sql.NullString `db:"procedure_comment" json:"procedure_comment"`
 	ProcedureArguments sql.NullString `db:"procedure_arguments" json:"procedure_arguments"`
 	ProcedureSignature sql.NullString `db:"procedure_signature" json:"procedure_signature"`
@@ -2852,26 +2945,25 @@ func (q *Queries) GetProcedures(ctx context.Context) ([]GetProceduresRow, error)
 
 const getProceduresForSchema = `-- name: GetProceduresForSchema :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     -- Use pg_get_function_sqlbody for RETURN clause syntax (PG14+)
     -- Fall back to prosrc for traditional AS $$ ... $$ syntax
     COALESCE(
         pg_get_function_sqlbody(p.oid),
         CASE WHEN p.prosrc ~ E'\n$' THEN p.prosrc ELSE p.prosrc || E'\n' END
     ) AS routine_definition,
-    r.routine_type,
-    r.external_language,
+	'PROCEDURE' AS routine_type,
+	l.lanname AS external_language,
     COALESCE(desc_proc.description, '') AS procedure_comment,
     oidvectortypes(p.proargtypes) AS procedure_arguments,
     pg_get_function_arguments(p.oid) AS procedure_signature
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_proc ON desc_proc.objoid = p.oid AND desc_proc.classoid = 'pg_proc'::regclass
-WHERE r.routine_schema = $1
-    AND r.routine_type = 'PROCEDURE'
+WHERE n.nspname = $1
+    AND p.prokind = 'p'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -2881,15 +2973,15 @@ WHERE r.routine_schema = $1
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name
+ORDER BY n.nspname, p.proname
 `
 
 type GetProceduresForSchemaRow struct {
-	RoutineSchema      interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName        interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineSchema      string         `db:"routine_schema" json:"routine_schema"`
+	RoutineName        string         `db:"routine_name" json:"routine_name"`
 	RoutineDefinition  sql.NullString `db:"routine_definition" json:"routine_definition"`
-	RoutineType        interface{}    `db:"routine_type" json:"routine_type"`
-	ExternalLanguage   interface{}    `db:"external_language" json:"external_language"`
+	RoutineType        sql.NullString `db:"routine_type" json:"routine_type"`
+	ExternalLanguage   string         `db:"external_language" json:"external_language"`
 	ProcedureComment   sql.NullString `db:"procedure_comment" json:"procedure_comment"`
 	ProcedureArguments sql.NullString `db:"procedure_arguments" json:"procedure_arguments"`
 	ProcedureSignature sql.NullString `db:"procedure_signature" json:"procedure_signature"`
@@ -3369,19 +3461,19 @@ func (q *Queries) GetRevokedDefaultPrivilegesForSchema(ctx context.Context, doll
 
 const getSchema = `-- name: GetSchema :one
 SELECT 
-    schema_name
-FROM information_schema.schemata
+    nspname AS schema_name
+FROM pg_catalog.pg_namespace
 WHERE 
-    schema_name = $1
-    AND schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND schema_name NOT LIKE 'pg_temp_%'
-    AND schema_name NOT LIKE 'pg_toast_temp_%'
+    nspname = $1
+    AND nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+    AND nspname NOT LIKE 'pg_temp_%'
+    AND nspname NOT LIKE 'pg_toast_temp_%'
 `
 
 // GetSchema retrieves a specific schema by name
-func (q *Queries) GetSchema(ctx context.Context, schemaName sql.NullString) (interface{}, error) {
-	row := q.db.QueryRowContext(ctx, getSchema, schemaName)
-	var schema_name interface{}
+func (q *Queries) GetSchema(ctx context.Context, nspname string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getSchema, nspname)
+	var schema_name string
 	err := row.Scan(&schema_name)
 	return schema_name, err
 }
@@ -3690,18 +3782,17 @@ func (q *Queries) GetTables(ctx context.Context) ([]GetTablesRow, error) {
 
 const getTablesForSchema = `-- name: GetTablesForSchema :many
 SELECT
-    t.table_schema,
-    t.table_name,
-    t.table_type,
+	n.nspname AS table_schema,
+	c.relname AS table_name,
+	CASE WHEN c.relkind = 'v' THEN 'VIEW' ELSE 'BASE TABLE' END AS table_type,
     COALESCE(d.description, '') AS table_comment,
     c.relpersistence::text AS relpersistence
-FROM information_schema.tables t
-LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
-LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = 0
 WHERE
-    t.table_schema = $1
-    AND t.table_type IN ('BASE TABLE', 'VIEW')
+	n.nspname = $1
+	AND c.relkind IN ('r', 'p', 'v')
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_class'::regclass
@@ -3711,13 +3802,13 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY t.table_name
+ORDER BY c.relname
 `
 
 type GetTablesForSchemaRow struct {
-	TableSchema    interface{}    `db:"table_schema" json:"table_schema"`
-	TableName      interface{}    `db:"table_name" json:"table_name"`
-	TableType      interface{}    `db:"table_type" json:"table_type"`
+	TableSchema    string         `db:"table_schema" json:"table_schema"`
+	TableName      string         `db:"table_name" json:"table_name"`
+	TableType      sql.NullString `db:"table_type" json:"table_type"`
 	TableComment   sql.NullString `db:"table_comment" json:"table_comment"`
 	Relpersistence sql.NullString `db:"relpersistence" json:"relpersistence"`
 }

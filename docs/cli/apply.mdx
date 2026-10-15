@@ -140,6 +140,12 @@ When using File Mode (`--file`), the apply command generates a plan internally u
   Used in File Mode to generate and apply a plan from the desired state.
 </ParamField>
 
+<ParamField path="--global-file" type="string">
+  Path to the opt-in global-state TOML manifest used with `--file` mode. In
+  `--plan` mode, the saved JSON plan already contains the global-state steps and
+  scoped fingerprint.
+</ParamField>
+
 <ParamField path="--plan" type="string">
   Path to pre-generated plan JSON file (mutually exclusive with --file)
   

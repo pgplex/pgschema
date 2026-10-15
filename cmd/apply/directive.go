@@ -22,7 +22,12 @@ const (
 )
 
 // executeDirective executes a directive based on its type
-func executeDirective(ctx context.Context, conn *sql.DB, directive *plan.Directive, query string) error {
+type directiveExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func executeDirective(ctx context.Context, conn directiveExecer, directive *plan.Directive, query string) error {
 	switch directive.Type {
 	case "wait":
 		return executeWaitDirective(ctx, conn, directive, query)
@@ -32,7 +37,7 @@ func executeDirective(ctx context.Context, conn *sql.DB, directive *plan.Directi
 }
 
 // checkWaitStatus executes the wait query and extracts done/progress values
-func checkWaitStatus(ctx context.Context, conn *sql.DB, query string) (done bool, progress int, err error) {
+func checkWaitStatus(ctx context.Context, conn directiveExecer, query string) (done bool, progress int, err error) {
 	rows, err := conn.QueryContext(ctx, query)
 	if err != nil {
 		return false, -1, fmt.Errorf("failed to execute wait query: %w", err)
@@ -98,7 +103,7 @@ func checkWaitStatus(ctx context.Context, conn *sql.DB, query string) (done bool
 }
 
 // executeWaitDirective monitors a long-running operation until completion
-func executeWaitDirective(ctx context.Context, conn *sql.DB, directive *plan.Directive, query string) error {
+func executeWaitDirective(ctx context.Context, conn directiveExecer, directive *plan.Directive, query string) error {
 	if directive.Message != "" {
 		fmt.Printf("  Waiting: %s\n", directive.Message)
 	} else {

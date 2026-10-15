@@ -1,0 +1,28 @@
+{
+  "id": "global-state-roles-memberships",
+  "name": "global-state-roles-memberships",
+  "title": "Declarative PostgreSQL global state",
+  "description": "Add opt-in declarative roles, memberships, ownership, and global default privileges.",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "globalstate",
+  "priority": "P2",
+  "creator": "codex-global-state",
+  "assignee": "codex-global-state",
+  "createdAt": "2026-10-09",
+  "completedAt": "2026-10-09",
+  "branch": "codex/global-state-authority",
+  "base_branch": "codex/global-state-authority",
+  "worktree_path": null,
+  "current_phase": 3,
+  "next_action": [],
+  "commit": "b9527eb",
+  "pr_url": null,
+  "subtasks": [],
+  "relatedFiles": [
+    "internal/globalstate/",
+    "cmd/plan/plan.go",
+    "cmd/apply/apply.go"
+  ],
+  "notes": "PostgreSQL 15-18 integration matrix passed. Full suite hit the existing 10-minute cmd package timeout under machine contention; the exact timed-out subtest passed independently."
+}

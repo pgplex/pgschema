@@ -2,15 +2,18 @@ package plan
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/fingerprint"
+	"github.com/pgplex/pgschema/internal/globalstate"
 	"github.com/pgplex/pgschema/internal/include"
 	"github.com/pgplex/pgschema/internal/plan"
 	"github.com/pgplex/pgschema/internal/postgres"
@@ -19,17 +22,18 @@ import (
 )
 
 var (
-	planHost     string
-	planPort     int
-	planDB       string
-	planUser     string
-	planPassword string
-	planSchema   string
-	planFile     string
-	outputHuman  string
-	outputJSON   string
-	outputSQL    string
-	planNoColor  bool
+	planHost       string
+	planPort       int
+	planDB         string
+	planUser       string
+	planPassword   string
+	planSchema     string
+	planFile       string
+	planGlobalFile string
+	outputHuman    string
+	outputJSON     string
+	outputSQL      string
+	planNoColor    bool
 
 	// Plan database flags (optional - if not provided, uses embedded postgres)
 	planDBHost     string
@@ -62,6 +66,7 @@ func init() {
 
 	// Desired state schema file flag
 	PlanCmd.Flags().StringVar(&planFile, "file", "", "Path to desired state SQL schema file (required)")
+	PlanCmd.Flags().StringVar(&planGlobalFile, "global-file", "", "Path to opt-in global state TOML file")
 
 	// Plan database connection flags (optional - for using external database instead of embedded postgres)
 	PlanCmd.Flags().StringVar(&planDBHost, "plan-host", "", "Plan database host (env: PGSCHEMA_PLAN_HOST). If provided, uses external database instead of embedded postgres")
@@ -135,6 +140,7 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		Password:        finalPassword,
 		Schema:          planSchema,
 		File:            planFile,
+		GlobalFile:      planGlobalFile,
 		ApplicationName: "pgschema",
 		SSLMode:         finalSSLMode,
 		// Plan database configuration
@@ -184,6 +190,7 @@ type PlanConfig struct {
 	Password        string
 	Schema          string
 	File            string
+	GlobalFile      string
 	ApplicationName string
 	// Plan database configuration (optional - for external database)
 	PlanDBHost     string
@@ -290,8 +297,26 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	// reach role validation or the plan database (issues #602, #603).
 	desiredState = stripNoEffectStatements(warningWriter, desiredState)
 
+	var globalManifest *globalstate.Manifest
+	plannedRoles := make(map[string]bool)
+	if config.GlobalFile != "" {
+		manifest, err := globalstate.LoadManifest(config.GlobalFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load global state: %w", err)
+		}
+		globalManifest = &manifest
+		for _, role := range manifest.Roles {
+			if role.State == globalstate.StatePresent {
+				plannedRoles[role.Name] = true
+			}
+		}
+	}
+
 	// Get current state from target database
-	currentStateIR, err := util.GetIRFromDatabase(config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig, "")
+	currentStateIR, err := util.GetIRFromDatabase(
+		config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode,
+		config.Schema, config.ApplicationName, ignoreConfig, "",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current state from database: %w", err)
 	}
@@ -332,7 +357,7 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 
 	// Roles are cluster-global and unmanaged: the provider stubs the ones the
 	// schema references, but only roles the target has (issue #450).
-	if err := validateReferencedRoles(ctx, targetConnCfg, desiredState); err != nil {
+	if err := validateReferencedRoles(ctx, targetConnCfg, desiredState, plannedRoles); err != nil {
 		return nil, err
 	}
 
@@ -397,7 +422,311 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 	// Create plan from diffs with fingerprint
 	migrationPlan := plan.NewPlanWithFingerprint(diffs, sourceFingerprint, targetMajorVersion, currentStateIR)
 
+	if globalManifest != nil {
+		selection := globalstate.SelectionFor(*globalManifest)
+		targetDB, err := util.Connect(targetConnCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect for global state inspection: %w", err)
+		}
+		defer targetDB.Close()
+		currentGlobalState, err := globalstate.Inspect(ctx, targetDB, selection, targetMajorVersion)
+		if err != nil {
+			return nil, err
+		}
+		executionRole := schemaExecutionRole(currentGlobalState, config.Schema)
+		globalFingerprint, err := globalstate.ComputeFingerprint(currentGlobalState, selection)
+		if err != nil {
+			return nil, err
+		}
+		globalChanges, err := globalstate.PlanChanges(*globalManifest, currentGlobalState, targetMajorVersion)
+		if err != nil {
+			return nil, fmt.Errorf("failed to plan global state: %w", err)
+		}
+		if err := validateRetiringExecutionRole(*globalManifest, migrationPlan, executionRole); err != nil {
+			return nil, fmt.Errorf("failed to plan schema execution role: %w", err)
+		}
+		if err := setSchemaExecutionRoles(ctx, targetDB, migrationPlan, *globalManifest, currentGlobalState, executionRole, config.Schema, targetMajorVersion); err != nil {
+			return nil, fmt.Errorf("failed to plan schema execution role: %w", err)
+		}
+		preSteps := make([]plan.Step, 0, len(globalChanges))
+		postChanges := make([]globalstate.Change, 0, len(globalChanges))
+		finalChanges := make([]globalstate.Change, 0, len(globalChanges))
+		globalDiffs := make([]diff.Diff, 0, len(globalChanges))
+		for _, change := range globalChanges {
+			if change.Phase == "final" {
+				finalChanges = append(finalChanges, change)
+			} else if change.Phase == "post" {
+				postChanges = append(postChanges, change)
+			} else {
+				preSteps = append(preSteps, plan.Step{SQL: change.SQL, Type: change.Type, Operation: change.Operation, Path: change.Path})
+			}
+			globalDiffs = append(globalDiffs, globalChangeDiff(change))
+		}
+		sort.SliceStable(postChanges, func(i, j int) bool { return globalPostRank(postChanges[i]) < globalPostRank(postChanges[j]) })
+		postSteps := make([]plan.Step, 0, len(postChanges))
+		for _, change := range postChanges {
+			postSteps = append(postSteps, plan.Step{SQL: change.SQL, Type: change.Type, Operation: change.Operation, Path: change.Path})
+		}
+		migrationPlan.SourceGlobalFingerprint = globalFingerprint
+		migrationPlan.SourceDiffs = append(globalDiffs, migrationPlan.SourceDiffs...)
+		migrationPlan.PrependSteps(preSteps)
+		migrationPlan.AppendSteps(postSteps)
+		finalSteps := make([]plan.Step, 0, len(finalChanges))
+		for _, change := range finalChanges {
+			finalSteps = append(finalSteps, plan.Step{SQL: change.SQL, Type: change.Type, Operation: change.Operation, Path: change.Path})
+		}
+		migrationPlan.AppendSteps(finalSteps)
+	}
+
 	return migrationPlan, nil
+}
+
+func schemaExecutionRole(current globalstate.Snapshot, schema string) string {
+	owner, exists := current.Ownership[globalstate.OwnershipRef{Kind: "schema", Name: schema}]
+	if !exists || current.SessionRole.Superuser || owner.Owner == current.SessionRole.Name {
+		return ""
+	}
+	return owner.Owner
+}
+
+func validateRetiringExecutionRole(manifest globalstate.Manifest, migrationPlan *plan.Plan, executionRole string) error {
+	if executionRole == "" {
+		return nil
+	}
+	retiring := false
+	for _, role := range manifest.Roles {
+		if role.Name == executionRole && role.State == globalstate.StateAbsent {
+			retiring = true
+			break
+		}
+	}
+	if !retiring {
+		return nil
+	}
+	for _, group := range migrationPlan.Groups {
+		for _, step := range group.Steps {
+			if createsOwnedObject(step) {
+				return fmt.Errorf("retiring schema execution role %q would own newly created objects", executionRole)
+			}
+		}
+	}
+	return nil
+}
+
+func setSchemaExecutionRoles(
+	ctx context.Context,
+	db *sql.DB,
+	migrationPlan *plan.Plan,
+	manifest globalstate.Manifest,
+	current globalstate.Snapshot,
+	defaultRole string,
+	targetSchema string,
+	majorVersion int,
+) error {
+	if current.SessionRole.Superuser {
+		return nil
+	}
+	for groupIndex := range migrationPlan.Groups {
+		group := &migrationPlan.Groups[groupIndex]
+		owners := make(map[string]struct{})
+		hasCreate := false
+		for _, step := range group.Steps {
+			if createsOwnedObject(step) {
+				hasCreate = true
+				continue
+			}
+			owner, found, err := inspectPlanStepOwner(ctx, db, step, targetSchema)
+			if err != nil {
+				return err
+			}
+			if found {
+				owners[owner] = struct{}{}
+			}
+		}
+		if len(owners) > 1 {
+			return fmt.Errorf("execution group %d changes objects with different owners", groupIndex+1)
+		}
+		role := defaultRole
+		for owner := range owners {
+			role = owner
+		}
+		if hasCreate && len(owners) == 1 && role != defaultRole {
+			return fmt.Errorf("execution group %d mixes new objects for schema owner %q with existing objects owned by %q", groupIndex+1, defaultRole, role)
+		}
+		if role == current.SessionRole.Name {
+			role = ""
+		}
+		if err := globalstate.ValidateExecutionRole(manifest, current, role, majorVersion); err != nil {
+			return err
+		}
+		group.ExecutionRole = role
+	}
+	return nil
+}
+
+func createsOwnedObject(step plan.Step) bool {
+	if step.Operation != "create" {
+		return false
+	}
+	switch step.Type {
+	case "table", "view", "materialized_view", "function", "procedure", "aggregate", "sequence", "type", "domain":
+		return true
+	default:
+		return false
+	}
+}
+
+func inspectPlanStepOwner(ctx context.Context, db *sql.DB, step plan.Step, targetSchema string) (string, bool, error) {
+	identity := step.OwnerIdentity
+	schema := identity.Schema
+	if schema == "" {
+		schema = targetSchema
+	}
+	switch identity.Kind {
+	case diff.OwnerIdentityRelation:
+		return inspectRelationOwner(ctx, db, schema, identity.Name)
+	case diff.OwnerIdentityType:
+		return inspectSinglePlanOwner(ctx, db, `
+			SELECT pg_get_userbyid(t.typowner)
+			FROM pg_catalog.pg_type t
+			JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+			WHERE n.nspname = $1 AND t.typname = $2`, schema, identity.Name)
+	case diff.OwnerIdentityRoutine:
+		return inspectRoutinePlanOwner(ctx, db, schema, identity)
+	case diff.OwnerIdentityDefaultPrivilege:
+		if identity.Role == "" {
+			return "", false, fmt.Errorf("cannot resolve default privilege owner from path %q", step.Path)
+		}
+		return identity.Role, true, nil
+	case "":
+		if step.Type == "comment" {
+			return "", false, fmt.Errorf("cannot safely resolve execution owner for generic comment %q", step.Path)
+		}
+		return "", false, fmt.Errorf("cannot safely resolve execution owner for %s %q", step.Type, step.Path)
+	default:
+		return "", false, fmt.Errorf("cannot safely resolve execution owner for %s %q", step.Type, step.Path)
+	}
+}
+
+func inspectRoutinePlanOwner(
+	ctx context.Context,
+	db *sql.DB,
+	schema string,
+	identity diff.OwnerIdentity,
+) (string, bool, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT pg_get_userbyid(p.proowner), p.proname,
+		       pg_catalog.pg_get_function_identity_arguments(p.oid),
+		       pg_catalog.oidvectortypes(p.proargtypes)
+		FROM pg_catalog.pg_proc p
+		JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = $1 AND p.prokind = $2`, schema, identity.RoutineKind)
+	if err != nil {
+		return "", false, fmt.Errorf("inspect owner for planned routine: %w", err)
+	}
+	defer rows.Close()
+	owners := make([]string, 0, 1)
+	for rows.Next() {
+		var owner, name, catalogArguments, typeArguments string
+		if err := rows.Scan(&owner, &name, &catalogArguments, &typeArguments); err != nil {
+			return "", false, fmt.Errorf("scan owner for planned routine: %w", err)
+		}
+		matches := name == identity.Name && ir.StripSchemaQualifiers(typeArguments, schema) == identity.Arguments
+		if identity.CatalogRoutineIdentity {
+			candidate := name + "(" + ir.StripSchemaQualifiers(catalogArguments, schema) + ")"
+			matches = candidate == identity.Name
+		}
+		if matches {
+			owners = append(owners, owner)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", false, fmt.Errorf("inspect owner for planned routine: %w", err)
+	}
+	if len(owners) > 1 {
+		return "", false, fmt.Errorf("planned routine %q resolves to multiple owners", identity.Name)
+	}
+	if len(owners) == 0 {
+		return "", false, nil
+	}
+	return owners[0], true, nil
+}
+
+func inspectRelationOwner(ctx context.Context, db *sql.DB, schema, name string) (string, bool, error) {
+	return inspectSinglePlanOwner(ctx, db, `
+		SELECT pg_get_userbyid(c.relowner)
+		FROM pg_catalog.pg_class c
+		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2`, schema, name)
+}
+
+func inspectSinglePlanOwner(ctx context.Context, db *sql.DB, query string, args ...any) (string, bool, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return "", false, fmt.Errorf("inspect owner for planned object: %w", err)
+	}
+	defer rows.Close()
+	owners := make([]string, 0, 2)
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			return "", false, fmt.Errorf("scan owner for planned object: %w", err)
+		}
+		owners = append(owners, owner)
+	}
+	if err := rows.Err(); err != nil {
+		return "", false, fmt.Errorf("inspect owner for planned object: %w", err)
+	}
+	if len(owners) > 1 {
+		return "", false, fmt.Errorf("planned object resolves to multiple owners")
+	}
+	if len(owners) == 0 {
+		return "", false, nil
+	}
+	return owners[0], true, nil
+}
+
+func globalChangeDiff(change globalstate.Change) diff.Diff {
+	diffType := diff.DiffTypeRole
+	if change.Type == "role_membership" {
+		diffType = diff.DiffTypeRoleMembership
+	} else if change.Type == "ownership" {
+		diffType = diff.DiffTypeOwnership
+	} else if change.Type == "global_default_privilege" {
+		diffType = diff.DiffTypeGlobalDefaultPrivilege
+	}
+	operation := diff.DiffOperationAlter
+	switch change.Operation {
+	case "create":
+		operation = diff.DiffOperationCreate
+	case "drop":
+		operation = diff.DiffOperationDrop
+	}
+	return diff.Diff{
+		Statements: []diff.SQLStatement{{SQL: change.SQL}},
+		Type:       diffType,
+		Operation:  operation,
+		Path:       change.Path,
+	}
+}
+
+func globalPostRank(change globalstate.Change) int {
+	switch change.Type {
+	case "ownership":
+		if change.Ownership.Kind == "schema" {
+			return 0
+		}
+		if change.Ownership.Kind == "database" {
+			return 3
+		}
+		return 1
+	case "global_default_privilege":
+		return 2
+	case "role":
+		return 4
+	default:
+		return 2
+	}
 }
 
 // outputSpec represents a single output specification

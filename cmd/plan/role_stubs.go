@@ -11,11 +11,10 @@ import (
 )
 
 // validateReferencedRoles rejects desired-state SQL that grants to roles the
-// target database does not have. Roles are cluster-global and not managed by
-// pgschema, so plan stubs the referenced ones in its throwaway database (issue
-// #450) — but stubbing a role the target lacks would only move the failure to
-// apply time, with a worse message.
-func validateReferencedRoles(ctx context.Context, cfg *util.ConnectionConfig, desiredSQL string) error {
+// target database does not have unless the opt-in global manifest declares
+// that role as present. The plan provider stubs validated references in its
+// throwaway database so desired schema SQL can be inspected (issue #450).
+func validateReferencedRoles(ctx context.Context, cfg *util.ConnectionConfig, desiredSQL string, plannedRoles map[string]bool) error {
 	referenced := postgres.ExtractReferencedRoles(desiredSQL)
 	if len(referenced) == 0 {
 		return nil
@@ -46,7 +45,7 @@ func validateReferencedRoles(ctx context.Context, cfg *util.ConnectionConfig, de
 
 	var missing []string
 	for _, role := range referenced {
-		if !existing[role] {
+		if !existing[role] && !plannedRoles[role] {
 			missing = append(missing, ir.QuoteIdentifier(role))
 		}
 	}
@@ -54,8 +53,8 @@ func validateReferencedRoles(ctx context.Context, cfg *util.ConnectionConfig, de
 	case 0:
 		return nil
 	case 1:
-		return fmt.Errorf("role %s is referenced by the schema but does not exist on the target database; pgschema does not manage roles, create it on the target first, see https://www.pgschema.com/cli/plan-db", missing[0])
+		return fmt.Errorf("role %s is referenced by the schema but does not exist on the target database; create it first or declare it in --global-file, see https://www.pgschema.com/cli/plan-db", missing[0])
 	default:
-		return fmt.Errorf("roles %s are referenced by the schema but do not exist on the target database; pgschema does not manage roles, create them on the target first, see https://www.pgschema.com/cli/plan-db", strings.Join(missing, ", "))
+		return fmt.Errorf("roles %s are referenced by the schema but do not exist on the target database; create them first or declare them in --global-file, see https://www.pgschema.com/cli/plan-db", strings.Join(missing, ", "))
 	}
 }

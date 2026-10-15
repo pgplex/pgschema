@@ -15,6 +15,7 @@ import (
 	planCmd "github.com/pgplex/pgschema/cmd/plan"
 	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/fingerprint"
+	"github.com/pgplex/pgschema/internal/globalstate"
 	"github.com/pgplex/pgschema/internal/plan"
 	"github.com/pgplex/pgschema/internal/postgres"
 	"github.com/pgplex/pgschema/internal/version"
@@ -46,6 +47,7 @@ var (
 	applyPassword        string
 	applySchema          string
 	applyFile            string
+	applyGlobalFile      string
 	applyPlan            string
 	applyAutoApprove     bool
 	applyNoColor         bool
@@ -83,6 +85,7 @@ func init() {
 
 	// Desired state schema file flag
 	ApplyCmd.Flags().StringVar(&applyFile, "file", "", "Path to desired state SQL schema file")
+	ApplyCmd.Flags().StringVar(&applyGlobalFile, "global-file", "", "Path to opt-in global state TOML file (requires --file)")
 
 	// Plan file flag
 	ApplyCmd.Flags().StringVar(&applyPlan, "plan", "", "Path to plan JSON file")
@@ -117,6 +120,7 @@ type ApplyConfig struct {
 	Password        string
 	Schema          string
 	File            string     // Desired state file (optional, used with embeddedPG)
+	GlobalFile      string     // Global state file (optional, used with File)
 	Plan            *plan.Plan // Pre-generated plan (optional, alternative to File)
 	AutoApprove     bool
 	NoColor         bool
@@ -157,6 +161,7 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 			Password:        config.Password,
 			Schema:          config.Schema,
 			File:            config.File,
+			GlobalFile:      config.GlobalFile,
 			ApplicationName: config.ApplicationName,
 			SSLMode:         config.SSLMode,
 			PlanDBHost:      config.PlanDBHost,
@@ -182,6 +187,11 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 	if migrationPlan.SourceFingerprint != nil {
 		err := validateSchemaFingerprint(migrationPlan, config.Host, config.Port, config.DB, config.User, config.Password, config.SSLMode, config.Schema, config.ApplicationName, ignoreConfig)
 		if err != nil {
+			return err
+		}
+	}
+	if migrationPlan.SourceGlobalFingerprint != nil {
+		if err := validateGlobalFingerprint(migrationPlan, config); err != nil {
 			return err
 		}
 	}
@@ -322,6 +332,9 @@ func RunApply(cmd *cobra.Command, args []string) error {
 	if applyFile == "" && applyPlan == "" {
 		return fmt.Errorf("either --file or --plan must be specified")
 	}
+	if applyGlobalFile != "" && applyFile == "" {
+		return fmt.Errorf("--global-file requires --file; saved plans already contain global-state steps")
+	}
 
 	// Validate file extensions to catch flag mix-ups early
 	if err := validateFileExtension(applyFile, applyPlan); err != nil {
@@ -395,6 +408,7 @@ func RunApply(cmd *cobra.Command, args []string) error {
 	} else {
 		// Using --file flag, will need desired state provider
 		config.File = applyFile
+		config.GlobalFile = applyGlobalFile
 
 		// Apply environment variables to plan database flags (only needed for File Mode)
 		util.ApplyPlanDBEnvVars(cmd, &applyPlanDBHost, &applyPlanDBDatabase, &applyPlanDBUser, &applyPlanDBPassword, &applyPlanDBPort, &applyPlanDBSSLMode)
@@ -428,6 +442,7 @@ func RunApply(cmd *cobra.Command, args []string) error {
 			Password:        finalPassword,
 			Schema:          applySchema,
 			File:            applyFile,
+			GlobalFile:      applyGlobalFile,
 			ApplicationName: applyApplicationName,
 			SSLMode:         finalSSLMode,
 			// Plan database configuration
@@ -453,11 +468,50 @@ func RunApply(cmd *cobra.Command, args []string) error {
 	return ApplyMigration(config, provider)
 }
 
+func validateGlobalFingerprint(migrationPlan *plan.Plan, config *ApplyConfig) error {
+	conn, err := util.Connect(&util.ConnectionConfig{
+		Host: config.Host, Port: config.Port, Database: config.DB, User: config.User,
+		Password: config.Password, SSLMode: config.SSLMode, ApplicationName: config.ApplicationName,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to connect for global state fingerprint validation: %w", err)
+	}
+	defer conn.Close()
+
+	majorVersion, err := detectPostgresMajorVersion(conn)
+	if err != nil {
+		return fmt.Errorf("failed to detect PostgreSQL version for global state validation: %w", err)
+	}
+	current, err := globalstate.Inspect(context.Background(), conn, migrationPlan.SourceGlobalFingerprint.Selection, majorVersion)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := globalstate.ComputeFingerprint(current, migrationPlan.SourceGlobalFingerprint.Selection)
+	if err != nil {
+		return err
+	}
+	if fingerprint.Hash != migrationPlan.SourceGlobalFingerprint.Hash {
+		return fmt.Errorf("global state fingerprint mismatch - expected: %.16s, actual: %.16s\n\nRegenerate the plan against the current database state", migrationPlan.SourceGlobalFingerprint.Hash, fingerprint.Hash)
+	}
+	return nil
+}
+
+func detectPostgresMajorVersion(db *sql.DB) (int, error) {
+	var versionNum int
+	if err := db.QueryRow("SHOW server_version_num").Scan(&versionNum); err != nil {
+		return 0, err
+	}
+	return versionNum / 10000, nil
+}
+
 // validateSchemaFingerprint validates that the current database schema matches the expected fingerprint
 func validateSchemaFingerprint(migrationPlan *plan.Plan, host string, port int, db, user, password, sslmode, schema, applicationName string, ignoreConfig *ir.IgnoreConfig) error {
 	// Get current state from target database with ignore config
 	// This ensures ignored objects are excluded from fingerprint calculation
-	currentStateIR, err := util.GetIRFromDatabase(host, port, db, user, password, sslmode, schema, applicationName, ignoreConfig, "")
+	currentStateIR, err := util.GetIRFromDatabase(
+		host, port, db, user, password, sslmode, schema, applicationName,
+		ignoreConfig, "",
+	)
 	if err != nil {
 		return fmt.Errorf("failed to get current database state for fingerprint validation: %w", err)
 	}
@@ -488,7 +542,15 @@ func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, 
 		}
 	}
 
-	if !hasDirectives {
+	hasConcurrent := false
+	for _, step := range group.Steps {
+		if containsConcurrentStatement([]string{step.SQL}) {
+			hasConcurrent = true
+			break
+		}
+	}
+
+	if !hasDirectives && !hasConcurrent {
 		// No directives - concatenate all SQL and execute in implicit transaction
 		return executeGroupConcatenated(ctx, conn, group, groupNum, quiet, retry)
 	} else {
@@ -503,10 +565,16 @@ func executeGroup(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, 
 // executeGroupConcatenated concatenates all SQL statements and executes them in an implicit transaction
 func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool, retry lockRetryConfig) error {
 	var sqlStatements []string
+	if group.ExecutionRole != "" {
+		sqlStatements = append(sqlStatements, "SET ROLE "+ir.QuoteIdentifier(group.ExecutionRole))
+	}
 
 	// Collect all SQL statements
 	for _, step := range group.Steps {
 		sqlStatements = append(sqlStatements, step.SQL)
+	}
+	if group.ExecutionRole != "" {
+		sqlStatements = append(sqlStatements, "RESET ROLE")
 	}
 
 	// Concatenate all SQL statements
@@ -539,6 +607,26 @@ func executeGroupConcatenated(ctx context.Context, conn *sql.DB, group plan.Exec
 
 // executeGroupIndividually executes statements individually without transactions
 func executeGroupIndividually(ctx context.Context, conn *sql.DB, group plan.ExecutionGroup, groupNum int, quiet bool) error {
+	pinned, err := conn.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to pin connection for group %d: %w", groupNum, err)
+	}
+	defer pinned.Close()
+	if group.ExecutionRole != "" {
+		if _, err := util.ExecContextWithLogging(ctx, pinned, "SET ROLE "+ir.QuoteIdentifier(group.ExecutionRole), "set group execution role"); err != nil {
+			return fmt.Errorf("failed to set execution role for group %d: %w", groupNum, err)
+		}
+	}
+	groupErr := executeGroupStepsIndividually(ctx, pinned, group, groupNum, quiet)
+	if group.ExecutionRole != "" {
+		if _, err := util.ExecContextWithLogging(ctx, pinned, "RESET ROLE", "reset group execution role"); err != nil && groupErr == nil {
+			return fmt.Errorf("failed to reset execution role for group %d: %w", groupNum, err)
+		}
+	}
+	return groupErr
+}
+
+func executeGroupStepsIndividually(ctx context.Context, conn directiveExecer, group plan.ExecutionGroup, groupNum int, quiet bool) error {
 	for stepIdx, step := range group.Steps {
 		if step.Directive != nil {
 			// Handle directive execution

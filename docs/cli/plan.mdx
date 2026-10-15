@@ -155,6 +155,11 @@ By default, the plan command uses an embedded PostgreSQL instance to validate yo
   Path to desired state SQL schema file
 </ParamField>
 
+<ParamField path="--global-file" type="string">
+  Path to an opt-in TOML manifest for cluster-global roles and memberships.
+  Omitting this flag preserves the portable, schema-only behavior.
+</ParamField>
+
 <ParamField path="--output-human" type="string">
   Output human-readable format to stdout or file path
   
@@ -195,6 +200,83 @@ By default, the plan command uses an embedded PostgreSQL instance to validate yo
 ## Ignoring Objects
 
 You can exclude specific database objects from migration planning using a `.pgschemaignore` file. See [Ignore (.pgschemaignore)](/cli/ignore) for complete documentation.
+
+## Roles and memberships
+
+Use a separate global-state manifest when roles and role memberships are part of the desired state:
+
+```toml global.toml
+version = 1
+
+[[roles]]
+name = "app_group"
+
+[[roles]]
+name = "app_login"
+login = true
+connection_limit = 20
+valid_until = "2030-01-02T03:04:05Z"
+configuration = { statement_timeout = "5s" }
+
+[[roles]]
+name = "provider_admin"
+state = "external"
+
+[[memberships]]
+role = "app_group"
+member = "app_login"
+admin = false
+inherit = true
+set = true
+
+[[ownership]]
+kind = "database"
+name = "myapp"
+owner = "app_group"
+
+[[ownership]]
+kind = "table"
+name = "public.documents"
+owner = "app_group"
+
+[[default_privileges]]
+owner = "app_group"
+object_type = "tables"
+grantee = "app_login"
+privileges = ["SELECT"]
+```
+
+```bash
+pgschema plan --file schema.sql --global-file global.toml --output-json plan.json
+```
+
+Declared roles manage `LOGIN`, `INHERIT`, `CREATEDB`, `CREATEROLE`, `REPLICATION`,
+`BYPASSRLS`, connection limit, validity, and per-role configuration. Managed roles
+always converge to `NOSUPERUSER`; granting `SUPERUSER` is intentionally unsupported.
+Omitted attributes use PostgreSQL's role defaults.
+An external role must exist, but pgschema never alters it. Memberships may use
+`state = "absent"` for an explicit revoke. PostgreSQL 15 supports the `ADMIN` option;
+per-membership `INHERIT` and `SET` options require PostgreSQL 16 or newer.
+
+Ownership declarations support databases, schemas, tables, views, materialized views,
+sequences, functions, procedures, and types. Routine names use schema-qualified identity
+signatures, such as `public.calculate(integer)`. Extension-member ownership is rejected.
+Global default privileges support tables, sequences, functions, types, and schemas;
+pgschema compares PostgreSQL's implicit PUBLIC defaults as well as stored
+`pg_default_acl` rows. Role passwords are never part of the manifest.
+
+Role removal is explicit with `state = "absent"`. Undeclared global objects remain
+unmanaged, and pgschema refuses to drop the active session role or a `pg_` system role.
+
+Planning reads catalogs directly and does not apply the manifest to the target or plan
+database. Saved JSON plans include a fingerprint scoped to the declared roles and
+memberships, so `apply --plan` rejects concurrent changes before executing any step.
+The fingerprint also binds the plan to the applying role's relevant authority. Planning
+fails before mutation when pgschema cannot prove CREATEROLE, ADMIN/SET membership,
+CREATEDB, ownership-transfer, or default-privilege authority.
+For a non-superuser deployment role that creates a new owner role, declare a
+SET-enabled membership from the new owner role to the deployment role. pgschema
+reports the missing relationship instead of creating a hidden temporary grant.
 
 ## Examples
 

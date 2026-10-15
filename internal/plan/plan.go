@@ -11,6 +11,7 @@ import (
 	"github.com/pgplex/pgschema/internal/color"
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/internal/fingerprint"
+	"github.com/pgplex/pgschema/internal/globalstate"
 	"github.com/pgplex/pgschema/internal/version"
 	"github.com/pgplex/pgschema/ir"
 )
@@ -35,8 +36,9 @@ type Directive struct {
 
 // Step represents a single execution step with SQL and optional directive
 type Step struct {
-	SQL       string     `json:"sql"`
-	Directive *Directive `json:"directive,omitempty"`
+	SQL           string             `json:"sql"`
+	Directive     *Directive         `json:"directive,omitempty"`
+	OwnerIdentity diff.OwnerIdentity `json:"-"`
 	// Metadata for summary generation
 	Type      string `json:"type,omitempty"`      // e.g., "table", "index"
 	Operation string `json:"operation,omitempty"` // e.g., "create", "alter", "drop"
@@ -45,7 +47,8 @@ type Step struct {
 
 // ExecutionGroup represents a group of steps that should be executed together
 type ExecutionGroup struct {
-	Steps []Step `json:"steps"`
+	Steps         []Step `json:"steps"`
+	ExecutionRole string `json:"execution_role,omitempty"`
 }
 
 // Plan represents the migration plan between two DDL states
@@ -58,7 +61,8 @@ type Plan struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// Source database fingerprint when plan was created
-	SourceFingerprint *fingerprint.SchemaFingerprint `json:"source_fingerprint,omitempty"`
+	SourceFingerprint       *fingerprint.SchemaFingerprint `json:"source_fingerprint,omitempty"`
+	SourceGlobalFingerprint *globalstate.Fingerprint       `json:"source_global_fingerprint,omitempty"`
 
 	// Groups is the ordered list of execution groups
 	Groups []ExecutionGroup `json:"groups"`
@@ -89,6 +93,10 @@ type Type string
 
 const (
 	TypeSchema                  Type = "schemas"
+	TypeRole                    Type = "roles"
+	TypeRoleMembership          Type = "role memberships"
+	TypeOwnership               Type = "ownerships"
+	TypeGlobalDefaultPrivilege  Type = "global default privileges"
 	TypeType                    Type = "types"
 	TypeFunction                Type = "functions"
 	TypeProcedure               Type = "procedures"
@@ -121,6 +129,10 @@ const (
 // getObjectOrder returns the dependency order for database objects
 func getObjectOrder() []Type {
 	return []Type{
+		TypeRole,
+		TypeRoleMembership,
+		TypeOwnership,
+		TypeGlobalDefaultPrivilege,
 		TypeSchema,
 		TypeDefaultPrivilege,
 		TypeType,
@@ -139,6 +151,32 @@ func getObjectOrder() []Type {
 		TypePrivilege,
 		TypeColumnPrivilege,
 		TypeRevokedDefaultPrivilege,
+	}
+}
+
+// PrependSteps adds steps that must run before schema-local changes.
+func (p *Plan) PrependSteps(steps []Step) {
+	if len(steps) == 0 {
+		return
+	}
+	p.Groups = append([]ExecutionGroup{{Steps: steps}}, p.Groups...)
+}
+
+// AppendSteps adds steps that must run after schema-local changes.
+func (p *Plan) AppendSteps(steps []Step) {
+	if len(steps) == 0 {
+		return
+	}
+	p.Groups = append(p.Groups, ExecutionGroup{Steps: steps})
+}
+
+// SetExecutionRole applies schema-local groups as an explicitly declared owner role.
+func (p *Plan) SetExecutionRole(role string) {
+	if role == "" {
+		return
+	}
+	for i := range p.Groups {
+		p.Groups[i].ExecutionRole = role
 	}
 }
 
@@ -178,11 +216,12 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []E
 			// For operations with rewrites, create one step per rewrite statement
 			for _, rewriteStep := range rewriteSteps {
 				step := Step{
-					SQL:       rewriteStep.SQL,
-					Type:      d.Type.String(),
-					Operation: d.Operation.String(),
-					Path:      d.Path,
-					Directive: rewriteStep.Directive,
+					SQL:           rewriteStep.SQL,
+					Type:          d.Type.String(),
+					Operation:     d.Operation.String(),
+					Path:          d.Path,
+					Directive:     rewriteStep.Directive,
+					OwnerIdentity: diff.ExecutionOwnerIdentity(d),
 				}
 
 				// Check if this step needs isolation: it has a directive, cannot
@@ -210,10 +249,11 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []E
 			// For operations without rewrites, create one step per canonical statement
 			for _, stmt := range d.Statements {
 				step := Step{
-					SQL:       stmt.SQL,
-					Type:      d.Type.String(),
-					Operation: d.Operation.String(),
-					Path:      d.Path,
+					SQL:           stmt.SQL,
+					Type:          d.Type.String(),
+					Operation:     d.Operation.String(),
+					Path:          d.Path,
+					OwnerIdentity: diff.ExecutionOwnerIdentity(d),
 				}
 				// Canonical statements don't have directives
 				transactionalSteps = append(transactionalSteps, step)
@@ -344,6 +384,12 @@ func (p *Plan) ToSQL(format SQLFormat) string {
 			sqlOutput.WriteString(fmt.Sprintf("-- Transaction Group #%d\n", groupIdx+1))
 		}
 
+		if group.ExecutionRole != "" {
+			sqlOutput.WriteString("SET ROLE ")
+			sqlOutput.WriteString(ir.QuoteIdentifier(group.ExecutionRole))
+			sqlOutput.WriteString(";\n")
+		}
+
 		for stepIdx, step := range group.Steps {
 			if step.Directive != nil {
 				// Handle directive statements
@@ -360,6 +406,9 @@ func (p *Plan) ToSQL(format SQLFormat) string {
 			if stepIdx < len(group.Steps)-1 || groupIdx < len(p.Groups)-1 {
 				sqlOutput.WriteString("\n")
 			}
+		}
+		if group.ExecutionRole != "" {
+			sqlOutput.WriteString("RESET ROLE;\n")
 		}
 	}
 

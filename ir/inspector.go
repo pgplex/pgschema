@@ -261,7 +261,7 @@ func (i *Inspector) buildMetadata(ctx context.Context, schema *IR) error {
 
 func (i *Inspector) buildSchemas(ctx context.Context, schema *IR, targetSchema string) error {
 	// Use the schema-specific query to prefilter at the database level
-	schemaName, err := i.queries.GetSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
+	schemaName, err := i.queries.GetSchema(ctx, targetSchema)
 	if err != nil {
 		return err
 	}
@@ -647,8 +647,10 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 
 		// Add column to constraint (skip for column-less constraints like CHECK (FALSE))
 		if columnName != "" && columnName != "<nil>" {
-			// Get column position in constraint
-			position := i.getConstraintColumnPosition(ctx, schemaName, constraintName, columnName)
+			position := 0
+			if c.Type != ConstraintTypeCheck && c.Type != ConstraintTypeExclusion {
+				position = i.getConstraintColumnPosition(ctx, schemaName, constraintName, columnName)
+			}
 
 			// Check if column already exists in constraint to avoid duplicates
 			columnExists := false
@@ -1052,19 +1054,21 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 // isIdentityColumn checks if a column is an identity column
 func (i *Inspector) isIdentityColumn(ctx context.Context, schemaName, tableName, columnName string) bool {
 	query := `
-		SELECT is_identity 
-		FROM information_schema.columns 
-		WHERE table_schema = $1 
-		  AND table_name = $2 
-		  AND column_name = $3`
+		SELECT attribute.attidentity <> ''
+		FROM pg_catalog.pg_attribute attribute
+		JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid
+		JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = $1
+		  AND relation.relname = $2
+		  AND attribute.attname = $3`
 
-	var isIdentity string
+	var isIdentity bool
 	err := i.db.QueryRowContext(ctx, query, schemaName, tableName, columnName).Scan(&isIdentity)
 	if err != nil {
 		return false
 	}
 
-	return isIdentity == "YES"
+	return isIdentity
 }
 
 func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema string) error {
@@ -2424,11 +2428,16 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 
 func (i *Inspector) getConstraintColumnPosition(ctx context.Context, schemaName, constraintName, columnName string) int {
 	query := `
-		SELECT kcu.ordinal_position
-		FROM information_schema.key_column_usage kcu
-		WHERE kcu.table_schema = $1
-		  AND kcu.constraint_name = $2
-		  AND kcu.column_name = $3`
+		SELECT key_column.ordinality
+		FROM pg_catalog.pg_constraint constraint_row
+		JOIN pg_catalog.pg_class relation ON relation.oid = constraint_row.conrelid
+		JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+		CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+		JOIN pg_catalog.pg_attribute attribute
+		  ON attribute.attrelid = relation.oid AND attribute.attnum = key_column.attnum
+		WHERE namespace.nspname = $1
+		  AND constraint_row.conname = $2
+		  AND attribute.attname = $3`
 
 	var position int
 	err := i.db.QueryRowContext(ctx, query, schemaName, constraintName, columnName).Scan(&position)
@@ -2492,11 +2501,11 @@ func (i *Inspector) shouldAddPgCatalogPrefix(funcCall string) bool {
 func (i *Inspector) validateSchemaExists(ctx context.Context, schemaName string) error {
 	query := `
 		SELECT 1 
-		FROM information_schema.schemata 
-		WHERE schema_name = $1
-		  AND schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-		  AND schema_name NOT LIKE 'pg_temp_%'
-		  AND schema_name NOT LIKE 'pg_toast_temp_%'`
+		FROM pg_catalog.pg_namespace
+		WHERE nspname = $1
+		  AND nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+		  AND nspname NOT LIKE 'pg_temp_%'
+		  AND nspname NOT LIKE 'pg_toast_temp_%'`
 
 	var exists int
 	err := i.db.QueryRowContext(ctx, query, schemaName).Scan(&exists)
@@ -2813,6 +2822,12 @@ func (i *Inspector) safeInterfaceToInt(val interface{}, defaultVal int) int {
 		}
 		return defaultVal
 	}
+	if sqlVal, ok := val.(sql.NullInt32); ok {
+		if sqlVal.Valid {
+			return int(sqlVal.Int32)
+		}
+		return defaultVal
+	}
 	if intVal, ok := val.(int64); ok {
 		return int(intVal)
 	}
@@ -2829,9 +2844,25 @@ func (i *Inspector) safeInterfaceToInt64(val interface{}, defaultVal int64) int6
 	if val == nil {
 		return defaultVal
 	}
+	if sqlVal, ok := val.(sql.NullString); ok {
+		if !sqlVal.Valid {
+			return defaultVal
+		}
+		parsedVal, err := strconv.ParseInt(sqlVal.String, 10, 64)
+		if err != nil {
+			return defaultVal
+		}
+		return parsedVal
+	}
 	if sqlVal, ok := val.(sql.NullInt64); ok {
 		if sqlVal.Valid {
 			return sqlVal.Int64
+		}
+		return defaultVal
+	}
+	if sqlVal, ok := val.(sql.NullInt32); ok {
+		if sqlVal.Valid {
+			return int64(sqlVal.Int32)
 		}
 		return defaultVal
 	}

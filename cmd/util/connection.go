@@ -100,6 +100,14 @@ func ValidateSSLMode(mode string) error {
 // (see Inspector.SetManagedSchema). Pass "" when they're the same, which is
 // every caller except the desired-state/temp-schema comparison path.
 func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig, managedSchema string) (*ir.IR, error) {
+	return GetIRFromDatabaseAsRole(
+		host, port, db, user, password, sslmode, schemaName, applicationName,
+		ignoreConfig, managedSchema, "",
+	)
+}
+
+// GetIRFromDatabaseAsRole inspects through a SET-enabled owner role when it exists.
+func GetIRFromDatabaseAsRole(host string, port int, db, user, password, sslmode, schemaName, applicationName string, ignoreConfig *ir.IgnoreConfig, managedSchema, inspectionRole string) (*ir.IR, error) {
 	if sslmode == "" {
 		sslmode = "prefer"
 	}
@@ -122,6 +130,39 @@ func GetIRFromDatabase(host string, port int, db, user, password, sslmode, schem
 	defer conn.Close()
 
 	ctx := context.Background()
+	if inspectionRole != "" {
+		// SET ROLE is connection-local, while the inspector runs concurrent queries.
+		conn.SetMaxOpenConns(1)
+		conn.SetMaxIdleConns(1)
+		var exists bool
+		if err := conn.QueryRowContext(ctx,
+			"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)", inspectionRole,
+		).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("check inspection role %q: %w", inspectionRole, err)
+		}
+		if exists {
+			setPrivilege := "SET"
+			var serverVersion int
+			if err := conn.QueryRowContext(ctx, "SHOW server_version_num").Scan(&serverVersion); err != nil {
+				return nil, fmt.Errorf("detect PostgreSQL version for inspection role: %w", err)
+			}
+			if serverVersion < 160000 {
+				setPrivilege = "MEMBER"
+			}
+			var canSet bool
+			if err := conn.QueryRowContext(ctx,
+				"SELECT pg_has_role(current_user, $1, $2)", inspectionRole, setPrivilege,
+			).Scan(&canSet); err != nil {
+				return nil, fmt.Errorf("check SET authority for inspection role %q: %w", inspectionRole, err)
+			}
+			if !canSet {
+				return nil, fmt.Errorf("session role cannot SET ROLE to schema owner %q for inspection", inspectionRole)
+			}
+			if _, err := conn.ExecContext(ctx, "SET ROLE "+ir.QuoteIdentifier(inspectionRole)); err != nil {
+				return nil, fmt.Errorf("set inspection role %q: %w", inspectionRole, err)
+			}
+		}
+	}
 
 	// Build IR using the IR system with ignore config
 	inspector := ir.NewInspector(conn, ignoreConfig)

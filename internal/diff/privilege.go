@@ -247,14 +247,22 @@ func formatObjectReference(objType ir.PrivilegeObjectType, objName string) strin
 	case ir.PrivilegeObjectTypeSequence:
 		return "SEQUENCE " + ir.QuoteIdentifier(objName)
 	case ir.PrivilegeObjectTypeFunction:
-		return "FUNCTION " + objName // Function signature already includes parentheses
+		return "FUNCTION " + formatRoutineReference(objName)
 	case ir.PrivilegeObjectTypeProcedure:
-		return "PROCEDURE " + objName // Procedure signature already includes parentheses
+		return "PROCEDURE " + formatRoutineReference(objName)
 	case ir.PrivilegeObjectTypeType:
 		return "TYPE " + ir.QuoteIdentifier(objName)
 	default:
 		return ir.QuoteIdentifier(objName)
 	}
+}
+
+func formatRoutineReference(identity string) string {
+	open := strings.IndexByte(identity, '(')
+	if open < 0 {
+		return ir.QuoteIdentifier(identity)
+	}
+	return ir.QuoteIdentifier(identity[:open]) + identity[open:]
 }
 
 // privilegesEqual checks if two privileges are structurally equal

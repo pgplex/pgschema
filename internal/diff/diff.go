@@ -43,6 +43,10 @@ const (
 	DiffTypePrivilege
 	DiffTypeRevokedDefaultPrivilege
 	DiffTypeColumnPrivilege
+	DiffTypeRole
+	DiffTypeRoleMembership
+	DiffTypeOwnership
+	DiffTypeGlobalDefaultPrivilege
 )
 
 // String returns the string representation of DiffType
@@ -106,6 +110,14 @@ func (d DiffType) String() string {
 		return "revoked_default_privilege"
 	case DiffTypeColumnPrivilege:
 		return "column_privilege"
+	case DiffTypeRole:
+		return "role"
+	case DiffTypeRoleMembership:
+		return "role_membership"
+	case DiffTypeOwnership:
+		return "ownership"
+	case DiffTypeGlobalDefaultPrivilege:
+		return "global_default_privilege"
 	default:
 		return "unknown"
 	}
@@ -182,6 +194,14 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeRevokedDefaultPrivilege
 	case "column_privilege":
 		*d = DiffTypeColumnPrivilege
+	case "role":
+		*d = DiffTypeRole
+	case "role_membership":
+		*d = DiffTypeRoleMembership
+	case "ownership":
+		*d = DiffTypeOwnership
+	case "global_default_privilege":
+		*d = DiffTypeGlobalDefaultPrivilege
 	default:
 		return fmt.Errorf("unknown diff type: %s", s)
 	}
@@ -268,11 +288,12 @@ type SQLStatement struct {
 
 // Diff represents one or more related SQL statements with their source change
 type Diff struct {
-	Statements []SQLStatement `json:"statements"`
-	Type       DiffType       `json:"type"`
-	Operation  DiffOperation  `json:"operation"` // create, alter, drop, replace
-	Path       string         `json:"path"`
-	Source     DiffSource     `json:"-"` // interface; not JSON-serializable (see #305)
+	Statements    []SQLStatement `json:"statements"`
+	Type          DiffType       `json:"type"`
+	Operation     DiffOperation  `json:"operation"` // create, alter, drop, replace
+	Path          string         `json:"path"`
+	Source        DiffSource     `json:"-"` // interface; not JSON-serializable (see #305)
+	OwnerIdentity OwnerIdentity  `json:"-"`
 }
 
 type ddlDiff struct {

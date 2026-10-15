@@ -6,8 +6,9 @@ type diffContext struct {
 	Operation           DiffOperation // e.g., DiffOperationCreate, DiffOperationAlter, DiffOperationDrop
 	Path                string        // e.g., "schema.table" or "schema.table.column"
 	Source              DiffSource    // The ddlDiff element that generated this SQL
-	CanRunInTransaction bool          // Whether this SQL can run in a transaction
-	RequiresCommitAfter bool          // Whether later statements must run in a separate transaction
+	OwnerIdentity       OwnerIdentity
+	CanRunInTransaction bool // Whether this SQL can run in a transaction
+	RequiresCommitAfter bool // Whether later statements must run in a separate transaction
 }
 
 // diffCollector collects SQL statements with their context information
@@ -36,10 +37,11 @@ func (c *diffCollector) collect(context *diffContext, stmt string) {
 				CanRunInTransaction: context.CanRunInTransaction,
 				RequiresCommitAfter: context.RequiresCommitAfter,
 			}},
-			Type:      context.Type,
-			Operation: context.Operation,
-			Path:      context.Path,
-			Source:    context.Source,
+			Type:          context.Type,
+			Operation:     context.Operation,
+			Path:          context.Path,
+			Source:        context.Source,
+			OwnerIdentity: context.OwnerIdentity,
 		}
 		c.diffs = append(c.diffs, step)
 	}
@@ -49,11 +51,12 @@ func (c *diffCollector) collect(context *diffContext, stmt string) {
 func (c *diffCollector) collectStatements(context *diffContext, statements []SQLStatement) {
 	if context != nil && len(statements) > 0 {
 		step := Diff{
-			Statements: statements,
-			Type:       context.Type,
-			Operation:  context.Operation,
-			Path:       context.Path,
-			Source:     context.Source,
+			Statements:    statements,
+			Type:          context.Type,
+			Operation:     context.Operation,
+			Path:          context.Path,
+			Source:        context.Source,
+			OwnerIdentity: context.OwnerIdentity,
 		}
 		c.diffs = append(c.diffs, step)
 	}

@@ -1310,6 +1310,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			Operation:           DiffOperationDrop,
 			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, column.Name),
 			Source:              column,
+			OwnerIdentity:       RelationOwnerIdentity(td.Table.Schema, td.Table.Name),
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
@@ -1404,6 +1405,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			Operation:           DiffOperationCreate,
 			Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, column.Name),
 			Source:              column,
+			OwnerIdentity:       RelationOwnerIdentity(td.Table.Schema, td.Table.Name),
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, stmt+";")
@@ -1420,6 +1422,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				Operation:           DiffOperationCreate,
 				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, column.Name),
 				Source:              column,
+				OwnerIdentity:       RelationOwnerIdentity(td.Table.Schema, td.Table.Name),
 				CanRunInTransaction: true,
 			}
 			collector.collect(context, sql)
@@ -1437,6 +1440,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				Operation:           DiffOperationAlter,
 				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, ColumnDiff.New.Name),
 				Source:              ColumnDiff,
+				OwnerIdentity:       RelationOwnerIdentity(td.Table.Schema, td.Table.Name),
 				CanRunInTransaction: true,
 			}
 
@@ -1913,6 +1917,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				Operation:           DiffOperationAlter,
 				Path:                fmt.Sprintf("%s.%s.%s", td.Table.Schema, td.Table.Name, colDiff.New.Name),
 				Source:              colDiff,
+				OwnerIdentity:       RelationOwnerIdentity(td.Table.Schema, td.Table.Name),
 				CanRunInTransaction: true,
 			}
 			collector.collect(context, sql)

@@ -18,13 +18,13 @@ ORDER BY schema_name;
 -- GetSchema retrieves a specific schema by name
 -- name: GetSchema :one
 SELECT 
-    schema_name
-FROM information_schema.schemata
+    nspname AS schema_name
+FROM pg_catalog.pg_namespace
 WHERE 
-    schema_name = $1
-    AND schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND schema_name NOT LIKE 'pg_temp_%'
-    AND schema_name NOT LIKE 'pg_toast_temp_%';
+    nspname = $1
+    AND nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+    AND nspname NOT LIKE 'pg_temp_%'
+    AND nspname NOT LIKE 'pg_toast_temp_%';
 
 -- GetTables retrieves all tables in the database with metadata
 -- name: GetTables :many
@@ -57,18 +57,17 @@ ORDER BY t.table_schema, t.table_name;
 -- GetTablesForSchema retrieves all tables in a specific schema with metadata
 -- name: GetTablesForSchema :many
 SELECT
-    t.table_schema,
-    t.table_name,
-    t.table_type,
+	n.nspname AS table_schema,
+	c.relname AS table_name,
+	CASE WHEN c.relkind = 'v' THEN 'VIEW' ELSE 'BASE TABLE' END AS table_type,
     COALESCE(d.description, '') AS table_comment,
     c.relpersistence::text AS relpersistence
-FROM information_schema.tables t
-LEFT JOIN pg_namespace n ON n.nspname = t.table_schema
-LEFT JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = 0
 WHERE
-    t.table_schema = $1
-    AND t.table_type IN ('BASE TABLE', 'VIEW')
+	n.nspname = $1
+	AND c.relkind IN ('r', 'p', 'v')
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_class'::regclass
@@ -78,7 +77,7 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY t.table_name;
+ORDER BY c.relname;
 
 -- GetColumns retrieves all columns for all tables
 -- name: GetColumns :many
@@ -149,7 +148,55 @@ WITH column_base AS (
         a.attgenerated,
         ad.adbin,
         ad.adrelid
-    FROM information_schema.columns c
+    FROM (
+        SELECT
+            ns.nspname AS table_schema,
+            cls.relname AS table_name,
+            attr.attname AS column_name,
+            attr.attnum::integer AS ordinal_position,
+            pg_get_expr(attrdef.adbin, attrdef.adrelid) AS column_default,
+            CASE WHEN attr.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+            format_type(attr.atttypid, attr.atttypmod) AS data_type,
+            information_schema._pg_char_max_length(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS character_maximum_length,
+            information_schema._pg_numeric_precision(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_precision,
+            information_schema._pg_numeric_scale(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_scale,
+            attrtype.typname AS udt_name,
+            CASE WHEN attr.attidentity <> '' THEN 'YES' ELSE 'NO' END AS is_identity,
+            CASE attr.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE NULL END AS identity_generation,
+            identity_seq.seqstart::text AS identity_start,
+            identity_seq.seqincrement::text AS identity_increment,
+            identity_seq.seqmax::text AS identity_maximum,
+            identity_seq.seqmin::text AS identity_minimum,
+            CASE WHEN identity_seq.seqcycle THEN 'YES' WHEN identity_seq.seqcycle IS NOT NULL THEN 'NO' ELSE NULL END AS identity_cycle
+        FROM pg_catalog.pg_attribute attr
+        JOIN pg_catalog.pg_class cls ON cls.oid = attr.attrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
+        JOIN pg_catalog.pg_type attrtype ON attrtype.oid = attr.atttypid
+        LEFT JOIN pg_catalog.pg_attrdef attrdef ON attrdef.adrelid = attr.attrelid AND attrdef.adnum = attr.attnum
+        LEFT JOIN LATERAL (
+            SELECT sequence.seqstart, sequence.seqincrement, sequence.seqmax, sequence.seqmin, sequence.seqcycle
+            FROM pg_catalog.pg_depend dependency
+            JOIN pg_catalog.pg_sequence sequence ON sequence.seqrelid = dependency.objid
+            WHERE dependency.refclassid = 'pg_catalog.pg_class'::regclass
+              AND dependency.refobjid = cls.oid
+              AND dependency.refobjsubid = attr.attnum
+              AND dependency.classid = 'pg_catalog.pg_class'::regclass
+              AND dependency.deptype = 'i'
+            LIMIT 1
+        ) identity_seq ON true
+        WHERE attr.attnum > 0
+          AND NOT attr.attisdropped
+          AND cls.relkind IN ('r', 'p', 'v', 'm', 'f')
+    ) c
     LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
     LEFT JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = n.oid
     LEFT JOIN pg_description d ON d.objoid = cl.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = c.ordinal_position
@@ -295,7 +342,55 @@ WITH column_base AS (
         ad.adbin,
         ad.adrelid,
         cl.oid AS table_oid
-    FROM information_schema.columns c
+    FROM (
+        SELECT
+            ns.nspname AS table_schema,
+            cls.relname AS table_name,
+            attr.attname AS column_name,
+            attr.attnum::integer AS ordinal_position,
+            pg_get_expr(attrdef.adbin, attrdef.adrelid) AS column_default,
+            CASE WHEN attr.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+            format_type(attr.atttypid, attr.atttypmod) AS data_type,
+            information_schema._pg_char_max_length(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS character_maximum_length,
+            information_schema._pg_numeric_precision(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_precision,
+            information_schema._pg_numeric_scale(
+                information_schema._pg_truetypid(attr, attrtype),
+                information_schema._pg_truetypmod(attr, attrtype)
+            ) AS numeric_scale,
+            attrtype.typname AS udt_name,
+            CASE WHEN attr.attidentity <> '' THEN 'YES' ELSE 'NO' END AS is_identity,
+            CASE attr.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE NULL END AS identity_generation,
+            identity_seq.seqstart::text AS identity_start,
+            identity_seq.seqincrement::text AS identity_increment,
+            identity_seq.seqmax::text AS identity_maximum,
+            identity_seq.seqmin::text AS identity_minimum,
+            CASE WHEN identity_seq.seqcycle THEN 'YES' WHEN identity_seq.seqcycle IS NOT NULL THEN 'NO' ELSE NULL END AS identity_cycle
+        FROM pg_catalog.pg_attribute attr
+        JOIN pg_catalog.pg_class cls ON cls.oid = attr.attrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
+        JOIN pg_catalog.pg_type attrtype ON attrtype.oid = attr.atttypid
+        LEFT JOIN pg_catalog.pg_attrdef attrdef ON attrdef.adrelid = attr.attrelid AND attrdef.adnum = attr.attnum
+        LEFT JOIN LATERAL (
+            SELECT sequence.seqstart, sequence.seqincrement, sequence.seqmax, sequence.seqmin, sequence.seqcycle
+            FROM pg_catalog.pg_depend dependency
+            JOIN pg_catalog.pg_sequence sequence ON sequence.seqrelid = dependency.objid
+            WHERE dependency.refclassid = 'pg_catalog.pg_class'::regclass
+              AND dependency.refobjid = cls.oid
+              AND dependency.refobjsubid = attr.attnum
+              AND dependency.classid = 'pg_catalog.pg_class'::regclass
+              AND dependency.deptype = 'i'
+            LIMIT 1
+        ) identity_seq ON true
+        WHERE attr.attnum > 0
+          AND NOT attr.attisdropped
+          AND cls.relkind IN ('r', 'p', 'v', 'm', 'f')
+    ) c
     LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
     LEFT JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = n.oid
     LEFT JOIN pg_description d ON d.objoid = cl.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = c.ordinal_position
@@ -735,12 +830,12 @@ ORDER BY sequence_schema, sequence_name;
 -- GetFunctions retrieves all user-defined functions (excluding extension members)
 -- name: GetFunctions :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     p.prosrc AS routine_definition,
-    r.routine_type,
-    COALESCE(pg_get_function_result(p.oid), r.data_type) AS data_type,
-    r.external_language,
+	'FUNCTION' AS routine_type,
+	pg_get_function_result(p.oid) AS data_type,
+	l.lanname AS external_language,
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
@@ -752,16 +847,15 @@ SELECT
     END AS volatility,
     p.proisstrict AS is_strict,
     p.prosecdef AS is_security_definer
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_func ON desc_func.objoid = p.oid AND desc_func.classoid = 'pg_proc'::regclass
 WHERE
-    r.routine_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND r.routine_schema NOT LIKE 'pg_temp_%'
-    AND r.routine_schema NOT LIKE 'pg_toast_temp_%'
-    AND r.routine_type = 'FUNCTION'
+	n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+	AND n.nspname NOT LIKE 'pg_temp_%'
+	AND n.nspname NOT LIKE 'pg_toast_temp_%'
+	AND p.prokind = 'f'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -771,29 +865,28 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name;
+ORDER BY n.nspname, p.proname;
 
 -- GetProcedures retrieves all user-defined procedures (excluding extension members)
 -- name: GetProcedures :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     p.prosrc AS routine_definition,
-    r.routine_type,
-    r.external_language,
+	'PROCEDURE' AS routine_type,
+	l.lanname AS external_language,
     COALESCE(desc_proc.description, '') AS procedure_comment,
     oidvectortypes(p.proargtypes) AS procedure_arguments,
     pg_get_function_arguments(p.oid) AS procedure_signature
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_proc ON desc_proc.objoid = p.oid AND desc_proc.classoid = 'pg_proc'::regclass
 WHERE
-    r.routine_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-    AND r.routine_schema NOT LIKE 'pg_temp_%'
-    AND r.routine_schema NOT LIKE 'pg_toast_temp_%'
-    AND r.routine_type = 'PROCEDURE'
+	n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+	AND n.nspname NOT LIKE 'pg_temp_%'
+	AND n.nspname NOT LIKE 'pg_toast_temp_%'
+	AND p.prokind = 'p'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -803,7 +896,7 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name;
+ORDER BY n.nspname, p.proname;
 
 -- GetAggregates retrieves all user-defined aggregates
 -- name: GetAggregates :many
@@ -1514,17 +1607,17 @@ ORDER BY s.schemaname, s.sequencename;
 -- GetFunctionsForSchema retrieves all user-defined functions for a specific schema
 -- name: GetFunctionsForSchema :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     -- Use pg_get_function_sqlbody for RETURN clause syntax (PG14+)
     -- Fall back to prosrc for traditional AS $$ ... $$ syntax
     COALESCE(
         pg_get_function_sqlbody(p.oid),
         CASE WHEN p.prosrc ~ E'\n$' THEN p.prosrc ELSE p.prosrc || E'\n' END
     ) AS routine_definition,
-    r.routine_type,
-    COALESCE(pg_get_function_result(p.oid), r.data_type) AS data_type,
-    r.external_language,
+	'FUNCTION' AS routine_type,
+	pg_get_function_result(p.oid) AS data_type,
+	l.lanname AS external_language,
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
@@ -1539,13 +1632,12 @@ SELECT
     p.proleakproof AS is_leakproof,
     p.proparallel AS parallel_mode,
     COALESCE(p.proconfig, '{}') AS set_config
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_func ON desc_func.objoid = p.oid AND desc_func.classoid = 'pg_proc'::regclass
-WHERE r.routine_schema = $1
-    AND r.routine_type = 'FUNCTION'
+WHERE n.nspname = $1
+    AND p.prokind = 'f'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -1555,31 +1647,30 @@ WHERE r.routine_schema = $1
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name;
+ORDER BY n.nspname, p.proname;
 
 -- GetProceduresForSchema retrieves all user-defined procedures for a specific schema
 -- name: GetProceduresForSchema :many
 SELECT
-    r.routine_schema,
-    r.routine_name,
+	n.nspname AS routine_schema,
+	p.proname AS routine_name,
     -- Use pg_get_function_sqlbody for RETURN clause syntax (PG14+)
     -- Fall back to prosrc for traditional AS $$ ... $$ syntax
     COALESCE(
         pg_get_function_sqlbody(p.oid),
         CASE WHEN p.prosrc ~ E'\n$' THEN p.prosrc ELSE p.prosrc || E'\n' END
     ) AS routine_definition,
-    r.routine_type,
-    r.external_language,
+	'PROCEDURE' AS routine_type,
+	l.lanname AS external_language,
     COALESCE(desc_proc.description, '') AS procedure_comment,
     oidvectortypes(p.proargtypes) AS procedure_arguments,
     pg_get_function_arguments(p.oid) AS procedure_signature
-FROM information_schema.routines r
-LEFT JOIN pg_proc p ON p.proname = r.routine_name
-    AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = r.routine_schema)
-    AND p.oid = (regexp_match(r.specific_name, '_(\d+)$'))[1]::oid
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 LEFT JOIN pg_description desc_proc ON desc_proc.objoid = p.oid AND desc_proc.classoid = 'pg_proc'::regclass
-WHERE r.routine_schema = $1
-    AND r.routine_type = 'PROCEDURE'
+WHERE n.nspname = $1
+    AND p.prokind = 'p'
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
@@ -1589,7 +1680,7 @@ WHERE r.routine_schema = $1
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
-ORDER BY r.routine_schema, r.routine_name;
+ORDER BY n.nspname, p.proname;
 
 -- GetAggregatesForSchema retrieves all user-defined aggregates for a specific schema.
 -- Support-function references (SFUNC, FINALFUNC, COMBINEFUNC, ...) are pre-quoted and
