@@ -240,6 +240,13 @@ func TestDumpCommand_NameTypeNotDumpedAsCharArray(t *testing.T) {
 	}
 }
 
+func TestDumpCommand_Issue644FKColumnOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_644_fk_column_order")
+}
+
 func TestDumpCommand_Issue318CrossSchemaComment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

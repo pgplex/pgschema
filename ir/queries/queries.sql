@@ -564,8 +564,8 @@ WITH index_base AS (
         n.nspname as schemaname,
         t.relname as tablename,
         i.relname as indexname,
-        pi.relname AS parent_index,
-        pn.nspname AS parent_index_schema,
+        COALESCE(pi.relname, '') AS parent_index,
+        COALESCE(pn.nspname, '') AS parent_index_schema,
         idx.indisunique as is_unique,
         idx.indisprimary as is_primary,
         (idx.indpred IS NOT NULL) as is_partial,
@@ -1380,6 +1380,14 @@ SELECT
     END AS constraint_type,
     COALESCE(a.attname, '') AS column_name,
     COALESCE(a.attnum, 0) AS ordinal_position,
+    -- 1-based position of the column within the constraint key, for the key
+    -- constraints whose column order matters. Computed here from conkey rather
+    -- than with one information_schema.key_column_usage lookup per column,
+    -- which also keyed on constraint name without the table and could return
+    -- another table's position for a same-named foreign key (issue #644).
+    (CASE WHEN c.contype IN ('p', 'u', 'f')
+          THEN COALESCE(array_position(c.conkey, a.attnum), 0)
+          ELSE 0 END)::int AS constraint_position,
     COALESCE(fn.nspname, '') AS foreign_table_schema,
     COALESCE(fcl.relname, '') AS foreign_table_name,
     COALESCE(fa.attname, '') AS foreign_column_name,
@@ -1472,6 +1480,9 @@ SELECT
     s.cache_size,
     COALESCE(dep_table.relname, '') AS owned_by_table,
     COALESCE(dep_col.attname, '') AS owned_by_column,
+    -- Whether the owning column is an identity column, so identity-backed
+    -- sequences are skipped without a per-sequence lookup (issue #644).
+    COALESCE(dep_col.attidentity IN ('a', 'd'), false)::boolean AS owned_by_identity,
     COALESCE(obj_description(c.oid, 'pg_class'), '') AS sequence_comment
 FROM pg_sequences s
 LEFT JOIN pg_namespace n ON n.nspname = s.schemaname
@@ -1747,13 +1758,23 @@ SELECT
     sp.view_def AS view_definition,
     vd.view_comment,
     vd.is_materialized,
-    vd.reloptions
+    vd.reloptions,
+    -- Column names in attnum order, folded in here rather than fetched with
+    -- one pg_attribute query per view (issue #644).
+    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
         set_config('search_path', vd.view_schema || ', pg_catalog', true) as dummy,
         pg_get_viewdef(vd.view_oid, true) as view_def
 ) sp
+LEFT JOIN LATERAL (
+    SELECT array_agg(a.attname::text ORDER BY a.attnum) AS column_names
+    FROM pg_attribute a
+    WHERE a.attrelid = vd.view_oid
+      AND a.attnum > 0
+      AND NOT a.attisdropped
+) cols ON true
 ORDER BY vd.table_schema, vd.table_name;
 
 -- GetTriggersForSchema retrieves all triggers for a specific schema
@@ -2145,16 +2166,30 @@ WITH acl_data AS (
         )
         AND t.typacl IS NOT NULL
 )
+, exploded AS (
+    SELECT
+        schema_name,
+        object_name,
+        object_type,
+        owner,
+        (aclexplode(acl)).grantee AS grantee,
+        (aclexplode(acl)).privilege_type AS privilege_type,
+        (aclexplode(acl)).is_grantable AS is_grantable
+    FROM acl_data
+)
 SELECT
-    schema_name,
-    object_name,
-    object_type,
-    (aclexplode(acl)).grantee AS grantee_oid,
-    (aclexplode(acl)).privilege_type AS privilege_type,
-    (aclexplode(acl)).is_grantable AS is_grantable,
-    owner
-FROM acl_data
-ORDER BY object_type, object_name, grantee_oid, privilege_type;
+    e.schema_name,
+    e.object_name,
+    e.object_type,
+    -- Grantee resolved here rather than with one pg_roles lookup per row
+    -- (issue #644). Empty when the grantee role no longer exists.
+    COALESCE(CASE WHEN e.grantee = 0 THEN 'PUBLIC' ELSE r.rolname END, '')::text AS grantee_name,
+    e.privilege_type,
+    e.is_grantable,
+    e.owner
+FROM exploded e
+LEFT JOIN pg_roles r ON r.oid = e.grantee
+ORDER BY e.object_type, e.object_name, e.grantee, e.privilege_type;
 
 -- GetRevokedDefaultPrivilegesForSchema finds objects where default PUBLIC grants have been explicitly revoked
 -- name: GetRevokedDefaultPrivilegesForSchema :many
@@ -2272,14 +2307,26 @@ WITH column_acls AS (
         AND NOT a.attisdropped
         AND a.attacl IS NOT NULL           -- only columns with explicit ACL
 )
+, exploded AS (
+    SELECT
+        table_name,
+        column_name,
+        (aclexplode(acl)).grantee AS grantee,
+        (aclexplode(acl)).privilege_type AS privilege_type,
+        (aclexplode(acl)).is_grantable AS is_grantable
+    FROM column_acls
+)
 SELECT
-    table_name,
-    column_name,
-    (aclexplode(acl)).grantee AS grantee_oid,
-    (aclexplode(acl)).privilege_type AS privilege_type,
-    (aclexplode(acl)).is_grantable AS is_grantable
-FROM column_acls
-ORDER BY table_name, column_name, grantee_oid, privilege_type;
+    e.table_name,
+    e.column_name,
+    -- Grantee resolved here rather than with one pg_roles lookup per row
+    -- (issue #644). Empty when the grantee role no longer exists.
+    COALESCE(CASE WHEN e.grantee = 0 THEN 'PUBLIC' ELSE r.rolname END, '')::text AS grantee_name,
+    e.privilege_type,
+    e.is_grantable
+FROM exploded e
+LEFT JOIN pg_roles r ON r.oid = e.grantee
+ORDER BY e.table_name, e.column_name, e.grantee, e.privilege_type;
 
 -- GetFunctionDependencies retrieves function-to-function dependencies for topological sorting
 -- name: GetFunctionDependencies :many

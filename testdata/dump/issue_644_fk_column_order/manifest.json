@@ -1,0 +1,9 @@
+{
+  "name": "issue_644_fk_column_order",
+  "description": "Foreign keys with the same name on different tables keep their own column order (GitHub issue #644)",
+  "source": "https://github.com/pgplex/pgschema/issues/644",
+  "notes": [
+    "c1 and c2 both have a foreign key named fk_p to p, on (a, b) and (b, a) respectively",
+    "Reproduces the bug where constraint column positions were looked up by (schema, constraint name, column) without the table, so c2 was dumped with c1's column order and referenced p's primary key instead of its (b, a) unique constraint"
+  ]
+}

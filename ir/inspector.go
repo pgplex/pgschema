@@ -548,8 +548,7 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 			table.AllConstraintNames[constraintName] = true
 		}
 
-		// Skip ignored constraints early to avoid the per-column position
-		// queries below for constraints that would be discarded anyway.
+		// Skip ignored constraints early; they would be discarded anyway.
 		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreConstraint(constraintName) {
 			continue
 		}
@@ -681,8 +680,8 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 
 		// Add column to constraint (skip for column-less constraints like CHECK (FALSE))
 		if columnName != "" && columnName != "<nil>" {
-			// Get column position in constraint
-			position := i.getConstraintColumnPosition(ctx, schemaName, constraintName, columnName)
+			// Column position within the constraint key, from the batched query
+			position := int(constraint.ConstraintPosition.Int32)
 
 			// Check if column already exists in constraint to avoid duplicates
 			columnExists := false
@@ -1070,8 +1069,8 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 		// Skip sequences that are owned by identity columns
 		// Identity sequences should be managed through the identity column, not as separate sequences
 		if sequence.OwnedByTable != "" && sequence.OwnedByColumn != "" {
-			// Check if the owning column is an identity column
-			if i.isIdentityColumn(ctx, seq.SequenceSchema.String, sequence.OwnedByTable, sequence.OwnedByColumn) {
+			// The batched query reports whether the owning column is an identity column
+			if seq.OwnedByIdentity.Valid && seq.OwnedByIdentity.Bool {
 				// Skip this sequence - it's managed by the identity column
 				continue
 			}
@@ -1081,24 +1080,6 @@ func (i *Inspector) buildSequences(ctx context.Context, schema *IR, targetSchema
 	}
 
 	return nil
-}
-
-// isIdentityColumn checks if a column is an identity column
-func (i *Inspector) isIdentityColumn(ctx context.Context, schemaName, tableName, columnName string) bool {
-	query := `
-		SELECT is_identity 
-		FROM information_schema.columns 
-		WHERE table_schema = $1 
-		  AND table_name = $2 
-		  AND column_name = $3`
-
-	var isIdentity string
-	err := i.db.QueryRowContext(ctx, query, schemaName, tableName, columnName).Scan(&isIdentity)
-	if err != nil {
-		return false
-	}
-
-	return isIdentity == "YES"
 }
 
 func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema string) error {
@@ -1841,11 +1822,8 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			definition = strings.TrimSuffix(definition, ";")
 		}
 
-		// Fetch view column names from pg_attribute (ordered by attnum)
-		columns, err := i.getViewColumns(ctx, schemaName, viewName)
-		if err != nil {
-			return fmt.Errorf("failed to get columns for view %s.%s: %w", schemaName, viewName, err)
-		}
+		// View column names in attnum order, from the batched query
+		columns := view.ColumnNames
 
 		// Copy and sort reloptions for deterministic comparison and output
 		options := append([]string(nil), view.Reloptions...)
@@ -1865,37 +1843,6 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 	}
 
 	return nil
-}
-
-// getViewColumns returns the ordered list of column names for a view or materialized view.
-// Uses pg_attribute to get column names ordered by their position (attnum).
-func (i *Inspector) getViewColumns(ctx context.Context, schemaName, viewName string) ([]string, error) {
-	query := `
-		SELECT a.attname
-		FROM pg_attribute a
-		JOIN pg_class c ON a.attrelid = c.oid
-		JOIN pg_namespace n ON c.relnamespace = n.oid
-		WHERE n.nspname = $1
-		  AND c.relname = $2
-		  AND a.attnum > 0
-		  AND NOT a.attisdropped
-		ORDER BY a.attnum`
-
-	rows, err := i.db.QueryContext(ctx, query, schemaName, viewName)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var columns []string
-	for rows.Next() {
-		var colName string
-		if err := rows.Scan(&colName); err != nil {
-			return nil, err
-		}
-		columns = append(columns, colName)
-	}
-	return columns, rows.Err()
 }
 
 // extractWhenClauseFromTriggerDef extracts the WHEN clause from a trigger definition
@@ -2456,23 +2403,6 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 
 // Helper methods
 
-func (i *Inspector) getConstraintColumnPosition(ctx context.Context, schemaName, constraintName, columnName string) int {
-	query := `
-		SELECT kcu.ordinal_position
-		FROM information_schema.key_column_usage kcu
-		WHERE kcu.table_schema = $1
-		  AND kcu.constraint_name = $2
-		  AND kcu.column_name = $3`
-
-	var position int
-	err := i.db.QueryRowContext(ctx, query, schemaName, constraintName, columnName).Scan(&position)
-	if err != nil {
-		return 0 // Default position if query fails
-	}
-
-	return position
-}
-
 // pgCatalogTriggerFunctions contains the hard-coded list of built-in PostgreSQL trigger functions
 // that exist in the pg_catalog schema. These functions should always be schema-qualified
 // to maintain consistency between parser and inspector outputs.
@@ -2581,31 +2511,11 @@ func (i *Inspector) buildPrivileges(ctx context.Context, schema *IR, targetSchem
 		owner := row.Owner.String
 		isGrantable := row.IsGrantable.Valid && row.IsGrantable.Bool
 
-		// Determine grantee name from OID
-		grantee := "PUBLIC"
-		if row.GranteeOid != nil {
-			// Handle different possible types for grantee OID
-			var granteeOID int64
-			switch v := row.GranteeOid.(type) {
-			case int64:
-				granteeOID = v
-			case int32:
-				granteeOID = int64(v)
-			case int:
-				granteeOID = int64(v)
-			}
-			if granteeOID != 0 {
-				// Look up role name
-				var roleName string
-				err := i.db.QueryRowContext(ctx, "SELECT rolname FROM pg_roles WHERE oid = $1", granteeOID).Scan(&roleName)
-				if err != nil {
-					if err == sql.ErrNoRows {
-						continue // Role no longer exists, skip this privilege
-					}
-					return fmt.Errorf("failed to lookup role name for OID %d: %w", granteeOID, err)
-				}
-				grantee = roleName
-			}
+		// The query resolves the grantee ("PUBLIC" for the public pseudo-role);
+		// an empty name means the role no longer exists, so skip the privilege.
+		grantee := row.GranteeName.String
+		if grantee == "" {
+			continue
 		}
 
 		// Skip owner grants (owners implicitly have all privileges)
@@ -2947,29 +2857,11 @@ func (i *Inspector) buildColumnPrivileges(ctx context.Context, schema *IR, targe
 		privilegeType := row.PrivilegeType.String
 		isGrantable := row.IsGrantable.Valid && row.IsGrantable.Bool
 
-		// Determine grantee name from OID
-		grantee := "PUBLIC"
-		if row.GranteeOid != nil {
-			var granteeOID int64
-			switch v := row.GranteeOid.(type) {
-			case int64:
-				granteeOID = v
-			case int32:
-				granteeOID = int64(v)
-			case int:
-				granteeOID = int64(v)
-			}
-			if granteeOID != 0 {
-				var roleName string
-				err := i.db.QueryRowContext(ctx, "SELECT rolname FROM pg_roles WHERE oid = $1", granteeOID).Scan(&roleName)
-				if err != nil {
-					if err == sql.ErrNoRows {
-						continue // Role no longer exists, skip this privilege
-					}
-					return fmt.Errorf("failed to lookup role name for OID %d: %w", granteeOID, err)
-				}
-				grantee = roleName
-			}
+		// The query resolves the grantee ("PUBLIC" for the public pseudo-role);
+		// an empty name means the role no longer exists, so skip the privilege.
+		grantee := row.GranteeName.String
+		if grantee == "" {
+			continue
 		}
 
 		// Skip column privileges for ignored grantees
