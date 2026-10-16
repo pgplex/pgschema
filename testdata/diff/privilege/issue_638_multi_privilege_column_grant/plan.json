@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.3",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "ca8fed2741083ff2d176cec3b66b587bcf4d1a0d50c25519579134aaa173c093"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "REVOKE INSERT (a, b), UPDATE (a, b) ON TABLE t FROM app_user;",
+          "type": "column_privilege",
+          "operation": "drop",
+          "path": "column_privileges.TABLE.t.a,b.app_user"
+        },
+        {
+          "sql": "GRANT INSERT (x), UPDATE (x) ON TABLE u TO app_user;",
+          "type": "column_privilege",
+          "operation": "alter",
+          "path": "column_privileges.TABLE.u.x.app_user"
+        },
+        {
+          "sql": "GRANT INSERT (c), UPDATE (c) ON TABLE v TO app_user WITH GRANT OPTION;",
+          "type": "column_privilege",
+          "operation": "alter",
+          "path": "column_privileges.TABLE.v.c.app_user"
+        },
+        {
+          "sql": "REVOKE GRANT OPTION FOR INSERT (c), UPDATE (c) ON TABLE w FROM app_user;",
+          "type": "column_privilege",
+          "operation": "alter",
+          "path": "column_privileges.TABLE.w.c.app_user"
+        },
+        {
+          "sql": "GRANT INSERT (a), UPDATE (a) ON TABLE t TO app_user;",
+          "type": "column_privilege",
+          "operation": "create",
+          "path": "column_privileges.TABLE.t.a.app_user"
+        }
+      ]
+    }
+  ]
+}

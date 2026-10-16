@@ -84,20 +84,12 @@ func generateGrantColumnPrivilegeSQL(cp *ir.ColumnPrivilege) string {
 	copy(sortedPrivs, cp.Privileges)
 	sort.Strings(sortedPrivs)
 
-	privStr := strings.Join(sortedPrivs, ", ")
-
-	// Format columns with proper quoting
-	quotedCols := make([]string, len(cp.Columns))
-	for i, col := range cp.Columns {
-		quotedCols[i] = ir.QuoteIdentifier(col)
-	}
-	sort.Strings(quotedCols)
-	colStr := strings.Join(quotedCols, ", ")
+	privStr := formatColumnPrivilegeList(sortedPrivs, formatColumnList(cp.Columns))
 
 	grantee := formatGrantee(cp.Grantee)
 	tableName := ir.QuoteIdentifier(cp.TableName)
 
-	sql := fmt.Sprintf("GRANT %s (%s) ON TABLE %s TO %s", privStr, colStr, tableName, grantee)
+	sql := fmt.Sprintf("GRANT %s ON TABLE %s TO %s", privStr, tableName, grantee)
 
 	if cp.WithGrantOption {
 		sql += " WITH GRANT OPTION"
@@ -113,20 +105,12 @@ func generateRevokeColumnPrivilegeSQL(cp *ir.ColumnPrivilege) string {
 	copy(sortedPrivs, cp.Privileges)
 	sort.Strings(sortedPrivs)
 
-	privStr := strings.Join(sortedPrivs, ", ")
-
-	// Format columns with proper quoting
-	quotedCols := make([]string, len(cp.Columns))
-	for i, col := range cp.Columns {
-		quotedCols[i] = ir.QuoteIdentifier(col)
-	}
-	sort.Strings(quotedCols)
-	colStr := strings.Join(quotedCols, ", ")
+	privStr := formatColumnPrivilegeList(sortedPrivs, formatColumnList(cp.Columns))
 
 	grantee := formatGrantee(cp.Grantee)
 	tableName := ir.QuoteIdentifier(cp.TableName)
 
-	return fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s;", privStr, colStr, tableName, grantee)
+	return fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s;", privStr, tableName, grantee)
 }
 
 // generateAlterColumnPrivilegeStatements generates statements for column privilege modifications
@@ -160,26 +144,20 @@ func (d *columnPrivilegeDiff) generateAlterColumnPrivilegeStatements() []string 
 	grantee := formatGrantee(d.New.Grantee)
 	tableName := ir.QuoteIdentifier(d.New.TableName)
 
-	// Format columns with proper quoting
-	quotedCols := make([]string, len(d.New.Columns))
-	for i, col := range d.New.Columns {
-		quotedCols[i] = ir.QuoteIdentifier(col)
-	}
-	sort.Strings(quotedCols)
-	colStr := strings.Join(quotedCols, ", ")
+	colStr := formatColumnList(d.New.Columns)
 
 	// Generate REVOKE for removed privileges
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
-		statements = append(statements, fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s;",
-			strings.Join(toRevoke, ", "), colStr, tableName, grantee))
+		statements = append(statements, fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s;",
+			formatColumnPrivilegeList(toRevoke, colStr), tableName, grantee))
 	}
 
 	// Generate GRANT for added privileges
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
-		sql := fmt.Sprintf("GRANT %s (%s) ON TABLE %s TO %s",
-			strings.Join(toGrant, ", "), colStr, tableName, grantee)
+		sql := fmt.Sprintf("GRANT %s ON TABLE %s TO %s",
+			formatColumnPrivilegeList(toGrant, colStr), tableName, grantee)
 		if d.New.WithGrantOption {
 			sql += " WITH GRANT OPTION"
 		}
@@ -198,16 +176,16 @@ func (d *columnPrivilegeDiff) generateAlterColumnPrivilegeStatements() []string 
 
 		if len(unchanged) > 0 {
 			sort.Strings(unchanged)
-			unchangedStr := strings.Join(unchanged, ", ")
+			unchangedStr := formatColumnPrivilegeList(unchanged, colStr)
 
 			if d.Old.WithGrantOption && !d.New.WithGrantOption {
 				// Revoke grant option only (keep the privilege)
-				statements = append(statements, fmt.Sprintf("REVOKE GRANT OPTION FOR %s (%s) ON TABLE %s FROM %s;",
-					unchangedStr, colStr, tableName, grantee))
+				statements = append(statements, fmt.Sprintf("REVOKE GRANT OPTION FOR %s ON TABLE %s FROM %s;",
+					unchangedStr, tableName, grantee))
 			} else if !d.Old.WithGrantOption && d.New.WithGrantOption {
 				// Add grant option (re-grant with grant option)
-				statements = append(statements, fmt.Sprintf("GRANT %s (%s) ON TABLE %s TO %s WITH GRANT OPTION;",
-					unchangedStr, colStr, tableName, grantee))
+				statements = append(statements, fmt.Sprintf("GRANT %s ON TABLE %s TO %s WITH GRANT OPTION;",
+					unchangedStr, tableName, grantee))
 			}
 		}
 	}
@@ -261,4 +239,27 @@ func columnPrivilegesEqual(old, new *ir.ColumnPrivilege) bool {
 // GetObjectName returns a unique identifier for the column privilege diff
 func (d *columnPrivilegeDiff) GetObjectName() string {
 	return d.New.GetObjectKey()
+}
+
+// formatColumnList quotes and sorts column names and joins them for use in a
+// column privilege list, e.g. "a, b".
+func formatColumnList(columns []string) string {
+	quotedCols := make([]string, len(columns))
+	for i, col := range columns {
+		quotedCols[i] = ir.QuoteIdentifier(col)
+	}
+	sort.Strings(quotedCols)
+	return strings.Join(quotedCols, ", ")
+}
+
+// formatColumnPrivilegeList attaches the column list to every privilege, e.g.
+// "INSERT (a, b), UPDATE (a, b)". PostgreSQL applies a column list only to the
+// privilege immediately before it, so "INSERT, UPDATE (a, b)" would grant
+// INSERT on the whole table (#638).
+func formatColumnPrivilegeList(privileges []string, colStr string) string {
+	parts := make([]string, len(privileges))
+	for i, p := range privileges {
+		parts[i] = fmt.Sprintf("%s (%s)", p, colStr)
+	}
+	return strings.Join(parts, ", ")
 }

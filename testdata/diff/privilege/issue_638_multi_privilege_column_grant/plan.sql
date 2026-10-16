@@ -1,0 +1,9 @@
+REVOKE INSERT (a, b), UPDATE (a, b) ON TABLE t FROM app_user;
+
+GRANT INSERT (x), UPDATE (x) ON TABLE u TO app_user;
+
+GRANT INSERT (c), UPDATE (c) ON TABLE v TO app_user WITH GRANT OPTION;
+
+REVOKE GRANT OPTION FOR INSERT (c), UPDATE (c) ON TABLE w FROM app_user;
+
+GRANT INSERT (a), UPDATE (a) ON TABLE t TO app_user;
