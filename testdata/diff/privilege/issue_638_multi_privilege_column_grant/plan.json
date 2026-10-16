@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.3",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "e248c37b13f3d75676e614591a4b50cfbc09461787e556cb08e292793cd044a3"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "REVOKE INSERT (a, b), UPDATE (a, b) ON TABLE t FROM app_user;",
+          "type": "column_privilege",
+          "operation": "drop",
+          "path": "column_privileges.TABLE.t.a,b.app_user"
+        },
+        {
+          "sql": "GRANT INSERT (x), UPDATE (x) ON TABLE u TO app_user;",
+          "type": "column_privilege",
+          "operation": "alter",
+          "path": "column_privileges.TABLE.u.x.app_user"
+        },
+        {
+          "sql": "GRANT INSERT (a), UPDATE (a) ON TABLE t TO app_user;",
+          "type": "column_privilege",
+          "operation": "create",
+          "path": "column_privileges.TABLE.t.a.app_user"
+        }
+      ]
+    }
+  ]
+}
