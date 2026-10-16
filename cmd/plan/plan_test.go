@@ -303,6 +303,10 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 			"child": {Schema: temporary, Name: "child", Indexes: map[string]*ir.Index{"local": local, "external": external},
 				Constraints:          map[string]*ir.Constraint{"local": localConstraint, "external": externalConstraint},
 				AllPartitionChildren: []ir.TableDependency{{Schema: temporary, Name: "leaf"}, {Schema: "other", Name: "outside_leaf"}},
+				InheritedConstraintIndexes: []ir.InheritedConstraintIndex{
+					{Index: ir.IndexRef{Schema: temporary, Name: "leaf"}, ParentIndex: ir.IndexRef{Schema: temporary, Name: "parent"}, ParentConstraint: ir.ConstraintRef{Schema: temporary, Table: "root", Name: "origin"}},
+					{Index: ir.IndexRef{Schema: temporary, Name: "local_leaf"}, ParentIndex: ir.IndexRef{Schema: "other", Name: "external_parent"}, ParentConstraint: ir.ConstraintRef{Schema: "other", Table: "outside_root", Name: "external_origin"}},
+				},
 			},
 		}},
 	}}
@@ -320,6 +324,11 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 		t.Fatalf("Incorrect constraint-index normalization: %+v, %+v", localConstraint.BackingIndex, externalConstraint.BackingIndex)
 	}
 	children := data.Schemas["public"].Tables["child"].AllPartitionChildren
+	inherited := data.Schemas["public"].Tables["child"].InheritedConstraintIndexes
+	if inherited[0].Index.Schema != "public" || inherited[0].ParentIndex.Schema != "public" || inherited[0].ParentConstraint.Schema != "public" ||
+		inherited[1].Index.Schema != "public" || inherited[1].ParentIndex.Schema != "other" || inherited[1].ParentConstraint.Schema != "other" {
+		t.Fatalf("Incorrect inherited-index metadata normalization: %+v", inherited)
+	}
 	if children[0].Schema != "public" || children[1].Schema != "other" {
 		t.Fatalf("Incorrect partition-table metadata normalization: %+v", children)
 	}

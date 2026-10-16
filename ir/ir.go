@@ -83,6 +83,27 @@ type Table struct {
 	// AllPartitionChildren records catalog children, including ignored or external
 	// tables. Creation planning uses this metadata to identify complete hierarchies.
 	AllPartitionChildren []TableDependency `json:"-"`
+	// InheritedConstraintIndexes contains catalog identities and definitions of
+	// inherited PK/UNIQUE constraints, outside the managed schema and fingerprints.
+	InheritedConstraintIndexes []InheritedConstraintIndex `json:"-"`
+}
+
+// ConstraintRef identifies the immediate parent of an inherited constraint.
+type ConstraintRef struct {
+	Schema string
+	Table  string
+	Name   string
+}
+
+// InheritedConstraintIndex is table-owned, transient inspection metadata.
+type InheritedConstraintIndex struct {
+	Definition       string
+	Comment          string
+	Index            IndexRef
+	ConstraintName   string
+	ConstraintType   ConstraintType
+	ParentIndex      IndexRef
+	ParentConstraint ConstraintRef
 }
 
 // Column represents a table column
@@ -246,9 +267,13 @@ type Sequence struct {
 
 // Constraint represents a table constraint
 type Constraint struct {
-	// BackingIndex identifies the index created by this constraint. Inspection
-	// records it for attached indexes; it does not change constraint generation.
-	BackingIndex        *IndexRef           `json:"-"`
+	// BackingIndex identifies the catalog index owned by this constraint.
+	// Creation planning uses this transient identity for partition families.
+	BackingIndex *IndexRef `json:"-"`
+	// CatalogDefinition and CatalogComment support explicit family creation
+	// without changing public IR or fingerprints.
+	CatalogDefinition   string              `json:"-"`
+	CatalogComment      string              `json:"-"`
 	Schema              string              `json:"schema"`
 	Table               string              `json:"table"`
 	Name                string              `json:"name"`

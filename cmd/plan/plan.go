@@ -588,6 +588,19 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 				}
 			}
 
+			for j := range table.InheritedConstraintIndexes {
+				index := &table.InheritedConstraintIndexes[j]
+				if index.Index.Schema == fromSchema {
+					index.Index.Schema = toSchema
+				}
+				if index.ParentIndex.Schema == fromSchema {
+					index.ParentIndex.Schema = toSchema
+				}
+				if index.ParentConstraint.Schema == fromSchema {
+					index.ParentConstraint.Schema = toSchema
+				}
+			}
+
 			// Normalize schema names in indexes
 			for _, index := range table.Indexes {
 				if index.Schema == fromSchema {

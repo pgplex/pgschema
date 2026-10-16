@@ -2031,6 +2031,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
+	d.partitionIndexes.planExplicitConstraints(d.allNewTables, tablesWithoutDeps, tablesWithDeps, tablesAfterTableDomains)
 	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
 
 	// Build view lookup - needed for detecting functions that depend on views

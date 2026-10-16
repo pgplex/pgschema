@@ -274,22 +274,19 @@ func TestStripSchemaQualifications_PreservesStringLiterals(t *testing.T) {
 			expected: "/* drop public.t */ DROP TABLE t;",
 		},
 		{
-			// Known limitation: E'...' escape-string syntax with backslash-escaped quotes
-			// is not handled. The parser treats \' as ordinary char + string-closer,
-			// mistracking boundaries. Here it strips inside the string (wrong) and
-			// misses the identifier after (also wrong). Both are safe: the SQL remains
-			// valid, and the unstripped qualifier just means the object is looked up
-			// in the original schema. E'...' in DDL is extremely rare.
-			name:     "E-string with backslash-escaped quote (known limitation)",
+			name:     "E-string with backslash-escaped quote",
 			sql:      "SELECT E'it\\'s public.test' FROM public.t;",
 			schema:   "public",
-			expected: "SELECT E'it\\'s test' FROM public.t;",
+			expected: "SELECT E'it\\'s public.test' FROM t;",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := stripSchemaQualifications(tt.sql, tt.schema)
+			result, err := stripSchemaQualifications(tt.sql, tt.schema)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if result != tt.expected {
 				t.Errorf("stripSchemaQualifications(%q, %q)\n  got:  %q\n  want: %q", tt.sql, tt.schema, result, tt.expected)
 			}
@@ -529,7 +526,7 @@ func TestQualifyFunctionBodiesWithTempSchema(t *testing.T) {
 			expected: `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM auth.users, notpublic.t $$;`,
 		},
 		{
-			name:     "dollar-quoted text that is not a function body is preserved",
+			name:     "DO code and comments remain unchanged",
 			sql:      `COMMENT ON TABLE t IS $$see public.t$$; DO $$ BEGIN PERFORM 1 FROM public.t; END $$;`,
 			expected: `COMMENT ON TABLE t IS $$see public.t$$; DO $$ BEGIN PERFORM 1 FROM public.t; END $$;`,
 		},
@@ -543,7 +540,10 @@ func TestQualifyFunctionBodiesWithTempSchema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := qualifyFunctionBodiesWithTempSchema(tt.sql, "public", tmp, tt.objects)
+			got, err := qualifyFunctionBodiesWithTempSchema(tt.sql, "public", tmp, schemaRemapNames{body: tt.objects, relations: tt.objects})
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got != tt.expected {
 				t.Errorf("got:\n%s\nexpected:\n%s", got, tt.expected)
 			}
@@ -559,14 +559,76 @@ CREATE OR REPLACE FUNCTION Find_Rank(id bigint) RETURNS text LANGUAGE sql AS $$ 
 CREATE MATERIALIZED VIEW IF NOT EXISTS name_mv AS SELECT 1;
 CREATE INDEX idx ON name (id);
 `
-	got := extractCreatedObjectNames(sql)
+	got, err := extractCreatedObjectNames(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
 	expected := []string{"name", "Rank", "find_rank", "name_mv"}
-	if len(got) != len(expected) {
+	if len(got.body) != len(expected) {
 		t.Errorf("got %v, expected %v", got, expected)
 	}
 	for _, name := range expected {
-		if !got[name] {
+		if !got.body[name] {
 			t.Errorf("missing %q in %v", name, got)
 		}
+	}
+}
+
+func TestCreatedIndexNamesForRegclassRemapping(t *testing.T) {
+	for _, tc := range []struct {
+		name, sql       string
+		body, relations []string
+	}{
+		{"regular", `CREATE TABLE t(id int); CREATE INDEX idx ON t(id);`, []string{"t"}, []string{"t", "idx"}},
+		{"unique_only", `CREATE TABLE t(id int); CREATE UNIQUE INDEX IF NOT EXISTS idx ON ONLY t(id);`, []string{"t"}, []string{"t", "idx"}},
+		{"concurrent", `CREATE TABLE t(id int); CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx ON t(id);`, []string{"t"}, []string{"t", "idx"}},
+		{"quoted", `CREATE TABLE "only"(id int); CREATE INDEX "on" ON "only"(id); CREATE INDEX "idx""quoted" ON "only"(id);`, []string{"only"}, []string{"only", "on", `idx"quoted`}},
+		{"materialized_view", `CREATE MATERIALIZED VIEW mv AS SELECT 1 AS id; CREATE INDEX idx ON mv(id);`, []string{"mv"}, []string{"mv", "idx"}},
+		{"other_schema", `CREATE TABLE t(id int); CREATE INDEX idx ON other.t(id);`, []string{"t"}, []string{"t"}},
+		{"existing_table", `CREATE TABLE t(id int); CREATE INDEX idx ON outside_table(id); CREATE INDEX outside_table ON t(id);`, []string{"t"}, []string{"t", "outside_table"}},
+		{"repeated_index_existing_table_after", `CREATE TABLE t(id int); CREATE INDEX idx ON t(id); CREATE INDEX IF NOT EXISTS idx ON outside_table(id);`, []string{"t"}, []string{"t", "idx"}},
+		{"repeated_index_existing_table_before", `CREATE TABLE t(id int); CREATE INDEX IF NOT EXISTS idx ON outside_table(id); CREATE UNIQUE INDEX idx ON t(id);`, []string{"t"}, []string{"t", "idx"}},
+		{"implicit_name", `CREATE TABLE t(id int); CREATE INDEX ON t(id);`, []string{"t"}, []string{"t"}},
+		{"non_relations", `CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$; CREATE TYPE typ AS ENUM ('x'); CREATE SEQUENCE seq;`, []string{"f", "typ", "seq"}, []string{"seq"}},
+		{"comments_and_strings", `-- CREATE INDEX fake ON t(id);
+CREATE TABLE t(id int); COMMENT ON TABLE t IS 'CREATE INDEX fake2 ON t(id)'; DO $$ BEGIN PERFORM 'CREATE INDEX fake3 ON t(id)'; END $$;`, []string{"t"}, []string{"t"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extractCreatedObjectNames(tc.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := schemaRemapNames{body: make(map[string]bool), relations: make(map[string]bool)}
+			for _, name := range tc.body {
+				want.body[name] = true
+			}
+			for _, name := range tc.relations {
+				want.relations[name] = true
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestIndexRegclassRemappingPreservesExternalFunctions(t *testing.T) {
+	const sql = `CREATE TABLE t(id int);
+CREATE INDEX idx ON t(id);
+CREATE UNIQUE INDEX IF NOT EXISTS "Unique.Index" ON ONLY t(id);
+CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT public.idx() $$;
+DO $$ BEGIN PERFORM 'public.idx'::regclass, 'public."Unique.Index"'::pg_catalog.regclass, 'public.untouched'::regclass; END $$;`
+	objects, err := extractCreatedObjectNames(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := qualifyFunctionBodiesWithTempSchema(sql, "public", "pgschema_tmp_x", objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ReplaceAll(sql, "'public.idx'", "'\"pgschema_tmp_x\".idx'")
+	want = strings.ReplaceAll(want, `'public."Unique.Index"'`, `'"pgschema_tmp_x"."Unique.Index"'`)
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }

@@ -11,10 +11,9 @@
 --
 
 CREATE TABLE IF NOT EXISTS ledger (
-    id uuid,
+    id uuid NOT NULL,
     amount bigint NOT NULL,
-    ts timestamptz,
-    CONSTRAINT ledger_pkey PRIMARY KEY (ts, id)
+    ts timestamptz NOT NULL
 ) PARTITION BY RANGE (ts);
 
 --
@@ -22,6 +21,24 @@ CREATE TABLE IF NOT EXISTS ledger (
 --
 
 CREATE TABLE IF NOT EXISTS ledger_2026_06 PARTITION OF ledger FOR VALUES FROM ('2026-06-01 00:00:00+00') TO ('2026-07-01 00:00:00+00');
+
+--
+-- Name: ledger_2026_06_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY ledger_2026_06 ADD CONSTRAINT ledger_2026_06_pkey PRIMARY KEY (ts, id);
+
+--
+-- Name: ledger_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY ledger ADD CONSTRAINT ledger_pkey PRIMARY KEY (ts, id);
+
+--
+-- Name: ledger_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX ledger_pkey ATTACH PARTITION ledger_2026_06_pkey;
 
 --
 -- Name: tg_noop(); Type: FUNCTION; Schema: -; Owner: -

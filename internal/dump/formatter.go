@@ -92,6 +92,9 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	stepsByFile := make(map[fileKey][]diff.Diff)
 	var fileOrder []fileKey
 	constraintIndex := 0
+	constraintFiles := make(map[ir.ConstraintRef]fileKey)
+	policyIndex := 0
+	namedKeysCreated := false
 	type indexKey struct{ schema, name string }
 	partitionIndexFiles := make(map[indexKey]fileKey)
 	var tables []*ir.Table
@@ -107,12 +110,34 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 		}
 		key := fileKey{dir: dir, name: f.getGroupingName(step)}
 		if step.Type == diff.DiffTypeTableConstraint {
+			if constraint, ok := step.Source.(*ir.Constraint); ok &&
+				(constraint.Type == ir.ConstraintTypePrimaryKey || constraint.Type == ir.ConstraintTypeUnique) {
+				namedKeysCreated = true
+			}
 			// Keep postponed constraints at their position in the diff sequence.
 			// Bundling them with CREATE TABLE can put an FK before its target.
 			// A sequence number also avoids collisions between constraint names
 			// on different tables and names that sanitize to the same filename.
 			constraintIndex++
 			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+			if constraint, ok := step.Source.(*ir.Constraint); ok {
+				constraintFiles[ir.ConstraintRef{Schema: constraint.Schema, Table: constraint.Table, Name: constraint.Name}] = key
+			}
+		}
+		if step.Type == diff.DiffTypeTableComment {
+			if constraint, ok := step.Source.(*ir.Constraint); ok {
+				// Constraint comments follow their deferred creation, even when
+				// attachments have intervened. Never bundle them with the table.
+				if existing, exists := constraintFiles[ir.ConstraintRef{Schema: constraint.Schema, Table: constraint.Table, Name: constraint.Name}]; exists {
+					key = existing
+				}
+			}
+		}
+		if step.Type == diff.DiffTypeTablePolicy && namedKeysCreated {
+			// A policy can use a PK's GROUP BY dependency. Keep it after the
+			// explicit keys rather than moving it into an earlier table file.
+			policyIndex++
+			key = fileKey{dir: "policies", name: fmt.Sprintf("%04d_%s", policyIndex, key.name)}
 		}
 
 		if index, ok := step.Source.(*ir.Index); ok && index.IsPartitioned &&

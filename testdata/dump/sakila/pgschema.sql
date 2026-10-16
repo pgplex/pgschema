@@ -287,13 +287,12 @@ CREATE TABLE IF NOT EXISTS film_category (
 --
 
 CREATE TABLE IF NOT EXISTS payment (
-    payment_id integer DEFAULT nextval('payment_payment_id_seq'::regclass),
+    payment_id integer DEFAULT nextval('payment_payment_id_seq'::regclass) NOT NULL,
     customer_id integer NOT NULL,
     staff_id integer NOT NULL,
     rental_id integer NOT NULL,
     amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_pkey PRIMARY KEY (payment_date, payment_id)
+    payment_date timestamptz NOT NULL
 ) PARTITION BY RANGE (payment_date);
 
 --
@@ -619,6 +618,96 @@ CREATE INDEX IF NOT EXISTS idx_fk_payment_p2022_07_staff_id ON payment_p2022_07 
 --
 
 CREATE INDEX IF NOT EXISTS payment_p2022_07_customer_id_idx ON payment_p2022_07 (customer_id);
+
+--
+-- Name: payment_p2022_01_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_01 ADD CONSTRAINT payment_p2022_01_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_p2022_02_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_02 ADD CONSTRAINT payment_p2022_02_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_p2022_03_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_03 ADD CONSTRAINT payment_p2022_03_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_p2022_04_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_04 ADD CONSTRAINT payment_p2022_04_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_p2022_05_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_05 ADD CONSTRAINT payment_p2022_05_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_p2022_06_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_06 ADD CONSTRAINT payment_p2022_06_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_p2022_07_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment_p2022_07 ADD CONSTRAINT payment_p2022_07_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment ADD CONSTRAINT payment_pkey PRIMARY KEY (payment_date, payment_id);
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_01_pkey;
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_02_pkey;
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_03_pkey;
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_04_pkey;
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_05_pkey;
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_06_pkey;
+
+--
+-- Name: payment_pkey; Type: INDEX; Schema: -; Owner: -
+--
+
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_07_pkey;
 
 --
 -- Name: _group_concat(text, text); Type: FUNCTION; Schema: -; Owner: -

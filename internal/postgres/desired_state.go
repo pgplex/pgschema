@@ -95,9 +95,9 @@ func GenerateTempSchemaName() string {
 //
 // Only qualifications matching the specified schemaName are stripped.
 // All other schema qualifications are preserved as intentional cross-schema references.
-func stripSchemaQualifications(sql string, schemaName string) string {
-	if schemaName == "" || !strings.Contains(sql, schemaName) {
-		return sql
+func stripSchemaQualifications(sql string, schemaName string) (string, error) {
+	if schemaName == "" {
+		return sql, nil
 	}
 
 	// Split SQL into dollar-quoted and non-dollar-quoted segments.
@@ -109,113 +109,25 @@ func stripSchemaQualifications(sql string, schemaName string) string {
 	// unstripped body references (Issue #399), callers should disable function
 	// body validation with SET check_function_bodies = off before executing
 	// the resulting SQL.
-	segments := splitDollarQuotedSegments(sql)
+	tokens := lexSQL(sql)
+	if err := unicodeTokenError(tokens); err != nil {
+		return "", err
+	}
+	significant := significantTokens(tokens)
+	for j := 0; j < len(significant); j++ {
+		i := significant[j]
+		if (j == 0 || tokens[significant[j-1]].text != ".") && tokenIdentifier(tokens[i]) == schemaName && j+2 < len(significant) && tokens[significant[j+1]].text == "." && tokens[significant[j+2]].kind == 'i' {
+			tokens[i].text = tokens[i].trivia
+			tokens[significant[j+1]].text = ""
+			j += 2
+		}
+	}
 	var result strings.Builder
 	result.Grow(len(sql))
-	for _, seg := range segments {
-		if seg.quoted {
-			// Preserve dollar-quoted content as-is
-			result.WriteString(seg.text)
-		} else {
-			// Further split on single-quoted string literals to avoid stripping
-			// schema prefixes from inside string constants (Issue #371).
-			// e.g., has_scope('s.manage') must NOT become has_scope('manage')
-			result.WriteString(stripSchemaQualificationsPreservingStrings(seg.text, schemaName))
-		}
+	for _, token := range tokens {
+		result.WriteString(token.text)
 	}
-	return result.String()
-}
-
-// stripSchemaQualificationsPreservingStrings splits text on single-quoted string
-// literals and SQL comments, applies schema stripping only to non-string,
-// non-comment parts, and reassembles.
-//
-// Limitation: E'...' escape-string syntax uses backslash-escaped quotes (E'it\'s')
-// rather than doubled quotes ('it”s'). This parser only recognises the ” form.
-// With E'content\”, a backslash-escaped quote may cause the parser to mistrack
-// string boundaries, which can result in either:
-//   - false-negative: schema qualifiers after the string are not stripped, or
-//   - false-positive: schema prefixes inside the E-string are incorrectly stripped.
-//
-// Both cases change semantics only for E'...' strings, which are extremely rare
-// in DDL schema definitions. The false-negative case preserves valid SQL; the
-// false-positive case could alter string content but is unlikely in practice.
-func stripSchemaQualificationsPreservingStrings(text string, schemaName string) string {
-	var result strings.Builder
-	result.Grow(len(text))
-
-	// flushCode writes text[segStart:end] through schema stripping and advances segStart.
-	i := 0
-	segStart := 0
-
-	flushCode := func(end int) {
-		if end > segStart {
-			result.WriteString(stripSchemaQualificationsFromText(text[segStart:end], schemaName))
-		}
-		segStart = end
-	}
-	flushLiteral := func(end int) {
-		result.WriteString(text[segStart:end])
-		segStart = end
-	}
-
-	for i < len(text) {
-		ch := text[i]
-
-		// Start of single-quoted string literal
-		if ch == '\'' {
-			flushCode(i)
-			i++ // skip opening quote
-			for i < len(text) {
-				if text[i] == '\'' {
-					if i+1 < len(text) && text[i+1] == '\'' {
-						i += 2 // skip escaped ''
-					} else {
-						i++ // skip closing quote
-						break
-					}
-				} else {
-					i++
-				}
-			}
-			flushLiteral(i)
-			continue
-		}
-
-		// Start of line comment (--)
-		if ch == '-' && i+1 < len(text) && text[i+1] == '-' {
-			flushCode(i)
-			i += 2
-			for i < len(text) && text[i] != '\n' {
-				i++
-			}
-			if i < len(text) {
-				i++ // skip the newline
-			}
-			flushLiteral(i)
-			continue
-		}
-
-		// Start of block comment (/* ... */)
-		if ch == '/' && i+1 < len(text) && text[i+1] == '*' {
-			flushCode(i)
-			i += 2
-			for i < len(text) {
-				if text[i] == '*' && i+1 < len(text) && text[i+1] == '/' {
-					i += 2
-					break
-				}
-				i++
-			}
-			flushLiteral(i)
-			continue
-		}
-
-		i++
-	}
-	// Remaining text is code
-	flushCode(i)
-	return result.String()
+	return result.String(), nil
 }
 
 // dollarQuotedSegment represents a segment of SQL text, either inside or outside a dollar-quoted block.
@@ -234,43 +146,26 @@ var dollarQuoteRe = regexp.MustCompile(`\$(?:[a-zA-Z_][a-zA-Z0-9_]*)?\$`)
 
 func splitDollarQuotedSegments(sql string) []dollarQuotedSegment {
 	var segments []dollarQuotedSegment
-
-	pos := 0
-	for pos < len(sql) {
-		// Find the next dollar-quote opening tag
-		loc := dollarQuoteRe.FindStringIndex(sql[pos:])
-		if loc == nil {
-			// No more dollar quotes — rest is unquoted
-			segments = append(segments, dollarQuotedSegment{text: sql[pos:], quoted: false})
-			break
+	var plain strings.Builder
+	for _, token := range lexSQL(sql) {
+		if token.kind != 'd' {
+			plain.WriteString(token.text)
+			continue
 		}
-
-		openStart := pos + loc[0]
-		openEnd := pos + loc[1]
-		tag := sql[openStart:openEnd]
-
-		// Add the unquoted segment before this tag
-		if openStart > pos {
-			segments = append(segments, dollarQuotedSegment{text: sql[pos:openStart], quoted: false})
+		if plain.Len() > 0 {
+			segments = append(segments, dollarQuotedSegment{text: plain.String()})
+			plain.Reset()
 		}
-
-		// Find the matching closing tag
-		closeIdx := strings.Index(sql[openEnd:], tag)
-		if closeIdx == -1 {
-			// No closing tag — treat rest as quoted (unterminated)
-			segments = append(segments, dollarQuotedSegment{text: sql[openStart:], quoted: true})
-			pos = len(sql)
-		} else {
-			closeEnd := openEnd + closeIdx + len(tag)
-			segments = append(segments, dollarQuotedSegment{text: sql[openStart:closeEnd], quoted: true})
-			pos = closeEnd
-		}
+		segments = append(segments, dollarQuotedSegment{text: token.text, quoted: true})
+	}
+	if plain.Len() > 0 {
+		segments = append(segments, dollarQuotedSegment{text: plain.String()})
 	}
 	return segments
 }
 
 // schemaRegexes holds compiled regexes for a specific schema name, avoiding
-// recompilation on every call to stripSchemaQualificationsFromText.
+// recompilation when remapping function and procedure bodies.
 type schemaRegexes struct {
 	re1 *regexp.Regexp // "schema"."object"
 	re2 *regexp.Regexp // "schema".object
@@ -307,65 +202,105 @@ func getSchemaRegexes(schemaName string) *schemaRegexes {
 	return sr
 }
 
-// stripSchemaQualificationsFromText performs the actual schema qualification stripping on a text segment.
-// It handles 4 cases:
-// 1. unquoted_schema.unquoted_object  -> unquoted_object
-// 2. unquoted_schema."quoted_object"  -> "quoted_object"
-// 3. "quoted_schema".unquoted_object  -> unquoted_object
-// 4. "quoted_schema"."quoted_object"  -> "quoted_object"
-func stripSchemaQualificationsFromText(text string, schemaName string) string {
-	sr := getSchemaRegexes(schemaName)
-
-	result := text
-	// Apply in order: quoted schema first to avoid double-matching
-	result = sr.re1.ReplaceAllString(result, "$1")
-	result = sr.re2.ReplaceAllString(result, "$1")
-	// For patterns 3 and 4, $1 is the prefix (boundary char or empty at ^),
-	// $2 is the object name — preserve the prefix and keep only the object.
-	result = sr.re3.ReplaceAllString(result, "${1}${2}")
-	result = sr.re4.ReplaceAllString(result, "${1}${2}")
-
-	return result
+// schemaRemapNames keeps index names out of function/procedure remapping.
+// An index and an external function can have the same name. Nil maps allow all
+// names when the embedded provider owns the entire desired-state schema.
+type schemaRemapNames struct {
+	body      map[string]bool
+	relations map[string]bool
 }
 
-var (
-	// functionBodyPrefixRe matches unquoted SQL ending in the AS keyword, i.e. the text
-	// right before a dollar-quoted function/procedure body (as opposed to a DO block,
-	// a COMMENT ... IS $$...$$ or a dollar-quoted string constant). Comments may sit
-	// between AS and the opening dollar quote.
-	functionBodyPrefixRe = regexp.MustCompile(`(?is)\bAS\s*(?:(?:--[^\n]*\n|/\*.*?\*/)\s*)*$`)
-
-	// createdObjectRe captures the name of each schema-level object a CREATE statement
-	// defines. It runs on SQL whose target-schema qualifiers were already stripped.
-	createdObjectRe = regexp.MustCompile(`(?i)\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:UNLOGGED\s+|RECURSIVE\s+)?` +
-		`(?:TABLE|VIEW|MATERIALIZED\s+VIEW|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN|SEQUENCE)\s+` +
-		`(?:IF\s+NOT\s+EXISTS\s+)?("[^"]+"|[a-zA-Z_][a-zA-Z0-9_$]*)`)
-)
-
-// extractCreatedObjectNames returns the names of the objects created by the given SQL,
-// folded the way PostgreSQL folds them (unquoted names lowercased, quotes removed).
-func extractCreatedObjectNames(sql string) map[string]bool {
-	names := make(map[string]bool)
-	for _, seg := range splitDollarQuotedSegments(sql) {
-		if seg.quoted {
+// extractCreatedObjectNames reads SQL after managed-schema qualifiers have been
+// stripped. Indexes belong to their indexed table's schema, so only indexes on
+// relations created in the temporary schema qualify for regclass remapping.
+func extractCreatedObjectNames(sql string) (schemaRemapNames, error) {
+	names := schemaRemapNames{body: make(map[string]bool), relations: make(map[string]bool)}
+	indexableRelations := make(map[string]bool)
+	var indexedTables []struct{ index, table string }
+	tokens := lexSQL(sql)
+	if err := unicodeTokenError(tokens); err != nil {
+		return schemaRemapNames{}, err
+	}
+	indexes := significantTokens(tokens)
+	keyword := func(k int, word string) bool {
+		return k < len(indexes) && (tokenKeyword(tokens[indexes[k]]) == word || word == "." && tokens[indexes[k]].text == ".")
+	}
+	for j, i := range indexes {
+		if tokenKeyword(tokens[i]) != "create" {
 			continue
 		}
-		for _, m := range createdObjectRe.FindAllStringSubmatch(seg.text, -1) {
-			names[foldIdentifier(m[1])] = true
+		k := j + 1
+		for k < len(indexes) {
+			word := tokenKeyword(tokens[indexes[k]])
+			if word != "or" && word != "replace" && word != "unlogged" && word != "recursive" && word != "materialized" && word != "unique" {
+				break
+			}
+			k++
+		}
+		if k >= len(indexes) {
+			continue
+		}
+		kind := tokenKeyword(tokens[indexes[k]])
+		switch kind {
+		case "table", "view", "function", "procedure", "aggregate", "type", "domain", "sequence", "index":
+		default:
+			continue
+		}
+		k++
+		if kind == "index" && keyword(k, "concurrently") {
+			k++
+		}
+		if keyword(k, "if") && keyword(k+1, "not") && keyword(k+2, "exists") {
+			k += 3
+		}
+		if k >= len(indexes) || tokens[indexes[k]].kind != 'i' || keyword(k+1, ".") {
+			continue
+		}
+		name := tokenIdentifier(tokens[indexes[k]])
+		if kind == "index" {
+			// An omitted index name is generated by PostgreSQL, not this reader.
+			if keyword(k, "on") || !keyword(k+1, "on") {
+				continue
+			}
+			k += 2
+			if keyword(k, "only") {
+				k++
+			}
+			if k < len(indexes) && tokens[indexes[k]].kind == 'i' && !keyword(k+1, ".") {
+				indexedTables = append(indexedTables, struct{ index, table string }{name, tokenIdentifier(tokens[indexes[k]])})
+			}
+			continue
+		}
+		names.body[name] = true
+		switch kind {
+		case "table", "view":
+			indexableRelations[name] = true
+			names.relations[name] = true
+		case "sequence":
+			names.relations[name] = true
 		}
 	}
-	return names
+	// The same index name may occur on tables in different schemas. Keep every
+	// declaration so an external-table index cannot hide a temporary one.
+	for _, index := range indexedTables {
+		if indexableRelations[index.table] {
+			names.relations[index.index] = true
+		}
+	}
+	return names, nil
 }
 
 func foldIdentifier(ident string) string {
 	if strings.HasPrefix(ident, `"`) {
-		return strings.Trim(ident, `"`)
+		return strings.ReplaceAll(ident[1:len(ident)-1], `""`, `"`)
 	}
 	return strings.ToLower(ident)
 }
 
 // qualifyFunctionBodiesWithTempSchema points target-schema qualifiers inside
-// dollar-quoted function/procedure bodies at the temporary schema.
+// function/procedure bodies at the temporary schema. In executable DO bodies,
+// it remaps only explicit relation-valued literals cast to regclass. Other DO
+// code, comments, and ordinary literals retain their existing meaning.
 //
 // stripSchemaQualifications leaves bodies untouched (issue #354), and
 // check_function_bodies = off keeps CREATE FUNCTION from validating them. But a
@@ -376,35 +311,60 @@ func foldIdentifier(ident string) string {
 // search_path keep working, and normalizeSchemaNames maps the temporary schema name
 // back to the target schema after inspection, so the inspected body is unchanged.
 //
-// When objects is nil every qualifier is rewritten; this is right when everything of
-// the target schema lives in the temporary schema (embedded postgres, which also
+// Nil name maps allow every eligible reference when everything in the target
+// schema lives in the temporary schema (embedded postgres, which also
 // installs the target schema's extensions there). Otherwise only qualifiers of the
 // named objects are rewritten, so references to things that really live in the
 // target schema of an external plan database (e.g. public.unaccent) are preserved.
-func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, objects map[string]bool) string {
-	if schemaName == "" || tempSchema == "" || !strings.Contains(sql, schemaName) {
-		return sql
+func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, objects schemaRemapNames) (string, error) {
+	if schemaName == "" || tempSchema == "" {
+		return sql, nil
 	}
 
 	sr := getSchemaRegexes(schemaName)
 	rewrite := func(re *regexp.Regexp, body string, objectGroup int, replacement string) string {
 		return re.ReplaceAllStringFunc(body, func(match string) string {
-			if objects != nil && !objects[foldIdentifier(re.FindStringSubmatch(match)[objectGroup])] {
+			if objects.body != nil && !objects.body[foldIdentifier(re.FindStringSubmatch(match)[objectGroup])] {
 				return match
 			}
 			return re.ReplaceAllString(match, replacement)
 		})
 	}
 
-	segments := splitDollarQuotedSegments(sql)
-	var result strings.Builder
-	result.Grow(len(sql))
-	for i, seg := range segments {
-		if !seg.quoted || i == 0 || !functionBodyPrefixRe.MatchString(segments[i-1].text) {
-			result.WriteString(seg.text)
+	tokens := lexSQL(sql)
+	if err := unicodeTokenError(tokens); err != nil {
+		return "", err
+	}
+	significant := significantTokens(tokens)
+	for j, i := range significant {
+		token := tokens[i]
+		if !completeSQLLiteral(token) {
 			continue
 		}
-		body := seg.text
+		doPosition := j - 1
+		if j >= 3 && tokenKeyword(tokens[significant[j-2]]) == "language" {
+			doPosition = j - 3
+		}
+		isDO := doPosition >= 0 && tokenKeyword(tokens[significant[doPosition]]) == "do" &&
+			(doPosition == 0 || tokens[significant[doPosition-1]].text == ";")
+		if isDO {
+			body, err := literalContent(token)
+			if err != nil {
+				return "", fmt.Errorf("decode DO body: %w", err)
+			}
+			remapped, err := remapDOBody(body, schemaName, tempSchema, objects.relations)
+			if err != nil {
+				return "", err
+			}
+			if remapped != body {
+				tokens[i].text = encodeSQLLiteral(token, remapped)
+			}
+			continue
+		}
+		if token.kind != 'd' || j == 0 || tokenKeyword(tokens[significant[j-1]]) != "as" {
+			continue
+		}
+		body := token.text
 		// Preserve the qualifier's quoting so the round trip through
 		// normalizeSchemaNames reproduces the original text.
 		quoted := `"` + tempSchema + `".$1`
@@ -413,9 +373,13 @@ func qualifyFunctionBodiesWithTempSchema(sql, schemaName, tempSchema string, obj
 		body = rewrite(sr.re2, body, 1, quoted)
 		body = rewrite(sr.re3, body, 2, unquoted)
 		body = rewrite(sr.re4, body, 2, unquoted)
-		result.WriteString(body)
+		tokens[i].text = body
 	}
-	return result.String()
+	var result strings.Builder
+	for _, token := range tokens {
+		result.WriteString(token.text)
+	}
+	return result.String(), nil
 }
 
 // replaceSchemaInSearchPath replaces the target schema name in SET search_path clauses

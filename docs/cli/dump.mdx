@@ -263,6 +263,26 @@ leaves unattached indexes unattached. Multi-file dumps write parent indexes and
 their attachments under `indexes/`, such as `indexes/0001_events_lookup.sql`,
 after the table includes.
 
+For complete inherited `PRIMARY KEY` and `UNIQUE` families that fit in one
+table-creation batch, the exporter emits named constraints with
+`ALTER TABLE ONLY ... ADD CONSTRAINT`. It then emits explicit index attachments.
+During replay, PostgreSQL creates the indexes with their source names and retains
+constraint ownership. The exporter uses this path for ordinary and custom names
+without rename blocks. For example, PostgreSQL creates `events_low_identity`
+directly, leaving `events_low_pkey` available for a separate timestamp index.
+
+If the exporter must split table creation across batches because of function or
+domain dependencies, or cannot use the captured constraint definitions, it retains
+a `DO` restoration block after each eligible `CREATE TABLE ... PARTITION OF`.
+During replay, PostgreSQL locates inherited indexes through their parent
+constraints and renames mismatches in two phases, so name swaps work. PostgreSQL
+reports lookup and rename failures to the caller.
+
+Multi-file dumps keep deferred constraint creation under `constraints/` and
+index attachments under `indexes/`, in dependency order in `schema.sql`.
+For the restoration path, the exporter keeps each block with its table
+definition, before standalone indexes. Load files in the generated include order.
+
 Each individual file (e.g., `tables/users.sql`) contains the specific object definition:
 ```sql
 --

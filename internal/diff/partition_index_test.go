@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -102,8 +103,13 @@ func TestGenerateDumpExcludedPartitionIndex(t *testing.T) {
 				}}
 			}
 			steps, err := GenerateDump(schema, "public", false)
-			if err == nil || !strings.Contains(err.Error(), "index public.parent_lookup: attached index public.child_lookup is excluded") {
+			var dependencyErr *PartitionIndexDependencyError
+			if !errors.As(err, &dependencyErr) {
 				t.Fatalf("Expected excluded-child error, got %v", err)
+			}
+			if dependencyErr.ParentIndex != (ir.IndexRef{Schema: "public", Name: "parent_lookup"}) ||
+				dependencyErr.AttachedIndex != (ir.IndexRef{Schema: "public", Name: "child_lookup"}) || dependencyErr.ExcludedTable != nil {
+				t.Fatalf("Unexpected dependency context: %+v", dependencyErr)
 			}
 			if len(steps) != 0 {
 				t.Fatal("Failed dump returned partial SQL")

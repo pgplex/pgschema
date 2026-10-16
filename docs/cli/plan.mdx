@@ -28,6 +28,35 @@ When part of the hierarchy already exists in the target, or part of it is
 ignored, `plan` falls back to recursive index creation and does not reconcile
 attachments on existing tables.
 
+For a complete new hierarchy with catalog constraint definitions, `plan` can
+schedule named `PRIMARY KEY` and `UNIQUE` constraints after creating the tables.
+It then attaches each child index to its recorded parent index. This preserves
+source names without rename blocks. For example, PostgreSQL creates a child key
+named `custom_pk` directly, even if its usual generated name is `events_low_pkey`.
+
+If `plan` must create the hierarchy in separate batches because of function or
+domain dependencies, it retains recursive constraint creation and restores
+inherited index names after each partition. It also retains this path for
+unsupported constraint definitions or missing catalog metadata. It restores only
+indexes whose originating constraint remains managed. Native `apply` keeps creation and
+attachments or restoration in the table creation transaction, so a failure
+rolls back that group.
+
+## Executable DO blocks in desired SQL
+
+When loading desired SQL into its temporary schema, `plan` remaps explicit
+relation-valued literals cast to `regclass` inside executable `DO` bodies.
+For example, `'public.events'::pg_catalog.regclass` refers to the temporary copy
+of `events`. The loader preserves other code, ordinary strings, comments,
+destination index names, and references to other schemas. For example,
+`FROM public.events` remains unchanged inside a `DO` body. This preserves table
+aliases and record fields that have the same name as the managed schema.
+With an external plan database, the loader remaps only casts for objects created
+by the desired SQL, so extension references remain intact. The loader continues
+to remap function and procedure bodies as before.
+If the loader encounters an invalid escape literal while remapping a `DO` body,
+it returns a contextual error before executing the desired SQL.
+
 ## Basic Usage
 
 ```bash
