@@ -55,6 +55,18 @@ ADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) RE
 
 ALTER TABLE projects VALIDATE CONSTRAINT projects_tenant_id_org_id_fkey;
 
+ALTER TABLE returns DROP CONSTRAINT returns_region_id_warehouse_id_fkey;
+
+ALTER TABLE returns
+ADD CONSTRAINT returns_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL NOT VALID;
+
+ALTER TABLE returns VALIDATE CONSTRAINT returns_region_id_warehouse_id_fkey;
+
+ALTER TABLE shipments
+ADD CONSTRAINT shipments_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL NOT VALID;
+
+ALTER TABLE shipments VALIDATE CONSTRAINT shipments_region_id_warehouse_id_fkey;
+
 ALTER TABLE tasks
 ADD CONSTRAINT tasks_org_id_owner_member_id_fkey FOREIGN KEY (org_id, owner_member_id) REFERENCES members (org_id, id) ON DELETE SET DEFAULT (owner_member_id) NOT VALID;
 

@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.3",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "d362a1d307cacbda3523c26227836ff883ea2839ece7b16eec4eb53c5d6959d6"
+    "hash": "24701480f5a3206f0530e8cce038066c4b550ffcd8c097e683d15e12b2441726"
   },
   "groups": [
     {
@@ -229,6 +229,52 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.projects.projects_tenant_id_org_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE returns DROP CONSTRAINT returns_region_id_warehouse_id_fkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.returns.returns_region_id_warehouse_id_fkey"
+        },
+        {
+          "sql": "ALTER TABLE returns\nADD CONSTRAINT returns_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.returns.returns_region_id_warehouse_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE returns VALIDATE CONSTRAINT returns_region_id_warehouse_id_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.returns.returns_region_id_warehouse_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE shipments\nADD CONSTRAINT shipments_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.shipments.shipments_region_id_warehouse_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE shipments VALIDATE CONSTRAINT shipments_region_id_warehouse_id_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.shipments.shipments_region_id_warehouse_id_fkey"
         }
       ]
     },

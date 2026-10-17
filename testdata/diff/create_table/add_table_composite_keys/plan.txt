@@ -28,5 +28,5 @@ CREATE TABLE IF NOT EXISTS projects (
     description text,
     CONSTRAINT projects_pkey PRIMARY KEY (tenant_id, org_id, project_id),
     CONSTRAINT projects_project_name_tenant_id_project_id_key UNIQUE (project_name, tenant_id, project_id),
-    CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id)
+    CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id) MATCH FULL
 );

@@ -1,7 +1,7 @@
-Plan: 12 to modify.
+Plan: 14 to modify.
 
 Summary by type:
-  tables: 12 to modify
+  tables: 14 to modify
 
 Tables:
   ~ audit_log
@@ -25,6 +25,11 @@ Tables:
     + products_category_code_fkey (constraint)
   ~ projects
     + projects_tenant_id_org_id_fkey (constraint)
+  ~ returns
+    - returns_region_id_warehouse_id_fkey (constraint)
+    + returns_region_id_warehouse_id_fkey (constraint)
+  ~ shipments
+    + shipments_region_id_warehouse_id_fkey (constraint)
   ~ tasks
     + tasks_org_id_owner_member_id_fkey (constraint)
   ~ teams
@@ -115,22 +120,38 @@ ADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) RE
 ALTER TABLE projects VALIDATE CONSTRAINT projects_tenant_id_org_id_fkey;
 
 -- Transaction Group #23
+ALTER TABLE returns DROP CONSTRAINT returns_region_id_warehouse_id_fkey;
+
+ALTER TABLE returns
+ADD CONSTRAINT returns_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL NOT VALID;
+
+-- Transaction Group #24
+ALTER TABLE returns VALIDATE CONSTRAINT returns_region_id_warehouse_id_fkey;
+
+-- Transaction Group #25
+ALTER TABLE shipments
+ADD CONSTRAINT shipments_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL NOT VALID;
+
+-- Transaction Group #26
+ALTER TABLE shipments VALIDATE CONSTRAINT shipments_region_id_warehouse_id_fkey;
+
+-- Transaction Group #27
 ALTER TABLE tasks
 ADD CONSTRAINT tasks_org_id_owner_member_id_fkey FOREIGN KEY (org_id, owner_member_id) REFERENCES members (org_id, id) ON DELETE SET DEFAULT (owner_member_id) NOT VALID;
 
--- Transaction Group #24
+-- Transaction Group #28
 ALTER TABLE tasks VALIDATE CONSTRAINT tasks_org_id_owner_member_id_fkey;
 
--- Transaction Group #25
+-- Transaction Group #29
 ALTER TABLE teams
 ADD CONSTRAINT teams_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES managers (id) ON DELETE SET NULL NOT VALID;
 
--- Transaction Group #26
+-- Transaction Group #30
 ALTER TABLE teams VALIDATE CONSTRAINT teams_manager_id_fkey;
 
--- Transaction Group #27
+-- Transaction Group #31
 ALTER TABLE user_profiles
 ADD CONSTRAINT user_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED NOT VALID;
 
--- Transaction Group #28
+-- Transaction Group #32
 ALTER TABLE user_profiles VALIDATE CONSTRAINT user_profiles_user_id_fkey;

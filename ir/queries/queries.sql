@@ -424,6 +424,8 @@ SELECT
     c.convalidated AS is_valid,
     COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
     c.connoinherit AS no_inherit,
+    -- MATCH FULL (pg_constraint.confmatchtype = 'f'); only foreign keys can set it.
+    (c.confmatchtype = 'f') AS match_full,
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
@@ -1418,6 +1420,8 @@ SELECT
     -- pg_index.indnullsnotdistinct is PG15+. Use to_jsonb so the column reference
     -- doesn't fail to plan on PG14 (where the attribute does not exist on pg_index).
     COALESCE((to_jsonb(i) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct,
+    -- MATCH FULL (pg_constraint.confmatchtype = 'f'); only foreign keys can set it.
+    (c.confmatchtype = 'f') AS match_full,
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.

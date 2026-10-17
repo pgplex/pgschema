@@ -15,7 +15,7 @@
           "path": "public.organizations"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS projects (\n    tenant_id integer,\n    org_id integer,\n    project_id integer,\n    project_name text NOT NULL,\n    project_code text NOT NULL,\n    description text,\n    CONSTRAINT projects_pkey PRIMARY KEY (tenant_id, org_id, project_id),\n    CONSTRAINT projects_project_name_tenant_id_project_id_key UNIQUE (project_name, tenant_id, project_id),\n    CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id)\n);",
+          "sql": "CREATE TABLE IF NOT EXISTS projects (\n    tenant_id integer,\n    org_id integer,\n    project_id integer,\n    project_name text NOT NULL,\n    project_code text NOT NULL,\n    description text,\n    CONSTRAINT projects_pkey PRIMARY KEY (tenant_id, org_id, project_id),\n    CONSTRAINT projects_project_name_tenant_id_project_id_key UNIQUE (project_name, tenant_id, project_id),\n    CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id) MATCH FULL\n);",
           "type": "table",
           "operation": "create",
           "path": "public.projects"
