@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "dbdb86e54e0cd7cab91492b48159e7049e9c045141ab050c705b1213a6c0e018"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_amount_check CHECK (amount >= 0) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.orders.orders_amount_check"
+        }
+      ]
+    }
+  ]
+}

@@ -391,6 +391,11 @@ func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*
 		fmt.Sscanf(v, "%d", &targetMajorVersion)
 	}
 
+	// Refuse function recreations whose callers cannot survive them (#601)
+	if err := diff.ValidateFunctionRecreations(currentStateIR, desiredStateIR, targetMajorVersion); err != nil {
+		return nil, err
+	}
+
 	// Generate diff (current -> desired) using IR directly
 	diffs := diff.GenerateMigrationForTarget(currentStateIR, desiredStateIR, config.Schema, targetMajorVersion)
 

@@ -1,0 +1,162 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "b937ed39410ca595a2e96ecccfba9a415b696601cb8719a4861f179317c6dc0a"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS refunds (\n    id integer,\n    tenant_id integer,\n    qty integer,\n    CONSTRAINT refunds_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.refunds"
+        },
+        {
+          "sql": "ALTER TABLE refunds ENABLE ROW LEVEL SECURITY;",
+          "type": "table.rls",
+          "operation": "alter",
+          "path": "public.refunds"
+        },
+        {
+          "sql": "ALTER TABLE shipments DROP CONSTRAINT IF EXISTS shipments_qty_check;",
+          "type": "table.constraint",
+          "operation": "recreate",
+          "path": "public.shipments.shipments_qty_check"
+        },
+        {
+          "sql": "DROP INDEX IF EXISTS shipments_qty_idx;",
+          "type": "table.index",
+          "operation": "recreate",
+          "path": "public.shipments.shipments_qty_idx"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS current_tenant();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.current_tenant"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION current_tenant()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$ SELECT current_setting('app.tenant', true)::bigint\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.current_tenant"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS default_priority();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION default_priority()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 5\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS max_qty();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.max_qty"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION max_qty()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 100\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.max_qty"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS normalize_code(text);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.normalize_code"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION normalize_code(\n    input text\n)\nRETURNS text\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT lower(input)\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.normalize_code"
+        },
+        {
+          "sql": "ALTER TABLE refunds ALTER COLUMN tenant_id SET DEFAULT current_tenant();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.refunds.tenant_id"
+        },
+        {
+          "sql": "ALTER TABLE refunds\nADD CONSTRAINT refunds_qty_check CHECK (qty <= max_qty());",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.refunds.refunds_qty_check"
+        },
+        {
+          "sql": "CREATE POLICY refunds_tenant ON refunds TO tenant_reader USING (tenant_id = current_tenant());",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.refunds.refunds_tenant"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS refunds_large_idx ON refunds (id) WHERE qty > (max_qty() / 2);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.refunds.refunds_large_idx"
+        },
+        {
+          "sql": "ALTER TABLE shipments ALTER COLUMN priority SET DEFAULT default_priority();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.shipments.priority"
+        },
+        {
+          "sql": "ALTER TABLE shipments\nADD CONSTRAINT shipments_qty_check CHECK (qty > 0 AND qty <= max_qty()) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.shipments.shipments_qty_check"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS shipments_qty_idx ON shipments ((qty * max_qty()));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.shipments.shipments_qty_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE shipments VALIDATE CONSTRAINT shipments_qty_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.shipments.shipments_qty_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS shipments_code_idx ON shipments (normalize_code(id::text));",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.shipments.shipments_code_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'shipments_code_idx';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index shipments_code_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.shipments.shipments_code_idx"
+        }
+      ]
+    }
+  ]
+}

@@ -92,7 +92,9 @@ func generateCreateViewsSQL(views []*ir.View, targetSchema string, collector *di
 // preDroppedViews contains views that were already dropped in the pre-drop phase
 // dependentViewsCtx contains views that depend on materialized views being recreated
 // recreatedViews tracks views that were recreated as dependencies (to avoid duplicate processing)
-func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *diffCollector, preDroppedViews map[string]bool, dependentViewsCtx *dependentViewsContext, recreatedViews map[string]bool) {
+// indexCollector receives the index changes of materialized views that are
+// kept (not recreated); it is collector unless the caller defers them (#601).
+func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector, indexCollector *diffCollector, preDroppedViews map[string]bool, dependentViewsCtx *dependentViewsContext, recreatedViews map[string]bool) {
 	// Track dependent views that have already been dropped to avoid redundant operations
 	// when a view depends on multiple materialized views being recreated
 	droppedDependentViews := make(map[string]bool)
@@ -355,7 +357,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 					targetSchema,
 					DiffTypeMaterializedViewIndex,
 					DiffTypeMaterializedViewIndexComment,
-					collector,
+					indexCollector,
 				)
 			}
 		} else {

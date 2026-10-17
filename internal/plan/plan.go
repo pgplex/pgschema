@@ -41,6 +41,9 @@ type Step struct {
 	Type      string `json:"type,omitempty"`      // e.g., "table", "index"
 	Operation string `json:"operation,omitempty"` // e.g., "create", "alter", "drop"
 	Path      string `json:"path,omitempty"`      // e.g., "public.users"
+
+	// heldDependent carries diff.Diff.HeldDependent (#601); not serialized.
+	heldDependent bool
 }
 
 // ExecutionGroup represents a group of steps that should be executed together
@@ -161,6 +164,9 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []E
 	// We build these maps incrementally as we process each diff.
 	newlyCreatedTables := make(map[string]bool)
 	newlyCreatedMaterializedViews := make(map[string]bool)
+	// Indexes dropped earlier in the plan as part of a drop + create cycle
+	// (around a function that is dropped and created again, #601).
+	recreatedIndexes := make(map[string]bool)
 
 	// Convert diffs to steps
 	for _, d := range diffs {
@@ -171,18 +177,22 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []E
 		if d.Type == diff.DiffTypeMaterializedView && d.Operation == diff.DiffOperationCreate {
 			newlyCreatedMaterializedViews[d.Path] = true
 		}
+		if d.Type == diff.DiffTypeTableIndex && d.Operation == diff.DiffOperationRecreate {
+			recreatedIndexes[d.Path] = true
+		}
 		// Try to generate rewrites if online operations are enabled
-		rewriteSteps := generateRewrite(d, newlyCreatedTables, newlyCreatedMaterializedViews, targetMajorVersion, currentIR)
+		rewriteSteps := generateRewrite(d, newlyCreatedTables, newlyCreatedMaterializedViews, recreatedIndexes, targetMajorVersion, currentIR)
 
 		if len(rewriteSteps) > 0 {
 			// For operations with rewrites, create one step per rewrite statement
 			for _, rewriteStep := range rewriteSteps {
 				step := Step{
-					SQL:       rewriteStep.SQL,
-					Type:      d.Type.String(),
-					Operation: d.Operation.String(),
-					Path:      d.Path,
-					Directive: rewriteStep.Directive,
+					SQL:           rewriteStep.SQL,
+					Type:          d.Type.String(),
+					Operation:     d.Operation.String(),
+					Path:          d.Path,
+					Directive:     rewriteStep.Directive,
+					heldDependent: d.HeldDependent,
 				}
 
 				// Check if this step needs isolation: it has a directive, cannot
@@ -210,10 +220,11 @@ func groupDiffs(diffs []diff.Diff, targetMajorVersion int, currentIR *ir.IR) []E
 			// For operations without rewrites, create one step per canonical statement
 			for _, stmt := range d.Statements {
 				step := Step{
-					SQL:       stmt.SQL,
-					Type:      d.Type.String(),
-					Operation: d.Operation.String(),
-					Path:      d.Path,
+					SQL:           stmt.SQL,
+					Type:          d.Type.String(),
+					Operation:     d.Operation.String(),
+					Path:          d.Path,
+					heldDependent: d.HeldDependent,
 				}
 				// Canonical statements don't have directives
 				transactionalSteps = append(transactionalSteps, step)

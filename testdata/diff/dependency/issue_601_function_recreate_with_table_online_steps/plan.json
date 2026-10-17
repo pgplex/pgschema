@@ -1,0 +1,82 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "8f6ce19c9317e25b16dcead60288b519224ed9919d208ccce998b7c2f77f9521"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS notes_body_idx ON notes (body);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.notes.notes_body_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'notes_body_idx';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index notes_body_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.notes.notes_body_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE tasks ADD CONSTRAINT tasks_weight_not_null NOT NULL weight NOT VALID;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tasks.weight"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE tasks VALIDATE CONSTRAINT tasks_weight_not_null;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tasks.weight"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "DROP FUNCTION IF EXISTS default_priority();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION default_priority()\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT 5\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.default_priority"
+        },
+        {
+          "sql": "ALTER TABLE tasks ALTER COLUMN priority SET DEFAULT default_priority();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tasks.priority"
+        },
+        {
+          "sql": "ALTER TABLE tasks ALTER COLUMN weight SET DEFAULT default_priority();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tasks.weight"
+        }
+      ]
+    }
+  ]
+}

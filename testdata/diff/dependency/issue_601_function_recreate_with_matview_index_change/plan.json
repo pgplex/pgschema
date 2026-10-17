@@ -1,0 +1,74 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "9c3572e76427259ba43e76dddfae381322763f26ebdc42eb53e67cc2943dfa18"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP POLICY IF EXISTS documents_tenant ON documents;",
+          "type": "table.policy",
+          "operation": "recreate",
+          "path": "public.documents.documents_tenant"
+        },
+        {
+          "sql": "ALTER TABLE documents ALTER COLUMN tenant_id DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.documents.tenant_id"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS current_tenant();",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.current_tenant"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION current_tenant()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$ SELECT current_setting('app.tenant', true)::bigint\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.current_tenant"
+        },
+        {
+          "sql": "ALTER TABLE documents ALTER COLUMN tenant_id SET DEFAULT current_tenant();",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.documents.tenant_id"
+        },
+        {
+          "sql": "CREATE POLICY documents_tenant ON documents AS RESTRICTIVE TO tenant_reader USING (tenant_id = current_tenant());",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.documents.documents_tenant"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS document_titles_title_idx ON document_titles (title);",
+          "type": "materialized_view.index",
+          "operation": "create",
+          "path": "public.document_titles.document_titles_title_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'document_titles_title_idx';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index document_titles_title_idx"
+          },
+          "type": "materialized_view.index",
+          "operation": "create",
+          "path": "public.document_titles.document_titles_title_idx"
+        }
+      ]
+    }
+  ]
+}
