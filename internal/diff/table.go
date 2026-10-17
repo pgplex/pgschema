@@ -2225,6 +2225,10 @@ func generateForeignKeyClauseMode(constraint *ir.Constraint, targetSchema string
 		}
 	}
 
+	if constraint.MatchFull {
+		clause += " MATCH FULL"
+	}
+
 	// Add referential actions
 	if constraint.UpdateRule != "" && constraint.UpdateRule != "NO ACTION" {
 		clause += fmt.Sprintf(" ON UPDATE %s", constraint.UpdateRule)

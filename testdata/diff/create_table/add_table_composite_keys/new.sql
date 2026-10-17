@@ -15,6 +15,6 @@ CREATE TABLE public.projects (
     project_code text NOT NULL,
     description text,
     PRIMARY KEY (tenant_id, org_id, project_id),
-    FOREIGN KEY (tenant_id, org_id) REFERENCES public.organizations(tenant_id, org_id),
+    FOREIGN KEY (tenant_id, org_id) REFERENCES public.organizations(tenant_id, org_id) MATCH FULL,
     UNIQUE (project_name, tenant_id, project_id)
 );

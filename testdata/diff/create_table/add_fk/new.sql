@@ -150,6 +150,31 @@ CREATE TABLE public.notes (
     CONSTRAINT notes_org_id_author_member_id_fkey FOREIGN KEY (org_id, author_member_id) REFERENCES public.members(org_id, id) ON DELETE SET NULL (author_member_id)
 );
 
+-- FK with MATCH FULL case: added on a new constraint
+CREATE TABLE public.warehouses (
+    region_id integer NOT NULL,
+    warehouse_id integer NOT NULL,
+    CONSTRAINT warehouses_pkey PRIMARY KEY (region_id, warehouse_id)
+);
+
+CREATE TABLE public.shipments (
+    id integer NOT NULL,
+    region_id integer,
+    warehouse_id integer,
+    CONSTRAINT shipments_pkey PRIMARY KEY (id),
+    CONSTRAINT shipments_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES public.warehouses(region_id, warehouse_id) MATCH FULL
+);
+
+-- Existing FK that is simple: the desired state adds MATCH FULL, so the
+-- constraint must be recreated (the match type must be compared).
+CREATE TABLE public.returns (
+    id integer NOT NULL,
+    region_id integer,
+    warehouse_id integer,
+    CONSTRAINT returns_pkey PRIMARY KEY (id),
+    CONSTRAINT returns_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES public.warehouses(region_id, warehouse_id) MATCH FULL
+);
+
 -- Temporal FK case (PG18+)
 CREATE TABLE public.price_history (
     product_id integer NOT NULL,

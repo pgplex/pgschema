@@ -639,6 +639,7 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				if updateRule := i.safeInterfaceToString(constraint.UpdateRule); updateRule != "" && updateRule != "<nil>" {
 					c.UpdateRule = updateRule
 				}
+				c.MatchFull = constraint.MatchFull.Bool
 			}
 
 			// Handle check constraints

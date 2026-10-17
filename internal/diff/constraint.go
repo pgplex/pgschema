@@ -56,6 +56,9 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string, quali
 			ir.QuoteIdentifier(constraint.Name),
 			strings.Join(cols, ", "),
 			qualifiedRefTable, strings.Join(refCols, ", "))
+		if constraint.MatchFull {
+			stmt += " MATCH FULL"
+		}
 		// Only add ON UPDATE/DELETE if they are not the default "NO ACTION"
 		if constraint.UpdateRule != "" && constraint.UpdateRule != "NO ACTION" {
 			stmt += fmt.Sprintf(" ON UPDATE %s", constraint.UpdateRule)
@@ -187,6 +190,9 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 		return false
 	}
 	if old.UpdateRule != new.UpdateRule {
+		return false
+	}
+	if old.MatchFull != new.MatchFull {
 		return false
 	}
 	if old.Deferrable != new.Deferrable {

@@ -1062,6 +1062,8 @@ SELECT
     c.convalidated AS is_valid,
     COALESCE((to_jsonb(c) ->> 'conperiod')::boolean, false) AS is_period,
     c.connoinherit AS no_inherit,
+    -- MATCH FULL (pg_constraint.confmatchtype = 'f'); only foreign keys can set it.
+    (c.confmatchtype = 'f') AS match_full,
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
@@ -1132,6 +1134,7 @@ type GetConstraintsRow struct {
 	IsValid                bool           `db:"is_valid" json:"is_valid"`
 	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
+	MatchFull              sql.NullBool   `db:"match_full" json:"match_full"`
 	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
 }
 
@@ -1165,6 +1168,7 @@ func (q *Queries) GetConstraints(ctx context.Context) ([]GetConstraintsRow, erro
 			&i.IsValid,
 			&i.IsPeriod,
 			&i.NoInherit,
+			&i.MatchFull,
 			&i.DeleteSetColumns,
 		); err != nil {
 			return nil, err
@@ -1233,6 +1237,8 @@ SELECT
     -- pg_index.indnullsnotdistinct is PG15+. Use to_jsonb so the column reference
     -- doesn't fail to plan on PG14 (where the attribute does not exist on pg_index).
     COALESCE((to_jsonb(i) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct,
+    -- MATCH FULL (pg_constraint.confmatchtype = 'f'); only foreign keys can set it.
+    (c.confmatchtype = 'f') AS match_full,
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
@@ -1304,6 +1310,7 @@ type GetConstraintsForSchemaRow struct {
 	IsPeriod               sql.NullBool   `db:"is_period" json:"is_period"`
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 	NullsNotDistinct       sql.NullBool   `db:"nulls_not_distinct" json:"nulls_not_distinct"`
+	MatchFull              sql.NullBool   `db:"match_full" json:"match_full"`
 	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
 }
 
@@ -1339,6 +1346,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.IsPeriod,
 			&i.NoInherit,
 			&i.NullsNotDistinct,
+			&i.MatchFull,
 			&i.DeleteSetColumns,
 		); err != nil {
 			return nil, err

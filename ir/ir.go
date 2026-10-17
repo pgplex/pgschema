@@ -262,6 +262,7 @@ type Constraint struct {
 	DeleteRule          string              `json:"delete_rule,omitempty"`
 	DeleteSetColumns    []string            `json:"delete_set_columns,omitempty"` // PG15+: column list of ON DELETE SET NULL/SET DEFAULT (confdelsetcols)
 	UpdateRule          string              `json:"update_rule,omitempty"`
+	MatchFull           bool                `json:"match_full,omitempty"` // FOREIGN KEY ... MATCH FULL (confmatchtype = 'f')
 	Deferrable          bool                `json:"deferrable,omitempty"`
 	InitiallyDeferred   bool                `json:"initially_deferred,omitempty"`
 	IsValid             bool                `json:"is_valid,omitempty"`

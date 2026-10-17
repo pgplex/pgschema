@@ -316,6 +316,10 @@ func generateForeignKeyRewrite(constraint *ir.Constraint) []RewriteStep {
 		refTableName,
 		joinStrings(refColumnNames, ", "))
 
+	if constraint.MatchFull {
+		fkClause += " MATCH FULL"
+	}
+
 	// Add ON UPDATE/DELETE clauses if specified (in correct order)
 	if constraint.UpdateRule != "" && constraint.UpdateRule != "NO ACTION" {
 		fkClause += fmt.Sprintf(" ON UPDATE %s", constraint.UpdateRule)

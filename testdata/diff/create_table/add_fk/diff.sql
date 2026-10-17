@@ -33,6 +33,14 @@ ADD CONSTRAINT products_category_code_fkey FOREIGN KEY (category_code) REFERENCE
 ALTER TABLE projects
 ADD CONSTRAINT projects_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES organizations (tenant_id, org_id);
 
+ALTER TABLE returns DROP CONSTRAINT returns_region_id_warehouse_id_fkey;
+
+ALTER TABLE returns
+ADD CONSTRAINT returns_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL;
+
+ALTER TABLE shipments
+ADD CONSTRAINT shipments_region_id_warehouse_id_fkey FOREIGN KEY (region_id, warehouse_id) REFERENCES warehouses (region_id, warehouse_id) MATCH FULL;
+
 ALTER TABLE tasks
 ADD CONSTRAINT tasks_org_id_owner_member_id_fkey FOREIGN KEY (org_id, owner_member_id) REFERENCES members (org_id, id) ON DELETE SET DEFAULT (owner_member_id);
 
