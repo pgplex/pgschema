@@ -734,6 +734,9 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 
 	// Record which tables are partitions of which parents
 	i.populatePartitionChildMetadata(ctx, schema, targetSchema)
+	if err := i.buildInheritedConstraints(ctx, schema, targetSchema); err != nil {
+		return err
+	}
 
 	// Add constraints to tables
 	for key, constraint := range constraintGroups {
@@ -759,6 +762,29 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 		}
 	}
 
+	return nil
+}
+
+// buildInheritedConstraints records the catalog names of the PRIMARY KEY and
+// UNIQUE constraints that partitions inherited from their parents. They are not
+// managed constraints (see GetConstraintsForSchema), but creation planning needs
+// their names to recreate them explicitly (issue #653).
+func (i *Inspector) buildInheritedConstraints(ctx context.Context, schema *IR, targetSchema string) error {
+	rows, err := i.queries.GetInheritedPartitionConstraintsForSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
+	if err != nil {
+		return err
+	}
+	dbSchema := schema.getOrCreateSchema(targetSchema)
+	for _, row := range rows {
+		table, exists := dbSchema.Tables[row.TableName]
+		if !exists {
+			continue
+		}
+		if table.InheritedConstraints == nil {
+			table.InheritedConstraints = make(map[string]string)
+		}
+		table.InheritedConstraints[row.ParentConstraintName] = row.ConstraintName
+	}
 	return nil
 }
 

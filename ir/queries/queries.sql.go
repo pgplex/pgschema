@@ -2414,6 +2414,71 @@ func (q *Queries) GetIndexesForSchema(ctx context.Context, dollar_1 sql.NullStri
 	return items, nil
 }
 
+const getInheritedPartitionConstraintsForSchema = `-- name: GetInheritedPartitionConstraintsForSchema :many
+SELECT
+    n.nspname AS table_schema,
+    cl.relname AS table_name,
+    c.conname AS constraint_name,
+    pn.nspname AS parent_schema,
+    pcl.relname AS parent_table,
+    pc.conname AS parent_constraint_name
+FROM pg_constraint c
+JOIN pg_class cl ON c.conrelid = cl.oid
+JOIN pg_namespace n ON cl.relnamespace = n.oid
+JOIN pg_constraint pc ON pc.oid = c.conparentid
+JOIN pg_class pcl ON pc.conrelid = pcl.oid
+JOIN pg_namespace pn ON pcl.relnamespace = pn.oid
+WHERE n.nspname = $1
+    AND c.contype IN ('p', 'u')
+    AND c.conparentid <> 0
+ORDER BY n.nspname, cl.relname, c.conname
+`
+
+type GetInheritedPartitionConstraintsForSchemaRow struct {
+	TableSchema          string `db:"table_schema" json:"table_schema"`
+	TableName            string `db:"table_name" json:"table_name"`
+	ConstraintName       string `db:"constraint_name" json:"constraint_name"`
+	ParentSchema         string `db:"parent_schema" json:"parent_schema"`
+	ParentTable          string `db:"parent_table" json:"parent_table"`
+	ParentConstraintName string `db:"parent_constraint_name" json:"parent_constraint_name"`
+}
+
+// GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY and UNIQUE
+// constraints PostgreSQL copied onto partitions from their parent's constraints
+// (conparentid != 0), with the parent constraint each one derives from.
+// GetConstraintsForSchema skips these copies because PARTITION OF recreates
+// them, but their catalog names are needed to recreate them explicitly when a
+// generated name would otherwise take a standalone index's name (issue #653).
+func (q *Queries) GetInheritedPartitionConstraintsForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetInheritedPartitionConstraintsForSchemaRow, error) {
+	rows, err := q.db.QueryContext(ctx, getInheritedPartitionConstraintsForSchema, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetInheritedPartitionConstraintsForSchemaRow
+	for rows.Next() {
+		var i GetInheritedPartitionConstraintsForSchemaRow
+		if err := rows.Scan(
+			&i.TableSchema,
+			&i.TableName,
+			&i.ConstraintName,
+			&i.ParentSchema,
+			&i.ParentTable,
+			&i.ParentConstraintName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPartitionChildren = `-- name: GetPartitionChildren :many
 SELECT 
     pn.nspname AS parent_schema,

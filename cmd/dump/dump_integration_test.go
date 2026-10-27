@@ -173,6 +173,13 @@ func TestDumpCommand_Issue472PartitionCloneTrigger(t *testing.T) {
 	runExactMatchTest(t, "issue_472_partition_clone_trigger")
 }
 
+func TestDumpCommand_Issue653InheritedConstraintIndexName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_653_inherited_constraint_index_name")
+}
+
 func TestDumpCommand_Issue421QuotedFKColumns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

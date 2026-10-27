@@ -17,6 +17,7 @@ func TestPartitionInspectionMetadataNotSerialized(t *testing.T) {
 	index.AttachedPartitions = []IndexRef{{Schema: "public", Name: "ignored_child"}}
 	constraint.BackingIndex = &IndexRef{Schema: "public", Name: "unique_constraint"}
 	table.AllPartitionChildren = []TableDependency{{Schema: "public", Name: "ignored_partition"}}
+	table.InheritedConstraints = map[string]string{"events_pkey": "events_early_pkey1"}
 	after, err := json.Marshal(table)
 	if err != nil {
 		t.Fatal(err)

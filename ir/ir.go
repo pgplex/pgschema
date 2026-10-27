@@ -83,6 +83,13 @@ type Table struct {
 	// AllPartitionChildren records catalog children, including ignored or external
 	// tables. Creation planning uses this metadata to identify complete hierarchies.
 	AllPartitionChildren []TableDependency `json:"-"`
+	// InheritedConstraints maps a parent constraint name to the name PostgreSQL
+	// gave this partition's copy of it, for PRIMARY KEY and UNIQUE constraints.
+	// The copies are not managed constraints; creation planning uses the names
+	// to recreate them explicitly so a generated copy cannot take a standalone
+	// index's name (issue #653). Inspection metadata, excluded from
+	// serialization and fingerprints.
+	InheritedConstraints map[string]string `json:"-"`
 }
 
 // Column represents a table column

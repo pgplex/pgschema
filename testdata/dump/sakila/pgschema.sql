@@ -287,13 +287,12 @@ CREATE TABLE IF NOT EXISTS film_category (
 --
 
 CREATE TABLE IF NOT EXISTS payment (
-    payment_id integer DEFAULT nextval('payment_payment_id_seq'::regclass),
+    payment_id integer DEFAULT nextval('payment_payment_id_seq'::regclass) NOT NULL,
     customer_id integer NOT NULL,
     staff_id integer NOT NULL,
     rental_id integer NOT NULL,
     amount numeric(5,2) NOT NULL,
-    payment_date timestamptz,
-    CONSTRAINT payment_pkey PRIMARY KEY (payment_date, payment_id)
+    payment_date timestamptz NOT NULL
 ) PARTITION BY RANGE (payment_date);
 
 --
@@ -890,6 +889,26 @@ BEGIN
 RETURN;
 END
 $_$;
+
+--
+-- Name: payment_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY payment ADD CONSTRAINT payment_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER TABLE ONLY payment_p2022_01 ADD CONSTRAINT payment_p2022_01_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_01_pkey;
+ALTER TABLE ONLY payment_p2022_02 ADD CONSTRAINT payment_p2022_02_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_02_pkey;
+ALTER TABLE ONLY payment_p2022_03 ADD CONSTRAINT payment_p2022_03_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_03_pkey;
+ALTER TABLE ONLY payment_p2022_04 ADD CONSTRAINT payment_p2022_04_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_04_pkey;
+ALTER TABLE ONLY payment_p2022_05 ADD CONSTRAINT payment_p2022_05_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_05_pkey;
+ALTER TABLE ONLY payment_p2022_06 ADD CONSTRAINT payment_p2022_06_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_06_pkey;
+ALTER TABLE ONLY payment_p2022_07 ADD CONSTRAINT payment_p2022_07_pkey PRIMARY KEY (payment_date, payment_id);
+ALTER INDEX payment_pkey ATTACH PARTITION payment_p2022_07_pkey;
 
 --
 -- Name: group_concat(text); Type: AGGREGATE; Schema: -; Owner: -

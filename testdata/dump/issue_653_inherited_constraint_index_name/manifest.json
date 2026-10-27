@@ -1,0 +1,10 @@
+{
+  "name": "issue_653_inherited_constraint_index_name",
+  "description": "Dump replay failed or silently dropped an index when a partition's inherited PRIMARY KEY index name collided with a standalone index",
+  "source": "https://github.com/pgplex/pgschema/issues/653",
+  "notes": [
+    "PARTITION OF copies the parent's PRIMARY KEY and UNIQUE constraints onto the partition under generated names; with a standalone index already named events_leaf_pkey, the copy is named events_leaf_pkey1.",
+    "Creating the partition with the constraint inline, before the standalone index, gave the generated name to the copy. The later CREATE INDEX IF NOT EXISTS events_leaf_pkey was skipped and ALTER INDEX ... ATTACH PARTITION failed with SQLSTATE 42809.",
+    "The dump now follows pg_dump: PRIMARY KEY and UNIQUE constraints of a partitioned table with partitions are added after the tables with ALTER TABLE ONLY, each partition copy under its catalog name, followed by ALTER INDEX ... ATTACH PARTITION."
+  ]
+}

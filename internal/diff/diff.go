@@ -2153,6 +2153,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
 
+	// Postponed PRIMARY KEY and UNIQUE constraints of partitioned tables come
+	// before the standalone partitioned indexes, which may attach to them.
+	d.partitionIndexes.generateDeferredConstraintSQL(targetSchema, collector)
 	d.partitionIndexes.generateSQL(targetSchema, collector)
 
 	// Add deferred foreign key constraints from ALL batches AFTER all tables are created

@@ -11,10 +11,9 @@
 --
 
 CREATE TABLE IF NOT EXISTS ledger (
-    id uuid,
+    id uuid NOT NULL,
     amount bigint NOT NULL,
-    ts timestamptz,
-    CONSTRAINT ledger_pkey PRIMARY KEY (ts, id)
+    ts timestamptz NOT NULL
 ) PARTITION BY RANGE (ts);
 
 --
@@ -33,6 +32,14 @@ LANGUAGE plpgsql
 VOLATILE
 AS $$ BEGIN RETURN NEW; END
 $$;
+
+--
+-- Name: ledger_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY ledger ADD CONSTRAINT ledger_pkey PRIMARY KEY (ts, id);
+ALTER TABLE ONLY ledger_2026_06 ADD CONSTRAINT ledger_2026_06_pkey PRIMARY KEY (ts, id);
+ALTER INDEX ledger_pkey ATTACH PARTITION ledger_2026_06_pkey;
 
 --
 -- Name: trg_rollup; Type: TRIGGER; Schema: -; Owner: -

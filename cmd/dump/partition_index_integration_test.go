@@ -78,6 +78,17 @@ ALTER INDEX archive_unique ATTACH PARTITION archive_local_unique;
 CREATE TABLE archive_links (bucket int, label text, FOREIGN KEY (bucket, label) REFERENCES archive_events (bucket, label));
 COMMENT ON INDEX event_lookup IS 'Parent lookup';
 COMMENT ON INDEX early_custom_lookup IS 'Named child lookup';
+-- Inherited constraint indexes keep their catalog names even when a standalone
+-- index already holds the generated name (issue #653).
+CREATE TABLE keyed_events (bucket int NOT NULL, id int NOT NULL, note text,
+    PRIMARY KEY (bucket, id), CONSTRAINT keyed_events_note_key UNIQUE (bucket, id, note)) PARTITION BY RANGE (bucket);
+CREATE INDEX keyed_events_early_pkey ON keyed_events (id);
+CREATE TABLE keyed_events_early PARTITION OF keyed_events FOR VALUES FROM (0) TO (10);
+CREATE TABLE keyed_events_late PARTITION OF keyed_events FOR VALUES FROM (10) TO (20) PARTITION BY RANGE (bucket);
+CREATE TABLE keyed_events_late_a PARTITION OF keyed_events_late FOR VALUES FROM (10) TO (15);
+ALTER INDEX keyed_events_late_a_pkey RENAME TO keyed_late_a_pk;
+CREATE INDEX keyed_events_late_a_pkey ON keyed_events_late_a (note);
+CREATE TABLE keyed_links (bucket int, id int, FOREIGN KEY (bucket, id) REFERENCES keyed_events (bucket, id));
 `
 	for _, constraintType := range []string{"UNIQUE", "PRIMARY KEY"} {
 		for _, multiFile := range []bool{false, true} {

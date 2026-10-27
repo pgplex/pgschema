@@ -263,6 +263,15 @@ leaves unattached indexes unattached. Multi-file dumps write parent indexes and
 their attachments under `indexes/`, such as `indexes/0001_events_lookup.sql`,
 after the table includes.
 
+A `PRIMARY KEY` or `UNIQUE` constraint on a partitioned table with partitions is
+not written inline. `PARTITION OF` would copy it onto each partition under a
+generated name, which can take the name of a standalone index created later.
+Instead, `pgschema` adds the constraint after the tables with
+`ALTER TABLE ONLY ... ADD CONSTRAINT`, adds each partition's copy under its
+original name the same way, and attaches the copies with
+`ALTER INDEX ... ATTACH PARTITION`. Multi-file dumps write each constraint and
+its copies under `constraints/`, such as `constraints/0001_events.sql`.
+
 Each individual file (e.g., `tables/users.sql`) contains the specific object definition:
 ```sql
 --

@@ -1466,6 +1466,31 @@ WHERE n.nspname = $1
     )
 ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum;
 
+-- GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY and UNIQUE
+-- constraints PostgreSQL copied onto partitions from their parent's constraints
+-- (conparentid != 0), with the parent constraint each one derives from.
+-- GetConstraintsForSchema skips these copies because PARTITION OF recreates
+-- them, but their catalog names are needed to recreate them explicitly when a
+-- generated name would otherwise take a standalone index's name (issue #653).
+-- name: GetInheritedPartitionConstraintsForSchema :many
+SELECT
+    n.nspname AS table_schema,
+    cl.relname AS table_name,
+    c.conname AS constraint_name,
+    pn.nspname AS parent_schema,
+    pcl.relname AS parent_table,
+    pc.conname AS parent_constraint_name
+FROM pg_constraint c
+JOIN pg_class cl ON c.conrelid = cl.oid
+JOIN pg_namespace n ON cl.relnamespace = n.oid
+JOIN pg_constraint pc ON pc.oid = c.conparentid
+JOIN pg_class pcl ON pc.conrelid = pcl.oid
+JOIN pg_namespace pn ON pcl.relnamespace = pn.oid
+WHERE n.nspname = $1
+    AND c.contype IN ('p', 'u')
+    AND c.conparentid <> 0
+ORDER BY n.nspname, cl.relname, c.conname;
+
 -- GetSequencesForSchema retrieves all sequences for a specific schema
 -- name: GetSequencesForSchema :many
 SELECT 
