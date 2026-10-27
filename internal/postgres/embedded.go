@@ -97,8 +97,33 @@ func DetectPostgresVersionAndExtensionsFromDB(host string, port int, database, u
 	return version, extensions, nil
 }
 
-// StartEmbeddedPostgres starts a temporary embedded PostgreSQL instance
+// embeddedStartAttempts bounds how many times StartEmbeddedPostgres tries to
+// launch the server. The port is reserved by probing it and closing the probe
+// socket before pg_ctl binds it, so another process (for example a parallel
+// test package starting its own instance) can take the port in between and
+// the launch fails with "could not start server". Each attempt picks a fresh
+// port and runtime directory.
+const embeddedStartAttempts = 3
+
+// StartEmbeddedPostgres starts a temporary embedded PostgreSQL instance.
 func StartEmbeddedPostgres(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, error) {
+	var err error
+	for attempt := 1; attempt <= embeddedStartAttempts; attempt++ {
+		var embeddedPG *EmbeddedPostgres
+		embeddedPG, err = startEmbeddedPostgresOnce(config)
+		if err == nil {
+			return embeddedPG, nil
+		}
+		if attempt < embeddedStartAttempts {
+			logger.Get().Debug("embedded PostgreSQL failed to start, retrying", "attempt", attempt, "error", err)
+		}
+	}
+	return nil, err
+}
+
+// startEmbeddedPostgresOnce performs a single launch attempt on a fresh port
+// and runtime directory.
+func startEmbeddedPostgresOnce(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, error) {
 	// Create unique runtime path and schema name
 	tempSchema := GenerateTempSchemaName()
 	runtimePath := filepath.Join(os.TempDir(), tempSchema)
@@ -123,7 +148,7 @@ func StartEmbeddedPostgres(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, e
 		StartParameters(map[string]string{
 			"logging_collector":          "off",       // Disable log collector
 			"log_destination":            "stderr",    // Send logs to stderr (which we discard)
-			"log_min_messages":           "PANIC",     // Only log PANIC level messages
+			"log_min_messages":           "LOG",       // Keep startup failures (e.g. port in use) in the pg_ctl output
 			"log_statement":              "none",      // Don't log SQL statements
 			"log_min_duration_statement": "-1",        // Don't log slow queries
 			"unix_socket_directories":    runtimePath, // Use a directory that is guaranteed to exist
@@ -133,6 +158,7 @@ func StartEmbeddedPostgres(config *EmbeddedPostgresConfig) (*EmbeddedPostgres, e
 	// Create and start PostgreSQL instance
 	instance := embeddedpostgres.NewDatabase(pgConfig)
 	if err := instance.Start(); err != nil {
+		os.RemoveAll(runtimePath)
 		return nil, fmt.Errorf("failed to start embedded PostgreSQL: %w", err)
 	}
 
@@ -389,8 +415,10 @@ func installUntilFixpoint(names []string, install func(name string) error) map[s
 	return lastErr
 }
 
-// findAvailablePort finds an available TCP port for PostgreSQL to use
-func findAvailablePort() (int, error) {
+// findAvailablePort finds an available TCP port for PostgreSQL to use.
+// It is a variable so tests can hand StartEmbeddedPostgres a port that is
+// already taken and exercise the retry.
+var findAvailablePort = func() (int, error) {
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		return 0, err
