@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -158,6 +159,7 @@ func startEmbeddedPostgresOnce(config *EmbeddedPostgresConfig) (*EmbeddedPostgre
 	// Create and start PostgreSQL instance
 	instance := embeddedpostgres.NewDatabase(pgConfig)
 	if err := instance.Start(); err != nil {
+		stopOrphanedPostmaster(runtimePath)
 		os.RemoveAll(runtimePath)
 		return nil, fmt.Errorf("failed to start embedded PostgreSQL: %w", err)
 	}
@@ -413,6 +415,20 @@ func installUntilFixpoint(names []string, install func(name string) error) map[s
 		pending = failed
 	}
 	return lastErr
+}
+
+// stopOrphanedPostmaster stops a postmaster that a failed launch may have left
+// running under runtimePath. When "pg_ctl start -w" gives up waiting, the
+// library returns an error but the server keeps running, and its own Stop
+// refuses to act because it never marked the instance as started. Best
+// effort: with no server running, pg_ctl stop fails fast and that is fine.
+func stopOrphanedPostmaster(runtimePath string) {
+	binDir := binariesPath
+	if binDir == "" {
+		binDir = runtimePath // embedded-postgres extracts the binaries here by default
+	}
+	pgCtl := filepath.Join(binDir, "bin", "pg_ctl")
+	_ = exec.Command(pgCtl, "stop", "-w", "-m", "immediate", "-D", filepath.Join(runtimePath, "data")).Run()
 }
 
 // findAvailablePort finds an available TCP port for PostgreSQL to use.
