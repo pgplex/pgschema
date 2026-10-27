@@ -93,6 +93,15 @@ CREATE TABLE keyed_links (bucket int, id int, FOREIGN KEY (bucket, id) REFERENCE
 CREATE FUNCTION upsert_keyed_event(p_bucket int, p_id int) RETURNS void LANGUAGE sql BEGIN ATOMIC
     INSERT INTO keyed_events (bucket, id) VALUES (p_bucket, p_id) ON CONFLICT ON CONSTRAINT keyed_events_pkey DO NOTHING;
 END;
+-- A partition default calling a function that reads the parent keeps the
+-- parent, the function and the partition in that order.
+CREATE FUNCTION count_keyed_events() RETURNS text LANGUAGE sql BEGIN ATOMIC
+    SELECT count(*)::text FROM keyed_events;
+END;
+CREATE TABLE keyed_events_rest PARTITION OF keyed_events (note DEFAULT count_keyed_events()) DEFAULT;
+-- A policy expression relying on the key follows the postponed constraints.
+ALTER TABLE keyed_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY keyed_events_grouped ON keyed_events USING (EXISTS (SELECT note FROM keyed_events GROUP BY bucket, id));
 `
 	for _, constraintType := range []string{"UNIQUE", "PRIMARY KEY"} {
 		for _, multiFile := range []bool{false, true} {

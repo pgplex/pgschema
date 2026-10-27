@@ -577,7 +577,9 @@ func generateCreateTablesSQL(
 			policyNames := sortedKeys(table.Policies)
 			for _, name := range policyNames {
 				policy := table.Policies[name]
-				if shouldDeferPolicy != nil && shouldDeferPolicy(policy) {
+				// A policy on a table whose keys are postponed may parse against
+				// them (GROUP BY functional dependency), so it follows them.
+				if (shouldDeferPolicy != nil && shouldDeferPolicy(policy)) || partitionIndexes.hierarchyRoot(table) != "" {
 					deferredPolicies = append(deferredPolicies, policy)
 				} else {
 					inlinePolicies = append(inlinePolicies, policy)

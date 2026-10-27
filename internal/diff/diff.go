@@ -2030,24 +2030,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		return 0
 	}
 	batches := make(map[string]int, len(d.addedTables))
-	// A hierarchy whose keys are postponed until its last partition exists
-	// (issue #653) is created in one batch, the latest any member needs, so
-	// its keys still precede the functions scheduled after that batch.
-	hierarchyBatch := make(map[string]int)
 	for _, table := range d.addedTables {
 		key := table.Schema + "." + table.Name
 		batches[key] = tableBatch(table)
-		if root := d.partitionIndexes.hierarchyRoot(table); root != "" && batches[key] > hierarchyBatch[root] {
-			hierarchyBatch[root] = batches[key]
-		}
-	}
-	for _, table := range d.addedTables {
-		key := table.Schema + "." + table.Name
-		batch := batches[key]
-		if root := d.partitionIndexes.hierarchyRoot(table); root != "" {
-			batch = hierarchyBatch[root]
-		}
-		switch batch {
+		switch batches[key] {
 		case 2:
 			tablesAfterTableDomains = append(tablesAfterTableDomains, table)
 		case 1:
@@ -2139,6 +2125,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
 			}
 		}
+		// A function whose body may depend on a postponed key (issue #653) is
+		// validated at creation, so one referencing a hierarchy that completes
+		// in a later batch moves after that batch, unless an earlier table or
+		// domain needs it first.
+		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, domainsWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
@@ -3072,6 +3063,68 @@ func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.
 // holdBackCallersAcrossBatches applies holdBackCallers to three consecutive function
 // batches until none changes. A single round is not enough: a function that joins a
 // later batch in one step can strand a caller that an earlier step already examined.
+// holdBackKeyDependentFunctions moves a function that references a table of a
+// hierarchy with postponed keys (issue #653) to the function batch after the
+// table batch in which that hierarchy completes. Whether the body depends on
+// the key (ON CONFLICT ON CONSTRAINT, GROUP BY functional dependency) is not
+// known, so every such function moves unless a table default or CHECK, or a
+// domain created earlier, needs it: then the parent -> function -> partition
+// chain keeps its order. batches maps table keys to their creation batch;
+// first, second and third are the function batches created after table
+// batches 0, 1 and 2.
+func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table, domains []*ir.Type, first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	if plan == nil || len(plan.roots) == 0 {
+		return first, second, third
+	}
+	completion := make(map[string]int)
+	lookups := make(map[string]map[string]struct{})
+	for _, table := range addedTables {
+		root := plan.hierarchyRoot(table)
+		if root == "" {
+			continue
+		}
+		key := table.Schema + "." + table.Name
+		if batches[key] > completion[root] {
+			completion[root] = batches[key]
+		}
+		if lookups[root] == nil {
+			lookups[root] = make(map[string]struct{})
+		}
+		lookups[root][strings.ToLower(key)] = struct{}{}
+		lookups[root][strings.ToLower(table.Name)] = struct{}{}
+	}
+	neededEarlier := func(fn *ir.Function) bool {
+		lookup := buildFunctionLookup([]*ir.Function{fn})
+		for _, table := range addedTables {
+			if tableReferencesNewFunction(table, lookup) {
+				return true
+			}
+		}
+		for _, domain := range domains {
+			if domainReferencesNewFunction(domain, lookup) {
+				return true
+			}
+		}
+		return false
+	}
+	var result [3][]*ir.Function
+	for batch, fns := range [][]*ir.Function{first, second, third} {
+		for _, fn := range fns {
+			target := batch
+			for root, lookup := range lookups {
+				if completion[root] > target && functionReferencesNewTable(fn, lookup) {
+					target = completion[root]
+				}
+			}
+			if target != batch && neededEarlier(fn) {
+				target = batch
+			}
+			result[target] = append(result[target], fn)
+		}
+	}
+	return result[0], result[1], result[2]
+}
+
 func holdBackCallersAcrossBatches(first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
 	for {
 		secondLen, thirdLen := len(second), len(third)

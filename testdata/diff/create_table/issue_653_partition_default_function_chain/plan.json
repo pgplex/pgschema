@@ -1,0 +1,68 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.3",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events (\n    id integer NOT NULL,\n    payload text\n) PARTITION BY RANGE (id);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.events"
+        },
+        {
+          "sql": "ALTER TABLE events ENABLE ROW LEVEL SECURITY;",
+          "type": "table.rls",
+          "operation": "alter",
+          "path": "public.events"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION count_events()\nRETURNS text\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n SELECT (count(*))::text AS count\n    FROM public.events;\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_events"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events_leaf PARTITION OF events (\n    payload DEFAULT count_events()\n) FOR VALUES FROM (0) TO (10);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.events_leaf"
+        },
+        {
+          "sql": "ALTER TABLE ONLY events ADD CONSTRAINT events_pkey PRIMARY KEY (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "ALTER TABLE ONLY events_leaf ADD CONSTRAINT events_leaf_pkey PRIMARY KEY (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "ALTER INDEX events_pkey ATTACH PARTITION events_leaf_pkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION upsert_event(\n    p_id integer,\n    p_payload text\n)\nRETURNS void\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n INSERT INTO public.events (id, payload)\n   VALUES (upsert_event.p_id, upsert_event.p_payload) ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET payload = excluded.payload;\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.upsert_event"
+        },
+        {
+          "sql": "CREATE POLICY events_grouped ON events TO PUBLIC USING (EXISTS ( SELECT events_1.payload FROM events events_1 GROUP BY events_1.id));",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.events.events_grouped"
+        }
+      ]
+    }
+  ]
+}

@@ -96,6 +96,30 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	partitionIndexFiles := make(map[indexKey]fileKey)
 	var tables []*ir.Table
 	var views []*ir.View
+	// Tables whose PRIMARY KEY or UNIQUE constraints were emitted as separate
+	// steps after the tables (partitioned tables, issue #653), with the tables
+	// seen so far for walking a partition up to such a table.
+	keyedTables := make(map[string]bool)
+	tablesByKey := make(map[string]*ir.Table)
+	policyIndex := 0
+	policyFollowsKeys := func(policy *ir.RLSPolicy) bool {
+		key := policy.Schema + "." + policy.Table
+		for key != "" {
+			if keyedTables[key] {
+				return true
+			}
+			table := tablesByKey[key]
+			if table == nil || table.PartitionOf == "" {
+				return false
+			}
+			parentSchema := table.PartitionOfSchema
+			if parentSchema == "" {
+				parentSchema = table.Schema
+			}
+			key = parentSchema + "." + table.PartitionOf
+		}
+		return false
+	}
 
 	for _, step := range diffs {
 		var dir string
@@ -113,6 +137,17 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			// on different tables and names that sanitize to the same filename.
 			constraintIndex++
 			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+		}
+
+		if constraint, ok := step.Source.(*ir.Constraint); ok && step.Type == diff.DiffTypeTableConstraint &&
+			(constraint.Type == ir.ConstraintTypePrimaryKey || constraint.Type == ir.ConstraintTypeUnique) {
+			keyedTables[constraint.Schema+"."+constraint.Table] = true
+		}
+		if policy, ok := step.Source.(*ir.RLSPolicy); ok && step.Type == diff.DiffTypeTablePolicy && policyFollowsKeys(policy) {
+			// A policy created after its table's postponed keys stays after
+			// them instead of moving back into the table file.
+			policyIndex++
+			key = fileKey{dir: "policies", name: fmt.Sprintf("%04d_%s", policyIndex, policy.Name)}
 		}
 
 		if index, ok := step.Source.(*ir.Index); ok && index.IsPartitioned &&
@@ -137,6 +172,7 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 		switch src := step.Source.(type) {
 		case *ir.Table:
 			tables = append(tables, src)
+			tablesByKey[src.Schema+"."+src.Name] = src
 		case *ir.View:
 			views = append(views, src)
 		}
