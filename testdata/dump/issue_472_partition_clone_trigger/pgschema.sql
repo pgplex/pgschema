@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS ledger_2026_06 PARTITION OF ledger FOR VALUES FROM ('2026-06-01 00:00:00+00') TO ('2026-07-01 00:00:00+00');
 
 --
+-- Name: ledger_pkey; Type: CONSTRAINT; Schema: -; Owner: -
+--
+
+ALTER TABLE ONLY ledger ADD CONSTRAINT ledger_pkey PRIMARY KEY (ts, id);
+ALTER TABLE ONLY ledger_2026_06 ADD CONSTRAINT ledger_2026_06_pkey PRIMARY KEY (ts, id);
+ALTER INDEX ledger_pkey ATTACH PARTITION ledger_2026_06_pkey;
+
+--
 -- Name: tg_noop(); Type: FUNCTION; Schema: -; Owner: -
 --
 
@@ -32,14 +40,6 @@ LANGUAGE plpgsql
 VOLATILE
 AS $$ BEGIN RETURN NEW; END
 $$;
-
---
--- Name: ledger_pkey; Type: CONSTRAINT; Schema: -; Owner: -
---
-
-ALTER TABLE ONLY ledger ADD CONSTRAINT ledger_pkey PRIMARY KEY (ts, id);
-ALTER TABLE ONLY ledger_2026_06 ADD CONSTRAINT ledger_2026_06_pkey PRIMARY KEY (ts, id);
-ALTER INDEX ledger_pkey ATTACH PARTITION ledger_2026_06_pkey;
 
 --
 -- Name: trg_rollup; Type: TRIGGER; Schema: -; Owner: -

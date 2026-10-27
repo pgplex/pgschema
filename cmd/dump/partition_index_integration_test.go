@@ -89,6 +89,10 @@ CREATE TABLE keyed_events_late_a PARTITION OF keyed_events_late FOR VALUES FROM 
 ALTER INDEX keyed_events_late_a_pkey RENAME TO keyed_late_a_pk;
 CREATE INDEX keyed_events_late_a_pkey ON keyed_events_late_a (note);
 CREATE TABLE keyed_links (bucket int, id int, FOREIGN KEY (bucket, id) REFERENCES keyed_events (bucket, id));
+-- A SQL-standard body is validated at creation, so the key must already exist.
+CREATE FUNCTION upsert_keyed_event(p_bucket int, p_id int) RETURNS void LANGUAGE sql BEGIN ATOMIC
+    INSERT INTO keyed_events (bucket, id) VALUES (p_bucket, p_id) ON CONFLICT ON CONSTRAINT keyed_events_pkey DO NOTHING;
+END;
 `
 	for _, constraintType := range []string{"UNIQUE", "PRIMARY KEY"} {
 		for _, multiFile := range []bool{false, true} {

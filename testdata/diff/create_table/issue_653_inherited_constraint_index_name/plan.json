@@ -51,12 +51,6 @@
           "path": "public.events_leaf.events_leaf_id_idx"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS leaf_notes (\n    event_id integer NOT NULL\n);",
-          "type": "table",
-          "operation": "create",
-          "path": "public.leaf_notes"
-        },
-        {
           "sql": "ALTER TABLE ONLY events ADD CONSTRAINT events_pkey PRIMARY KEY (id);",
           "type": "table.constraint",
           "operation": "create",
@@ -139,6 +133,18 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.events.events_region_id_key"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS leaf_notes (\n    event_id integer NOT NULL\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.leaf_notes"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION upsert_event(\n    p_id integer,\n    p_region text\n)\nRETURNS void\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n INSERT INTO public.events (id, region)\n   VALUES (upsert_event.p_id, upsert_event.p_region) ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET region = excluded.region;\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.upsert_event"
         },
         {
           "sql": "CREATE INDEX IF NOT EXISTS events_archive_id_idx ON ONLY events_archive (id);",

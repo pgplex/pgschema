@@ -590,6 +590,7 @@ func generateCreateTablesSQL(
 		}
 
 		createdTables[fmt.Sprintf("%s.%s", table.Schema, table.Name)] = true
+		partitionIndexes.tableCreated(table, targetSchema, collector)
 	}
 
 	return deferredPolicies, deferredConstraints

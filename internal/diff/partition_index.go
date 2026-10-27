@@ -119,6 +119,14 @@ type partitionIndexCreationPlan struct {
 	// partitions lists the added partitions of each table key, in name order.
 	partitions map[string][]*ir.Table
 	tables     map[string]*ir.Table
+	// roots maps each table of a hierarchy with postponed constraints to the
+	// hierarchy's root key, so the whole hierarchy is created in one batch.
+	roots map[string]string
+	// created and emitted track creation progress so each constraint family
+	// is added as soon as its last partition exists, ahead of SQL functions
+	// whose bodies depend on the key.
+	created map[string]bool
+	emitted map[string]map[string]bool
 }
 
 func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[string]*ir.Table, dump bool) *partitionIndexCreationPlan {
@@ -128,6 +136,9 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 		uniqueTables: make(map[string]bool),
 		constraints:  make(map[string]map[string]bool),
 		partitions:   make(map[string][]*ir.Table),
+		roots:        make(map[string]string),
+		created:      make(map[string]bool),
+		emitted:      make(map[string]map[string]bool),
 	}
 	added := make(map[string]*ir.Table)
 	available := availablePartitionIndexes(addedTables)
@@ -228,6 +239,25 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 			plan.markUniqueTables(table)
 		}
 	}
+	for key := range plan.constraints {
+		root := key
+		for {
+			table := added[root]
+			if table == nil || table.PartitionOf == "" {
+				break
+			}
+			parentSchema := table.PartitionOfSchema
+			if parentSchema == "" {
+				parentSchema = table.Schema
+			}
+			parentKey := parentSchema + "." + table.PartitionOf
+			if added[parentKey] == nil {
+				break
+			}
+			root = parentKey
+		}
+		plan.markHierarchy(added[root], root)
+	}
 	for parent, index := range plan.indexes {
 		plan.children[parent] = make(map[ir.IndexRef]bool)
 		for _, child := range index.AttachedPartitions {
@@ -282,6 +312,23 @@ func (p *partitionIndexCreationPlan) inheritedNamesKnown(table *ir.Table, constr
 	return true
 }
 
+func (p *partitionIndexCreationPlan) markHierarchy(table *ir.Table, root string) {
+	key := table.Schema + "." + table.Name
+	p.roots[key] = root
+	for _, child := range p.partitions[key] {
+		p.markHierarchy(child, root)
+	}
+}
+
+// hierarchyRoot returns the root key of a hierarchy with postponed
+// constraints, or "" for any other table.
+func (p *partitionIndexCreationPlan) hierarchyRoot(table *ir.Table) string {
+	if p == nil {
+		return ""
+	}
+	return p.roots[table.Schema+"."+table.Name]
+}
+
 func (p *partitionIndexCreationPlan) markUniqueTables(table *ir.Table) {
 	key := table.Schema + "." + table.Name
 	p.uniqueTables[key] = true
@@ -299,15 +346,38 @@ func (p *partitionIndexCreationPlan) defersConstraint(table *ir.Table, constrain
 	return p.constraints[table.Schema+"."+table.Name][constraint.Name]
 }
 
-// generateDeferredConstraintSQL adds the postponed PRIMARY KEY and UNIQUE
-// constraints once every partition exists. ONLY keeps PostgreSQL from creating
-// partition copies under generated names; each copy is added under its catalog
-// name and attached explicitly. One step carries the whole family so the
-// statements stay together in plans and multi-file dumps.
+// tableCreated records that the table's CREATE TABLE was emitted and adds the
+// postponed constraints of every family that is now complete. Emitting them
+// here, inside the table batch, keeps them ahead of SQL functions created
+// after the batch whose bodies depend on the key (ON CONFLICT ON CONSTRAINT,
+// GROUP BY functional dependency).
+func (p *partitionIndexCreationPlan) tableCreated(table *ir.Table, targetSchema string, collector *diffCollector) {
+	if p == nil {
+		return
+	}
+	p.created[table.Schema+"."+table.Name] = true
+	if p.hierarchyRoot(table) == "" {
+		return
+	}
+	p.generateReadyConstraintSQL(targetSchema, collector, false)
+}
+
+// generateDeferredConstraintSQL adds any postponed constraint family not yet
+// emitted by tableCreated.
 func (p *partitionIndexCreationPlan) generateDeferredConstraintSQL(targetSchema string, collector *diffCollector) {
 	if p == nil {
 		return
 	}
+	p.generateReadyConstraintSQL(targetSchema, collector, true)
+}
+
+// generateReadyConstraintSQL adds the postponed PRIMARY KEY and UNIQUE
+// constraints of each family whose table and partitions all exist (or of every
+// remaining family when flush is set). ONLY keeps PostgreSQL from creating
+// partition copies under generated names; each copy is added under its catalog
+// name and attached explicitly. One step carries the whole family so the
+// statements stay together in plans and multi-file dumps.
+func (p *partitionIndexCreationPlan) generateReadyConstraintSQL(targetSchema string, collector *diffCollector, flush bool) {
 	keys := make([]string, 0, len(p.constraints))
 	for key := range p.constraints {
 		keys = append(keys, key)
@@ -315,7 +385,17 @@ func (p *partitionIndexCreationPlan) generateDeferredConstraintSQL(targetSchema 
 	sort.Strings(keys)
 	for _, key := range keys {
 		table := p.tables[key]
+		if !flush && !p.hierarchyCreated(table) {
+			continue
+		}
 		for _, name := range sortedKeys(p.constraints[key]) {
+			if p.emitted[key][name] {
+				continue
+			}
+			if p.emitted[key] == nil {
+				p.emitted[key] = make(map[string]bool)
+			}
+			p.emitted[key][name] = true
 			constraint := table.Constraints[name]
 			var statements []SQLStatement
 			p.appendConstraintFamily(&statements, table, constraint, targetSchema, collector.qualifySchema)
@@ -326,6 +406,21 @@ func (p *partitionIndexCreationPlan) generateDeferredConstraintSQL(targetSchema 
 			}, statements)
 		}
 	}
+}
+
+// hierarchyCreated reports whether the table and every partition below it
+// have been created.
+func (p *partitionIndexCreationPlan) hierarchyCreated(table *ir.Table) bool {
+	key := table.Schema + "." + table.Name
+	if !p.created[key] {
+		return false
+	}
+	for _, child := range p.partitions[key] {
+		if !p.hierarchyCreated(child) {
+			return false
+		}
+	}
+	return true
 }
 
 // appendConstraintFamily adds the constraint to its table with ONLY, then each

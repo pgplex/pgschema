@@ -38,3 +38,12 @@ CREATE TABLE event_notes (
     event_id integer NOT NULL REFERENCES events (id),
     note text
 );
+
+-- A SQL-standard function body is validated at creation and needs the key,
+-- so the dump adds the constraints before functions that use the table.
+CREATE FUNCTION upsert_event(p_id integer, p_region text) RETURNS void
+LANGUAGE sql
+BEGIN ATOMIC
+    INSERT INTO events (id, region) VALUES (p_id, p_region)
+    ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET region = EXCLUDED.region;
+END;

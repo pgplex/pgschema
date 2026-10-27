@@ -2020,12 +2020,39 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	tablesWithDeps := []*ir.Table{}
 	tablesAfterTableDomains := []*ir.Table{}
 
-	for _, table := range d.addedTables {
+	tableBatch := func(table *ir.Table) int {
 		if tableUsesDeferredDomain(table, tableDomainLookup) {
+			return 2
+		}
+		if tableReferencesNewFunction(table, newFunctionLookup) || tableUsesDeferredDomain(table, functionDomainLookup) {
+			return 1
+		}
+		return 0
+	}
+	batches := make(map[string]int, len(d.addedTables))
+	// A hierarchy whose keys are postponed until its last partition exists
+	// (issue #653) is created in one batch, the latest any member needs, so
+	// its keys still precede the functions scheduled after that batch.
+	hierarchyBatch := make(map[string]int)
+	for _, table := range d.addedTables {
+		key := table.Schema + "." + table.Name
+		batches[key] = tableBatch(table)
+		if root := d.partitionIndexes.hierarchyRoot(table); root != "" && batches[key] > hierarchyBatch[root] {
+			hierarchyBatch[root] = batches[key]
+		}
+	}
+	for _, table := range d.addedTables {
+		key := table.Schema + "." + table.Name
+		batch := batches[key]
+		if root := d.partitionIndexes.hierarchyRoot(table); root != "" {
+			batch = hierarchyBatch[root]
+		}
+		switch batch {
+		case 2:
 			tablesAfterTableDomains = append(tablesAfterTableDomains, table)
-		} else if tableReferencesNewFunction(table, newFunctionLookup) || tableUsesDeferredDomain(table, functionDomainLookup) {
+		case 1:
 			tablesWithDeps = append(tablesWithDeps, table)
-		} else {
+		default:
 			tablesWithoutDeps = append(tablesWithoutDeps, table)
 		}
 	}
@@ -2153,7 +2180,8 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		generateSequenceComment(seq, targetSchema, DiffOperationCreate, collector)
 	}
 
-	// Postponed PRIMARY KEY and UNIQUE constraints of partitioned tables come
+	// Postponed PRIMARY KEY and UNIQUE constraints are normally added inside
+	// the table batches as each hierarchy completes; any remaining family comes
 	// before the standalone partitioned indexes, which may attach to them.
 	d.partitionIndexes.generateDeferredConstraintSQL(targetSchema, collector)
 	d.partitionIndexes.generateSQL(targetSchema, collector)

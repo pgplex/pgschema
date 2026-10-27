@@ -104,6 +104,18 @@ ALTER TABLE ONLY public.events
 
 
 --
+-- Name: upsert_event(integer, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.upsert_event(p_id integer, p_region text) RETURNS void
+    LANGUAGE sql
+    BEGIN ATOMIC
+ INSERT INTO public.events (id, region)
+   VALUES (upsert_event.p_id, upsert_event.p_region) ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET region = excluded.region;
+END;
+
+
+--
 -- Name: events_archive events_archive_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 

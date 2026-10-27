@@ -85,6 +85,22 @@ ALTER TABLE ONLY events_leaf ADD CONSTRAINT events_leaf_region_id_key UNIQUE (re
 ALTER INDEX events_region_id_key ATTACH PARTITION events_leaf_region_id_key;
 
 --
+-- Name: upsert_event(integer, text); Type: FUNCTION; Schema: -; Owner: -
+--
+
+CREATE OR REPLACE FUNCTION upsert_event(
+    p_id integer,
+    p_region text
+)
+RETURNS void
+LANGUAGE sql
+VOLATILE
+BEGIN ATOMIC
+ INSERT INTO events (id, region)
+   VALUES (upsert_event.p_id, upsert_event.p_region) ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET region = excluded.region;
+END;
+
+--
 -- Name: events_archive_id_idx; Type: INDEX; Schema: -; Owner: -
 --
 

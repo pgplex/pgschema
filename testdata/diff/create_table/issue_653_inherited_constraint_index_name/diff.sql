@@ -18,10 +18,6 @@ CREATE TABLE IF NOT EXISTS events_leaf PARTITION OF events FOR VALUES FROM (0) T
 
 CREATE INDEX IF NOT EXISTS events_leaf_id_idx ON events_leaf (id);
 
-CREATE TABLE IF NOT EXISTS leaf_notes (
-    event_id integer NOT NULL
-);
-
 ALTER TABLE ONLY events ADD CONSTRAINT events_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY events_archive ADD CONSTRAINT events_archive_pkey PRIMARY KEY (id);
@@ -49,6 +45,22 @@ ALTER INDEX events_region_id_key ATTACH PARTITION events_archive_region_id_key;
 ALTER TABLE ONLY events_leaf ADD CONSTRAINT events_leaf_region_id_key UNIQUE (region, id);
 
 ALTER INDEX events_region_id_key ATTACH PARTITION events_leaf_region_id_key;
+
+CREATE TABLE IF NOT EXISTS leaf_notes (
+    event_id integer NOT NULL
+);
+
+CREATE OR REPLACE FUNCTION upsert_event(
+    p_id integer,
+    p_region text
+)
+RETURNS void
+LANGUAGE sql
+VOLATILE
+BEGIN ATOMIC
+ INSERT INTO events (id, region)
+   VALUES (upsert_event.p_id, upsert_event.p_region) ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET region = excluded.region;
+END;
 
 CREATE INDEX IF NOT EXISTS events_archive_id_idx ON ONLY events_archive (id);
 
