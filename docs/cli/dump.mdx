@@ -270,9 +270,13 @@ Instead, `pgschema` adds the constraint after the tables with
 `ALTER TABLE ONLY ... ADD CONSTRAINT`, adds each partition's copy under its
 original name the same way, and attaches the copies with
 `ALTER INDEX ... ATTACH PARTITION`. Multi-file dumps write each constraint and
-its copies under `constraints/`, such as `constraints/0001_events.sql`. Row-level
-security policies on such a table follow its constraints, under `policies/` in
-multi-file dumps, because a policy expression may rely on the key.
+its copies under `constraints/`, such as `constraints/0001_events.sql`.
+
+A row-level security policy that must wait for other objects, because it refers
+to another new table or function or because its table's keys are added after
+the tables, is created after them. Multi-file dumps keep such a policy at that
+position under `policies/`, such as `policies/0001_events.sql`, rather than in
+its table's file.
 
 Each individual file (e.g., `tables/users.sql`) contains the specific object definition:
 ```sql

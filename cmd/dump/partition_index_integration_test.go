@@ -98,10 +98,19 @@ END;
 CREATE FUNCTION count_keyed_events() RETURNS text LANGUAGE sql BEGIN ATOMIC
     SELECT count(*)::text FROM keyed_events;
 END;
-CREATE TABLE keyed_events_rest PARTITION OF keyed_events (note DEFAULT count_keyed_events()) DEFAULT;
--- A policy expression relying on the key follows the postponed constraints.
+CREATE FUNCTION count_keyed_events_text() RETURNS text LANGUAGE sql BEGIN ATOMIC
+    SELECT count_keyed_events();
+END;
+CREATE TABLE keyed_events_rest PARTITION OF keyed_events (note DEFAULT count_keyed_events_text()) DEFAULT;
+CREATE PROCEDURE upsert_keyed_event_proc(p_bucket int, p_id int) LANGUAGE sql BEGIN ATOMIC
+    INSERT INTO keyed_events (bucket, id) VALUES (p_bucket, p_id) ON CONFLICT ON CONSTRAINT keyed_events_pkey DO NOTHING;
+END;
+-- A policy expression relying on the key follows the postponed constraints,
+-- on the keyed table and on a table that references it.
 ALTER TABLE keyed_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY keyed_events_grouped ON keyed_events USING (EXISTS (SELECT note FROM keyed_events GROUP BY bucket, id));
+ALTER TABLE keyed_links ENABLE ROW LEVEL SECURITY;
+CREATE POLICY keyed_links_grouped ON keyed_links USING (EXISTS (SELECT note FROM keyed_events GROUP BY bucket, id));
 `
 	for _, constraintType := range []string{"UNIQUE", "PRIMARY KEY"} {
 		for _, multiFile := range []bool{false, true} {

@@ -21,13 +21,31 @@
           "path": "public.events"
         },
         {
+          "sql": "CREATE TABLE IF NOT EXISTS event_notes (\n    event_id integer NOT NULL,\n    note text\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.event_notes"
+        },
+        {
+          "sql": "ALTER TABLE event_notes ENABLE ROW LEVEL SECURITY;",
+          "type": "table.rls",
+          "operation": "alter",
+          "path": "public.event_notes"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION count_events()\nRETURNS text\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n SELECT (count(*))::text AS count\n    FROM public.events;\nEND;",
           "type": "function",
           "operation": "create",
           "path": "public.count_events"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS events_leaf PARTITION OF events (\n    payload DEFAULT count_events()\n) FOR VALUES FROM (0) TO (10);",
+          "sql": "CREATE OR REPLACE FUNCTION count_events_text()\nRETURNS text\nLANGUAGE sql\nVOLATILE\nBEGIN ATOMIC\n SELECT public.count_events() AS count_events;\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_events_text"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS events_leaf PARTITION OF events (\n    payload DEFAULT count_events_text()\n) FOR VALUES FROM (0) TO (10);",
           "type": "table",
           "operation": "create",
           "path": "public.events_leaf"
@@ -55,6 +73,24 @@
           "type": "function",
           "operation": "create",
           "path": "public.upsert_event"
+        },
+        {
+          "sql": "CREATE OR REPLACE PROCEDURE upsert_event_proc(\n    IN p_id integer,\n    IN p_payload text\n)\nLANGUAGE sql\nBEGIN ATOMIC\n INSERT INTO public.events (id, payload)\n   VALUES (upsert_event_proc.p_id, upsert_event_proc.p_payload) ON CONFLICT ON CONSTRAINT events_pkey DO UPDATE SET payload = excluded.payload;\nEND;",
+          "type": "procedure",
+          "operation": "create",
+          "path": "public.upsert_event_proc"
+        },
+        {
+          "sql": "ALTER TABLE event_notes\nADD CONSTRAINT event_notes_event_id_fkey FOREIGN KEY (event_id) REFERENCES events (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.event_notes.event_notes_event_id_fkey"
+        },
+        {
+          "sql": "CREATE POLICY event_notes_grouped ON event_notes TO PUBLIC USING (EXISTS ( SELECT events.payload FROM events GROUP BY events.id));",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.event_notes.event_notes_grouped"
         },
         {
           "sql": "CREATE POLICY events_grouped ON events TO PUBLIC USING (EXISTS ( SELECT events_1.payload FROM events events_1 GROUP BY events_1.id));",

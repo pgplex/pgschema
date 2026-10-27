@@ -96,30 +96,13 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	partitionIndexFiles := make(map[indexKey]fileKey)
 	var tables []*ir.Table
 	var views []*ir.View
-	// Tables whose PRIMARY KEY or UNIQUE constraints were emitted as separate
-	// steps after the tables (partitioned tables, issue #653), with the tables
-	// seen so far for walking a partition up to such a table.
-	keyedTables := make(map[string]bool)
-	tablesByKey := make(map[string]*ir.Table)
-	policyIndex := 0
-	policyFollowsKeys := func(policy *ir.RLSPolicy) bool {
-		key := policy.Schema + "." + policy.Table
-		for key != "" {
-			if keyedTables[key] {
-				return true
-			}
-			table := tablesByKey[key]
-			if table == nil || table.PartitionOf == "" {
-				return false
-			}
-			parentSchema := table.PartitionOfSchema
-			if parentSchema == "" {
-				parentSchema = table.Schema
-			}
-			key = parentSchema + "." + table.PartitionOf
-		}
-		return false
-	}
+	// A policy the diff emits apart from its table, because it needs other
+	// tables, functions or postponed keys (issue #653) first, keeps that
+	// position in its own file instead of moving back into the table file
+	// ahead of what it needs. Inline policies directly follow their table's
+	// statements, so the previous step's file tells the two apart.
+	policyFiles := make(map[string]fileKey)
+	var prevKey fileKey
 
 	for _, step := range diffs {
 		var dir string
@@ -139,15 +122,14 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
 		}
 
-		if constraint, ok := step.Source.(*ir.Constraint); ok && step.Type == diff.DiffTypeTableConstraint &&
-			(constraint.Type == ir.ConstraintTypePrimaryKey || constraint.Type == ir.ConstraintTypeUnique) {
-			keyedTables[constraint.Schema+"."+constraint.Table] = true
-		}
-		if policy, ok := step.Source.(*ir.RLSPolicy); ok && step.Type == diff.DiffTypeTablePolicy && policyFollowsKeys(policy) {
-			// A policy created after its table's postponed keys stays after
-			// them instead of moving back into the table file.
-			policyIndex++
-			key = fileKey{dir: "policies", name: fmt.Sprintf("%04d_%s", policyIndex, policy.Name)}
+		if policy, ok := step.Source.(*ir.RLSPolicy); ok && step.Type == diff.DiffTypeTablePolicy && len(fileOrder) > 0 && prevKey != key {
+			tableKey := policy.Schema + "." + policy.Table
+			if existing, exists := policyFiles[tableKey]; exists {
+				key = existing
+			} else {
+				key = fileKey{dir: "policies", name: fmt.Sprintf("%04d_%s", len(policyFiles)+1, policy.Table)}
+				policyFiles[tableKey] = key
+			}
 		}
 
 		if index, ok := step.Source.(*ir.Index); ok && index.IsPartitioned &&
@@ -168,11 +150,11 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			fileOrder = append(fileOrder, key)
 		}
 		stepsByFile[key] = append(stepsByFile[key], step)
+		prevKey = key
 
 		switch src := step.Source.(type) {
 		case *ir.Table:
 			tables = append(tables, src)
-			tablesByKey[src.Schema+"."+src.Name] = src
 		case *ir.View:
 			views = append(views, src)
 		}
@@ -194,11 +176,38 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 		}
 	}
 	relations := diff.RelationLookup(tables, views)
+	hoisted := make(map[fileKey]bool)
+	for _, key := range fileOrder[firstTable:] {
+		if key.dir == "functions" && !f.functionFileReferencesRelation(stepsByFile[key], relations) {
+			hoisted[key] = true
+		}
+	}
+	// A SQL function is resolved against the functions it calls when it is
+	// created, so its file is hoisted only if every callee's file is too.
+	for changed := true; changed; {
+		changed = false
+		var staying []*ir.Function
+		for _, key := range fileOrder[firstTable:] {
+			if key.dir == "functions" && !hoisted[key] {
+				staying = append(staying, functionsIn(stepsByFile[key])...)
+			}
+		}
+		lookup := diff.FunctionLookup(staying)
+		for key := range hoisted {
+			for _, fn := range functionsIn(stepsByFile[key]) {
+				if diff.SQLFunctionCallsFunction(fn, lookup) {
+					delete(hoisted, key)
+					changed = true
+					break
+				}
+			}
+		}
+	}
 	orderedFiles := make([]fileKey, 0, len(fileOrder))
 	orderedFiles = append(orderedFiles, fileOrder[:firstTable]...)
 	var rest []fileKey
 	for _, key := range fileOrder[firstTable:] {
-		if key.dir == "functions" && !f.functionFileReferencesRelation(stepsByFile[key], relations) {
+		if hoisted[key] {
 			orderedFiles = append(orderedFiles, key)
 		} else {
 			rest = append(rest, key)
@@ -303,6 +312,17 @@ func (f *DumpFormatter) writeObjectFile(filePath string, diffs []diff.Diff) erro
 	}
 
 	return nil
+}
+
+// functionsIn returns the functions defined by the steps of a functions/ file.
+func functionsIn(steps []diff.Diff) []*ir.Function {
+	var functions []*ir.Function
+	for _, step := range steps {
+		if fn, ok := step.Source.(*ir.Function); ok && step.Type == diff.DiffTypeFunction {
+			functions = append(functions, fn)
+		}
+	}
+	return functions
 }
 
 // functionFileReferencesRelation reports whether any function in a functions/

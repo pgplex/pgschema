@@ -2145,7 +2145,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateTypesSQL(domainsWithFunctionDepsOnly, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
-	generateCreateProceduresSQL(d.addedProcedures, targetSchema, collector)
+	// A procedure whose body may depend on a postponed key (issue #653) waits
+	// for the batch in which that hierarchy completes, like a function.
+	proceduresNow, proceduresAfterSecondBatch, proceduresAfterThirdBatch := holdBackKeyDependentProcedures(d.partitionIndexes, batches, d.addedTables, d.addedProcedures)
+	generateCreateProceduresSQL(proceduresNow, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
 	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
@@ -2153,6 +2156,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create functions WITHOUT view deps that reference new tables (now that all tables exist)
 	// These functions query tables that were created in tablesWithDeps above (issue #530)
 	generateCreateFunctionsSQL(functionsWithTableDeps, targetSchema, collector)
+	generateCreateProceduresSQL(proceduresAfterSecondBatch, targetSchema, collector)
 
 	// Create domains whose base type is a new table's implicit row type (issue #535).
 	// Emitted after ALL other tables so the row type exists, even if the domain also
@@ -2164,6 +2168,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Create functions that reference tables in the last table batch above.
 	generateCreateFunctionsSQL(functionsAfterAllTables, targetSchema, collector)
+	generateCreateProceduresSQL(proceduresAfterThirdBatch, targetSchema, collector)
 
 	// Emit COMMENT ON SEQUENCE for sequences created implicitly via CREATE TABLE (SERIAL/BIGSERIAL).
 	// These were skipped from addedSequences but their comments must still be deployed.
@@ -3076,6 +3081,61 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 	if plan == nil || len(plan.roots) == 0 {
 		return first, second, third
 	}
+	completion, lookups := hierarchyCompletion(plan, batches, addedTables)
+	pool := append(append(append([]*ir.Function{}, first...), second...), third...)
+	needed := make(map[*ir.Function]bool)
+	for _, fn := range pool {
+		lookup := buildFunctionLookup([]*ir.Function{fn})
+		for _, table := range addedTables {
+			if tableReferencesNewFunction(table, lookup) {
+				needed[fn] = true
+				break
+			}
+		}
+		for _, domain := range domains {
+			if !needed[fn] && domainReferencesNewFunction(domain, lookup) {
+				needed[fn] = true
+			}
+		}
+	}
+	// A SQL function needed earlier is validated against the functions it
+	// calls when it is created, so those are needed earlier as well.
+	for changed := true; changed; {
+		changed = false
+		for fn := range needed {
+			if !strings.EqualFold(fn.Language, "sql") {
+				continue
+			}
+			for _, callee := range pool {
+				if !needed[callee] && referencesNewFunction(fn.Definition, fn.Schema, buildFunctionLookup([]*ir.Function{callee})) {
+					needed[callee] = true
+					changed = true
+				}
+			}
+		}
+	}
+	var result [3][]*ir.Function
+	for batch, fns := range [][]*ir.Function{first, second, third} {
+		for _, fn := range fns {
+			target := batch
+			for root, lookup := range lookups {
+				if completion[root] > target && functionReferencesNewTable(fn, lookup) {
+					target = completion[root]
+				}
+			}
+			if target != batch && needed[fn] {
+				target = batch
+			}
+			result[target] = append(result[target], fn)
+		}
+	}
+	return result[0], result[1], result[2]
+}
+
+// hierarchyCompletion returns, per hierarchy root with postponed keys, the
+// table batch in which its last partition is created, and a relation lookup
+// of its tables in the form bodyReferencesRelation expects.
+func hierarchyCompletion(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table) (map[string]int, map[string]map[string]struct{}) {
 	completion := make(map[string]int)
 	lookups := make(map[string]map[string]struct{})
 	for _, table := range addedTables {
@@ -3093,34 +3153,28 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 		lookups[root][strings.ToLower(key)] = struct{}{}
 		lookups[root][strings.ToLower(table.Name)] = struct{}{}
 	}
-	neededEarlier := func(fn *ir.Function) bool {
-		lookup := buildFunctionLookup([]*ir.Function{fn})
-		for _, table := range addedTables {
-			if tableReferencesNewFunction(table, lookup) {
-				return true
-			}
-		}
-		for _, domain := range domains {
-			if domainReferencesNewFunction(domain, lookup) {
-				return true
-			}
-		}
-		return false
+	return completion, lookups
+}
+
+// holdBackKeyDependentProcedures is the procedure counterpart of
+// holdBackKeyDependentFunctions. A SQL-standard procedure body is validated
+// at creation, so one referencing a hierarchy that completes in a later
+// table batch is created after that batch. Nothing created earlier can
+// depend on a procedure, so none is needed earlier.
+func holdBackKeyDependentProcedures(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table, procedures []*ir.Procedure) ([]*ir.Procedure, []*ir.Procedure, []*ir.Procedure) {
+	if plan == nil || len(plan.roots) == 0 {
+		return procedures, nil, nil
 	}
-	var result [3][]*ir.Function
-	for batch, fns := range [][]*ir.Function{first, second, third} {
-		for _, fn := range fns {
-			target := batch
-			for root, lookup := range lookups {
-				if completion[root] > target && functionReferencesNewTable(fn, lookup) {
-					target = completion[root]
-				}
+	completion, lookups := hierarchyCompletion(plan, batches, addedTables)
+	var result [3][]*ir.Procedure
+	for _, procedure := range procedures {
+		target := 0
+		for root, lookup := range lookups {
+			if completion[root] > target && bodyReferencesRelation(procedure.Definition, lookup) {
+				target = completion[root]
 			}
-			if target != batch && neededEarlier(fn) {
-				target = batch
-			}
-			result[target] = append(result[target], fn)
 		}
+		result[target] = append(result[target], procedure)
 	}
 	return result[0], result[1], result[2]
 }
@@ -3253,6 +3307,18 @@ func RelationLookup(tables []*ir.Table, views []*ir.View) map[string]struct{} {
 // FunctionSignatureReferencesRelation reports whether a function's return type
 // or parameter types name a relation in the lookup (see RelationLookup). Such a
 // function must be created after that relation exists.
+// FunctionLookup builds the lookup SQLFunctionCallsFunction expects.
+func FunctionLookup(functions []*ir.Function) map[string]struct{} {
+	return buildFunctionLookup(functions)
+}
+
+// SQLFunctionCallsFunction reports whether a SQL-language function's body
+// calls one of the functions in the lookup. PostgreSQL resolves such a body
+// when the function is created, so the callee must exist by then.
+func SQLFunctionCallsFunction(fn *ir.Function, functions map[string]struct{}) bool {
+	return fn != nil && strings.EqualFold(fn.Language, "sql") && referencesNewFunction(fn.Definition, fn.Schema, functions)
+}
+
 func FunctionSignatureReferencesRelation(fn *ir.Function, relations map[string]struct{}) bool {
 	return functionSignatureReferencesRelation(fn, relations)
 }
