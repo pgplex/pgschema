@@ -603,6 +603,7 @@ func (i *Inspector) buildConstraints(ctx context.Context, schema *IR, targetSche
 				Name:             constraintName,
 				Type:             cType,
 				Columns:          []*ConstraintColumn{},
+				IncludeColumns:   constraint.IncludeColumns,
 				NoInherit:        constraint.NoInherit,
 				IsTemporal:       constraint.IsPeriod.Bool,         // PG18 temporal constraint (WITHOUT OVERLAPS / PERIOD)
 				NullsNotDistinct: constraint.NullsNotDistinct.Bool, // PG15+ UNIQUE NULLS NOT DISTINCT
