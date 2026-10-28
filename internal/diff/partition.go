@@ -228,7 +228,8 @@ func parentSuppliesConstraint(supplied []*ir.Constraint, constraint *ir.Constrai
 				candidate.MatchFull != constraint.MatchFull {
 				continue
 			}
-		} else if candidate.NullsNotDistinct != constraint.NullsNotDistinct {
+		} else if candidate.NullsNotDistinct != constraint.NullsNotDistinct ||
+			!slices.Equal(candidate.IncludeColumns, constraint.IncludeColumns) {
 			continue
 		}
 		return true
