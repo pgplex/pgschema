@@ -26,7 +26,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string, quali
 		if constraint.IsTemporal && len(cols) > 0 {
 			cols[len(cols)-1] = cols[len(cols)-1] + " WITHOUT OVERLAPS"
 		}
-		return fmt.Sprintf("CONSTRAINT %s PRIMARY KEY (%s)%s", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "), deferrableClause(constraint))
+		return fmt.Sprintf("CONSTRAINT %s PRIMARY KEY (%s)%s%s", ir.QuoteIdentifier(constraint.Name), strings.Join(cols, ", "), constraintIncludeClause(constraint), deferrableClause(constraint))
 	case ir.ConstraintTypeUnique:
 		// Always include CONSTRAINT name to be explicit and consistent
 		cols := getColumnNames(constraint.Columns)
@@ -37,7 +37,7 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string, quali
 		if constraint.NullsNotDistinct {
 			modifier = " NULLS NOT DISTINCT"
 		}
-		return fmt.Sprintf("CONSTRAINT %s UNIQUE%s (%s)%s", ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(cols, ", "), deferrableClause(constraint))
+		return fmt.Sprintf("CONSTRAINT %s UNIQUE%s (%s)%s%s", ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(cols, ", "), constraintIncludeClause(constraint), deferrableClause(constraint))
 	case ir.ConstraintTypeForeignKey:
 		// Always include CONSTRAINT name to preserve explicit FK names
 		// Use QualifyEntityNameWithQuotes to add schema qualifier when referencing tables in other schemas
@@ -89,6 +89,18 @@ func generateConstraintSQL(constraint *ir.Constraint, targetSchema string, quali
 	default:
 		return ""
 	}
+}
+
+// constraintIncludeClause renders the ordered non-key columns of a PK or UNIQUE.
+func constraintIncludeClause(constraint *ir.Constraint) string {
+	if len(constraint.IncludeColumns) == 0 {
+		return ""
+	}
+	columns := make([]string, len(constraint.IncludeColumns))
+	for i, column := range constraint.IncludeColumns {
+		columns[i] = ir.QuoteIdentifier(column)
+	}
+	return " INCLUDE (" + strings.Join(columns, ", ") + ")"
 }
 
 // deferrableClause returns the " DEFERRABLE [INITIALLY DEFERRED]" suffix for a
@@ -232,6 +244,10 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 				return false
 			}
 		}
+	}
+
+	if !slices.Equal(old.IncludeColumns, new.IncludeColumns) {
+		return false
 	}
 
 	// Compare referenced columns

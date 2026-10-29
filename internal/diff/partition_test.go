@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/pgplex/pgschema/ir"
@@ -30,6 +31,8 @@ func TestParentSuppliesConstraint(t *testing.T) {
 	childPK.Name = "events_2026_01_pkey"
 	deferrablePK := childPK
 	deferrablePK.Deferrable = true
+	includedPK := childPK
+	includedPK.IncludeColumns = []string{"payload"}
 	childFK := *parentFK
 	childFK.Name = "events_2026_01_account_id_fkey"
 	setNullAllFK := childFK
@@ -43,6 +46,7 @@ func TestParentSuppliesConstraint(t *testing.T) {
 	}{
 		{"primary key copy", &childPK, true},
 		{"primary key with different deferrability", &deferrablePK, false},
+		{"primary key with different included columns", &includedPK, false},
 		{"foreign key copy", &childFK, true},
 		{"foreign key with different SET NULL column list", &setNullAllFK, false},
 		{"check constraint", checkCopy, false},
@@ -60,7 +64,7 @@ func TestParentSuppliesConstraint(t *testing.T) {
 // constraints under the names the catalog gave them, so the old state used for
 // the diff must list them; the inspected table itself is left untouched. (#639)
 func TestWithConstraintsRetainedByDetach(t *testing.T) {
-	parentPK := &ir.Constraint{Schema: "public", Table: "events", Name: "events_pkey", Type: ir.ConstraintTypePrimaryKey, Columns: constraintColumns("id", "at"), Comment: "parent comment"}
+	parentPK := &ir.Constraint{Schema: "public", Table: "events", Name: "events_pkey", Type: ir.ConstraintTypePrimaryKey, Columns: constraintColumns("id", "at"), IncludeColumns: []string{"payload", "select"}, Comment: "parent comment"}
 	parentFK := &ir.Constraint{Schema: "public", Table: "events", Name: "events_account_id_fkey", Type: ir.ConstraintTypeForeignKey, Columns: constraintColumns("account_id"), ReferencedTable: "accounts", ReferencedColumns: constraintColumns("id")}
 	parent := &ir.Table{Schema: "public", Name: "events", Constraints: map[string]*ir.Constraint{parentPK.Name: parentPK, parentFK.Name: parentFK}}
 	check := &ir.Constraint{Schema: "public", Table: "events_2026_01", Name: "events_amount_check", Type: ir.ConstraintTypeCheck}
@@ -80,7 +84,7 @@ func TestWithConstraintsRetainedByDetach(t *testing.T) {
 		t.Fatalf("got %d constraints, want 3", len(got.Constraints))
 	}
 	pk := got.Constraints["events_2026_01_pkey"]
-	if pk == nil || pk.Type != ir.ConstraintTypePrimaryKey || pk.Table != "events_2026_01" || pk.Comment != "" {
+	if pk == nil || pk.Type != ir.ConstraintTypePrimaryKey || pk.Table != "events_2026_01" || pk.Comment != "" || !slices.Equal(pk.IncludeColumns, parentPK.IncludeColumns) {
 		t.Errorf("retained primary key = %+v", pk)
 	}
 	if fk := got.Constraints["events_account_id_fkey"]; fk == nil || fk.ReferencedTable != "accounts" || fk.Table != "events_2026_01" {

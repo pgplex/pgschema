@@ -262,6 +262,7 @@ type Constraint struct {
 	Name                string              `json:"name"`
 	Type                ConstraintType      `json:"type"`
 	Columns             []*ConstraintColumn `json:"columns"`
+	IncludeColumns      []string            `json:"include_columns,omitempty"` // Ordered non-key columns of the backing index
 	ReferencedSchema    string              `json:"referenced_schema,omitempty"`
 	ReferencedTable     string              `json:"referenced_table,omitempty"`
 	ReferencedColumns   []*ConstraintColumn `json:"referenced_columns,omitempty"`
