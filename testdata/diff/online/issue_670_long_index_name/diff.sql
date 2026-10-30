@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii;
+CREATE INDEX IF NOT EXISTS iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii ON entries (b);
