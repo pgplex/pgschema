@@ -1,11 +1,8 @@
 package plan
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/ir"
@@ -163,43 +160,6 @@ func generateIndexRewrite(index *ir.Index) []RewriteStep {
 	}
 }
 
-// onlineIndexTempNameSuffix marks the index built during an online rewrite.
-const onlineIndexTempNameSuffix = "_pgschema_new"
-
-// maxIdentifierBytes is PostgreSQL's NAMEDATALEN-1: identifiers longer than this
-// are truncated by the server.
-const maxIdentifierBytes = 63
-
-// onlineIndexTempName returns the name of the index built during an online
-// rewrite of the index called name.
-//
-// Appending the suffix to a long name can exceed PostgreSQL's 63-byte
-// identifier limit. The server then truncates the candidate back to the
-// canonical name, so CREATE INDEX CONCURRENTLY IF NOT EXISTS skips the build,
-// the wait returns at once, and the final DROP/ALTER pair fails on a relation
-// that is already gone. When the suffix does not fit, the canonical part is
-// shortened and a digest of the full name takes the tail, so the candidate fits,
-// differs from the canonical name, and stays distinct for names that share a
-// long prefix.
-func onlineIndexTempName(name string) string {
-	if len(name)+len(onlineIndexTempNameSuffix) <= maxIdentifierBytes {
-		return name + onlineIndexTempNameSuffix
-	}
-	sum := sha256.Sum256([]byte(name))
-	digest := hex.EncodeToString(sum[:4]) // 8 hex characters
-	budget := maxIdentifierBytes - len(onlineIndexTempNameSuffix) - len(digest) - 1
-	stem := name
-	if len(stem) > budget {
-		stem = stem[:budget]
-		// Do not cut a multi-byte character in half: the server counts bytes,
-		// but a truncated rune would produce a name PostgreSQL rejects.
-		for len(stem) > 0 && !utf8.ValidString(stem) {
-			stem = stem[:len(stem)-1]
-		}
-	}
-	return stem + "-" + digest + onlineIndexTempNameSuffix
-}
-
 // generateIndexChangeRewriteFromIndex generates rewrite steps for index replacement when source is new index
 func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
 	// PostgreSQL rejects CREATE INDEX CONCURRENTLY on partitioned parents
@@ -210,7 +170,7 @@ func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
 	}
 
 	// For index replacements, we need to create new index, wait, drop old, rename
-	tempIndexName := onlineIndexTempName(index.Name)
+	tempIndexName := diff.OnlineIndexTempName(index.Name)
 
 	// Create temporary index with new definition
 	tempIndex := *index
@@ -253,6 +213,13 @@ func generateIndexChangeRewriteFromIndex(index *ir.Index) []RewriteStep {
 
 // generateIndexChangeRewrite generates rewrite steps for index modifications
 func generateIndexChangeRewrite(indexDiff *diff.IndexDiff) []RewriteStep {
+	// A valid candidate from an earlier rewrite already holds the desired
+	// definition. The canonical DROP/RENAME pair adopts it; a fresh concurrent
+	// build would only repeat the finished work. (#672)
+	if indexDiff.ReusedCandidate != "" {
+		return nil
+	}
+
 	// PostgreSQL rejects CREATE INDEX CONCURRENTLY on partitioned parents
 	// (SQLSTATE 0A000). Fall back to the canonical synchronous DROP/CREATE
 	// (returning nil here makes the plan emit the non-concurrent statements).
@@ -261,7 +228,7 @@ func generateIndexChangeRewrite(indexDiff *diff.IndexDiff) []RewriteStep {
 	}
 
 	// For index changes, we need to create new index, wait, drop old, rename
-	tempIndexName := onlineIndexTempName(indexDiff.New.Name)
+	tempIndexName := diff.OnlineIndexTempName(indexDiff.New.Name)
 
 	// Create temporary index with new definition
 	tempIndex := *indexDiff.New

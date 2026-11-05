@@ -1975,6 +1975,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		td.DroppedIndexes,
 		td.AddedIndexes,
 		td.ModifiedIndexes,
+		td.RecreatedColumns,
 		targetSchema,
 		DiffTypeTableIndex,
 		DiffTypeTableIndexComment,

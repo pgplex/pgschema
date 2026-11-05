@@ -321,6 +321,11 @@ type Index struct {
 	ParentIndexSchema string         `json:"parent_index_schema,omitempty"`
 	StorageParameters []string       `json:"storage_parameters,omitempty"` // WITH (fillfactor=100, ...)
 	Comment           string         `json:"comment,omitempty"`
+	// IsValid mirrors pg_index.indisvalid. A failed CREATE INDEX CONCURRENTLY
+	// leaves an invalid index behind; the plan must never adopt one as the
+	// finished candidate of an online rewrite. Inspection metadata only, not
+	// part of the managed schema or its fingerprint.
+	IsValid bool `json:"-"`
 	// AttachedPartitions records catalog attachments, including ignored children.
 	// Dump validation uses it to detect excluded dependencies. It is inspection
 	// metadata, not part of the managed schema or its fingerprint.

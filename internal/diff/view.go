@@ -352,6 +352,7 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 					diff.DroppedIndexes,
 					diff.AddedIndexes,
 					diff.ModifiedIndexes,
+					nil,
 					targetSchema,
 					DiffTypeMaterializedViewIndex,
 					DiffTypeMaterializedViewIndexComment,

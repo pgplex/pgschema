@@ -1,0 +1,15 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ entries
+    ~ entries_sort_idx (index - concurrent rebuild)
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP INDEX IF EXISTS entries_sort_idx;
+
+ALTER INDEX entries_sort_idx_pgschema_new RENAME TO entries_sort_idx;

@@ -277,7 +277,7 @@ Tests are organized by object type (150+ test cases):
 - `create_materialized_view/` (3), `create_policy/` (10), `create_procedure/` (3), `create_sequence/` (3)
 - `create_table/` (37), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
 - `default_privilege/` (9), `privilege/` (13)
-- `dependency/` (13), `online/` (14), `migrate/` (5)
+- `dependency/` (13), `online/` (16), `migrate/` (5)
 
 Each test case contains: `old.sql` (starting state), `new.sql` (desired state), `diff.sql` (expected migration DDL), plus `plan.json`, `plan.sql`, `plan.txt` (plan output formats)
 
