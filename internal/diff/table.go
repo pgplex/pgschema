@@ -152,6 +152,14 @@ func diffTriggers(oldTable, newTable *ir.Table, diff *tableDiff, recreatedColumn
 // unknown); it decides whether a generated-column expression change can use
 // SET EXPRESSION AS (PG17+) or must re-create the column (issue #591).
 func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVersion int) *tableDiff {
+	return diffTablesWithTables(oldTable, newTable, targetSchema, targetMajorVersion, nil, nil)
+}
+
+// diffTablesWithTables is diffTables with the old and new states' tables
+// (keyed by schema.name) available, which a child's inheritance parent
+// change needs to tell the columns it still gets from a retained parent
+// from the ones it gains or loses with the change (see inherit.go).
+func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVersion int, oldTables, newTables map[string]*ir.Table) *tableDiff {
 	diff := &tableDiff{
 		Table:               newTable,
 		AddedColumns:        []*ir.Column{},
@@ -184,9 +192,36 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 		newColumns[column.Name] = column
 	}
 
+	// Check for inheritance parent changes (see inherit.go). A column the
+	// child gets from a parent it keeps is the parent's to add, drop and
+	// alter; the child only sets its DEFAULT and NOT NULL. When the parents
+	// stay the same every inherited column is such a column; when they
+	// change, only those a retained parent defines.
+	diffInherits(diff, oldTable, newTable)
+	retained := retainedParents(oldTable, newTable)
+	fromRetainedParent := func(tables map[string]*ir.Table, table *ir.Table, column *ir.Column) bool {
+		if !column.IsInherited {
+			return false
+		}
+		if !diff.InheritsChanged {
+			return true
+		}
+		return parentDefinesColumn(tables, retained, column.Name)
+	}
+
 	// Find added columns
 	for name, column := range newColumns {
 		if _, exists := oldColumns[name]; !exists {
+			if fromRetainedParent(newTables, newTable, column) {
+				// The parent adds it; only a comment is the child's own, and
+				// the parent's diff re-applies the DEFAULT and NOT NULL
+				if column.Comment != "" {
+					arrived := *column
+					arrived.Comment = ""
+					diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{Old: &arrived, New: column, Inherited: true})
+				}
+				continue
+			}
 			diff.AddedColumns = append(diff.AddedColumns, column)
 		}
 	}
@@ -194,6 +229,9 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 	// Find dropped columns
 	for name, column := range oldColumns {
 		if _, exists := newColumns[name]; !exists {
+			if fromRetainedParent(oldTables, oldTable, column) {
+				continue
+			}
 			diff.DroppedColumns = append(diff.DroppedColumns, column)
 		}
 	}
@@ -204,6 +242,16 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 	recreatedColumns := make(map[string]bool)
 	for name, newColumn := range newColumns {
 		if oldColumn, exists := oldColumns[name]; exists {
+			if oldColumn.IsInherited && fromRetainedParent(newTables, newTable, newColumn) {
+				if inheritedColumnChanged(oldColumn, newColumn) {
+					diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{
+						Old:       oldColumn,
+						New:       newColumn,
+						Inherited: true,
+					})
+				}
+				continue
+			}
 			if !columnsEqual(oldColumn, newColumn, targetSchema) {
 				if generatedColumnNeedsRecreate(oldColumn, newColumn, targetMajorVersion) {
 					diff.DroppedColumns = append(diff.DroppedColumns, oldColumn)
@@ -430,7 +478,8 @@ func diffTables(oldTable, newTable *ir.Table, targetSchema string, targetMajorVe
 		len(diff.DroppedTriggers) == 0 && len(diff.ModifiedTriggers) == 0 &&
 		len(diff.AddedPolicies) == 0 && len(diff.DroppedPolicies) == 0 &&
 		len(diff.ModifiedPolicies) == 0 && len(diff.RLSChanges) == 0 &&
-		!diff.CommentChanged && !diff.PersistenceChanged && !diff.PartitionChanged {
+		!diff.CommentChanged && !diff.PersistenceChanged && !diff.PartitionChanged &&
+		!diff.InheritsChanged {
 		return nil
 	}
 
@@ -491,6 +540,7 @@ func generateCreateTablesSQL(
 	suppressedInlineFKs map[string]bool,
 	allNewTables map[string]*ir.Table,
 	partitionIndexes *partitionIndexCreationPlan,
+	parentAddedColumns map[string]map[string]bool,
 ) ([]*ir.RLSPolicy, []*deferredConstraint) {
 	var deferredPolicies []*ir.RLSPolicy
 	var deferredConstraints []*deferredConstraint
@@ -511,7 +561,14 @@ func generateCreateTablesSQL(
 			CanRunInTransaction: true, // CREATE TABLE can run in a transaction
 		}
 
-		collector.collect(context, sql)
+		// A child's local DEFAULT / NOT NULL on inherited columns belong to
+		// the same step, unless a parent still has to add the column
+		// (see inherit.go)
+		statements := []SQLStatement{{SQL: sql, CanRunInTransaction: true}}
+		for _, override := range inheritedColumnOverrideSQL(table, targetSchema, collector.qualifySchema, allNewTables, parentAddedColumns) {
+			statements = append(statements, SQLStatement{SQL: override, CanRunInTransaction: true})
+		}
+		collector.collectStatements(context, statements)
 
 		// Add table comment
 		if table.Comment != "" {
@@ -1077,12 +1134,20 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	}
 	parts = append(parts, fmt.Sprintf("%s %s (", createPrefix, tableName))
 
-	// Add columns
+	// Add columns. Inherited ones come from the parents named in INHERITS;
+	// their local DEFAULT / NOT NULL follow the CREATE TABLE, unless the
+	// child declares the column itself (see inherit.go).
 	var columnParts []string
 	for _, column := range table.Columns {
+		if column.IsInherited && !inheritedColumnDeclaredInline(table, column, allTables) {
+			continue
+		}
 		// Build column definition with SERIAL detection
 		var builder strings.Builder
 		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema, partitionIndexes)
+		if inlineDeclarationNeedsDefaultNull(table, column, allTables) {
+			builder.WriteString(" DEFAULT NULL")
+		}
 		columnParts = append(columnParts, fmt.Sprintf("    %s", builder.String()))
 	}
 
@@ -1120,9 +1185,14 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		}
 	}
 
+	// CHECK constraints the child declares as well as inherits (see inherit.go)
+	for _, def := range mergedInheritedCheckSQL(table, targetSchema, qualifySchema, allTables) {
+		columnParts = append(columnParts, fmt.Sprintf("    %s", def))
+	}
+
 	parts = append(parts, strings.Join(columnParts, ",\n"))
 
-	parts = append(parts, ")"+partitionClause+";")
+	parts = append(parts, ")"+inheritsClauseSQL(table, targetSchema, qualifySchema)+partitionClause+";")
 
 	return strings.Join(parts, "\n"), deferred
 }
@@ -1204,6 +1274,25 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 }
 
 // collectDropPolicy emits DROP POLICY for a policy of this table.
+// generateChildConstraintDropsSQL emits, right after this table dropped the
+// named CHECK constraint, the drops of the copies its inheritance children
+// also declared and therefore keep (see planInheritanceEffects).
+func (td *tableDiff) generateChildConstraintDropsSQL(name string, targetSchema string, collector *diffCollector) {
+	for _, drop := range td.ChildConstraintDrops {
+		if drop.constraint != name {
+			continue
+		}
+		childName := getTableNameWithSchema(drop.table.Schema, drop.table.Name, targetSchema)
+		collector.collect(&diffContext{
+			Type:                DiffTypeTableConstraint,
+			Operation:           DiffOperationDrop,
+			Path:                fmt.Sprintf("%s.%s.%s", drop.table.Schema, drop.table.Name, name),
+			Source:              drop.table,
+			CanRunInTransaction: true,
+		}, fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", childName, ir.QuoteIdentifier(name)))
+	}
+}
+
 func (td *tableDiff) collectDropPolicy(policy *ir.RLSPolicy, targetSchema string, collector *diffCollector) {
 	tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 	sql := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s;", ir.QuoteIdentifier(policy.Name), tableName)
@@ -1354,6 +1443,10 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 	// Drop columns - already sorted by the Diff operation
 	for _, column := range td.DroppedColumns {
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
+		// ONLY when an inheritance child keeps the column (see planInheritanceEffects)
+		if td.DropColumnOnly[column.Name] {
+			tableName = "ONLY " + tableName
+		}
 		sql := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", tableName, ir.QuoteIdentifier(column.Name))
 
 		context := &diffContext{
@@ -1492,6 +1585,20 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			}
 
 			collector.collect(context, stmt)
+		}
+	}
+
+	// Re-apply what inheritance descendants set on the columns added or
+	// changed above (see planInheritanceEffects)
+	for _, override := range td.ChildOverrides {
+		for _, stmt := range override.diff.generateColumnSQL(override.table.Schema, override.table.Name, targetSchema) {
+			collector.collect(&diffContext{
+				Type:                DiffTypeTableColumn,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s.%s", override.table.Schema, override.table.Name, override.diff.New.Name),
+				Source:              override.diff,
+				CanRunInTransaction: true,
+			}, stmt)
 		}
 	}
 
@@ -1641,6 +1748,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				CanRunInTransaction: true,
 			}
 			collector.collect(dropContext, dropSQL)
+			td.generateChildConstraintDropsSQL(ConstraintDiff.Old.Name, targetSchema, collector)
 		}
 
 		// Step 2: Add new constraint

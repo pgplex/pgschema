@@ -7,6 +7,7 @@ title: "CREATE TABLE"
 ```sql
 create_table ::= CREATE TABLE [ IF NOT EXISTS ] table_name
                  ( [ { column_definition | like_clause } [, ...] ] [ table_constraint [, ...] ] )
+                 [ INHERITS ( parent_table [, ...] ) ]
                  [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } ) ]
 
 table_name ::= [schema.]name
@@ -77,6 +78,7 @@ pgschema understands the following `CREATE TABLE` features:
   - CHECK constraints with arbitrary expressions
   - DEFERRABLE constraints with INITIALLY DEFERRED option
 - **Partitioning**: PARTITION BY RANGE, LIST, or HASH
+- **Inheritance**: INHERITS from one or more parent tables
 - **Row-level security**: RLS policies (handled separately)
 - **Indexes**: Created via separate CREATE INDEX statements
 - **Triggers**: Created via separate CREATE TRIGGER statements
@@ -143,6 +145,32 @@ CREATE TABLE IF NOT EXISTS products (
 ```
 
 **Note on SERIAL types**: pgschema automatically detects and normalizes SERIAL columns (integer types with `nextval()` defaults) to their canonical SERIAL forms (SMALLSERIAL, SERIAL, BIGSERIAL) in CREATE TABLE statements.
+
+### Inheritance
+
+A child table lists the columns and constraints it declares itself, followed by `INHERITS (...)`. Columns and CHECK constraints it only inherits are left to the parent. A DEFAULT or NOT NULL the child sets on an inherited column follows the `CREATE TABLE` as a separate statement:
+
+```sql
+CREATE TABLE IF NOT EXISTS cities (
+    name text NOT NULL,
+    population real,
+    elevation integer,
+    CONSTRAINT cities_pkey PRIMARY KEY (name),
+    CONSTRAINT cities_pop_check CHECK (population >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS capitals (
+    state character(2) NOT NULL,
+    CONSTRAINT capitals_state_check CHECK (state <> '')
+) INHERITS (cities);
+
+ALTER TABLE ONLY capitals ALTER COLUMN elevation SET DEFAULT 0;
+ALTER TABLE capitals ALTER COLUMN elevation SET NOT NULL;
+```
+
+A column or CHECK constraint the child declares as well as inherits stays in its `CREATE TABLE`, as `pg_dump` keeps it.
+
+Changes to a parent recurse to its children in PostgreSQL, so the plan applies them to the parent only; the children get no statements of their own. A table that joins or leaves a parent gets `ALTER TABLE ... INHERIT` or `ALTER TABLE ... NO INHERIT`, and `NO INHERIT` runs before any `DROP TABLE`, so removing a parent from the schema file never drops its children.
 
 ### Constraint Handling Rules
 

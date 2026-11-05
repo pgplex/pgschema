@@ -26,6 +26,7 @@ const (
 	DiffTypeTableIndexComment
 	DiffTypeTablePersistence
 	DiffTypeTablePartition
+	DiffTypeTableInherit
 	DiffTypeView
 	DiffTypeViewTrigger
 	DiffTypeViewComment
@@ -73,6 +74,8 @@ func (d DiffType) String() string {
 		return "table.persistence"
 	case DiffTypeTablePartition:
 		return "table.partition"
+	case DiffTypeTableInherit:
+		return "table.inherit"
 	case DiffTypeView:
 		return "view"
 	case DiffTypeViewTrigger:
@@ -151,6 +154,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeTablePersistence
 	case "table.partition":
 		*d = DiffTypeTablePartition
+	case "table.inherit":
+		*d = DiffTypeTableInherit
 	case "view":
 		*d = DiffTypeView
 	case "view.trigger":
@@ -209,6 +214,12 @@ const (
 	DiffOperationAttach
 	// DiffOperationDetach indicates a table detached from its partition parent.
 	DiffOperationDetach
+	// DiffOperationInherit indicates a table added to an inheritance parent
+	// (DiffTypeTableInherit).
+	DiffOperationInherit
+	// DiffOperationNoInherit indicates a table removed from an inheritance
+	// parent.
+	DiffOperationNoInherit
 )
 
 // String returns the string representation of DiffOperation
@@ -226,6 +237,10 @@ func (d DiffOperation) String() string {
 		return "attach"
 	case DiffOperationDetach:
 		return "detach"
+	case DiffOperationInherit:
+		return "inherit"
+	case DiffOperationNoInherit:
+		return "no_inherit"
 	default:
 		return "unknown"
 	}
@@ -256,6 +271,10 @@ func (d *DiffOperation) UnmarshalJSON(data []byte) error {
 		*d = DiffOperationAttach
 	case "detach":
 		*d = DiffOperationDetach
+	case "inherit":
+		*d = DiffOperationInherit
+	case "no_inherit":
+		*d = DiffOperationNoInherit
 	default:
 		return fmt.Errorf("unknown diff operation: %s", s)
 	}
@@ -288,15 +307,19 @@ type Diff struct {
 }
 
 type ddlDiff struct {
-	targetMajorVersion        int // target PostgreSQL major version, 0 if unknown (gates version-specific DDL)
-	addedSchemas              []*ir.Schema
-	droppedSchemas            []*ir.Schema
-	modifiedSchemas           []*schemaDiff
-	addedTables               []*ir.Table
-	droppedTables             []*ir.Table
-	modifiedTables            []*tableDiff
-	allNewTables              map[string]*ir.Table
-	partitionIndexes          *partitionIndexCreationPlan
+	targetMajorVersion int // target PostgreSQL major version, 0 if unknown (gates version-specific DDL)
+	addedSchemas       []*ir.Schema
+	droppedSchemas     []*ir.Schema
+	modifiedSchemas    []*schemaDiff
+	addedTables        []*ir.Table
+	droppedTables      []*ir.Table
+	modifiedTables     []*tableDiff
+	allNewTables       map[string]*ir.Table
+	partitionIndexes   *partitionIndexCreationPlan
+	// inheritanceChildEffects are the DROP COLUMN and DROP CONSTRAINT
+	// statements inheritance descendants need after their parents' drops
+	// (see inherit.go).
+	inheritanceChildEffects   inheritanceChildEffects
 	addedViews                []*ir.View
 	droppedViews              []*ir.View
 	modifiedViews             []*viewDiff
@@ -472,12 +495,33 @@ type tableDiff struct {
 	PartitionChanged     bool
 	OldPartitionOf       string
 	OldPartitionOfSchema string
+	// InheritsChanged is set when the inheritance parent list differs. The
+	// old parents name the NO INHERIT statements, the new ones (from Table)
+	// the INHERIT statements. See inherit.go.
+	InheritsChanged bool
+	OldInherits     []ir.TableRef
+	// MissingParentChecks are the CHECK constraints a new inheritance parent
+	// requires of the child and the child lacks; they are added right before
+	// the INHERIT. See inherit.go.
+	MissingParentChecks []*ir.Constraint
+	// DropColumnOnly names the dropped columns an inheritance descendant
+	// keeps, dropped with ALTER TABLE ONLY; ChildConstraintDrops are the
+	// CHECK copies children drop right after this table's DROP CONSTRAINT;
+	// ChildOverrides re-apply what descendants set on columns this table
+	// adds or changes. See planInheritanceEffects.
+	DropColumnOnly       map[string]bool
+	ChildConstraintDrops []childConstraintDrop
+	ChildOverrides       []childOverride
 }
 
 // ColumnDiff represents changes to a column
 type ColumnDiff struct {
 	Old *ir.Column
 	New *ir.Column
+	// Inherited is set when the column comes from an inheritance parent the
+	// child keeps: only its DEFAULT, NOT NULL and generation expression are
+	// changed, the default with ALTER TABLE ONLY (see inherit.go).
+	Inherited bool
 }
 
 // ConstraintDiff represents changes to a constraint
@@ -701,9 +745,17 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				if oldTable.PartitionOf != "" && partitionChanged(oldTable, newTable) {
 					oldTable = withConstraintsRetainedByDetach(oldTable, oldTables)
 				}
-				if tableDiff := diffTables(oldTable, newTable, targetSchema, diff.targetMajorVersion); tableDiff != nil {
+				// Likewise, a child leaving an inheritance parent keeps the
+				// CHECK constraints it shared with it (see inherit.go)
+				if len(oldTable.Inherits) > 0 && !inheritsEqual(oldTable.Inherits, newTable.Inherits) {
+					oldTable = withConstraintsRetainedByNoInherit(oldTable, newTable, oldTables)
+				}
+				if tableDiff := diffTablesWithTables(oldTable, newTable, targetSchema, diff.targetMajorVersion, oldTables, newTables); tableDiff != nil {
 					if tableDiff.PartitionChanged && newTable.PartitionOf != "" {
 						tableDiff.keepConstraintsAdoptedByAttach(newTables)
+					}
+					if tableDiff.InheritsChanged {
+						tableDiff.reconcileConstraintsForInherit(oldTable, newTables)
 					}
 					diff.modifiedTables = append(diff.modifiedTables, tableDiff)
 				}
@@ -712,6 +764,9 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	}
 
 	diff.allNewTables = newTables
+
+	// What a parent's column changes do to its inheritance children (see inherit.go)
+	diff.inheritanceChildEffects = planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
 
 	// Columns re-created by this migration, keyed by schema.table (issue #591)
 	recreatedColumnsByTable := collectRecreatedColumns(diff.modifiedTables)
@@ -1663,7 +1718,8 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// This ensures that UNIQUE/PK constraints are added before FKs that reference them
 	// Pre-sort by name to ensure deterministic insertion order for cycle breaking
 	sortModifiedTables(diff.modifiedTables)
-	diff.modifiedTables = topologicallySortModifiedTables(diff.modifiedTables)
+	var cutFKs []*deferredConstraint
+	diff.modifiedTables, cutFKs = topologicallySortModifiedTables(diff.modifiedTables, newTables)
 
 	// Sort individual table objects (indexes, triggers, policies, constraints) within each table
 	sortTableObjects(diff.modifiedTables)
@@ -1671,6 +1727,15 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// Detect foreign keys bound to unique/PK constraints being replaced; they
 	// must be dropped before and recreated after the replacement (issue #439)
 	diff.fkPreDrops, diff.fkPostAdds, diff.suppressedInlineFKs = planFKRecreationForReplacedConstraints(diff.modifiedTables, diff.addedTables, oldTables, newTables)
+	// Foreign keys whose ordering edge was cut to keep an inheritance child
+	// after its parent are created in the post-add step as well
+	for _, fk := range cutFKs {
+		if diff.suppressedInlineFKs == nil {
+			diff.suppressedInlineFKs = make(map[string]bool)
+		}
+		diff.suppressedInlineFKs[constraintPathKey(fk.constraint)] = true
+		diff.fkPostAdds = append(diff.fkPostAdds, fk)
+	}
 
 	// A brand new SERIAL column/table can be adopting a sequence that already
 	// exists in the old state (issue #573): PostgreSQL's SERIAL shorthand
@@ -2064,8 +2129,21 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 	batches := make(map[string]int, len(d.addedTables))
 	for _, table := range d.addedTables {
+		batches[table.Schema+"."+table.Name] = tableBatch(table)
+	}
+	// An inheritance child cannot precede its parent: it goes in the
+	// parent's batch when that is later than its own. addedTables lists
+	// parents before children, so one pass reaches every level.
+	for _, table := range d.addedTables {
 		key := table.Schema + "." + table.Name
-		batches[key] = tableBatch(table)
+		for _, parent := range table.Inherits {
+			if batch, ok := batches[parent.Schema+"."+parent.Name]; ok && batch > batches[key] {
+				batches[key] = batch
+			}
+		}
+	}
+	for _, table := range d.addedTables {
+		key := table.Schema + "." + table.Name
 		switch batches[key] {
 		case 2:
 			tablesAfterTableDomains = append(tablesAfterTableDomains, table)
@@ -2077,7 +2155,8 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
-	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
+	parentAddedColumns := addedParentColumns(d.modifiedTables)
+	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -2184,7 +2263,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateProceduresSQL(proceduresNow, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
-	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
+	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
 
 	// Create functions WITHOUT view deps that reference new tables (now that all tables exist)
 	// These functions query tables that were created in tablesWithDeps above (issue #530)
@@ -2197,7 +2276,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
-	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
+	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
 
 	// Create functions that reference tables in the last table batch above.
 	generateCreateFunctionsSQL(functionsAfterAllTables, targetSchema, collector)
@@ -2350,6 +2429,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Modify tables
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, d.suppressedInlineFKs, targetSchema, collector)
 
+	// Columns inheritance descendants drop once every parent has (see inherit.go)
+	generateInheritanceChildDropsSQL(d.inheritanceChildEffects, targetSchema, collector)
+
 	// Attach OWNED BY for explicitly created sequences whose owning column was
 	// created by this migration, either with a new table (create phase) or by
 	// ALTER TABLE ... ADD COLUMN just above. The sequence itself was created
@@ -2365,6 +2447,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// (see partition.go). This precedes the deferred foreign keys because some
 	// of them reference a key the attached table gains from its parent.
 	generateAttachPartitionsSQL(d.modifiedTables, targetSchema, collector)
+
+	// Likewise for tables joining an inheritance parent (see inherit.go)
+	generateInheritSQL(d.modifiedTables, targetSchema, collector)
 
 	// (Re)create the dependent foreign keys now that the replacement constraints exist
 	generateDeferredConstraintsSQL(d.fkPostAdds, targetSchema, collector)
@@ -2499,6 +2584,9 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Detach partitions that leave their parent, before the parent may be
 	// dropped and before any partition is created (see partition.go)
 	generateDetachPartitionsSQL(d.modifiedTables, targetSchema, collector)
+
+	// Likewise for tables leaving an inheritance parent (see inherit.go)
+	generateNoInheritSQL(d.modifiedTables, targetSchema, collector)
 
 	// Drop tables
 	generateDropTablesSQL(d.droppedTables, targetSchema, collector)

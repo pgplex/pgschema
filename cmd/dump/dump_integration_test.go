@@ -180,6 +180,13 @@ func TestDumpCommand_Issue653InheritedConstraintIndexName(t *testing.T) {
 	runExactMatchTest(t, "issue_653_inherited_constraint_index_name")
 }
 
+func TestDumpCommand_Inherits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "inherits")
+}
+
 func TestDumpCommand_Issue421QuotedFKColumns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

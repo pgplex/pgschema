@@ -836,6 +836,12 @@ func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 					continue
 				}
 
+				// Inheritance parent changes: likewise a modification of the table
+				if subRes.subType == diff.DiffTypeTableInherit.String() {
+					fmt.Fprintf(summary, "    %s %s (%s)\n", c.PlanSymbol("change"), objectName, strings.ReplaceAll(subRes.operation, "_", " "))
+					continue
+				}
+
 				// Handle online index replacement display
 				if subRes.subType == diff.DiffTypeTableIndex.String() && subRes.operation == diff.DiffOperationAlter.String() {
 					subSymbol := c.PlanSymbol("change")

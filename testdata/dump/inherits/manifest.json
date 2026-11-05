@@ -1,0 +1,9 @@
+{
+  "name": "inherits",
+  "description": "Regular table inheritance (CREATE TABLE ... INHERITS): single and multiple parents, a merged column, local DEFAULT and NOT NULL on inherited columns, a child-only CHECK and index, and a NO INHERIT CHECK on the parent",
+  "notes": [
+    "A child prints only the columns it declares itself, followed by INHERITS (...); columns it shares with a parent are left to the parent, as in pg_dump.",
+    "A DEFAULT or NOT NULL the child sets on an inherited column, whether through ALTER TABLE ONLY or by declaring the column again, is rendered as ALTER TABLE ONLY child ALTER COLUMN after the CREATE TABLE.",
+    "CHECK constraints a child shares with a parent are not printed on the child: CREATE TABLE ... INHERITS recreates them. A NO INHERIT CHECK on the parent is not shared."
+  ]
+}

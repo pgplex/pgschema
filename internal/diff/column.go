@@ -11,6 +11,9 @@ import (
 func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSchema string) []string {
 	var statements []string
 	qualifiedTableName := getTableNameWithSchema(tableSchema, tableName, targetSchema)
+	if cd.Inherited {
+		return cd.generateInheritedColumnSQL(qualifiedTableName)
+	}
 
 	// Handle data type changes - normalize types by stripping target schema prefix.
 	// Base type names (without modifiers) drive cast-compatibility decisions,
@@ -142,6 +145,53 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	}
 
 	return statements
+}
+
+// generateInheritedColumnSQL generates the modifications a child table may
+// make to a column it inherits: its DEFAULT, with ALTER TABLE ONLY so it
+// stays on the child, and its NOT NULL (see inherit.go). The remaining
+// differences of such a column are the parent's to change, and recurse from
+// there.
+func (cd *ColumnDiff) generateInheritedColumnSQL(qualifiedTableName string) []string {
+	var statements []string
+	tableName := "ONLY " + qualifiedTableName
+	column := ir.QuoteIdentifier(cd.New.Name)
+	// A child may give an inherited generated column its own expression;
+	// SET EXPRESSION AS (PostgreSQL 17+) changes it in place, with ONLY so
+	// the child's own children keep theirs.
+	if cd.Old.IsGenerated && cd.New.IsGenerated && generatedExpr(cd.Old) != generatedExpr(cd.New) {
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET EXPRESSION AS (%s);", tableName, column, generatedExpr(cd.New)))
+	}
+	if cd.Old.IsNullable != cd.New.IsNullable {
+		if cd.New.IsNullable {
+			statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL;", qualifiedTableName, column))
+		} else {
+			statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;", qualifiedTableName, column))
+		}
+	} else if !cd.New.IsNullable && cd.Old.InvalidNotNullConstraint != "" {
+		// Finish a NOT NULL constraint left NOT VALID by an interrupted online
+		// apply (PostgreSQL 18+, issue #564), as the ordinary column path does
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s VALIDATE CONSTRAINT %s;", qualifiedTableName, ir.QuoteIdentifier(cd.Old.InvalidNotNullConstraint)))
+	}
+	oldDefault, newDefault := columnDefault(cd.Old), columnDefault(cd.New)
+	switch {
+	case newDefault != "" && newDefault != oldDefault:
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;", tableName, column, newDefault))
+	case newDefault == "" && oldDefault != "":
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;", tableName, column))
+	}
+	return statements
+}
+
+// inheritedColumnChanged reports whether the parts of an inherited column a
+// child controls differ: DEFAULT, NOT NULL (including one still awaiting
+// validation, issue #564), the generation expression and the comment.
+func inheritedColumnChanged(old, new *ir.Column) bool {
+	return old.IsNullable != new.IsNullable ||
+		(!new.IsNullable && old.InvalidNotNullConstraint != "") ||
+		columnDefault(old) != columnDefault(new) ||
+		generatedExpr(old) != generatedExpr(new) ||
+		old.Comment != new.Comment
 }
 
 // needsUsingClause determines if a type conversion requires a USING clause.
