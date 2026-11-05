@@ -264,16 +264,36 @@ func generateIndexModifications(
 
 	// A replacement whose candidate already exists, valid and matching the
 	// desired definition, is resumed: the candidate is renamed into place
-	// instead of being dropped and rebuilt. (#672)
-	reusedCandidates := make(map[string]*ir.Index)
-	candidateNames := make(map[string]string, len(onlineReplacements))
-	for indexName := range onlineReplacements {
-		candidateNames[OnlineIndexTempName(indexName)] = indexName
+	// instead of being dropped and rebuilt. Table replacements arrive as
+	// dropped/added pairs, materialized view replacements as structurally
+	// changed modifiedIndexes; both are rewritten online. (#672)
+	replacements := make(map[string]*ir.Index, len(onlineReplacements))
+	for indexName, newIndex := range onlineReplacements {
+		replacements[indexName] = newIndex
 	}
+	for _, indexDiff := range modifiedIndexes {
+		if !indexesStructurallyEqual(indexDiff.Old, indexDiff.New) {
+			replacements[indexDiff.New.Name] = indexDiff.New
+		}
+	}
+	// A candidate name claimed by two replacements (a long name whose digest
+	// form equals another index's plain suffix form) is left to the ordinary
+	// drop/rebuild sequence: adopting it for one would strand the other.
+	claims := make(map[string]int, len(replacements))
+	for indexName := range replacements {
+		claims[OnlineIndexTempName(indexName)]++
+	}
+	candidateNames := make(map[string]string, len(replacements))
+	for indexName := range replacements {
+		if candidate := OnlineIndexTempName(indexName); claims[candidate] == 1 {
+			candidateNames[candidate] = indexName
+		}
+	}
+	reusedCandidates := make(map[string]*ir.Index)
 	remainingDrops := []*ir.Index{}
 	for _, droppedIndex := range regularDrops {
 		indexName, isCandidate := candidateNames[droppedIndex.Name]
-		if isCandidate && isReusableCandidate(droppedIndex, onlineReplacements[indexName], recreatedColumns) {
+		if isCandidate && isReusableCandidate(droppedIndex, replacements[indexName], recreatedColumns) {
 			reusedCandidates[indexName] = droppedIndex
 			continue
 		}
@@ -314,6 +334,13 @@ func generateIndexModifications(
 		} else {
 			// Structure changed - use online replacement approach
 			dropSQL := fmt.Sprintf("DROP INDEX IF EXISTS %s;", qualifyEntityName(indexDiff.Old.Schema, indexDiff.Old.Name, targetSchema))
+
+			if candidate := reusedCandidates[indexDiff.New.Name]; candidate != nil {
+				indexDiff.ReusedCandidate = candidate.Name
+				collectCandidateAdoption(indexDiff, candidate, dropSQL, targetSchema, indexDiffType, commentDiffType, collector)
+				continue
+			}
+
 			canonicalSQL := generateIndexSQL(indexDiff.New, targetSchema, false)
 
 			statements := []SQLStatement{
@@ -354,29 +381,12 @@ func generateIndexModifications(
 			dropSQL := fmt.Sprintf("DROP INDEX IF EXISTS %s;", qualifyEntityName(newIndex.Schema, indexName, targetSchema))
 
 			if candidate := reusedCandidates[indexName]; candidate != nil {
-				// The finished candidate takes the canonical name. Its comment
-				// carries over with it, so only a differing comment is re-set.
-				renameSQL := fmt.Sprintf("ALTER INDEX %s RENAME TO %s;",
-					qualifyEntityName(candidate.Schema, candidate.Name, targetSchema), ir.QuoteIdentifier(indexName))
-				statements := []SQLStatement{
-					{SQL: dropSQL, CanRunInTransaction: true},
-					{SQL: renameSQL, CanRunInTransaction: true},
+				indexDiff := &IndexDiff{
+					Old:             replacedIndexes[indexName],
+					New:             newIndex,
+					ReusedCandidate: candidate.Name,
 				}
-				alterContext := &diffContext{
-					Type:      indexDiffType,
-					Operation: DiffOperationAlter,
-					Path:      fmt.Sprintf("%s.%s.%s", newIndex.Schema, newIndex.Table, indexName),
-					Source: &IndexDiff{
-						Old:             replacedIndexes[indexName],
-						New:             newIndex,
-						ReusedCandidate: candidate.Name,
-					},
-					CanRunInTransaction: true,
-				}
-				collector.collectStatements(alterContext, statements)
-				if newIndex.Comment != candidate.Comment {
-					generateIndexComment(newIndex, targetSchema, commentDiffType, DiffOperationAlter, collector)
-				}
+				collectCandidateAdoption(indexDiff, candidate, dropSQL, targetSchema, indexDiffType, commentDiffType, collector)
 				continue
 			}
 
@@ -444,10 +454,49 @@ func isReusableCandidate(candidate, newIndex *ir.Index, recreatedColumns map[str
 	if !candidate.IsValid {
 		return false
 	}
+	// A rewrite never attaches its candidate to a parent index. An attached
+	// index of that name belongs to a partition hierarchy, and dropping its
+	// parent elsewhere in the plan would take the adopted index with it.
+	if candidate.ParentIndex != "" {
+		return false
+	}
 	if indexReferencesColumns(candidate, recreatedColumns) {
 		return false
 	}
 	return indexesStructurallyEqual(candidate, newIndex)
+}
+
+// collectCandidateAdoption emits the resumed form of an index replacement:
+// the old index is dropped and the finished candidate takes its name. The
+// candidate's comment carries over with it, so only a differing comment is
+// re-set.
+func collectCandidateAdoption(
+	indexDiff *IndexDiff,
+	candidate *ir.Index,
+	dropSQL string,
+	targetSchema string,
+	indexDiffType DiffType,
+	commentDiffType DiffType,
+	collector *diffCollector,
+) {
+	newIndex := indexDiff.New
+	renameSQL := fmt.Sprintf("ALTER INDEX %s RENAME TO %s;",
+		qualifyEntityName(candidate.Schema, candidate.Name, targetSchema), ir.QuoteIdentifier(newIndex.Name))
+	statements := []SQLStatement{
+		{SQL: dropSQL, CanRunInTransaction: true},
+		{SQL: renameSQL, CanRunInTransaction: true},
+	}
+	alterContext := &diffContext{
+		Type:                indexDiffType,
+		Operation:           DiffOperationAlter,
+		Path:                fmt.Sprintf("%s.%s.%s", newIndex.Schema, newIndex.Table, newIndex.Name),
+		Source:              indexDiff,
+		CanRunInTransaction: true,
+	}
+	collector.collectStatements(alterContext, statements)
+	if newIndex.Comment != candidate.Comment {
+		generateIndexComment(newIndex, targetSchema, commentDiffType, DiffOperationAlter, collector)
+	}
 }
 
 // generateIndexComment generates COMMENT ON INDEX statement

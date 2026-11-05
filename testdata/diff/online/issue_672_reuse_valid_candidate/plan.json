@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "97f7d39a0bb818ca7ac954f344eaa84a8eea41733db36fbd3148edb36e63a797"
+    "hash": "78bdeb4da2d1d3334abf1d77027cc59e23ac2c2adb07f916eb33dfc0c7561ea2"
   },
   "groups": [
     {
@@ -65,6 +65,18 @@
           "type": "table.index",
           "operation": "alter",
           "path": "public.entries.entries_sort_idx"
+        },
+        {
+          "sql": "DROP INDEX IF EXISTS entries_summary_idx;",
+          "type": "materialized_view.index",
+          "operation": "alter",
+          "path": "public.entries_summary.entries_summary_idx"
+        },
+        {
+          "sql": "ALTER INDEX entries_summary_idx_pgschema_new RENAME TO entries_summary_idx;",
+          "type": "materialized_view.index",
+          "operation": "alter",
+          "path": "public.entries_summary.entries_summary_idx"
         }
       ]
     }

@@ -1,13 +1,18 @@
-Plan: 1 to modify.
+Plan: 2 to modify.
 
 Summary by type:
   tables: 1 to modify
+  materialized views: 1 to modify
 
 Tables:
   ~ entries
     ~ entries_lookup_idx (index - concurrent rebuild)
     - entries_lookup_idx_pgschema_new (index)
-    ~ entries_sort_idx (index - concurrent rebuild)
+    ~ entries_sort_idx (index - adopt finished candidate)
+
+Materialized views:
+  ~ entries_summary
+    ~ entries_summary_idx (index - adopt finished candidate)
 
 DDL to be executed:
 --------------------------------------------------
@@ -41,3 +46,7 @@ ALTER INDEX entries_lookup_idx_pgschema_new RENAME TO entries_lookup_idx;
 DROP INDEX IF EXISTS entries_sort_idx;
 
 ALTER INDEX entries_sort_idx_pgschema_new RENAME TO entries_sort_idx;
+
+DROP INDEX IF EXISTS entries_summary_idx;
+
+ALTER INDEX entries_summary_idx_pgschema_new RENAME TO entries_summary_idx;

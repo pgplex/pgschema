@@ -137,3 +137,48 @@ func TestOnlineIndexCandidateReuse(t *testing.T) {
 		})
 	}
 }
+
+// TestOnlineIndexCandidateReuseRejectsAttachedAndSharedCandidates covers two
+// candidates that must never be adopted: one attached to a parent index, and
+// one whose name two replacements both claim. (#672)
+func TestOnlineIndexCandidateReuseRejectsAttachedAndSharedCandidates(t *testing.T) {
+	t.Run("attached candidate is dropped and rebuilt", func(t *testing.T) {
+		const canonical = "entries_sort_idx"
+		candidate := issue672Index(OnlineIndexTempName(canonical), "b", true)
+		candidate.ParentIndex = "entries_parent_idx"
+		candidate.ParentIndexSchema = "public"
+
+		collector := newDiffCollector()
+		generateIndexModifications(
+			[]*ir.Index{issue672Index(canonical, "a", true), candidate},
+			[]*ir.Index{issue672Index(canonical, "b", true)},
+			nil, nil, "public", DiffTypeTableIndex, DiffTypeTableIndexComment, collector,
+		)
+		sql := buildSQLFromSteps(collector.diffs)
+		if strings.Contains(sql, "RENAME TO") || !strings.Contains(sql, "DROP INDEX IF EXISTS "+candidate.Name+";") {
+			t.Errorf("attached candidate must be dropped and rebuilt, got:\n%s", sql)
+		}
+	})
+
+	t.Run("candidate name claimed by two replacements is not adopted", func(t *testing.T) {
+		// A 63-byte name gets a digest-form candidate; the name equal to that
+		// candidate minus the suffix gets the very same candidate in plain form.
+		long := strings.Repeat("i", maxIdentifierBytes)
+		candidateName := OnlineIndexTempName(long)
+		short := strings.TrimSuffix(candidateName, OnlineIndexTempNameSuffix)
+		if OnlineIndexTempName(short) != candidateName {
+			t.Fatalf("test setup: %q and %q do not share a candidate", long, short)
+		}
+
+		collector := newDiffCollector()
+		generateIndexModifications(
+			[]*ir.Index{issue672Index(long, "a", true), issue672Index(short, "a", true), issue672Index(candidateName, "b", true)},
+			[]*ir.Index{issue672Index(long, "b", true), issue672Index(short, "b", true)},
+			nil, nil, "public", DiffTypeTableIndex, DiffTypeTableIndexComment, collector,
+		)
+		sql := buildSQLFromSteps(collector.diffs)
+		if strings.Contains(sql, "RENAME TO") || !strings.Contains(sql, "DROP INDEX IF EXISTS "+ir.QuoteIdentifier(candidateName)+";") {
+			t.Errorf("shared candidate must be dropped and both indexes rebuilt, got:\n%s", sql)
+		}
+	})
+}
