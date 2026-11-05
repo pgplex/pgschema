@@ -25,35 +25,47 @@ import (
 //     rendering; without ONLY it would also overwrite the defaults of the
 //     child's own children), the NOT NULL without ONLY, since NOT NULL
 //     recurses to the child's children in any case and ONLY is refused once
-//     it has any. The column is compared against the first parent that
-//     defines it, as PostgreSQL merges them.
-//   - On a modified child whose parents are unchanged, inherited columns are
-//     neither added nor dropped, and only their DEFAULT and NOT NULL are
-//     diffed, rendered the same way; the parent's own diff carries
-//     everything else. Parents are ordered before children in both the
-//     create and the modify phases, so a child-local object that needs a
-//     column the parent is adding comes after the parent's ADD COLUMN.
+//     it has any. The column is compared against the definition the parents
+//     merge to (inheritedColumnDefinition). Two cases keep the column in
+//     the CREATE TABLE instead: parents that disagree on the default, which
+//     PostgreSQL refuses unless the child settles it, and a child's own
+//     generation expression, which has no other place. An override on a
+//     column a parent only adds in this migration runs after the parent's
+//     ADD COLUMN, in the modify phase.
+//   - On a modified child, a column it gets from a parent it keeps is
+//     neither added nor dropped, and only its DEFAULT, NOT NULL and
+//     generation expression are diffed, rendered the same way; the parent's
+//     own diff carries everything else. Parents are ordered before children
+//     in both the create and the modify phases, so a child-local object
+//     that needs a column the parent is adding comes after the parent's
+//     ADD COLUMN.
 //   - A changed parent list is applied as ALTER TABLE child NO INHERIT old
 //     in the drop phase, before DROP TABLE could take the child along with
 //     its parent, and ALTER TABLE child INHERIT new at the end of the table
 //     modifications, once the child has every column and CHECK constraint
-//     the new parent requires. While the parent list changes, columns are
-//     compared without regard to IsInherited: NO INHERIT turns inherited
-//     columns into local ones, and INHERIT merges local columns with the
-//     parent's.
+//     the new parent requires; a required CHECK the child lacks, or holds
+//     under the same name with another expression, is added right before
+//     the INHERIT. Columns from a parent the child leaves or joins are
+//     compared like local ones: NO INHERIT turns them into local columns,
+//     and INHERIT merges local columns with the parent's. CHECK constraints
+//     follow the same split: those the child shared only with a parent it
+//     leaves are local after NO INHERIT and reconciled against the desired
+//     table; those a retained parent still supplies stay inherited.
 //
 // A column that is inherited on one side and merged (declared in the child
 // as well) on the other is not a difference: PostgreSQL has no DDL for that
 // transition, and the column behaves the same either way until a parent
 // drops it.
 
-// inheritsEqual reports whether two parent lists are the same, in order.
+// inheritsEqual reports whether two parent lists name the same parents. The
+// order of parents (inhseqno) is not managed: INHERIT and NO INHERIT can only
+// append and remove, so a reordered list is treated as unchanged.
 func inheritsEqual(a, b []ir.TableRef) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	for _, ref := range a {
+		if !containsTableRef(b, ref) {
 			return false
 		}
 	}
@@ -82,54 +94,337 @@ func inheritsClauseSQL(table *ir.Table, targetSchema string, qualifySchema bool)
 	return " INHERITS (" + strings.Join(parents, ", ") + ")"
 }
 
-// inheritanceParentColumn returns the definition an inherited column takes
-// from the table's parents: the first parent, in INHERITS order, that defines
-// a column of that name. Nil when no parent is among allTables, e.g. a parent
-// in an unmanaged schema.
-func inheritanceParentColumn(table *ir.Table, name string, allTables map[string]*ir.Table) *ir.Column {
+// inheritedColumnDefinition returns the definition an inherited column takes
+// from the table's parents, merged the way PostgreSQL merges them: NOT NULL
+// if any parent has it, the default the parents agree on, and the generation
+// expression of the first generated parent. conflict is set when the parents
+// carry different defaults, which the child must resolve by declaring the
+// column itself. Nil when no parent among allTables defines the column, e.g.
+// when the parents live in an unmanaged schema.
+func inheritedColumnDefinition(table *ir.Table, name string, allTables map[string]*ir.Table) (merged *ir.Column, conflict bool) {
+	var defaults []string
 	for _, parent := range table.Inherits {
 		parentTable := allTables[parent.Schema+"."+parent.Name]
 		if parentTable == nil {
 			continue
 		}
 		for _, column := range parentTable.Columns {
-			if column.Name == name {
-				return column
+			if column.Name != name {
+				continue
 			}
+			if merged == nil {
+				merged = &ir.Column{Name: name, IsNullable: true}
+			}
+			if !column.IsNullable {
+				merged.IsNullable = false
+			}
+			if d := columnDefault(column); d != "" && !slices.Contains(defaults, d) {
+				defaults = append(defaults, d)
+			}
+			if column.IsGenerated && !merged.IsGenerated {
+				merged.IsGenerated = true
+				merged.GeneratedKind = column.GeneratedKind
+				merged.GeneratedExpr = column.GeneratedExpr
+			}
+			break
 		}
 	}
-	return nil
+	if merged == nil {
+		return nil, false
+	}
+	switch len(defaults) {
+	case 0:
+	case 1:
+		merged.DefaultValue = &defaults[0]
+	default:
+		conflict = true
+	}
+	return merged, conflict
+}
+
+// inheritedColumnDeclaredInline reports whether an inherited column must
+// still be declared in the child's CREATE TABLE: when its parents disagree
+// on the default, PostgreSQL refuses the table unless the child settles it,
+// and a child's own generation expression can only be given there. The
+// declaration merges with the parents' definition.
+func inheritedColumnDeclaredInline(table *ir.Table, column *ir.Column, allTables map[string]*ir.Table) bool {
+	if !column.IsInherited {
+		return false
+	}
+	merged, conflict := inheritedColumnDefinition(table, column.Name, allTables)
+	if merged == nil {
+		return false
+	}
+	return conflict || generatedExpr(column) != generatedExpr(merged)
+}
+
+// ancestorAddsColumn reports whether a parent of the table, or a parent of a
+// parent, is adding the column in this migration (added keys schema.table to
+// the column names its ALTER TABLE adds). The child's override of such a
+// column has to wait for that ADD COLUMN.
+func ancestorAddsColumn(table *ir.Table, name string, allTables map[string]*ir.Table, added map[string]map[string]bool) bool {
+	visited := map[string]bool{}
+	var walk func(t *ir.Table) bool
+	walk = func(t *ir.Table) bool {
+		for _, parent := range t.Inherits {
+			key := parent.Schema + "." + parent.Name
+			if visited[key] {
+				continue
+			}
+			visited[key] = true
+			if added[key][name] {
+				return true
+			}
+			if parentTable := allTables[key]; parentTable != nil && walk(parentTable) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(table)
+}
+
+// addedParentColumns maps schema.table of every modified table to the names
+// of the columns its ALTER TABLE adds, for ancestorAddsColumn.
+func addedParentColumns(modifiedTables []*tableDiff) map[string]map[string]bool {
+	added := map[string]map[string]bool{}
+	for _, td := range modifiedTables {
+		if len(td.AddedColumns) == 0 {
+			continue
+		}
+		columns := make(map[string]bool, len(td.AddedColumns))
+		for _, column := range td.AddedColumns {
+			columns[column.Name] = true
+		}
+		added[td.Table.Schema+"."+td.Table.Name] = columns
+	}
+	return added
+}
+
+// childColumnDrop is a DROP COLUMN a child needs because its parent's drop
+// of the column does not reach it (see planInheritanceEffects).
+type childColumnDrop struct {
+	table  *ir.Table
+	column string
+}
+
+// inheritedColumnOverrideStatements returns the statements that set the
+// DEFAULT and NOT NULL a child sets locally on one column it inherits, or
+// nothing when the column matches what the parents pass on. tableName is the
+// child's rendered name.
+func inheritedColumnOverrideStatements(table *ir.Table, column *ir.Column, tableName string, allTables map[string]*ir.Table) []string {
+	if !column.IsInherited || inheritedColumnDeclaredInline(table, column, allTables) {
+		return nil
+	}
+	parentColumn, _ := inheritedColumnDefinition(table, column.Name, allTables)
+	if parentColumn == nil {
+		return nil
+	}
+	var statements []string
+	childDefault, parentDefault := columnDefault(column), columnDefault(parentColumn)
+	switch {
+	case childDefault != "" && childDefault != parentDefault:
+		statements = append(statements, fmt.Sprintf("ALTER TABLE ONLY %s ALTER COLUMN %s SET DEFAULT %s;", tableName, ir.QuoteIdentifier(column.Name), childDefault))
+	case childDefault == "" && parentDefault != "":
+		statements = append(statements, fmt.Sprintf("ALTER TABLE ONLY %s ALTER COLUMN %s DROP DEFAULT;", tableName, ir.QuoteIdentifier(column.Name)))
+	}
+	if !column.IsNullable && parentColumn.IsNullable {
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;", tableName, ir.QuoteIdentifier(column.Name)))
+	}
+	return statements
 }
 
 // inheritedColumnOverrideSQL returns the statements that follow a child's
 // CREATE TABLE to set the DEFAULT and NOT NULL the child sets locally on
-// columns it inherits. They are part of the table's create step.
-func inheritedColumnOverrideSQL(table *ir.Table, targetSchema string, qualifySchema bool, allTables map[string]*ir.Table) []string {
+// columns it inherits. They are part of the table's create step. A column a
+// parent is only adding in this migration (parentAdded keys schema.table to
+// the columns its ALTER TABLE adds) is left out: the parent's diff re-applies
+// the child's overrides after its ADD COLUMN (see planInheritanceEffects).
+func inheritedColumnOverrideSQL(table *ir.Table, targetSchema string, qualifySchema bool, allTables map[string]*ir.Table, parentAdded map[string]map[string]bool) []string {
 	if len(table.Inherits) == 0 {
 		return nil
 	}
 	var statements []string
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
 	for _, column := range table.Columns {
-		if !column.IsInherited {
+		if ancestorAddsColumn(table, column.Name, allTables, parentAdded) {
 			continue
 		}
-		parentColumn := inheritanceParentColumn(table, column.Name, allTables)
-		if parentColumn == nil {
-			continue
-		}
-		childDefault, parentDefault := columnDefault(column), columnDefault(parentColumn)
-		switch {
-		case childDefault != "" && childDefault != parentDefault:
-			statements = append(statements, fmt.Sprintf("ALTER TABLE ONLY %s ALTER COLUMN %s SET DEFAULT %s;", tableName, ir.QuoteIdentifier(column.Name), childDefault))
-		case childDefault == "" && parentDefault != "":
-			statements = append(statements, fmt.Sprintf("ALTER TABLE ONLY %s ALTER COLUMN %s DROP DEFAULT;", tableName, ir.QuoteIdentifier(column.Name)))
-		}
-		if !column.IsNullable && parentColumn.IsNullable {
-			statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;", tableName, ir.QuoteIdentifier(column.Name)))
-		}
+		statements = append(statements, inheritedColumnOverrideStatements(table, column, tableName, allTables)...)
 	}
 	return statements
+}
+
+// inheritanceChildren indexes the tables of one state by the schema.name of
+// each parent they inherit from.
+func inheritanceChildren(tables map[string]*ir.Table) map[string][]*ir.Table {
+	children := map[string][]*ir.Table{}
+	for _, key := range sortedKeys(tables) {
+		table := tables[key]
+		for _, parent := range table.Inherits {
+			parentKey := parent.Schema + "." + parent.Name
+			children[parentKey] = append(children[parentKey], table)
+		}
+	}
+	return children
+}
+
+// inheritanceDescendants lists every table that inherits from the given one,
+// directly or through other tables, parents before their children.
+func inheritanceDescendants(children map[string][]*ir.Table, key string) []*ir.Table {
+	var descendants []*ir.Table
+	visited := map[string]bool{}
+	queue := []string{key}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, child := range children[current] {
+			childKey := child.Schema + "." + child.Name
+			if visited[childKey] {
+				continue
+			}
+			visited[childKey] = true
+			descendants = append(descendants, child)
+			queue = append(queue, childKey)
+		}
+	}
+	return descendants
+}
+
+// planInheritanceEffects records, on each modified table's diff, what its
+// column changes do to its inheritance children, since PostgreSQL recurses
+// them:
+//
+//   - A dropped column is dropped from every child as well. A child whose
+//     desired state keeps the column (it declares it, as the parent no longer
+//     does) needs the parent to drop with ONLY, which leaves the column on
+//     every child as a local column; the children that do not keep it then
+//     drop it themselves. Without ONLY, only a child that also declared the
+//     column (IsMergedInherited) keeps it, and such a child drops it itself
+//     when the desired state has no column.
+//   - An added column arrives on every descendant with the parent's
+//     definition, and a changed DEFAULT or NOT NULL overwrites what a
+//     descendant set on it. The descendants' overrides on that column are
+//     re-applied after the parent's statements.
+//
+// oldTables and newTables key the tables of each state by schema.name.
+func planInheritanceEffects(modifiedTables []*tableDiff, oldTables, newTables map[string]*ir.Table, droppedTables []*ir.Table, targetSchema string) {
+	oldChildren := inheritanceChildren(oldTables)
+	newChildren := inheritanceChildren(newTables)
+	dropped := make(map[string]bool, len(droppedTables))
+	for _, table := range droppedTables {
+		dropped[table.Schema+"."+table.Name] = true
+	}
+	for _, td := range modifiedTables {
+		key := td.Table.Schema + "." + td.Table.Name
+
+		for _, column := range td.DroppedColumns {
+			if td.RecreatedColumns[column.Name] {
+				continue
+			}
+			var keepers, losers, mergedLosers []*ir.Table
+			for _, child := range oldChildren[key] {
+				childKey := child.Schema + "." + child.Name
+				if dropped[childKey] {
+					continue
+				}
+				desired := newTables[childKey]
+				if desired != nil && findColumn(desired, column.Name) != nil {
+					keepers = append(keepers, child)
+				} else if oldColumn := findColumn(child, column.Name); oldColumn != nil && oldColumn.IsMergedInherited {
+					mergedLosers = append(mergedLosers, child)
+				} else {
+					losers = append(losers, child)
+				}
+			}
+			if len(keepers) > 0 {
+				if td.DropColumnOnly == nil {
+					td.DropColumnOnly = map[string]bool{}
+				}
+				td.DropColumnOnly[column.Name] = true
+				for _, child := range losers {
+					td.ChildColumnDrops = append(td.ChildColumnDrops, childColumnDrop{table: child, column: column.Name})
+				}
+			}
+			for _, child := range mergedLosers {
+				td.ChildColumnDrops = append(td.ChildColumnDrops, childColumnDrop{table: child, column: column.Name})
+			}
+		}
+
+		var affected []string
+		for _, column := range td.AddedColumns {
+			affected = append(affected, column.Name)
+		}
+		for _, cd := range td.ModifiedColumns {
+			if cd.Old.IsNullable != cd.New.IsNullable || columnDefault(cd.Old) != columnDefault(cd.New) {
+				affected = append(affected, cd.New.Name)
+			}
+		}
+		if len(affected) == 0 {
+			continue
+		}
+		for _, descendant := range inheritanceDescendants(newChildren, key) {
+			tableName := getTableNameWithSchema(descendant.Schema, descendant.Name, targetSchema)
+			for _, name := range affected {
+				if column := findColumn(descendant, name); column != nil {
+					td.ChildOverrides = append(td.ChildOverrides, inheritedColumnOverrideStatements(descendant, column, tableName, newTables)...)
+				}
+			}
+		}
+	}
+}
+
+// findColumn returns the table's column of that name, or nil.
+func findColumn(table *ir.Table, name string) *ir.Column {
+	for _, column := range table.Columns {
+		if column.Name == name {
+			return column
+		}
+	}
+	return nil
+}
+
+// parentDefinesColumn reports whether one of the given parents, or one of
+// their own parents, defines the column. tables keys every table of the same
+// state by schema.name.
+func parentDefinesColumn(tables map[string]*ir.Table, parents []ir.TableRef, name string) bool {
+	visited := map[string]bool{}
+	var walk func(refs []ir.TableRef) bool
+	walk = func(refs []ir.TableRef) bool {
+		for _, ref := range refs {
+			key := ref.Schema + "." + ref.Name
+			if visited[key] {
+				continue
+			}
+			visited[key] = true
+			parent := tables[key]
+			if parent == nil {
+				continue
+			}
+			for _, column := range parent.Columns {
+				if column.Name == name {
+					return true
+				}
+			}
+			if walk(parent.Inherits) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(parents)
+}
+
+// retainedParents returns the parents a child keeps across a parent list
+// change.
+func retainedParents(oldTable, newTable *ir.Table) []ir.TableRef {
+	var retained []ir.TableRef
+	for _, parent := range newTable.Inherits {
+		if containsTableRef(oldTable.Inherits, parent) {
+			retained = append(retained, parent)
+		}
+	}
+	return retained
 }
 
 // columnDefault returns the column's default expression, or "" when it has
@@ -172,8 +467,10 @@ func generateInheritSQL(diffs []*tableDiff, targetSchema string, collector *diff
 		tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 		// The CHECK constraints the new parents require and the child lacks;
 		// INHERIT merges them with the parents' (see reconcileConstraintsForInherit)
+		// (without ONLY: the child's own children need it too, and ONLY is
+		// refused for an inheritable CHECK on a table that has children)
 		for _, constraint := range td.MissingParentChecks {
-			sql := fmt.Sprintf("ALTER TABLE ONLY %s ADD %s;", tableName, generateConstraintSQL(constraint, targetSchema, false))
+			sql := fmt.Sprintf("ALTER TABLE %s ADD %s;", tableName, generateConstraintSQL(constraint, targetSchema, false))
 			collector.collect(&diffContext{
 				Type:                DiffTypeTableConstraint,
 				Operation:           DiffOperationCreate,
@@ -236,12 +533,17 @@ func withConstraintsRetainedByNoInherit(oldTable, newTable *ir.Table, tables map
 	for name, constraint := range oldTable.Constraints {
 		table.Constraints[name] = constraint
 	}
+	// A check the child still gets from a parent it keeps stays inherited
+	var stillSupplied []*ir.Constraint
+	for _, parent := range retainedParents(oldTable, newTable) {
+		stillSupplied = append(stillSupplied, inheritableCheckConstraints(tables, tables[parent.Schema+"."+parent.Name])...)
+	}
 	for _, parent := range oldTable.Inherits {
 		if containsTableRef(newTable.Inherits, parent) {
 			continue
 		}
 		for _, source := range inheritableCheckConstraints(tables, tables[parent.Schema+"."+parent.Name]) {
-			if table.Constraints[source.Name] != nil {
+			if table.Constraints[source.Name] != nil || parentSuppliesCheck(stillSupplied, source) {
 				continue
 			}
 			retained := *source
@@ -274,15 +576,20 @@ func (td *tableDiff) reconcileConstraintsForInherit(oldTable *ir.Table, tables m
 		return
 	}
 	kept := td.DroppedConstraints[:0]
+	dropped := map[string]bool{}
 	for _, constraint := range td.DroppedConstraints {
 		if constraint.Type == ir.ConstraintTypeCheck && parentSuppliesCheck(supplied, constraint) {
 			continue
 		}
 		kept = append(kept, constraint)
+		dropped[constraint.Name] = true
 	}
 	td.DroppedConstraints = kept
 	for _, source := range supplied {
-		if oldTable.Constraints[source.Name] != nil || td.Table.Constraints[source.Name] != nil {
+		// Present only if the child has it and keeps it: an old constraint of
+		// the same name with another expression is dropped above and must
+		// be replaced, or the INHERIT would find it missing.
+		if (oldTable.Constraints[source.Name] != nil && !dropped[source.Name]) || td.Table.Constraints[source.Name] != nil {
 			continue
 		}
 		if slices.ContainsFunc(td.MissingParentChecks, func(c *ir.Constraint) bool { return c.Name == source.Name }) {

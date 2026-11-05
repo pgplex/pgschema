@@ -1,0 +1,21 @@
+Plan: 2 to add.
+
+Summary by type:
+  tables: 2 to add
+
+Tables:
+  + calibrated
+  + measurements
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS measurements (
+    raw integer NOT NULL,
+    scaled integer GENERATED ALWAYS AS ((raw * 10)) STORED
+);
+
+CREATE TABLE IF NOT EXISTS calibrated (
+    scaled integer GENERATED ALWAYS AS (((raw * 10) + 1)) STORED,
+    device text
+) INHERITS (measurements);

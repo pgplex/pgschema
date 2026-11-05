@@ -500,15 +500,23 @@ type tableDiff struct {
 	// requires of the child and the child lacks; they are added right before
 	// the INHERIT. See inherit.go.
 	MissingParentChecks []*ir.Constraint
+	// DropColumnOnly names the dropped columns an inheritance child keeps,
+	// dropped with ALTER TABLE ONLY; ChildColumnDrops are the DROP COLUMN
+	// statements children then need; ChildOverrides re-apply what
+	// descendants set on columns this table adds or changes. See
+	// planInheritanceEffects.
+	DropColumnOnly   map[string]bool
+	ChildColumnDrops []childColumnDrop
+	ChildOverrides   []string
 }
 
 // ColumnDiff represents changes to a column
 type ColumnDiff struct {
 	Old *ir.Column
 	New *ir.Column
-	// Inherited is set when the column comes from an inheritance parent on
-	// both sides: only its DEFAULT and NOT NULL are changed, with ALTER TABLE
-	// ONLY (see inherit.go).
+	// Inherited is set when the column comes from an inheritance parent the
+	// child keeps: only its DEFAULT, NOT NULL and generation expression are
+	// changed, the default with ALTER TABLE ONLY (see inherit.go).
 	Inherited bool
 }
 
@@ -738,7 +746,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				if len(oldTable.Inherits) > 0 && !inheritsEqual(oldTable.Inherits, newTable.Inherits) {
 					oldTable = withConstraintsRetainedByNoInherit(oldTable, newTable, oldTables)
 				}
-				if tableDiff := diffTables(oldTable, newTable, targetSchema, diff.targetMajorVersion); tableDiff != nil {
+				if tableDiff := diffTablesWithTables(oldTable, newTable, targetSchema, diff.targetMajorVersion, oldTables, newTables); tableDiff != nil {
 					if tableDiff.PartitionChanged && newTable.PartitionOf != "" {
 						tableDiff.keepConstraintsAdoptedByAttach(newTables)
 					}
@@ -752,6 +760,9 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	}
 
 	diff.allNewTables = newTables
+
+	// What a parent's column changes do to its inheritance children (see inherit.go)
+	planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
 
 	// Columns re-created by this migration, keyed by schema.table (issue #591)
 	recreatedColumnsByTable := collectRecreatedColumns(diff.modifiedTables)
@@ -1703,7 +1714,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// This ensures that UNIQUE/PK constraints are added before FKs that reference them
 	// Pre-sort by name to ensure deterministic insertion order for cycle breaking
 	sortModifiedTables(diff.modifiedTables)
-	diff.modifiedTables = topologicallySortModifiedTables(diff.modifiedTables)
+	diff.modifiedTables = topologicallySortModifiedTables(diff.modifiedTables, newTables)
 
 	// Sort individual table objects (indexes, triggers, policies, constraints) within each table
 	sortTableObjects(diff.modifiedTables)
@@ -2104,8 +2115,21 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 	batches := make(map[string]int, len(d.addedTables))
 	for _, table := range d.addedTables {
+		batches[table.Schema+"."+table.Name] = tableBatch(table)
+	}
+	// An inheritance child cannot precede its parent: it goes in the
+	// parent's batch when that is later than its own. addedTables lists
+	// parents before children, so one pass reaches every level.
+	for _, table := range d.addedTables {
 		key := table.Schema + "." + table.Name
-		batches[key] = tableBatch(table)
+		for _, parent := range table.Inherits {
+			if batch, ok := batches[parent.Schema+"."+parent.Name]; ok && batch > batches[key] {
+				batches[key] = batch
+			}
+		}
+	}
+	for _, table := range d.addedTables {
+		key := table.Schema + "." + table.Name
 		switch batches[key] {
 		case 2:
 			tablesAfterTableDomains = append(tablesAfterTableDomains, table)
@@ -2117,7 +2141,8 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create tables WITHOUT function/domain dependencies first (functions may reference these)
-	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
+	parentAddedColumns := addedParentColumns(d.modifiedTables)
+	deferredPolicies1, deferredConstraints1 := generateCreateTablesSQL(tablesWithoutDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
 
 	// Build view lookup - needed for detecting functions that depend on views
 	newViewLookup := buildViewLookup(d.addedViews)
@@ -2224,7 +2249,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateProceduresSQL(proceduresNow, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
-	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
+	deferredPolicies2, deferredConstraints2 := generateCreateTablesSQL(tablesWithDeps, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
 
 	// Create functions WITHOUT view deps that reference new tables (now that all tables exist)
 	// These functions query tables that were created in tablesWithDeps above (issue #530)
@@ -2237,7 +2262,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
-	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes)
+	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
 
 	// Create functions that reference tables in the last table batch above.
 	generateCreateFunctionsSQL(functionsAfterAllTables, targetSchema, collector)

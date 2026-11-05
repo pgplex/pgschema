@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION is_valid_code(\n    code text\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT code ~ '^[A-Z]{3}$'\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.is_valid_code"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS a_parent (\n    code text NOT NULL,\n    CONSTRAINT a_parent_code_check CHECK (is_valid_code(code))\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.a_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS b_child (\n    detail text\n) INHERITS (a_parent);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.b_child"
+        }
+      ]
+    }
+  ]
+}

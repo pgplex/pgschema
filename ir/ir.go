@@ -141,6 +141,11 @@ type Column struct {
 	// TABLE ONLY child ALTER COLUMN. Set only on INHERITS children;
 	// partitions leave it false.
 	IsInherited bool `json:"inherited,omitempty"`
+	// IsMergedInherited is true for an inherited column the table also
+	// declares itself (attislocal): it survives the parent's DROP COLUMN as
+	// a local column, so the child must drop it on its own. Inspection
+	// metadata, excluded from serialization and fingerprints.
+	IsMergedInherited bool `json:"-"`
 	// IsSerial is true when the column was created with the SERIAL shorthand:
 	// its default is nextval() on a sequence that is owned by this column
 	// (pg_depend) and that carries PostgreSQL's default <table>_<column>_seq

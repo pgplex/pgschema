@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "b2d737f533fd481646b2ed308336848ef6cd06f0a9fd59c52ca348b75c226262"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE z_root ADD COLUMN region text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.z_root.region"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS a_leaf_region_idx ON a_leaf (region);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.a_leaf.a_leaf_region_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nJOIN pg_namespace n ON c.relnamespace = n.oid\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'a_leaf_region_idx'\n  AND n.nspname = 'public';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index a_leaf_region_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.a_leaf.a_leaf_region_idx"
+        }
+      ]
+    }
+  ]
+}

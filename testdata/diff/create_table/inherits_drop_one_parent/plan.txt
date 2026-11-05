@@ -1,0 +1,20 @@
+Plan: 2 to modify.
+
+Summary by type:
+  tables: 2 to modify
+
+Tables:
+  ~ base_a
+    + added (column)
+  ~ child
+    - label_b (column)
+    ~ child (no inherit)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE child NO INHERIT base_b;
+
+ALTER TABLE base_a ADD COLUMN added text;
+
+ALTER TABLE child DROP COLUMN label_b;

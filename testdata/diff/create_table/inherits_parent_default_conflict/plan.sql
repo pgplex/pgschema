@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS base_a (
+    x integer DEFAULT 1,
+    y integer
+);
+
+CREATE TABLE IF NOT EXISTS base_b (
+    x integer DEFAULT 2,
+    y integer DEFAULT 5
+);
+
+CREATE TABLE IF NOT EXISTS child (
+    x integer DEFAULT 3,
+    extra text
+) INHERITS (base_a, base_b);
+
+ALTER TABLE ONLY child ALTER COLUMN y DROP DEFAULT;

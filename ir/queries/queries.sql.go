@@ -2515,7 +2515,8 @@ func (q *Queries) GetInheritanceParentsForSchema(ctx context.Context, nspname st
 const getInheritedColumnsForSchema = `-- name: GetInheritedColumnsForSchema :many
 SELECT
     cc.relname AS table_name,
-    a.attname AS column_name
+    a.attname AS column_name,
+    a.attislocal AS is_local
 FROM pg_catalog.pg_attribute a
 JOIN pg_catalog.pg_class cc ON cc.oid = a.attrelid
 JOIN pg_catalog.pg_namespace cn ON cn.oid = cc.relnamespace
@@ -2531,12 +2532,13 @@ ORDER BY cc.relname, a.attnum
 type GetInheritedColumnsForSchemaRow struct {
 	TableName  string `db:"table_name" json:"table_name"`
 	ColumnName string `db:"column_name" json:"column_name"`
+	IsLocal    bool   `db:"is_local" json:"is_local"`
 }
 
 // GetInheritedColumnsForSchema lists the columns that regular inheritance
 // children in a schema share with a parent (attinhcount > 0), whether purely
-// inherited or also declared in the child and merged with the parent's
-// definition. Partitions are excluded.
+// inherited or also declared in the child (attislocal) and merged with the
+// parent's definition. Partitions are excluded.
 func (q *Queries) GetInheritedColumnsForSchema(ctx context.Context, nspname string) ([]GetInheritedColumnsForSchemaRow, error) {
 	rows, err := q.db.QueryContext(ctx, getInheritedColumnsForSchema, nspname)
 	if err != nil {
@@ -2546,7 +2548,7 @@ func (q *Queries) GetInheritedColumnsForSchema(ctx context.Context, nspname stri
 	var items []GetInheritedColumnsForSchemaRow
 	for rows.Next() {
 		var i GetInheritedColumnsForSchemaRow
-		if err := rows.Scan(&i.TableName, &i.ColumnName); err != nil {
+		if err := rows.Scan(&i.TableName, &i.ColumnName, &i.IsLocal); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

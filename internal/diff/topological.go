@@ -23,14 +23,27 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 		insertionOrder = append(insertionOrder, key)
 	}
 
-	// Build dependency graph
+	// Build dependency graph. Partition and inheritance edges are hard: a
+	// child's CREATE TABLE names its parent and cannot be postponed. Foreign
+	// key edges are soft: the constraint can be added after both tables
+	// exist, which is how a cycle through them is broken.
 	inDegree := make(map[string]int)
+	hardInDegree := make(map[string]int)
 	adjList := make(map[string][]string)
+	hardEdge := make(map[string]bool)
 
 	// Initialize
 	for key := range tableMap {
 		inDegree[key] = 0
 		adjList[key] = []string{}
+	}
+	addHardEdge := func(keyB, keyA string) {
+		if _, exists := tableMap[keyB]; exists && keyA != keyB {
+			adjList[keyB] = append(adjList[keyB], keyA)
+			inDegree[keyA]++
+			hardInDegree[keyA]++
+			hardEdge[keyB+"->"+keyA] = true
+		}
 	}
 
 	// Build edges: if tableA has a foreign key to tableB, add edge tableB -> tableA
@@ -42,20 +55,12 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 			if parentSchema == "" {
 				parentSchema = tableA.Schema
 			}
-			keyB := parentSchema + "." + tableA.PartitionOf
-			if _, exists := tableMap[keyB]; exists && keyA != keyB {
-				adjList[keyB] = append(adjList[keyB], keyA)
-				inDegree[keyA]++
-			}
+			addHardEdge(parentSchema+"."+tableA.PartitionOf, keyA)
 		}
 
 		// Inheritance parent → child dependency (see inherit.go)
 		for _, parent := range tableA.Inherits {
-			keyB := parent.Schema + "." + parent.Name
-			if _, exists := tableMap[keyB]; exists && keyA != keyB {
-				adjList[keyB] = append(adjList[keyB], keyA)
-				inDegree[keyA]++
-			}
+			addHardEdge(parent.Schema+"."+parent.Name, keyA)
 		}
 
 		for _, constraint := range tableA.Constraints {
@@ -109,7 +114,20 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 			//
 			// This approach aligns with PostgreSQL's pg_dump, which breaks dependency cycles by
 			// separating table creation from constraint creation.
-			next := nextInOrder(insertionOrder, processed)
+			//
+			// Only the soft (foreign key) edges may be cut: among the
+			// unprocessed tables, the first in insertion order that no longer
+			// waits on a partition or inheritance parent.
+			next := ""
+			for _, key := range insertionOrder {
+				if !processed[key] && hardInDegree[key] <= 0 {
+					next = key
+					break
+				}
+			}
+			if next == "" {
+				next = nextInOrder(insertionOrder, processed)
+			}
 			if next == "" {
 				break
 			}
@@ -130,6 +148,9 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 
 		for _, neighbor := range neighbors {
 			inDegree[neighbor]--
+			if hardEdge[current+"->"+neighbor] {
+				hardInDegree[neighbor]--
+			}
 			// Add neighbor to queue if all its dependencies are satisfied.
 			// The '!processed[neighbor]' check is critical: it prevents re-adding tables
 			// that have already been processed, even if their inDegree becomes <= 0 again
@@ -581,7 +602,11 @@ func topologicallySortFunctions(functions []*ir.Function) []*ir.Function {
 // topologicallySortModifiedTables sorts modified tables based on constraint dependencies
 // Tables with added UNIQUE/PK constraints that are referenced by other tables' added FKs
 // will come before those tables
-func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
+//
+// tables keys every table of the desired state by schema.name; it resolves an
+// inheritance child's nearest modified ancestors through parents that have no
+// changes of their own (see inherit.go).
+func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]*ir.Table) []*tableDiff {
 	if len(tableDiffs) <= 1 {
 		return tableDiffs
 	}
@@ -607,11 +632,10 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 
 	// Build edges: if tableA adds a FK to tableB's newly-added UNIQUE/PK, add edge tableB -> tableA
 	for keyA, tdA := range tableDiffMap {
-		// An inheritance child's changes follow its parent's: a child-local
-		// object may need a column the parent is adding (see inherit.go)
-		for _, parent := range tdA.Table.Inherits {
-			keyB := parent.Schema + "." + parent.Name
-			if _, exists := tableDiffMap[keyB]; exists && keyA != keyB {
+		// An inheritance child's changes follow its ancestors': a child-local
+		// object may need a column an ancestor is adding (see inherit.go)
+		for _, keyB := range nearestModifiedAncestors(tdA.Table, tableDiffMap, tables) {
+			if keyA != keyB {
 				adjList[keyB] = append(adjList[keyB], keyA)
 				inDegree[keyA]++
 			}
@@ -722,6 +746,34 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 //
 // When no dependency exists, falls back to alphabetical by constraint path for
 // deterministic output.
+// nearestModifiedAncestors returns the schema.name keys of the inheritance
+// ancestors of table that have a diff, walking up through ancestors that
+// have none.
+func nearestModifiedAncestors(table *ir.Table, tableDiffMap map[string]*tableDiff, tables map[string]*ir.Table) []string {
+	var found []string
+	visited := map[string]bool{}
+	var walk func(t *ir.Table)
+	walk = func(t *ir.Table) {
+		for _, parent := range t.Inherits {
+			key := parent.Schema + "." + parent.Name
+			if visited[key] {
+				continue
+			}
+			visited[key] = true
+			if _, modified := tableDiffMap[key]; modified {
+				found = append(found, key)
+				continue
+			}
+			if parentTable := tables[key]; parentTable != nil {
+				walk(parentTable)
+			}
+		}
+	}
+	walk(table)
+	sort.Strings(found)
+	return found
+}
+
 func topologicallySortDeferredConstraints(deferred []*deferredConstraint) []*deferredConstraint {
 	if len(deferred) <= 1 {
 		return deferred

@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "1c43f8f7bc4af5debaed2ce407d5c769ca5dfa72fe5bf65b4dbfbf32e15ae5ca"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE archived_readings DROP CONSTRAINT readings_value_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.archived_readings.readings_value_check"
+        },
+        {
+          "sql": "ALTER TABLE archived_readings\nADD CONSTRAINT readings_value_check CHECK (value > 10) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.archived_readings.readings_value_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE archived_readings VALIDATE CONSTRAINT readings_value_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.archived_readings.readings_value_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE archived_readings INHERIT readings;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.archived_readings"
+        }
+      ]
+    }
+  ]
+}

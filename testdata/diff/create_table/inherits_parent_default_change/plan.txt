@@ -1,0 +1,16 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ tickets
+    ~ tickets (column)
+    ~ priority (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE tickets ALTER COLUMN priority SET DEFAULT 2;
+
+ALTER TABLE ONLY incidents ALTER COLUMN priority SET DEFAULT 9;

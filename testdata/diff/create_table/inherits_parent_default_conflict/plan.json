@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS base_a (\n    x integer DEFAULT 1,\n    y integer\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.base_a"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS base_b (\n    x integer DEFAULT 2,\n    y integer DEFAULT 5\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.base_b"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS child (\n    x integer DEFAULT 3,\n    extra text\n) INHERITS (base_a, base_b);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.child"
+        },
+        {
+          "sql": "ALTER TABLE ONLY child ALTER COLUMN y DROP DEFAULT;",
+          "type": "table",
+          "operation": "create",
+          "path": "public.child"
+        }
+      ]
+    }
+  ]
+}

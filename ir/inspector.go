@@ -886,6 +886,7 @@ func (i *Inspector) buildInheritance(ctx context.Context, schema *IR, targetSche
 		for _, column := range child.Columns {
 			if column.Name == row.ColumnName {
 				column.IsInherited = true
+				column.IsMergedInherited = row.IsLocal
 				break
 			}
 		}

@@ -1520,12 +1520,13 @@ ORDER BY cn.nspname, cc.relname, inh.inhseqno;
 
 -- GetInheritedColumnsForSchema lists the columns that regular inheritance
 -- children in a schema share with a parent (attinhcount > 0), whether purely
--- inherited or also declared in the child and merged with the parent's
--- definition. Partitions are excluded.
+-- inherited or also declared in the child (attislocal) and merged with the
+-- parent's definition. Partitions are excluded.
 -- name: GetInheritedColumnsForSchema :many
 SELECT
     cc.relname AS table_name,
-    a.attname AS column_name
+    a.attname AS column_name,
+    a.attislocal AS is_local
 FROM pg_catalog.pg_attribute a
 JOIN pg_catalog.pg_class cc ON cc.oid = a.attrelid
 JOIN pg_catalog.pg_namespace cn ON cn.oid = cc.relnamespace
