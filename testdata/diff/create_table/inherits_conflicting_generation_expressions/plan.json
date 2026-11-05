@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS sensor_a (\n    raw integer NOT NULL,\n    scaled integer GENERATED ALWAYS AS ((raw * 10)) STORED\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.sensor_a"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS sensor_b (\n    raw integer NOT NULL,\n    scaled integer GENERATED ALWAYS AS ((raw * 20)) STORED\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.sensor_b"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS combined (\n    scaled integer GENERATED ALWAYS AS ((raw * 10)) STORED,\n    label text\n) INHERITS (sensor_a, sensor_b);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.combined"
+        }
+      ]
+    }
+  ]
+}

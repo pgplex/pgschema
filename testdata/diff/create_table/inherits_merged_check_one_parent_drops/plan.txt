@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ base_a
+    - shared_check (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE base_a DROP CONSTRAINT shared_check;

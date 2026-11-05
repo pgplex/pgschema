@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ calibrated
+    ~ scaled (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE ONLY calibrated ALTER COLUMN scaled SET EXPRESSION AS ((raw * 4));

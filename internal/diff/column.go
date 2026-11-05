@@ -157,9 +157,10 @@ func (cd *ColumnDiff) generateInheritedColumnSQL(qualifiedTableName string) []st
 	tableName := "ONLY " + qualifiedTableName
 	column := ir.QuoteIdentifier(cd.New.Name)
 	// A child may give an inherited generated column its own expression;
-	// SET EXPRESSION AS (PostgreSQL 17+) changes it in place.
+	// SET EXPRESSION AS (PostgreSQL 17+) changes it in place, with ONLY so
+	// the child's own children keep theirs.
 	if cd.Old.IsGenerated && cd.New.IsGenerated && generatedExpr(cd.Old) != generatedExpr(cd.New) {
-		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET EXPRESSION AS (%s);", qualifiedTableName, column, generatedExpr(cd.New)))
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET EXPRESSION AS (%s);", tableName, column, generatedExpr(cd.New)))
 	}
 	if cd.Old.IsNullable != cd.New.IsNullable {
 		if cd.New.IsNullable {

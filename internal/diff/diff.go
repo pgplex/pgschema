@@ -316,9 +316,10 @@ type ddlDiff struct {
 	modifiedTables     []*tableDiff
 	allNewTables       map[string]*ir.Table
 	partitionIndexes   *partitionIndexCreationPlan
-	// inheritanceChildDrops are the DROP COLUMN statements inheritance
-	// descendants need after their parents' column drops (see inherit.go).
-	inheritanceChildDrops     []childColumnDrop
+	// inheritanceChildEffects are the DROP COLUMN and DROP CONSTRAINT
+	// statements inheritance descendants need after their parents' drops
+	// (see inherit.go).
+	inheritanceChildEffects   inheritanceChildEffects
 	addedViews                []*ir.View
 	droppedViews              []*ir.View
 	modifiedViews             []*viewDiff
@@ -765,7 +766,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	diff.allNewTables = newTables
 
 	// What a parent's column changes do to its inheritance children (see inherit.go)
-	diff.inheritanceChildDrops = planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
+	diff.inheritanceChildEffects = planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
 
 	// Columns re-created by this migration, keyed by schema.table (issue #591)
 	recreatedColumnsByTable := collectRecreatedColumns(diff.modifiedTables)
@@ -2429,7 +2430,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, d.suppressedInlineFKs, targetSchema, collector)
 
 	// Columns inheritance descendants drop once every parent has (see inherit.go)
-	generateInheritanceChildDropsSQL(d.inheritanceChildDrops, targetSchema, collector)
+	generateInheritanceChildDropsSQL(d.inheritanceChildEffects, targetSchema, collector)
 
 	// Attach OWNED BY for explicitly created sequences whose owning column was
 	// created by this migration, either with a new table (create phase) or by

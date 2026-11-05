@@ -1145,6 +1145,9 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		// Build column definition with SERIAL detection
 		var builder strings.Builder
 		writeColumnDefinitionToBuilder(&builder, table, column, targetSchema, qualifySchema, partitionIndexes)
+		if inlineDeclarationNeedsDefaultNull(table, column, allTables) {
+			builder.WriteString(" DEFAULT NULL")
+		}
 		columnParts = append(columnParts, fmt.Sprintf("    %s", builder.String()))
 	}
 
@@ -1430,7 +1433,6 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
-		td.generateChildConstraintDropsSQL(constraint.Name, targetSchema, collector)
 	}
 
 	// Drop columns - already sorted by the Diff operation

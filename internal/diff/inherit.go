@@ -107,7 +107,7 @@ func inheritsClauseSQL(table *ir.Table, targetSchema string, qualifySchema bool)
 // column itself. Nil when no parent among allTables defines the column, e.g.
 // when the parents live in an unmanaged schema.
 func inheritedColumnDefinition(table *ir.Table, name string, allTables map[string]*ir.Table) (merged *ir.Column, conflict bool) {
-	var defaults []string
+	var defaults, expressions []string
 	for _, parent := range table.Inherits {
 		parentTable := allTables[parent.Schema+"."+parent.Name]
 		if parentTable == nil {
@@ -126,10 +126,15 @@ func inheritedColumnDefinition(table *ir.Table, name string, allTables map[strin
 			if d := columnDefault(column); d != "" && !slices.Contains(defaults, d) {
 				defaults = append(defaults, d)
 			}
-			if column.IsGenerated && !merged.IsGenerated {
-				merged.IsGenerated = true
-				merged.GeneratedKind = column.GeneratedKind
-				merged.GeneratedExpr = column.GeneratedExpr
+			if column.IsGenerated {
+				if !merged.IsGenerated {
+					merged.IsGenerated = true
+					merged.GeneratedKind = column.GeneratedKind
+					merged.GeneratedExpr = column.GeneratedExpr
+				}
+				if e := generatedExpr(column); !slices.Contains(expressions, e) {
+					expressions = append(expressions, e)
+				}
 			}
 			break
 		}
@@ -144,7 +149,26 @@ func inheritedColumnDefinition(table *ir.Table, name string, allTables map[strin
 	default:
 		conflict = true
 	}
+	// Parents generating the column differently also need the child to settle it
+	if len(expressions) > 1 {
+		conflict = true
+	}
 	return merged, conflict
+}
+
+// inlineDeclarationNeedsDefaultNull reports whether an inherited column the
+// child declares inline must carry DEFAULT NULL: the parents disagree on the
+// default and the child has none (it dropped the one it settled with), and a
+// declaration without a default would not resolve the conflict. The DROP
+// DEFAULT follows the CREATE TABLE.
+func inlineDeclarationNeedsDefaultNull(table *ir.Table, column *ir.Column, allTables map[string]*ir.Table) bool {
+	// A generated column has no default; its declared expression settles
+	// a conflict between the parents' expressions on its own
+	if !column.IsInherited || column.IsGenerated || columnDefault(column) != "" {
+		return false
+	}
+	merged, conflict := inheritedColumnDefinition(table, column.Name, allTables)
+	return merged != nil && conflict
 }
 
 // inheritedColumnDeclaredInline reports whether an inherited column must
@@ -215,6 +239,16 @@ type childColumnDrop struct {
 	table  *ir.Table
 	column string
 	only   bool
+	// depth below the parent whose drop planned it; the aggregated drops
+	// run parents first
+	depth int
+}
+
+// inheritanceChildEffects are the statements descendants need after all
+// table modifications (see planInheritanceEffects).
+type inheritanceChildEffects struct {
+	columnDrops []childColumnDrop
+	checkDrops  []childConstraintDrop
 }
 
 // childConstraintDrop is a DROP CONSTRAINT a child needs right after its
@@ -238,7 +272,13 @@ type childOverride struct {
 // nothing when the column matches what the parents pass on. tableName is the
 // child's rendered name.
 func inheritedColumnOverrideStatements(table *ir.Table, column *ir.Column, tableName string, allTables map[string]*ir.Table) []string {
-	if !column.IsInherited || inheritedColumnDeclaredInline(table, column, allTables) {
+	if !column.IsInherited {
+		return nil
+	}
+	if inheritedColumnDeclaredInline(table, column, allTables) {
+		if inlineDeclarationNeedsDefaultNull(table, column, allTables) {
+			return []string{fmt.Sprintf("ALTER TABLE ONLY %s ALTER COLUMN %s DROP DEFAULT;", tableName, ir.QuoteIdentifier(column.Name))}
+		}
 		return nil
 	}
 	parentColumn, _ := inheritedColumnDefinition(table, column.Name, allTables)
@@ -350,7 +390,7 @@ type inheritanceEffectsPlanner struct {
 //     table that only joins the parent now brings the column itself.
 //
 // oldTables and newTables key the tables of each state by schema.name.
-func planInheritanceEffects(modifiedTables []*tableDiff, oldTables, newTables map[string]*ir.Table, droppedTables []*ir.Table, targetSchema string) []childColumnDrop {
+func planInheritanceEffects(modifiedTables []*tableDiff, oldTables, newTables map[string]*ir.Table, droppedTables []*ir.Table, targetSchema string) inheritanceChildEffects {
 	p := &inheritanceEffectsPlanner{
 		oldTables:    oldTables,
 		newTables:    newTables,
@@ -366,14 +406,27 @@ func planInheritanceEffects(modifiedTables []*tableDiff, oldTables, newTables ma
 	for _, td := range modifiedTables {
 		p.diffs[td.Table.Schema+"."+td.Table.Name] = td
 	}
-	var columnDrops []childColumnDrop
+	var effects inheritanceChildEffects
 	for _, td := range modifiedTables {
 		key := td.Table.Schema + "." + td.Table.Name
-		columnDrops = append(columnDrops, p.planColumnDrops(td, key)...)
-		p.planCheckDrops(td, key)
+		effects.columnDrops = append(effects.columnDrops, p.planColumnDrops(td, key)...)
+		effects.checkDrops = append(effects.checkDrops, p.planCheckDrops(td, key)...)
 		p.planOverrides(td, key)
 	}
-	return columnDrops
+	return effects
+}
+
+// newChildren lists the desired-state children of parentKey created in this
+// migration. They are created before the table modifications, so they
+// inherit the parent's old columns like the children attached before.
+func (p *inheritanceEffectsPlanner) newlyCreatedChildren(parentKey string) []*ir.Table {
+	var created []*ir.Table
+	for _, child := range p.newChildren[parentKey] {
+		if _, existed := p.oldTables[child.Schema+"."+child.Name]; !existed {
+			created = append(created, child)
+		}
+	}
+	return created
 }
 
 // attachedChildren lists the old-state children of parentKey that still
@@ -406,7 +459,7 @@ func (p *inheritanceEffectsPlanner) planColumnDrops(td *tableDiff, key string) [
 		if td.RecreatedColumns[column.Name] {
 			continue
 		}
-		keeper, childDrops := p.planColumnDrop(key, column.Name)
+		keeper, childDrops := p.planColumnDrop(key, column.Name, 1)
 		if keeper {
 			if td.DropColumnOnly == nil {
 				td.DropColumnOnly = map[string]bool{}
@@ -421,7 +474,7 @@ func (p *inheritanceEffectsPlanner) planColumnDrops(td *tableDiff, key string) [
 // planColumnDrop plans the drop of column below parentKey. keeper reports
 // whether a descendant keeps the column, so the parent has to drop with
 // ONLY; drops are the statements the descendants then need.
-func (p *inheritanceEffectsPlanner) planColumnDrop(parentKey, column string) (keeper bool, drops []childColumnDrop) {
+func (p *inheritanceEffectsPlanner) planColumnDrop(parentKey, column string, depth int) (keeper bool, drops []childColumnDrop) {
 	type pending struct {
 		child  *ir.Table
 		merged bool
@@ -429,47 +482,49 @@ func (p *inheritanceEffectsPlanner) planColumnDrop(parentKey, column string) (ke
 		drops  []childColumnDrop
 	}
 	var pendings []pending
-	for _, child := range p.attachedChildren(parentKey) {
+	consider := func(child *ir.Table, merged bool) {
 		childKey := child.Schema + "." + child.Name
 		if findColumn(p.newTables[childKey], column) != nil {
 			keeper = true
-			continue
+			return
 		}
-		oldColumn := findColumn(child, column)
-		if oldColumn == nil {
-			continue
-		}
-		childKeeper, childDrops := p.planColumnDrop(childKey, column)
+		childKeeper, childDrops := p.planColumnDrop(childKey, column, depth+1)
 		if childKeeper {
 			keeper = true
 		}
-		pendings = append(pendings, pending{child: child, merged: oldColumn.IsMergedInherited, keeper: childKeeper, drops: childDrops})
+		pendings = append(pendings, pending{child: child, merged: merged, keeper: childKeeper, drops: childDrops})
+	}
+	for _, child := range p.attachedChildren(parentKey) {
+		if oldColumn := findColumn(child, column); oldColumn != nil {
+			consider(child, oldColumn.IsMergedInherited)
+		}
+	}
+	// Children created in this migration got the column at creation too
+	for _, child := range p.newlyCreatedChildren(parentKey) {
+		consider(child, false)
 	}
 	for _, c := range pendings {
 		switch {
 		case c.keeper:
-			drops = append(drops, childColumnDrop{table: c.child, column: column, only: true})
+			drops = append(drops, childColumnDrop{table: c.child, column: column, only: true, depth: depth})
 		case keeper || c.merged:
-			drops = append(drops, childColumnDrop{table: c.child, column: column})
+			drops = append(drops, childColumnDrop{table: c.child, column: column, depth: depth})
 		}
 		drops = append(drops, c.drops...)
 	}
 	return keeper, drops
 }
 
-func (p *inheritanceEffectsPlanner) planCheckDrops(td *tableDiff, key string) {
-	var checks []*ir.Constraint
-	for _, constraint := range td.DroppedConstraints {
-		if constraint.Type == ir.ConstraintTypeCheck {
-			checks = append(checks, constraint)
-		}
-	}
-	for _, cd := range td.ModifiedConstraints {
-		if cd.Old.Type == ir.ConstraintTypeCheck {
-			checks = append(checks, cd.Old)
-		}
-	}
-	for _, check := range checks {
+// planCheckDrops plans what a parent's dropped or changed CHECK does to the
+// copies its descendants also declared. A copy another desired parent still
+// supplies stays inherited and is left alone. A copy left behind by a check
+// the parent drops outright is dropped after all table modifications, once
+// every parent has let go of it (returned); one left behind by a check the
+// parent changes is dropped right after the parent's DROP, before the
+// parent's ADD recurses (recorded on the diff).
+func (p *inheritanceEffectsPlanner) planCheckDrops(td *tableDiff, key string) []childConstraintDrop {
+	var deferred []childConstraintDrop
+	plan := func(check *ir.Constraint, inline bool) {
 		for _, child := range inheritanceDescendants(p.oldChildren, key) {
 			childKey := child.Schema + "." + child.Name
 			if !child.MergedInheritedChecks[check.Name] || p.dropped[childKey] {
@@ -477,6 +532,18 @@ func (p *inheritanceEffectsPlanner) planCheckDrops(td *tableDiff, key string) {
 			}
 			desired := p.newTables[childKey]
 			if desired == nil {
+				continue
+			}
+			// Still inherited from another parent the child keeps
+			stillSupplied := false
+			for _, parent := range desired.Inherits {
+				parentKey := parent.Schema + "." + parent.Name
+				if parentKey != key && parentSuppliesCheck(inheritableCheckConstraints(p.newTables, p.newTables[parentKey]), check) {
+					stillSupplied = true
+					break
+				}
+			}
+			if stillSupplied {
 				continue
 			}
 			// Parent gone, child still declares it with the same expression:
@@ -487,24 +554,59 @@ func (p *inheritanceEffectsPlanner) planCheckDrops(td *tableDiff, key string) {
 				}
 				continue
 			}
-			td.ChildConstraintDrops = append(td.ChildConstraintDrops, childConstraintDrop{table: child, constraint: check.Name})
+			drop := childConstraintDrop{table: child, constraint: check.Name}
+			if inline {
+				td.ChildConstraintDrops = append(td.ChildConstraintDrops, drop)
+			} else {
+				deferred = append(deferred, drop)
+			}
 		}
 	}
+	for _, constraint := range td.DroppedConstraints {
+		if constraint.Type == ir.ConstraintTypeCheck {
+			plan(constraint, false)
+		}
+	}
+	for _, cd := range td.ModifiedConstraints {
+		if cd.Old.Type == ir.ConstraintTypeCheck {
+			plan(cd.Old, true)
+		}
+	}
+	return deferred
 }
 
+// planOverrides plans the DEFAULT, NOT NULL and generation expression the
+// descendants need back after this table's column statements. A statement
+// that recurses (ADD COLUMN, SET/DROP NOT NULL, and SET DEFAULT / SET
+// EXPRESSION on a table's own column) overwrites every descendant; one with
+// ONLY (SET DEFAULT / SET EXPRESSION on an inherited column) reaches none,
+// but a descendant created in this migration, before the statement, was
+// created with the old value and needs the new one.
 func (p *inheritanceEffectsPlanner) planOverrides(td *tableDiff, key string) {
-	// The state the parent's recursive ALTER leaves on every descendant
-	after := map[string]*ir.Column{}
+	type effect struct {
+		after                               *ir.Column
+		defaultRecurses, expressionRecurses bool
+	}
+	effects := map[string]effect{}
 	var names []string
 	for _, column := range td.AddedColumns {
-		after[column.Name] = column
+		effects[column.Name] = effect{after: column, defaultRecurses: true, expressionRecurses: true}
 		names = append(names, column.Name)
 	}
 	for _, cd := range td.ModifiedColumns {
-		if cd.Old.IsNullable != cd.New.IsNullable || columnDefault(cd.Old) != columnDefault(cd.New) {
-			after[cd.New.Name] = cd.New
-			names = append(names, cd.New.Name)
+		defaultChanged := columnDefault(cd.Old) != columnDefault(cd.New)
+		expressionChanged := generatedExpr(cd.Old) != generatedExpr(cd.New)
+		if cd.Old.IsNullable == cd.New.IsNullable && !defaultChanged && !expressionChanged {
+			continue
 		}
+		after := *cd.New
+		if cd.Inherited {
+			// ONLY: the descendants keep what they had
+			after.DefaultValue = cd.Old.DefaultValue
+			after.GeneratedExpr = cd.Old.GeneratedExpr
+		}
+		effects[cd.New.Name] = effect{after: &after, defaultRecurses: !cd.Inherited, expressionRecurses: !cd.Inherited}
+		names = append(names, cd.New.Name)
 	}
 	if len(names) == 0 {
 		return
@@ -515,7 +617,8 @@ func (p *inheritanceEffectsPlanner) planOverrides(td *tableDiff, key string) {
 	}
 	for _, descendant := range inheritanceDescendants(p.newChildren, key) {
 		descendantKey := descendant.Schema + "." + descendant.Name
-		if _, existed := p.oldTables[descendantKey]; existed && !attachedBefore[descendantKey] {
+		_, existed := p.oldTables[descendantKey]
+		if existed && !attachedBefore[descendantKey] {
 			continue // joins the parent at the end of the modify phase, with its own columns
 		}
 		for _, name := range names {
@@ -523,10 +626,18 @@ func (p *inheritanceEffectsPlanner) planOverrides(td *tableDiff, key string) {
 			if desired == nil {
 				continue
 			}
+			e := effects[name]
+			// An existing descendant's own diff covers what the parent's ONLY
+			// statement leaves untouched
 			left := *desired
-			left.IsNullable = after[name].IsNullable
-			left.DefaultValue = after[name].DefaultValue
+			left.IsNullable = e.after.IsNullable
 			left.InvalidNotNullConstraint = ""
+			if e.defaultRecurses || !existed {
+				left.DefaultValue = e.after.DefaultValue
+			}
+			if e.expressionRecurses || !existed {
+				left.GeneratedExpr = e.after.GeneratedExpr
+			}
 			if inheritedColumnChanged(&left, desired) {
 				td.ChildOverrides = append(td.ChildOverrides, childOverride{
 					table: descendant,
@@ -541,19 +652,24 @@ func (p *inheritanceEffectsPlanner) planOverrides(td *tableDiff, key string) {
 // descendants of modified parents need once every parent has dropped the
 // column (see planInheritanceEffects). The same drop planned from several
 // parents is emitted once, with ONLY if any of them requires it.
-func generateInheritanceChildDropsSQL(drops []childColumnDrop, targetSchema string, collector *diffCollector) {
+func generateInheritanceChildDropsSQL(effects inheritanceChildEffects, targetSchema string, collector *diffCollector) {
 	type dropKey struct{ table, column string }
 	only := map[dropKey]bool{}
+	depth := map[dropKey]int{}
 	var order []dropKey
 	tables := map[dropKey]*ir.Table{}
-	for _, drop := range drops {
+	for _, drop := range effects.columnDrops {
 		k := dropKey{drop.table.Schema + "." + drop.table.Name, drop.column}
 		if _, seen := only[k]; !seen {
 			order = append(order, k)
 			tables[k] = drop.table
 		}
 		only[k] = only[k] || drop.only
+		depth[k] = max(depth[k], drop.depth)
 	}
+	// Parents before children: a child's copy can only go once the tables
+	// above it have let go of the column
+	slices.SortStableFunc(order, func(a, b dropKey) int { return depth[a] - depth[b] })
 	for _, k := range order {
 		table := tables[k]
 		tableName := getTableNameWithSchema(table.Schema, table.Name, targetSchema)
@@ -567,6 +683,23 @@ func generateInheritanceChildDropsSQL(drops []childColumnDrop, targetSchema stri
 			Source:              table,
 			CanRunInTransaction: true,
 		}, fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", tableName, ir.QuoteIdentifier(k.column)))
+	}
+
+	seen := map[string]bool{}
+	for _, drop := range effects.checkDrops {
+		k := drop.table.Schema + "." + drop.table.Name + "." + drop.constraint
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		tableName := getTableNameWithSchema(drop.table.Schema, drop.table.Name, targetSchema)
+		collector.collect(&diffContext{
+			Type:                DiffTypeTableConstraint,
+			Operation:           DiffOperationDrop,
+			Path:                k,
+			Source:              drop.table,
+			CanRunInTransaction: true,
+		}, fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", tableName, ir.QuoteIdentifier(drop.constraint)))
 	}
 }
 

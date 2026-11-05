@@ -1,0 +1,21 @@
+Plan: 1 to add, 1 to modify.
+
+Summary by type:
+  tables: 1 to add, 1 to modify
+
+Tables:
+  + boats
+    - boats (column)
+  ~ vehicles
+    - wheels (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS boats (
+    draft numeric
+) INHERITS (vehicles);
+
+ALTER TABLE ONLY vehicles DROP COLUMN wheels;
+
+ALTER TABLE boats DROP COLUMN wheels;
