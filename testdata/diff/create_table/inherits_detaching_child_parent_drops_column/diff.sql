@@ -1,0 +1,5 @@
+ALTER TABLE boats NO INHERIT vehicles;
+
+ALTER TABLE boats DROP COLUMN wheels;
+
+ALTER TABLE ONLY vehicles DROP COLUMN wheels;

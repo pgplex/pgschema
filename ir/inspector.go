@@ -891,6 +891,20 @@ func (i *Inspector) buildInheritance(ctx context.Context, schema *IR, targetSche
 			}
 		}
 	}
+	checks, err := i.queries.GetMergedInheritedChecksForSchema(ctx, targetSchema)
+	if err != nil {
+		return err
+	}
+	for _, row := range checks {
+		child := children[row.TableName]
+		if child == nil {
+			continue
+		}
+		if child.MergedInheritedChecks == nil {
+			child.MergedInheritedChecks = make(map[string]bool)
+		}
+		child.MergedInheritedChecks[row.ConstraintName] = true
+	}
 	return nil
 }
 

@@ -99,6 +99,12 @@ type Table struct {
 	// this table, including ignored or external ones. Inspection metadata,
 	// excluded from serialization and fingerprints.
 	AllInheritanceChildren []TableDependency `json:"-"`
+	// MergedInheritedChecks names the CHECK constraints this inheritance
+	// child shares with a parent and also declares itself (conislocal); they
+	// are left out of Constraints like other shared checks but survive the
+	// parent's DROP CONSTRAINT as local constraints. Inspection metadata,
+	// excluded from serialization and fingerprints.
+	MergedInheritedChecks map[string]bool `json:"-"`
 }
 
 // TableRef identifies a table within a schema.

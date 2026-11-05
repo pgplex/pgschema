@@ -1,11 +1,12 @@
-Plan: 1 to modify.
+Plan: 2 to modify.
 
 Summary by type:
-  tables: 1 to modify
+  tables: 2 to modify
 
 Tables:
+  ~ incidents
+    ~ priority (column)
   ~ tickets
-    ~ tickets (column)
     ~ priority (column)
 
 DDL to be executed:

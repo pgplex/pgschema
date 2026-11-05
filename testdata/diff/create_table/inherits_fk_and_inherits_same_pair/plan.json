@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS b_parent (\n    id integer,\n    CONSTRAINT b_parent_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.b_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS z_parent (\n    code text NOT NULL,\n    favorite_uid integer\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.z_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS a_child (\n    uid integer NOT NULL,\n    parent_id integer,\n    CONSTRAINT a_child_uid_key UNIQUE (uid),\n    CONSTRAINT a_child_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES b_parent (id)\n) INHERITS (b_parent, z_parent);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.a_child"
+        },
+        {
+          "sql": "ALTER TABLE z_parent\nADD CONSTRAINT z_parent_favorite_uid_fkey FOREIGN KEY (favorite_uid) REFERENCES a_child (uid);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.z_parent.z_parent_favorite_uid_fkey"
+        }
+      ]
+    }
+  ]
+}

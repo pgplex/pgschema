@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "75d828d48d0da857103673f34ad0e070d3d67634cb78bcfe9bbee896a493cef6"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE child INHERIT base_b;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.child"
+        }
+      ]
+    }
+  ]
+}

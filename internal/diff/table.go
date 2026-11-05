@@ -213,6 +213,13 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 	for name, column := range newColumns {
 		if _, exists := oldColumns[name]; !exists {
 			if fromRetainedParent(newTables, newTable, column) {
+				// The parent adds it; only a comment is the child's own, and
+				// the parent's diff re-applies the DEFAULT and NOT NULL
+				if column.Comment != "" {
+					arrived := *column
+					arrived.Comment = ""
+					diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{Old: &arrived, New: column, Inherited: true})
+				}
 				continue
 			}
 			diff.AddedColumns = append(diff.AddedColumns, column)
@@ -1259,6 +1266,25 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 }
 
 // collectDropPolicy emits DROP POLICY for a policy of this table.
+// generateChildConstraintDropsSQL emits, right after this table dropped the
+// named CHECK constraint, the drops of the copies its inheritance children
+// also declared and therefore keep (see planInheritanceEffects).
+func (td *tableDiff) generateChildConstraintDropsSQL(name string, targetSchema string, collector *diffCollector) {
+	for _, drop := range td.ChildConstraintDrops {
+		if drop.constraint != name {
+			continue
+		}
+		childName := getTableNameWithSchema(drop.table.Schema, drop.table.Name, targetSchema)
+		collector.collect(&diffContext{
+			Type:                DiffTypeTableConstraint,
+			Operation:           DiffOperationDrop,
+			Path:                fmt.Sprintf("%s.%s.%s", drop.table.Schema, drop.table.Name, name),
+			Source:              drop.table,
+			CanRunInTransaction: true,
+		}, fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", childName, ir.QuoteIdentifier(name)))
+	}
+}
+
 func (td *tableDiff) collectDropPolicy(policy *ir.RLSPolicy, targetSchema string, collector *diffCollector) {
 	tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
 	sql := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s;", ir.QuoteIdentifier(policy.Name), tableName)
@@ -1404,6 +1430,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
+		td.generateChildConstraintDropsSQL(constraint.Name, targetSchema, collector)
 	}
 
 	// Drop columns - already sorted by the Diff operation
@@ -1423,21 +1450,6 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			CanRunInTransaction: true,
 		}
 		collector.collect(context, sql)
-
-		// Inheritance children the drop does not reach drop the column themselves
-		for _, drop := range td.ChildColumnDrops {
-			if drop.column != column.Name {
-				continue
-			}
-			childName := getTableNameWithSchema(drop.table.Schema, drop.table.Name, targetSchema)
-			collector.collect(&diffContext{
-				Type:                DiffTypeTableColumn,
-				Operation:           DiffOperationDrop,
-				Path:                fmt.Sprintf("%s.%s.%s", drop.table.Schema, drop.table.Name, column.Name),
-				Source:              drop.table,
-				CanRunInTransaction: true,
-			}, fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", childName, ir.QuoteIdentifier(column.Name)))
-		}
 	}
 
 	// Track constraints that are added inline with columns to avoid duplicate generation
@@ -1571,14 +1583,16 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 
 	// Re-apply what inheritance descendants set on the columns added or
 	// changed above (see planInheritanceEffects)
-	for _, sql := range td.ChildOverrides {
-		collector.collect(&diffContext{
-			Type:                DiffTypeTableColumn,
-			Operation:           DiffOperationAlter,
-			Path:                fmt.Sprintf("%s.%s", td.Table.Schema, td.Table.Name),
-			Source:              td.Table,
-			CanRunInTransaction: true,
-		}, sql)
+	for _, override := range td.ChildOverrides {
+		for _, stmt := range override.diff.generateColumnSQL(override.table.Schema, override.table.Name, targetSchema) {
+			collector.collect(&diffContext{
+				Type:                DiffTypeTableColumn,
+				Operation:           DiffOperationAlter,
+				Path:                fmt.Sprintf("%s.%s.%s", override.table.Schema, override.table.Name, override.diff.New.Name),
+				Source:              override.diff,
+				CanRunInTransaction: true,
+			}, stmt)
+		}
 	}
 
 	// Add new constraints - already sorted by the Diff operation
@@ -1727,6 +1741,7 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				CanRunInTransaction: true,
 			}
 			collector.collect(dropContext, dropSQL)
+			td.generateChildConstraintDropsSQL(ConstraintDiff.Old.Name, targetSchema, collector)
 		}
 
 		// Step 2: Add new constraint

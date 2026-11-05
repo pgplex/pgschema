@@ -1,0 +1,21 @@
+Plan: 3 to modify.
+
+Summary by type:
+  tables: 3 to modify
+
+Tables:
+  ~ base_a
+    - shared (column)
+  ~ base_b
+    - shared (column)
+  ~ child
+    - child (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE base_a DROP COLUMN shared;
+
+ALTER TABLE base_b DROP COLUMN shared;
+
+ALTER TABLE child DROP COLUMN shared;

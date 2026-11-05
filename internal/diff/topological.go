@@ -148,8 +148,11 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 
 		for _, neighbor := range neighbors {
 			inDegree[neighbor]--
+			// A pair joined by both an inheritance and a foreign key edge
+			// appears twice among the neighbors; count the hard edge once
 			if hardEdge[current+"->"+neighbor] {
 				hardInDegree[neighbor]--
+				delete(hardEdge, current+"->"+neighbor)
 			}
 			// Add neighbor to queue if all its dependencies are satisfied.
 			// The '!processed[neighbor]' check is critical: it prevents re-adding tables
@@ -606,10 +609,15 @@ func topologicallySortFunctions(functions []*ir.Function) []*ir.Function {
 // tables keys every table of the desired state by schema.name; it resolves an
 // inheritance child's nearest modified ancestors through parents that have no
 // changes of their own (see inherit.go).
-func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]*ir.Table) []*tableDiff {
+//
+// It also returns the added foreign keys whose ordering edge had to be cut to
+// break a cycle: they are created in the post-add step, once the key they
+// reference exists, instead of with their table's changes.
+func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]*ir.Table) ([]*tableDiff, []*deferredConstraint) {
 	if len(tableDiffs) <= 1 {
-		return tableDiffs
+		return tableDiffs, nil
 	}
+	var cutFKs []*deferredConstraint
 
 	// Build maps for efficient lookup
 	tableDiffMap := make(map[string]*tableDiff)
@@ -620,15 +628,23 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]
 		insertionOrder = append(insertionOrder, key)
 	}
 
-	// Build dependency graph based on added constraints
+	// Build dependency graph based on added constraints. Inheritance edges
+	// are hard: a cycle through a foreign key is broken by postponing the
+	// foreign key, never by moving a child's changes before its parent's.
 	inDegree := make(map[string]int)
+	hardInDegree := make(map[string]int)
 	adjList := make(map[string][]string)
+	hardEdge := make(map[string]bool)
 
 	// Initialize
 	for key := range tableDiffMap {
 		inDegree[key] = 0
 		adjList[key] = []string{}
 	}
+
+	// fkEdges records, per soft edge tableB -> tableA, the foreign keys of
+	// tableA that need tableB's new key, to defer them if the edge is cut
+	fkEdges := make(map[string][]*ir.Constraint)
 
 	// Build edges: if tableA adds a FK to tableB's newly-added UNIQUE/PK, add edge tableB -> tableA
 	for keyA, tdA := range tableDiffMap {
@@ -638,6 +654,8 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]
 			if keyA != keyB {
 				adjList[keyB] = append(adjList[keyB], keyA)
 				inDegree[keyA]++
+				hardInDegree[keyA]++
+				hardEdge[keyB+"->"+keyA] = true
 			}
 		}
 
@@ -671,6 +689,7 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]
 					// Add edge: tableB (with new UNIQUE/PK) -> tableA (with new FK)
 					adjList[keyB] = append(adjList[keyB], keyA)
 					inDegree[keyA]++
+					fkEdges[keyB+"->"+keyA] = append(fkEdges[keyB+"->"+keyA], fkConstraint)
 					break
 				}
 			}
@@ -692,10 +711,29 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]
 
 	for len(result) < len(tableDiffMap) {
 		if len(queue) == 0 {
-			// Cycle detected: pick the next unprocessed table using original insertion order
-			next := nextInOrder(insertionOrder, processed)
+			// Cycle detected: pick the next unprocessed table using original
+			// insertion order, among those not waiting on an inheritance parent
+			next := ""
+			for _, key := range insertionOrder {
+				if !processed[key] && hardInDegree[key] <= 0 {
+					next = key
+					break
+				}
+			}
+			if next == "" {
+				next = nextInOrder(insertionOrder, processed)
+			}
 			if next == "" {
 				break
+			}
+			// The foreign keys behind the soft edges still pointing at next
+			// wait for the post-add step
+			for keyB := range tableDiffMap {
+				if !processed[keyB] {
+					for _, fk := range fkEdges[keyB+"->"+next] {
+						cutFKs = append(cutFKs, &deferredConstraint{table: tableDiffMap[next].Table, constraint: fk})
+					}
+				}
 			}
 			queue = append(queue, next)
 			inDegree[next] = 0
@@ -714,6 +752,10 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]
 
 		for _, neighbor := range neighbors {
 			inDegree[neighbor]--
+			if hardEdge[current+"->"+neighbor] {
+				hardInDegree[neighbor]--
+				delete(hardEdge, current+"->"+neighbor)
+			}
 			if inDegree[neighbor] <= 0 && !processed[neighbor] {
 				queue = append(queue, neighbor)
 				sort.Strings(queue)
@@ -727,7 +769,7 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff, tables map[string]
 		sortedTableDiffs = append(sortedTableDiffs, tableDiffMap[key])
 	}
 
-	return sortedTableDiffs
+	return sortedTableDiffs, cutFKs
 }
 
 // topologicallySortDeferredConstraints sorts deferred FK constraints in dependency

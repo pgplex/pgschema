@@ -5,8 +5,8 @@ Summary by type:
 
 Tables:
   + alerts
+    ~ priority (column)
   ~ events
-    ~ events (column)
     + priority (column)
 
 DDL to be executed:

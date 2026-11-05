@@ -1538,6 +1538,25 @@ WHERE cn.nspname = $1
     AND a.attinhcount > 0
 ORDER BY cc.relname, a.attnum;
 
+-- GetMergedInheritedChecksForSchema lists the CHECK constraints that regular
+-- inheritance children in a schema share with a parent (coninhcount > 0) and
+-- also declare themselves (conislocal). Such a copy survives the parent's
+-- DROP CONSTRAINT as a local constraint. Partitions are excluded.
+-- name: GetMergedInheritedChecksForSchema :many
+SELECT
+    cl.relname AS table_name,
+    c.conname AS constraint_name
+FROM pg_catalog.pg_constraint c
+JOIN pg_catalog.pg_class cl ON cl.oid = c.conrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
+WHERE n.nspname = $1
+    AND cl.relkind = 'r'
+    AND NOT cl.relispartition
+    AND c.contype = 'c'
+    AND c.coninhcount > 0
+    AND c.conislocal
+ORDER BY cl.relname, c.conname;
+
 -- GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY, UNIQUE and
 -- FOREIGN KEY constraints PostgreSQL copied onto partitions from their parent's
 -- constraints (conparentid != 0), with the parent constraint each one derives

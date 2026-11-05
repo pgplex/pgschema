@@ -18,7 +18,7 @@
           "sql": "ALTER TABLE ONLY incidents ALTER COLUMN priority SET DEFAULT 9;",
           "type": "table.column",
           "operation": "alter",
-          "path": "public.tickets"
+          "path": "public.incidents.priority"
         }
       ]
     }

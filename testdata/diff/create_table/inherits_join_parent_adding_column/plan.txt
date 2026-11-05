@@ -1,0 +1,17 @@
+Plan: 2 to modify.
+
+Summary by type:
+  tables: 2 to modify
+
+Tables:
+  ~ alerts
+    ~ alerts (inherit)
+  ~ events
+    + priority (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE events ADD COLUMN priority integer DEFAULT 1;
+
+ALTER TABLE alerts INHERIT events;

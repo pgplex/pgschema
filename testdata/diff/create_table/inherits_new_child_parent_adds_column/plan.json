@@ -24,7 +24,7 @@
           "sql": "ALTER TABLE ONLY alerts ALTER COLUMN priority SET DEFAULT 2;",
           "type": "table.column",
           "operation": "alter",
-          "path": "public.events"
+          "path": "public.alerts.priority"
         }
       ]
     }

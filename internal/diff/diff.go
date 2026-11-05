@@ -307,15 +307,18 @@ type Diff struct {
 }
 
 type ddlDiff struct {
-	targetMajorVersion        int // target PostgreSQL major version, 0 if unknown (gates version-specific DDL)
-	addedSchemas              []*ir.Schema
-	droppedSchemas            []*ir.Schema
-	modifiedSchemas           []*schemaDiff
-	addedTables               []*ir.Table
-	droppedTables             []*ir.Table
-	modifiedTables            []*tableDiff
-	allNewTables              map[string]*ir.Table
-	partitionIndexes          *partitionIndexCreationPlan
+	targetMajorVersion int // target PostgreSQL major version, 0 if unknown (gates version-specific DDL)
+	addedSchemas       []*ir.Schema
+	droppedSchemas     []*ir.Schema
+	modifiedSchemas    []*schemaDiff
+	addedTables        []*ir.Table
+	droppedTables      []*ir.Table
+	modifiedTables     []*tableDiff
+	allNewTables       map[string]*ir.Table
+	partitionIndexes   *partitionIndexCreationPlan
+	// inheritanceChildDrops are the DROP COLUMN statements inheritance
+	// descendants need after their parents' column drops (see inherit.go).
+	inheritanceChildDrops     []childColumnDrop
 	addedViews                []*ir.View
 	droppedViews              []*ir.View
 	modifiedViews             []*viewDiff
@@ -500,14 +503,14 @@ type tableDiff struct {
 	// requires of the child and the child lacks; they are added right before
 	// the INHERIT. See inherit.go.
 	MissingParentChecks []*ir.Constraint
-	// DropColumnOnly names the dropped columns an inheritance child keeps,
-	// dropped with ALTER TABLE ONLY; ChildColumnDrops are the DROP COLUMN
-	// statements children then need; ChildOverrides re-apply what
-	// descendants set on columns this table adds or changes. See
-	// planInheritanceEffects.
-	DropColumnOnly   map[string]bool
-	ChildColumnDrops []childColumnDrop
-	ChildOverrides   []string
+	// DropColumnOnly names the dropped columns an inheritance descendant
+	// keeps, dropped with ALTER TABLE ONLY; ChildConstraintDrops are the
+	// CHECK copies children drop right after this table's DROP CONSTRAINT;
+	// ChildOverrides re-apply what descendants set on columns this table
+	// adds or changes. See planInheritanceEffects.
+	DropColumnOnly       map[string]bool
+	ChildConstraintDrops []childConstraintDrop
+	ChildOverrides       []childOverride
 }
 
 // ColumnDiff represents changes to a column
@@ -762,7 +765,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	diff.allNewTables = newTables
 
 	// What a parent's column changes do to its inheritance children (see inherit.go)
-	planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
+	diff.inheritanceChildDrops = planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
 
 	// Columns re-created by this migration, keyed by schema.table (issue #591)
 	recreatedColumnsByTable := collectRecreatedColumns(diff.modifiedTables)
@@ -1714,7 +1717,8 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// This ensures that UNIQUE/PK constraints are added before FKs that reference them
 	// Pre-sort by name to ensure deterministic insertion order for cycle breaking
 	sortModifiedTables(diff.modifiedTables)
-	diff.modifiedTables = topologicallySortModifiedTables(diff.modifiedTables, newTables)
+	var cutFKs []*deferredConstraint
+	diff.modifiedTables, cutFKs = topologicallySortModifiedTables(diff.modifiedTables, newTables)
 
 	// Sort individual table objects (indexes, triggers, policies, constraints) within each table
 	sortTableObjects(diff.modifiedTables)
@@ -1722,6 +1726,15 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// Detect foreign keys bound to unique/PK constraints being replaced; they
 	// must be dropped before and recreated after the replacement (issue #439)
 	diff.fkPreDrops, diff.fkPostAdds, diff.suppressedInlineFKs = planFKRecreationForReplacedConstraints(diff.modifiedTables, diff.addedTables, oldTables, newTables)
+	// Foreign keys whose ordering edge was cut to keep an inheritance child
+	// after its parent are created in the post-add step as well
+	for _, fk := range cutFKs {
+		if diff.suppressedInlineFKs == nil {
+			diff.suppressedInlineFKs = make(map[string]bool)
+		}
+		diff.suppressedInlineFKs[constraintPathKey(fk.constraint)] = true
+		diff.fkPostAdds = append(diff.fkPostAdds, fk)
+	}
 
 	// A brand new SERIAL column/table can be adopting a sequence that already
 	// exists in the old state (issue #573): PostgreSQL's SERIAL shorthand
@@ -2414,6 +2427,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Modify tables
 	generateModifyTablesSQL(d.modifiedTables, d.droppedTables, d.fkPreDrops, d.suppressedInlineFKs, targetSchema, collector)
+
+	// Columns inheritance descendants drop once every parent has (see inherit.go)
+	generateInheritanceChildDropsSQL(d.inheritanceChildDrops, targetSchema, collector)
 
 	// Attach OWNED BY for explicitly created sequences whose owning column was
 	// created by this migration, either with a new table (create phase) or by
