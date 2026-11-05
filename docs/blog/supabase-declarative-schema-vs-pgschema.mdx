@@ -83,7 +83,11 @@ pg-delta's `apply` is also described as fingerprint-gated, so this is no longer 
 
 ## Object coverage
 
-This is where pg-delta has moved furthest. The table below is drawn from pg-delta's [COVERAGE.md](https://github.com/supabase/pg-toolbelt/blob/main/packages/pg-delta/COVERAGE.md) and pgschema's [unsupported](/syntax/unsupported) page.
+This is where pg-delta has moved furthest. The tables below are drawn from pg-delta's [COVERAGE.md](https://github.com/supabase/pg-toolbelt/blob/main/packages/pg-delta/COVERAGE.md) and pgschema's [unsupported](/syntax/unsupported) page. They are split by level, because the two tools draw their boundaries differently: pgschema manages one schema at a time and leaves everything above it to your provisioning layer. pg-delta manages the whole database, roles included.
+
+### Schema-level objects
+
+Both tools target this layer. The differences here are real gaps, not scoping choices.
 
 | Object | pg-delta | pgschema |
 |---|---|---|
@@ -92,32 +96,53 @@ This is where pg-delta has moved furthest. The table below is drawn from pg-delt
 | Table inheritance (`INHERITS`) | ✅ | ❌ |
 | Views, materialized views | ✅ | ✅ |
 | Functions, procedures, aggregates | ✅ | ✅ |
-| Triggers, event triggers | ✅ / ✅ | ✅ / ❌ |
+| Triggers | ✅ | ✅ |
 | RLS policies | ✅ | ✅ |
 | Sequences, identity columns | ✅ | ✅ |
-| Domains, enum, composite, range types | ✅ | ✅ (range types: ❌) |
+| Domains, enum and composite types | ✅ | ✅ |
+| Range types | ✅ | ❌ |
 | Comments | ✅ | ✅ |
 | GRANT / REVOKE, column privileges | ✅ | ✅ |
-| `ALTER DEFAULT PRIVILEGES` | ✅ (global) | ✅ (`IN SCHEMA` only) |
+| `ALTER DEFAULT PRIVILEGES ... IN SCHEMA` | ✅ | ✅ |
 | Rewrite rules | ✅ | ❌ |
-| Object ownership (`OWNER TO`) | ✅ | ❌ by design |
-| Schemas (`CREATE SCHEMA`) | ✅ | ❌ |
-| Roles, role config, memberships | ✅ | ❌ |
-| Extensions | ✅ | ❌ |
-| Publications, subscriptions | ✅ | ❌ |
-| FDWs, servers, user mappings, foreign tables | ✅ | ❌ |
-| Collations | ✅ | ❌ |
+| Foreign tables | ✅ (CHECK constraints only) | ❌ |
 | Security labels | ✅ | ❌ |
-| Casts, operators, text search, statistics, transforms | ❌ (reported as `unmodeled_kind`) | ❌ |
+| Object ownership (`OWNER TO`) | ✅ | ❌ by design |
+| Operators, operator classes, text search, statistics, casts, transforms | ❌ (reported as `unmodeled_kind`) | ❌ |
 | `RENAME` | Opt-in detection (`--renames auto` or `prompt`, `--accept-rename`); drop + add by default | ❌ (drop + create) |
-| Extension-managed state (pg_cron jobs, pgmq queues, pg_partman) | ✅ via extension API calls | ❌ |
 
-A few notes on reading this:
+On ownership: pgschema deliberately ignores `OWNER TO`, like `pg_dump --no-owner`, so one schema file works across environments with different owners. pg-delta models ownership as an edge and emits `ALTER ... OWNER TO`. Which you prefer depends on whether your environments share role names.
 
-- **pgschema's gaps are mostly above the schema level by design.** Roles, extensions, schemas, publications, and FDWs are cluster- or database-level objects that pgschema expects you to provision elsewhere. That is a defensible scoping choice for teams running one schema per app or per tenant, but it is a choice, and pg-delta made the other one. If you want a single tool to reconcile roles and extensions alongside tables, pg-delta does that and pgschema does not.
-- **Ownership.** pgschema deliberately ignores `OWNER TO`, like `pg_dump --no-owner`, so one schema file works across environments with different owners. pg-delta models ownership as an edge and emits `ALTER ... OWNER TO`. Which you prefer depends on whether your environments share role names.
-- **pg-delta reports what it cannot model.** Objects outside its model surface as `unmodeled_kind` warnings, and `--strict-coverage` turns them into failures. pgschema warns on some skipped statements (`OWNER TO`, global default privileges) but does not inventory every unsupported object kind in the target.
-- **Extension intent handlers** are a genuinely novel feature. pg-delta diffs pg_cron jobs and pgmq queues, which live in tables rather than the catalog, and emits `cron.schedule_in_database` or `pgmq.create` instead of raw DDL. pgschema has nothing comparable.
+### Database- and cluster-level objects
+
+pgschema does not manage this layer, and says so in its docs. It expects schemas, roles, and extensions to be created once by infrastructure tooling or a setup script. Roles referenced in grants and policies are stubbed during planning so the schema file still loads. pg-delta made the opposite choice and diffs all of it.
+
+| Object | pg-delta | pgschema |
+|---|---|---|
+| Schemas (`CREATE SCHEMA`) | ✅ | ❌ by design |
+| Roles, role config, memberships | ✅ | ❌ by design |
+| Extensions (`CREATE EXTENSION`) | ✅ | ❌ by design |
+| Global `ALTER DEFAULT PRIVILEGES` | ✅ | ❌ by design |
+| Event triggers | ✅ | ❌ |
+| Publications, subscriptions | ✅ | ❌ |
+| Foreign data wrappers, servers, user mappings | ✅ | ❌ |
+| Collations | ✅ | ❌ |
+| Languages, parameter ACLs, large objects | ❌ (reported as `unmodeled_kind`) | ❌ |
+
+If you want one tool to reconcile roles and extensions alongside tables, pg-delta does that today. There is an open pgschema issue, [pgplex/pgschema#627](https://github.com/pgplex/pgschema/issues/627), proposing opt-in declarative roles, memberships, and ownership, but nothing has shipped.
+
+### Extension-managed state
+
+This is a layer neither pg_dump nor a catalog diff sees, because the state lives in ordinary tables. pg-delta's extension intent handlers read those tables and emit the extension's own API calls instead of DDL.
+
+| Extension | pg-delta | pgschema |
+|---|---|---|
+| pg_cron jobs | ✅ (`cron.schedule_in_database`, `cron.unschedule`) | ❌ |
+| pgmq queues | ✅ (`pgmq.create`, `pgmq.drop_queue`) | ❌ |
+| pg_partman configuration | ✅ | ❌ |
+| Supabase Storage buckets | ❌ (rows, not diffed) | ❌ |
+
+This is a genuinely novel feature, and pgschema has nothing comparable. Objects of a kind pg-delta cannot model surface as `unmodeled_kind` warnings, and `--strict-coverage` turns them into failures. pgschema warns on some skipped statements (`OWNER TO`, global default privileges) but does not inventory every unsupported object kind in the target.
 
 ## Online DDL and production safety
 
@@ -191,7 +216,7 @@ It is less expressive than a profile, but it is documented and takes a minute to
 | Maturity | Alpha, breaking changes expected | Stable |
 | Workflow (Supabase CLI) | Schema files → migration files → history table | n/a |
 | Workflow (standalone) | Schema files or DB → fingerprinted plan → apply | Schema files → fingerprinted plan → apply |
-| Object coverage | Schema + database + cluster level | Schema level only |
+| Object coverage | Schema, database, and cluster level, plus extension state | Schema level only, by design |
 | Online DDL | Transaction segments, destructive-action gating, lock-table splitting; concurrent indexes and timeouts via library only; no NOT VALID rewrite | CONCURRENTLY, NOT VALID + VALIDATE, lock timeout, transaction handling, all default and on the CLI |
 | Verification | `prove` on a clone, `drift`, `schema lint` | Test suite and staging runs |
 | Shadow database | Docker/Podman (Supabase CLI) or user-supplied | Embedded Postgres or `--plan-host` |
