@@ -160,6 +160,23 @@ func TestOnlineIndexCandidateReuseRejectsAttachedAndSharedCandidates(t *testing.
 		}
 	})
 
+	t.Run("partitioned candidate is dropped and rebuilt", func(t *testing.T) {
+		const canonical = "entries_sort_idx"
+		candidate := issue672Index(OnlineIndexTempName(canonical), "b", true)
+		candidate.IsPartitioned = true
+
+		collector := newDiffCollector()
+		generateIndexModifications(
+			[]*ir.Index{issue672Index(canonical, "a", true), candidate},
+			[]*ir.Index{issue672Index(canonical, "b", true)},
+			nil, nil, "public", DiffTypeTableIndex, DiffTypeTableIndexComment, collector,
+		)
+		sql := buildSQLFromSteps(collector.diffs)
+		if strings.Contains(sql, "RENAME TO") || !strings.Contains(sql, "DROP INDEX IF EXISTS "+candidate.Name+";") {
+			t.Errorf("partitioned candidate must be dropped and rebuilt, got:\n%s", sql)
+		}
+	})
+
 	t.Run("candidate name claimed by two replacements is not adopted", func(t *testing.T) {
 		// A 63-byte name gets a digest-form candidate; the name equal to that
 		// candidate minus the suffix gets the very same candidate in plain form.

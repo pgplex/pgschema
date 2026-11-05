@@ -460,6 +460,13 @@ func isReusableCandidate(candidate, newIndex *ir.Index, recreatedColumns map[str
 	if candidate.ParentIndex != "" {
 		return false
 	}
+	// Nor does a rewrite ever build a candidate on a partitioned parent:
+	// CREATE INDEX CONCURRENTLY is rejected there, so those replacements take
+	// the synchronous path. A partitioned index of that name may own child
+	// indexes whose own DROP would fail while the parent still stands.
+	if candidate.IsPartitioned {
+		return false
+	}
 	if indexReferencesColumns(candidate, recreatedColumns) {
 		return false
 	}
