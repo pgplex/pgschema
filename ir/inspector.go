@@ -198,6 +198,11 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, fmt.Errorf("failed to build partition parent columns: %w", err)
 	}
 
+	// Needs tables and columns: marks INHERITS children and their inherited columns
+	if err := traced(ctx, "inheritance", func(ctx context.Context) error { return i.buildInheritance(ctx, schema, targetSchema) }); err != nil {
+		return nil, fmt.Errorf("failed to build table inheritance: %w", err)
+	}
+
 	// Build function dependencies after functions are loaded
 	if err := traced(ctx, "function dependencies", func(ctx context.Context) error { return i.buildFunctionDependencies(ctx, schema, targetSchema) }); err != nil {
 		return nil, err
@@ -835,6 +840,57 @@ func (i *Inspector) populatePartitionChildMetadata(ctx context.Context, schema *
 			}
 		}
 	}
+}
+
+// buildInheritance records regular table inheritance (CREATE TABLE ...
+// INHERITS): the parents of every child in the target schema, in inhseqno
+// order, the children of every parent in it, and which child columns are
+// shared with a parent. Partitions are handled by populatePartitionChildMetadata.
+func (i *Inspector) buildInheritance(ctx context.Context, schema *IR, targetSchema string) error {
+	rows, err := i.queries.GetInheritanceParentsForSchema(ctx, targetSchema)
+	if err != nil {
+		return err
+	}
+	dbSchema := schema.getOrCreateSchema(targetSchema)
+	children := make(map[string]*Table)
+	for _, row := range rows {
+		if row.ParentSchema == targetSchema {
+			if parent := dbSchema.Tables[row.ParentTable]; parent != nil {
+				parent.AllInheritanceChildren = append(parent.AllInheritanceChildren, TableDependency{
+					Schema: row.ChildSchema, Name: row.ChildTable, Type: DependencyTypeTable,
+				})
+			}
+		}
+		if row.ChildSchema != targetSchema {
+			continue
+		}
+		child := dbSchema.Tables[row.ChildTable]
+		if child == nil {
+			continue
+		}
+		child.Inherits = append(child.Inherits, TableRef{Schema: row.ParentSchema, Name: row.ParentTable})
+		children[row.ChildTable] = child
+	}
+	if len(children) == 0 {
+		return nil
+	}
+	columns, err := i.queries.GetInheritedColumnsForSchema(ctx, targetSchema)
+	if err != nil {
+		return err
+	}
+	for _, row := range columns {
+		child := children[row.TableName]
+		if child == nil {
+			continue
+		}
+		for _, column := range child.Columns {
+			if column.Name == row.ColumnName {
+				column.IsInherited = true
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // buildPartitionParentColumns keeps unmanaged parents available for comparing

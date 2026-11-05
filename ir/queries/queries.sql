@@ -464,6 +464,13 @@ WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
     -- only root constraints (conparentid = 0) and child-specific constraints
     -- are dumpable. PARTITION OF auto-creates the inherited copies.
     AND c.conparentid = 0
+    -- Skip the CHECK constraints an INHERITS child shares with a parent
+    -- (coninhcount > 0; conparentid stays 0 outside partitioning), whether
+    -- the child merely inherited the copy or also declared it. CREATE TABLE
+    -- ... INHERITS and ALTER TABLE parent ADD CONSTRAINT recreate them.
+    -- Partitions keep their copies: the partition code reconciles them on
+    -- DETACH (issue #639).
+    AND NOT (c.contype = 'c' AND c.coninhcount > 0 AND NOT cl.relispartition)
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_class'::regclass
@@ -1463,6 +1470,13 @@ WHERE n.nspname = $1
     -- only root constraints (conparentid = 0) and child-specific constraints
     -- are dumpable. PARTITION OF auto-creates the inherited copies.
     AND c.conparentid = 0
+    -- Skip the CHECK constraints an INHERITS child shares with a parent
+    -- (coninhcount > 0; conparentid stays 0 outside partitioning), whether
+    -- the child merely inherited the copy or also declared it. CREATE TABLE
+    -- ... INHERITS and ALTER TABLE parent ADD CONSTRAINT recreate them.
+    -- Partitions keep their copies: the partition code reconciles them on
+    -- DETACH (issue #639).
+    AND NOT (c.contype = 'c' AND c.coninhcount > 0 AND NOT cl.relispartition)
     AND NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_depend dep
         WHERE dep.classid = 'pg_catalog.pg_class'::regclass
@@ -1473,6 +1487,55 @@ WHERE n.nspname = $1
             AND dep.deptype = 'e'
     )
 ORDER BY n.nspname, cl.relname, c.contype, c.conname, a.attnum;
+
+-- GetInheritanceParentsForSchema lists the parents of every regular inheritance
+-- child (CREATE TABLE ... INHERITS) in a schema, in inhseqno order, plus the
+-- children of every parent in the schema. Partitions are excluded; they are
+-- read by GetPartitionChildren. Parents and children may live in other schemas.
+-- name: GetInheritanceParentsForSchema :many
+SELECT
+    cn.nspname AS child_schema,
+    cc.relname AS child_table,
+    pn.nspname AS parent_schema,
+    pc.relname AS parent_table,
+    inh.inhseqno
+FROM pg_catalog.pg_inherits inh
+JOIN pg_catalog.pg_class cc ON cc.oid = inh.inhrelid
+JOIN pg_catalog.pg_namespace cn ON cn.oid = cc.relnamespace
+JOIN pg_catalog.pg_class pc ON pc.oid = inh.inhparent
+JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
+WHERE NOT cc.relispartition
+    AND cc.relkind = 'r'
+    AND (cn.nspname = $1 OR pn.nspname = $1)
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_class'::regclass
+            AND dep.objid = cc.oid
+            AND dep.objsubid = 0
+            AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
+            AND dep.refobjsubid = 0
+            AND dep.deptype = 'e'
+    )
+ORDER BY cn.nspname, cc.relname, inh.inhseqno;
+
+-- GetInheritedColumnsForSchema lists the columns that regular inheritance
+-- children in a schema share with a parent (attinhcount > 0), whether purely
+-- inherited or also declared in the child and merged with the parent's
+-- definition. Partitions are excluded.
+-- name: GetInheritedColumnsForSchema :many
+SELECT
+    cc.relname AS table_name,
+    a.attname AS column_name
+FROM pg_catalog.pg_attribute a
+JOIN pg_catalog.pg_class cc ON cc.oid = a.attrelid
+JOIN pg_catalog.pg_namespace cn ON cn.oid = cc.relnamespace
+WHERE cn.nspname = $1
+    AND cc.relkind = 'r'
+    AND NOT cc.relispartition
+    AND a.attnum > 0
+    AND NOT a.attisdropped
+    AND a.attinhcount > 0
+ORDER BY cc.relname, a.attnum;
 
 -- GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY, UNIQUE and
 -- FOREIGN KEY constraints PostgreSQL copied onto partitions from their parent's

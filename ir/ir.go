@@ -91,6 +91,20 @@ type Table struct {
 	// uses them to reconcile the copies the child keeps (issue #639).
 	// Inspection metadata, excluded from serialization and fingerprints.
 	InheritedConstraints map[string]string `json:"-"`
+	// Inherits lists the parents of a regular inheritance child
+	// (CREATE TABLE ... INHERITS), in inhseqno order. Empty for partitions,
+	// which record their parent in PartitionOf instead.
+	Inherits []TableRef `json:"inherits,omitempty"`
+	// AllInheritanceChildren records the catalog's inheritance children of
+	// this table, including ignored or external ones. Inspection metadata,
+	// excluded from serialization and fingerprints.
+	AllInheritanceChildren []TableDependency `json:"-"`
+}
+
+// TableRef identifies a table within a schema.
+type TableRef struct {
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
 }
 
 // Column represents a table column
@@ -119,6 +133,14 @@ type Column struct {
 	// Only ever set on the current state; a freshly created desired state has no
 	// invalid constraints.
 	InvalidNotNullConstraint string `json:"invalid_not_null_constraint,omitempty"`
+	// IsInherited is true for a column the table shares with an inheritance
+	// parent (attinhcount > 0), whether purely inherited or also declared in
+	// the child and merged with the parent's definition. Such a column is not
+	// printed in CREATE TABLE ... INHERITS: its type follows the parent, and
+	// the DEFAULT and NOT NULL the child sets on it are rendered as ALTER
+	// TABLE ONLY child ALTER COLUMN. Set only on INHERITS children;
+	// partitions leave it false.
+	IsInherited bool `json:"inherited,omitempty"`
 	// IsSerial is true when the column was created with the SERIAL shorthand:
 	// its default is nextval() on a sequence that is owned by this column
 	// (pg_depend) and that carries PostgreSQL's default <table>_<column>_seq

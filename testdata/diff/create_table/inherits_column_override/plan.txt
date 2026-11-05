@@ -1,0 +1,23 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ capitals
+    ~ elevation (column)
+    ~ population (column)
+
+DDL to be executed:
+--------------------------------------------------
+
+-- Transaction Group #1
+ALTER TABLE capitals ADD CONSTRAINT capitals_population_not_null NOT NULL population NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE capitals VALIDATE CONSTRAINT capitals_population_not_null;
+
+-- Transaction Group #3
+ALTER TABLE ONLY capitals ALTER COLUMN population SET DEFAULT 1;
+
+ALTER TABLE ONLY capitals ALTER COLUMN elevation DROP DEFAULT;

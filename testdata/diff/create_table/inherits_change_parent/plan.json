@@ -1,0 +1,58 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "78831f0c30e27d443f0dfd4de75e03cda365564c5d6a3baa4d26e07ced2961f3"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE child NO INHERIT base_a;",
+          "type": "table.inherit",
+          "operation": "no_inherit",
+          "path": "public.child"
+        },
+        {
+          "sql": "ALTER TABLE child DROP COLUMN label_a;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.child.label_a"
+        },
+        {
+          "sql": "ALTER TABLE child ADD COLUMN label_b text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.child.label_b"
+        },
+        {
+          "sql": "ALTER TABLE child\nADD CONSTRAINT base_b_id_check CHECK (id > 0) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.child.base_b_id_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE child VALIDATE CONSTRAINT base_b_id_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.child.base_b_id_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE child INHERIT base_b;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.child"
+        }
+      ]
+    }
+  ]
+}

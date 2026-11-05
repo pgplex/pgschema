@@ -1,0 +1,19 @@
+Plan: 1 to modify, 1 to drop.
+
+Summary by type:
+  tables: 1 to modify, 1 to drop
+
+Tables:
+  ~ capitals
+    - cities_pop_check (constraint)
+    ~ capitals (no inherit)
+  - cities
+
+DDL to be executed:
+--------------------------------------------------
+
+ALTER TABLE capitals NO INHERIT cities;
+
+DROP TABLE IF EXISTS cities CASCADE;
+
+ALTER TABLE capitals DROP CONSTRAINT cities_pop_check;

@@ -26,6 +26,7 @@ const (
 	DiffTypeTableIndexComment
 	DiffTypeTablePersistence
 	DiffTypeTablePartition
+	DiffTypeTableInherit
 	DiffTypeView
 	DiffTypeViewTrigger
 	DiffTypeViewComment
@@ -73,6 +74,8 @@ func (d DiffType) String() string {
 		return "table.persistence"
 	case DiffTypeTablePartition:
 		return "table.partition"
+	case DiffTypeTableInherit:
+		return "table.inherit"
 	case DiffTypeView:
 		return "view"
 	case DiffTypeViewTrigger:
@@ -151,6 +154,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeTablePersistence
 	case "table.partition":
 		*d = DiffTypeTablePartition
+	case "table.inherit":
+		*d = DiffTypeTableInherit
 	case "view":
 		*d = DiffTypeView
 	case "view.trigger":
@@ -209,6 +214,12 @@ const (
 	DiffOperationAttach
 	// DiffOperationDetach indicates a table detached from its partition parent.
 	DiffOperationDetach
+	// DiffOperationInherit indicates a table added to an inheritance parent
+	// (DiffTypeTableInherit).
+	DiffOperationInherit
+	// DiffOperationNoInherit indicates a table removed from an inheritance
+	// parent.
+	DiffOperationNoInherit
 )
 
 // String returns the string representation of DiffOperation
@@ -226,6 +237,10 @@ func (d DiffOperation) String() string {
 		return "attach"
 	case DiffOperationDetach:
 		return "detach"
+	case DiffOperationInherit:
+		return "inherit"
+	case DiffOperationNoInherit:
+		return "no_inherit"
 	default:
 		return "unknown"
 	}
@@ -256,6 +271,10 @@ func (d *DiffOperation) UnmarshalJSON(data []byte) error {
 		*d = DiffOperationAttach
 	case "detach":
 		*d = DiffOperationDetach
+	case "inherit":
+		*d = DiffOperationInherit
+	case "no_inherit":
+		*d = DiffOperationNoInherit
 	default:
 		return fmt.Errorf("unknown diff operation: %s", s)
 	}
@@ -472,12 +491,25 @@ type tableDiff struct {
 	PartitionChanged     bool
 	OldPartitionOf       string
 	OldPartitionOfSchema string
+	// InheritsChanged is set when the inheritance parent list differs. The
+	// old parents name the NO INHERIT statements, the new ones (from Table)
+	// the INHERIT statements. See inherit.go.
+	InheritsChanged bool
+	OldInherits     []ir.TableRef
+	// MissingParentChecks are the CHECK constraints a new inheritance parent
+	// requires of the child and the child lacks; they are added right before
+	// the INHERIT. See inherit.go.
+	MissingParentChecks []*ir.Constraint
 }
 
 // ColumnDiff represents changes to a column
 type ColumnDiff struct {
 	Old *ir.Column
 	New *ir.Column
+	// Inherited is set when the column comes from an inheritance parent on
+	// both sides: only its DEFAULT and NOT NULL are changed, with ALTER TABLE
+	// ONLY (see inherit.go).
+	Inherited bool
 }
 
 // ConstraintDiff represents changes to a constraint
@@ -701,9 +733,17 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				if oldTable.PartitionOf != "" && partitionChanged(oldTable, newTable) {
 					oldTable = withConstraintsRetainedByDetach(oldTable, oldTables)
 				}
+				// Likewise, a child leaving an inheritance parent keeps the
+				// CHECK constraints it shared with it (see inherit.go)
+				if len(oldTable.Inherits) > 0 && !inheritsEqual(oldTable.Inherits, newTable.Inherits) {
+					oldTable = withConstraintsRetainedByNoInherit(oldTable, newTable, oldTables)
+				}
 				if tableDiff := diffTables(oldTable, newTable, targetSchema, diff.targetMajorVersion); tableDiff != nil {
 					if tableDiff.PartitionChanged && newTable.PartitionOf != "" {
 						tableDiff.keepConstraintsAdoptedByAttach(newTables)
+					}
+					if tableDiff.InheritsChanged {
+						tableDiff.reconcileConstraintsForInherit(oldTable, newTables)
 					}
 					diff.modifiedTables = append(diff.modifiedTables, tableDiff)
 				}
@@ -2366,6 +2406,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// of them reference a key the attached table gains from its parent.
 	generateAttachPartitionsSQL(d.modifiedTables, targetSchema, collector)
 
+	// Likewise for tables joining an inheritance parent (see inherit.go)
+	generateInheritSQL(d.modifiedTables, targetSchema, collector)
+
 	// (Re)create the dependent foreign keys now that the replacement constraints exist
 	generateDeferredConstraintsSQL(d.fkPostAdds, targetSchema, collector)
 
@@ -2499,6 +2542,9 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Detach partitions that leave their parent, before the parent may be
 	// dropped and before any partition is created (see partition.go)
 	generateDetachPartitionsSQL(d.modifiedTables, targetSchema, collector)
+
+	// Likewise for tables leaving an inheritance parent (see inherit.go)
+	generateNoInheritSQL(d.modifiedTables, targetSchema, collector)
 
 	// Drop tables
 	generateDropTablesSQL(d.droppedTables, targetSchema, collector)

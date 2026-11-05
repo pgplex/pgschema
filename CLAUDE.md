@@ -178,7 +178,7 @@ Note: Parser logic is no longer needed - both desired and current states come fr
 
 The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for complete data structures):
 
-- **Tables**: Columns, identity columns, generated columns, partitioning, LIKE clauses
+- **Tables**: Columns, identity columns, generated columns, partitioning, inheritance (INHERITS), LIKE clauses
 - **Constraints**: Primary keys, foreign keys, unique constraints, check constraints, NOT VALID
 - **Indexes**: Regular, unique, partial, functional/expression indexes, concurrent creation
 - **Views**: Regular views and materialized views with indexes
@@ -275,7 +275,7 @@ Tests are organized by object type (150+ test cases):
 
 - `comment/` (12), `create_aggregate/` (4), `create_domain/` (5), `create_function/` (8), `create_index/` (2)
 - `create_materialized_view/` (3), `create_policy/` (10), `create_procedure/` (3), `create_sequence/` (3)
-- `create_table/` (37), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
+- `create_table/` (64), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
 - `default_privilege/` (9), `privilege/` (13)
 - `dependency/` (13), `online/` (15), `migrate/` (5)
 
@@ -283,9 +283,9 @@ Each test case contains: `old.sql` (starting state), `new.sql` (desired state), 
 
 ### Dump Tests (`testdata/dump/`)
 
-18 test suites with `manifest.json`, `raw.sql`, `pgdump.sql`, `pgschema.sql`:
+31 test suites with `manifest.json`, `raw.sql`, `pgdump.sql`, `pgschema.sql`:
 
-- Schema examples: `bytebase/`, `employee/`, `sakila/`, `tenant/`
+- Schema examples: `bytebase/`, `employee/`, `inherits/`, `sakila/`, `tenant/`
 - Issue regressions: `issue_125_*`, `issue_133_*`, `issue_183_*`, `issue_191_*`, `issue_252_*`, `issue_275_*`, `issue_307_*`, `issue_318_*`, `issue_320_*`, `issue_78_*`, `issue_80_*`, `issue_82_*`, `issue_83_*`
 
 **pgdump.sql version gotcha**: `pgdump.sql` files are executed against all supported PostgreSQL versions (14-18). Version-specific SET parameters like `SET transaction_timeout = 0;` (PG 17+) must be commented out, e.g. `-- SET transaction_timeout = 0;`, or the test will fail on older versions.

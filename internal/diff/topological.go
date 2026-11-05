@@ -49,6 +49,15 @@ func topologicallySortTables(tables []*ir.Table) []*ir.Table {
 			}
 		}
 
+		// Inheritance parent → child dependency (see inherit.go)
+		for _, parent := range tableA.Inherits {
+			keyB := parent.Schema + "." + parent.Name
+			if _, exists := tableMap[keyB]; exists && keyA != keyB {
+				adjList[keyB] = append(adjList[keyB], keyA)
+				inDegree[keyA]++
+			}
+		}
+
 		for _, constraint := range tableA.Constraints {
 			if constraint.Type == ir.ConstraintTypeForeignKey && constraint.ReferencedTable != "" {
 				// Build referenced table key
@@ -598,6 +607,16 @@ func topologicallySortModifiedTables(tableDiffs []*tableDiff) []*tableDiff {
 
 	// Build edges: if tableA adds a FK to tableB's newly-added UNIQUE/PK, add edge tableB -> tableA
 	for keyA, tdA := range tableDiffMap {
+		// An inheritance child's changes follow its parent's: a child-local
+		// object may need a column the parent is adding (see inherit.go)
+		for _, parent := range tdA.Table.Inherits {
+			keyB := parent.Schema + "." + parent.Name
+			if _, exists := tableDiffMap[keyB]; exists && keyA != keyB {
+				adjList[keyB] = append(adjList[keyB], keyA)
+				inDegree[keyA]++
+			}
+		}
+
 		// Look at FK constraints being added to tableA
 		for _, fkConstraint := range tdA.AddedConstraints {
 			if fkConstraint.Type != ir.ConstraintTypeForeignKey {

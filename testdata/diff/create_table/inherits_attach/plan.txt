@@ -1,0 +1,22 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ capitals
+    + cities_pop_check (constraint)
+    ~ capitals (inherit)
+
+DDL to be executed:
+--------------------------------------------------
+
+-- Transaction Group #1
+ALTER TABLE capitals
+ADD CONSTRAINT cities_pop_check CHECK (population >= 0::double precision) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE capitals VALIDATE CONSTRAINT cities_pop_check;
+
+-- Transaction Group #3
+ALTER TABLE capitals INHERIT cities;

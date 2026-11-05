@@ -552,6 +552,16 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			if table.PartitionOfSchema == fromSchema {
 				table.PartitionOfSchema = toSchema
 			}
+			for i := range table.Inherits {
+				if table.Inherits[i].Schema == fromSchema {
+					table.Inherits[i].Schema = toSchema
+				}
+			}
+			for i := range table.AllInheritanceChildren {
+				if table.AllInheritanceChildren[i].Schema == fromSchema {
+					table.AllInheritanceChildren[i].Schema = toSchema
+				}
+			}
 			if table.PartitionBound != "" {
 				table.PartitionBound = stripQualifiers(replaceString(table.PartitionBound))
 			}
