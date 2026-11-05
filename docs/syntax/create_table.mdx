@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS products (
 
 ### Inheritance
 
-A child table lists only the columns and constraints it declares itself, followed by `INHERITS (...)`. Columns and CHECK constraints it shares with a parent are left to the parent, as in `pg_dump`. A DEFAULT or NOT NULL the child sets on an inherited column follows the CREATE TABLE as a separate statement:
+A child table lists the columns and constraints it declares itself, followed by `INHERITS (...)`. Columns and CHECK constraints it only inherits are left to the parent. A DEFAULT or NOT NULL the child sets on an inherited column follows the `CREATE TABLE` as a separate statement:
 
 ```sql
 CREATE TABLE IF NOT EXISTS cities (
@@ -168,11 +168,9 @@ ALTER TABLE ONLY capitals ALTER COLUMN elevation SET DEFAULT 0;
 ALTER TABLE capitals ALTER COLUMN elevation SET NOT NULL;
 ```
 
-The default uses `ONLY` so it does not overwrite the defaults of the child's own children; NOT NULL recurses to them in any case. A column the child declares as well as inherits, as `elevation integer DEFAULT 0 NOT NULL` in the child would be, is dumped in the child's `CREATE TABLE` like `pg_dump` does: PostgreSQL merges it with the parent's column, and because the child declared it, it survives a later `DROP COLUMN` on the parent. The same inline form is used when the child has to settle a conflict between its parents' defaults or generation expressions, or gives a generated column its own expression. A CHECK constraint the child declares as well as inherits is likewise kept in its `CREATE TABLE`, so it stays on the child if the parent later drops it.
+A column or CHECK constraint the child declares as well as inherits stays in its `CREATE TABLE`, as `pg_dump` keeps it.
 
-Changes to a parent recurse to its children in PostgreSQL, so the plan applies them to the parent only. Adding, dropping, or retyping a parent column, or adding or dropping a parent CHECK constraint, produces no statement for the children; a child-only index or policy that uses a new parent column is created after the parent's `ADD COLUMN`. On a child, only the DEFAULT and NOT NULL of an inherited column can change.
-
-A child that joins or leaves a parent gets `ALTER TABLE ... INHERIT` at the end of the table changes, once it carries every column and CHECK constraint the parent requires, or `ALTER TABLE ... NO INHERIT` before any table is dropped, so removing a parent from the schema file never drops its children. Columns and CHECK constraints a child keeps after `NO INHERIT` are dropped if the desired table does not declare them.
+Changes to a parent recurse to its children in PostgreSQL, so the plan applies them to the parent only; the children get no statements of their own. A table that joins or leaves a parent gets `ALTER TABLE ... INHERIT` or `ALTER TABLE ... NO INHERIT`, and `NO INHERIT` runs before any `DROP TABLE`, so removing a parent from the schema file never drops its children.
 
 ### Constraint Handling Rules
 
@@ -216,7 +214,6 @@ A child that joins or leaves a parent gets `ALTER TABLE ... INHERIT` at the end 
 - DEFAULT is omitted for SERIAL and IDENTITY columns
 - CHECK constraints are simplified to developer-friendly format (e.g., `IN('val1', 'val2')` instead of `= ANY (ARRAY[...])`)
 - Partitioned tables include the PARTITION BY clause
-- Inheritance children list only their own columns and constraints, followed by INHERITS (...)
 - Proper indentation with 4 spaces for readability
 - All table creation operations can run within transactions
 - For DROP operations: `DROP TABLE IF EXISTS table_name CASCADE;`
