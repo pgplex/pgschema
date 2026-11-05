@@ -1,295 +1,211 @@
 ---
-title: "Supabase Declarative Schema vs pgschema"
-description: "Comparing two declarative PostgreSQL schema tools: workflow differences, database object support, online DDL, CI/CD integration, and file organization."
+title: "Supabase pg-delta vs pgschema"
+description: "An honest comparison of Supabase's pg-delta (Declarative Schemas 2.0) and pgschema: workflow, object coverage, online DDL, verification, runtime requirements, and when to pick each."
 ---
 
-Managing PostgreSQL schemas with imperative migrations - writing `ALTER TABLE` statements by hand, tracking which migrations ran where - doesn't scale. Declarative schema management flips this: you define the desired state, and the tool figures out how to get there. It's the Terraform approach for databases.
+<Note>
+This post was rewritten after Supabase shipped [Declarative Schemas 2.0](https://supabase.com/blog/declarative-schemas-2-0-pg-delta) on top of a new diff engine, [pg-delta](https://github.com/supabase/pg-toolbelt/tree/main/packages/pg-delta). The earlier version of this article compared pgschema against the migra-based `supabase db diff`. Most of that comparison no longer holds, so we start over here. Claims about pg-delta were checked against its source at `1.0.0-alpha.60`, not only its README.
+</Note>
 
-Both Supabase and pgschema offer this declarative workflow for PostgreSQL. Recently, we've seen users [migrating from Supabase's declarative schemas to pgschema](https://github.com/pgplex/pgschema/issues/227). This article compares both tools to help you understand when each makes sense.
+Declarative schema management means you write the schema you want, and a tool computes the DDL to get there. Both Supabase and pgschema do this for PostgreSQL. Until recently the comparison was lopsided: Supabase's `supabase db diff` was built on [migra](https://github.com/djrobstep/migra), which could not see RLS policies, triggers, partitions, comments, or domains, and Supabase's own docs told you to fall back to hand-written migrations for those.
 
-## Workflow Comparison
+That is no longer the situation. Supabase replaced migra with pg-delta, a clean-room engine that reads the catalog, builds a dependency graph, and covers more object kinds than pgschema does. This post compares the two as they stand today. Where pg-delta is ahead, we say so.
+
+## What each tool is
+
+**pg-delta** is a TypeScript library and CLI (`pgdelta`) published on npm under the PostgreSQL License. It compares two live databases and emits an ordered migration. It is embedded in the Supabase CLI (2.119+) behind an `[experimental.pgdelta]` flag in `config.toml`, where it powers `supabase db diff`, `supabase db pull`, and the new `supabase db schema declarative sync` command. It is also usable standalone against any Postgres. The package is a `1.0.0-alpha.x` release, and the README says breaking changes may land between versions.
+
+**pgschema** is a single Go binary under Apache 2.0. It dumps a schema to SQL files, plans a migration from those files against a target database, and applies the plan. It has no Supabase dependency and no migration history table.
+
+Both support PostgreSQL 14 through 18. Both resolve the desired state by loading your SQL into a real Postgres instance and reading it back from the catalog, rather than parsing SQL text. Both order output with a dependency graph built from `pg_depend`.
+
+## Workflow
 
 <CardGroup cols={2}>
-  <Card title="Supabase (migration history in DB)">
+  <Card title="Supabase CLI + pg-delta">
     ```mermaid
     flowchart TB
-        A[Edit schema files] --> B[supabase db diff]
-        B --> C[Review migration file]
-        C --> D[supabase db push]
-        D --> E[Migration history updated]
-        E --> F[Database updated]
+        A[Edit supabase/schemas/*.sql] --> B[supabase db schema declarative sync]
+        B --> C[Shadow DB 1: load schema files]
+        B --> D[Shadow DB 2: replay migrations/]
+        C --> E[pg-delta diff]
+        D --> E
+        E --> F[New file in supabase/migrations/]
+        F --> G[Review]
+        G --> H[supabase db push]
+        H --> I[Migration history table updated]
     ```
   </Card>
-  <Card title="pgschema (migration history in git)">
+  <Card title="pgschema">
     ```mermaid
     flowchart TB
-        A[Edit schema files] --> B[pgschema plan]
-        B --> C[Review plan]
-        C --> D[pgschema apply]
-        D --> E[Database updated]
+        A[Edit schema.sql] --> B[pgschema plan]
+        B --> C[Embedded Postgres: load schema files]
+        B --> D[Target database: inspect]
+        C --> E[Diff]
+        D --> E
+        E --> F[plan.json with fingerprint]
+        F --> G[Review]
+        G --> H[pgschema apply]
     ```
   </Card>
 </CardGroup>
 
-### Supabase
+### Supabase CLI workflow
 
-Supabase maintains two directories and a database table:
+Inside the Supabase CLI, pg-delta still produces versioned migration files. `sync` spins up two throwaway databases: one loaded from `supabase/schemas/`, one built by replaying `supabase/migrations/`. pg-delta diffs them and writes a new timestamped migration. You then run `supabase db push`, which applies pending migrations and records them in `supabase_migrations.schema_migrations`.
 
-- `supabase/schemas/` - Your desired state (what you edit)
-- `supabase/migrations/` - Generated migration files (timestamped SQL)
-- `supabase_migrations.schema_migrations` - Table tracking which migrations have been applied
+Two consequences follow from this design:
 
-When you run `supabase db diff`, it compares your schema files against the cumulative result of existing migrations and generates a new timestamped migration file.
+- **The desired state is compared against your migration history, not the live database.** If someone changed production through the dashboard or `psql`, `sync` does not see it. You must `supabase db pull --declarative` first to bring the files back in line.
+- **You maintain two directories plus a history table.** The schema files are the thing you edit; the migrations directory is a derived artifact that still has to be committed and kept consistent.
 
-**Adding a column:**
+Shadow databases run in Docker or Podman by default. The Supabase CLI can use a native runtime instead, but that is itself experimental.
 
-```sql
--- supabase/schemas/users.sql
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  phone TEXT  -- add this line
-);
-```
+### Standalone pg-delta workflow
 
-```bash
-# Generate migration from schema diff
-supabase db diff -f add_phone_column
-# Creates: supabase/migrations/20240115120000_add_phone_column.sql
+Outside the Supabase CLI, `pgdelta` is a different and arguably cleaner tool. `pgdelta plan --source <db> --desired <db> --out plan.json` diffs two live databases. `pgdelta schema apply --dir ./schema --target <db>` loads your SQL files into a shadow database and plans and applies against the target directly, with no migrations directory. That is the same stateless model pgschema uses.
 
-# Apply locally
-supabase migration up
+The standalone CLI also has commands pgschema does not: `prove`, `drift`, `snapshot`, `schema lint`. More on those below.
 
-# Push to remote
-supabase db push
-```
+### pgschema workflow
 
-**Rolling back:**
-
-Supabase uses versioned migrations. To rollback, you reset to a previous migration timestamp:
+pgschema always compares schema files against the live target. There is one input (your SQL files) and one output (a plan). The plan is a JSON file carrying the SQL statements and a fingerprint of the target schema at plan time:
 
 ```bash
-supabase db reset --version 20240101000000
+pgschema plan --host prod.db --db myapp --user postgres --file schema.sql --output-json plan.json
+pgschema apply --host prod.db --db myapp --user postgres --plan plan.json
 ```
 
-This replays all migrations up to that version. The migration history table tracks what's been applied.
+If the target schema changed between plan and apply, apply refuses to run. Rollback is editing the file back and planning again.
 
-### pgschema
+pg-delta's `apply` is also described as fingerprint-gated, so this is no longer a point of difference. Both tools catch a stale plan.
 
-pgschema has a single source of truth:
+## Object coverage
 
-- Your schema SQL file(s) - that's it
-- No migration history table
-- No migrations directory
+This is where pg-delta has moved furthest. The table below is drawn from pg-delta's [COVERAGE.md](https://github.com/supabase/pg-toolbelt/blob/main/packages/pg-delta/COVERAGE.md) and pgschema's [unsupported](/syntax/unsupported) page.
 
-Each `plan` command does a fresh comparison: desired state (your SQL files) vs current state (live database).
+| Object | pg-delta | pgschema |
+|---|---|---|
+| Tables, columns, constraints, indexes | ✅ | ✅ |
+| Partitioned tables and partitions | ✅ | ✅ |
+| Table inheritance (`INHERITS`) | ✅ | ❌ |
+| Views, materialized views | ✅ | ✅ |
+| Functions, procedures, aggregates | ✅ | ✅ |
+| Triggers, event triggers | ✅ / ✅ | ✅ / ❌ |
+| RLS policies | ✅ | ✅ |
+| Sequences, identity columns | ✅ | ✅ |
+| Domains, enum, composite, range types | ✅ | ✅ (range types: ❌) |
+| Comments | ✅ | ✅ |
+| GRANT / REVOKE, column privileges | ✅ | ✅ |
+| `ALTER DEFAULT PRIVILEGES` | ✅ (global) | ✅ (`IN SCHEMA` only) |
+| Rewrite rules | ✅ | ❌ |
+| Object ownership (`OWNER TO`) | ✅ | ❌ by design |
+| Schemas (`CREATE SCHEMA`) | ✅ | ❌ |
+| Roles, role config, memberships | ✅ | ❌ |
+| Extensions | ✅ | ❌ |
+| Publications, subscriptions | ✅ | ❌ |
+| FDWs, servers, user mappings, foreign tables | ✅ | ❌ |
+| Collations | ✅ | ❌ |
+| Security labels | ✅ | ❌ |
+| Casts, operators, text search, statistics, transforms | ❌ (reported as `unmodeled_kind`) | ❌ |
+| `RENAME` | Opt-in detection (`--renames auto` or `prompt`, `--accept-rename`); drop + add by default | ❌ (drop + create) |
+| Extension-managed state (pg_cron jobs, pgmq queues, pg_partman) | ✅ via extension API calls | ❌ |
 
-**Adding a column:**
+A few notes on reading this:
 
-```sql
--- schema.sql
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  phone TEXT  -- add this line
-);
-```
+- **pgschema's gaps are mostly above the schema level by design.** Roles, extensions, schemas, publications, and FDWs are cluster- or database-level objects that pgschema expects you to provision elsewhere. That is a defensible scoping choice for teams running one schema per app or per tenant, but it is a choice, and pg-delta made the other one. If you want a single tool to reconcile roles and extensions alongside tables, pg-delta does that and pgschema does not.
+- **Ownership.** pgschema deliberately ignores `OWNER TO`, like `pg_dump --no-owner`, so one schema file works across environments with different owners. pg-delta models ownership as an edge and emits `ALTER ... OWNER TO`. Which you prefer depends on whether your environments share role names.
+- **pg-delta reports what it cannot model.** Objects outside its model surface as `unmodeled_kind` warnings, and `--strict-coverage` turns them into failures. pgschema warns on some skipped statements (`OWNER TO`, global default privileges) but does not inventory every unsupported object kind in the target.
+- **Extension intent handlers** are a genuinely novel feature. pg-delta diffs pg_cron jobs and pgmq queues, which live in tables rather than the catalog, and emits `cron.schedule_in_database` or `pgmq.create` instead of raw DDL. pgschema has nothing comparable.
 
-```bash
-# See the migration plan
-pgschema plan --host localhost --db myapp --user postgres --file schema.sql
+## Online DDL and production safety
 
-# Save the plan for review and apply
-pgschema plan --host localhost --db myapp --user postgres --file schema.sql --output-json plan.json
+Here pgschema is ahead, but the gap is narrower than pg-delta's blog post suggests. The post says zero-downtime rollout is out of scope. The source code (`1.0.0-alpha.60`) tells a more nuanced story:
 
-# Apply the reviewed plan
-pgschema apply --host localhost --db myapp --user postgres --plan plan.json
-```
+**What pg-delta does:**
 
-**Rolling back:**
+- Groups actions into transactional segments, runs statements that cannot be in a transaction (such as `CREATE INDEX CONCURRENTLY`) alone, and rolls back a failed segment.
+- Marks each action with a `dataLoss` flag. `apply` refuses destructive plans without `--allow-data-loss`, `render` hides drops without `--allow-drops`, and `--dry-run` reports destructive actions.
+- Splits a plan that would overflow the lock table (`--max-locks`, `--split-to-fit`).
+- Has a `concurrentIndexes` plan parameter that emits `CREATE INDEX CONCURRENTLY`. It is settable through the library API or a profile's serialize rules, not a CLI flag.
+- Accepts `lockTimeoutMs` and `statementTimeoutMs` in the library's apply options. No CLI flag sets them today.
+- Emits `NOT VALID` only when the desired constraint is itself declared `NOT VALID`. It does not rewrite a plain new foreign key into `NOT VALID` plus `VALIDATE CONSTRAINT`.
 
-There's no migration history. To rollback, edit your schema file to the desired state and apply:
+**What pgschema does by default** ([online DDL](/workflow/online-ddl)):
 
-```sql
--- schema.sql - remove the phone column
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL
-);
-```
+- `CREATE INDEX` becomes `CREATE INDEX CONCURRENTLY`, run outside a transaction.
+- Adding a foreign key or check constraint becomes `ADD CONSTRAINT ... NOT VALID` followed by `VALIDATE CONSTRAINT`.
+- `apply --lock-timeout` bounds how long any statement waits on a lock.
+- Statements that cannot run inside a transaction are executed outside one; the rest run in a transaction.
+- `--pgschema-no-transaction` and `--pgschema-lock-timeout` directives in schema files override behavior per statement.
 
-```bash
-pgschema plan --host localhost --db myapp --user postgres --file schema.sql --output-json plan.json
-# Shows: ALTER TABLE users DROP COLUMN phone;
+The practical difference: pgschema's online rewrites are on by default and reachable from the CLI. pg-delta has the building blocks but leaves the concurrent-index and timeout choices to library callers, and does not do the NOT VALID rewrite at all.
 
-pgschema apply --host localhost --db myapp --user postgres --plan plan.json
-```
+## Verification
 
-Rollback is just another state change. No timestamps, no migration history to manage.
+pg-delta ships a `prove` command: apply the plan to a throwaway clone, re-extract, and check that no drift remains and that row counts (or content fingerprints) survive per table. Its test corpus of 331 scenarios is proven in both directions on every supported Postgres version. The README is candid that `prove` only validates what it checked, so an empty table proves nothing about data preservation.
 
-### Concurrent Change Detection in CI/CD
+pgschema has no equivalent. Its correctness story is its own test suite (several hundred diff cases plus plan-and-apply integration tests), and the recommendation to run plan and apply against a staging copy first. pg-delta's `prove` turns that recommendation into a command. That is a real advantage.
 
-Both tools decouple migration generation from execution. Both produce migration SQL. But pgschema's JSON plan format encodes more than just the SQL statements - it includes a [fingerprint](/workflow/plan-review-apply#detect-concurrent-changes-with-fingerprinting) of the database schema at plan time:
+pg-delta also has `drift` (compare a live database to a saved snapshot) and `schema lint` (check SQL files for load-order problems without a database). pgschema's fingerprint check covers the narrow case of "did the target change since I planned," not general drift reporting against a baseline.
 
-```json
-{
-  "source_fingerprint": {
-    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
-  },
-  "statements": [...]
-}
-```
+## Runtime and dependencies
 
-This matters in CI/CD pipelines. A typical workflow:
+| | pg-delta | pgschema |
+|---|---|---|
+| Distribution | npm package, Node.js 20+ (Bun and Deno also work) | Single static Go binary |
+| Shadow / plan database | Supabase CLI: Docker or Podman by default. Standalone: you supply a database | Embedded Postgres downloaded on first run, or any external Postgres via `--plan-host` |
+| Supabase account or project | Not required for standalone use | Not required |
+| Stability | `1.0.0-alpha.x`, breaking changes expected; experimental flag in Supabase CLI | Stable releases |
 
-1. PR is opened, CI runs `pgschema plan` and saves `plan.json` as an artifact
-2. Team reviews the plan in the PR
-3. PR is merged, CD runs `pgschema apply --plan plan.json`
+pgschema is lighter to put into a CI job: one binary, no container runtime, no Node. pg-delta inside the Supabase CLI needs Docker for its shadow databases. Standalone pg-delta needs Node and two reachable databases.
 
-But what if another PR merged and applied schema changes between steps 1 and 3? With Supabase, you might apply a stale migration that conflicts with changes made by another PR. With pgschema, the apply fails:
+## Organizing schema files
 
-```bash
-pgschema apply --host prod.db.com --db myapp --user postgres --plan plan.json
-# ❌ Error: schema fingerprint mismatch detected - the database schema has changed since the plan was generated.
-```
+Both tools can export an existing database into one file per object.
 
-The CI pipeline catches the conflict. You regenerate the plan, review again, and apply. No silent schema drift.
+pg-delta's `schema export` writes one directory per schema with `tables/`, `views/`, `functions/` subdirectories and a `_cluster/` directory for roles and extensions. It offers three layouts (`by-object`, `ordered`, `grouped`) and refuses to overwrite SQL files it did not generate, except in a `_custom/` folder reserved for hand-written SQL for unmodeled objects. Load order is resolved automatically by `pg-topo`, so you no longer hand-order files in `config.toml`.
 
-## Database Object Support
+pgschema's `dump --multi-file` writes a `main.sql` entry point with `\i` includes and the same kind of per-type directories. Because `\i` is a `psql` directive, the files load with plain `psql -f main.sql` without the tool. Ordering is whatever you put in `main.sql`; pgschema does not reorder on load failure.
 
-Supabase uses [migra](https://github.com/djrobstep/migra) for schema diffing, which has [documented limitations](https://supabase.com/docs/guides/local-development/declarative-database-schemas#known-caveats). pgschema also has [limitations](/syntax/unsupported), but they're fundamentally different.
+## Scoping what is managed
 
-**Supabase/migra cannot track these schema-level objects:**
+pg-delta uses **profiles** (`--profile raw | supabase | <path>`). A profile holds policy rules separating user objects from platform objects, extension handlers, assumed roles and schemas, and optionally a baseline snapshot subtracted from both sides. The `supabase` profile is how the `auth`, `storage`, and other platform schemas and roles stay out of your migrations. The rule DSL is evaluated first-match-wins and is readable in the source under `src/policy/`, but the README does not document it, so writing a custom profile today means reading code.
 
-- Row-level security (RLS) policies
-- Materialized views
-- Comments
-- Partitions
-- Column privileges
-- View ownership and grants
-- Domain statements
-
-For these, Supabase recommends falling back to versioned migrations - defeating the purpose of declarative schemas.
-
-**pgschema supports all of the above.** Its limitations are at cluster and database levels - objects typically provisioned once during setup rather than changed frequently:
-
-- Cluster level: `CREATE DATABASE`, `CREATE ROLE`, `CREATE TABLESPACE`
-- Database level: `CREATE EXTENSION`, `CREATE SCHEMA`, `CREATE PUBLICATION`
-- `RENAME` operations (use DROP + CREATE instead)
-
-These objects are typically managed separately through infrastructure tools, cloud consoles, or initial setup scripts.
-
-| Object Type | Supabase/migra | pgschema |
-|-------------|----------------|----------|
-| Tables, views, functions | ✅ | ✅ |
-| RLS policies | ❌ | ✅ |
-| Materialized views | ❌ | ✅ |
-| Triggers | ❌ | ✅ |
-| Procedures | ❌ | ✅ |
-| Partitions | ❌ | ✅ |
-| Comments | ❌ | ✅ |
-| Column privileges | ❌ | ✅ |
-| Domain types | ❌ | ✅ |
-| CREATE INDEX CONCURRENTLY | ❌ | ✅ |
-| ADD CONSTRAINT ... NOT VALID | ❌ | ✅ |
-
-The last two rows matter for production. pgschema automatically rewrites your declarative schema changes into [online DDL](/workflow/online-ddl) - you write a normal `CREATE INDEX`, pgschema generates `CREATE INDEX CONCURRENTLY`. You add a foreign key constraint, pgschema generates `ADD CONSTRAINT ... NOT VALID` followed by `VALIDATE CONSTRAINT`. No manual intervention needed.
-
-## Organizing Schema Files
-
-Both tools support splitting schemas into multiple files, but with different approaches.
-
-### Multi-file Structure
-
-**Supabase** processes files in `supabase/schemas/` in lexicographic order. For custom ordering, you configure `config.toml`:
-
-```toml
-[db.migrations]
-schema_paths = [
-  "./schemas/employees.sql",
-  "./schemas/*.sql",
-]
-```
-
-**pgschema** uses PostgreSQL's native `\i` (include) directive. You can dump an existing database into a [modular structure](/workflow/modular-schema-files):
-
-```bash
-pgschema dump --host localhost --db myapp --user postgres \
-  --multi-file --file schema/main.sql
-```
-
-This generates:
-
-```
-schema/
-├── main.sql              # Entry point with \i directives
-├── tables/
-│   ├── users.sql
-│   └── orders.sql
-├── views/
-├── functions/
-└── indexes/
-```
-
-You can include individual files or entire folders:
-
-```sql
-\i tables/users.sql
-\i views/
-\i functions/
-```
-
-The key difference: pgschema uses PostgreSQL's native `\i` directive, so your schema files work directly with `psql` - no tool-specific configuration needed.
-
-### Ignoring Objects
-
-**Supabase** has a `--schema` flag to include/exclude entire schemas. By default, `auth` and `storage` schemas are excluded from diffs since they're managed by Supabase. You can diff specific schemas with:
-
-```bash
-supabase db diff --schema public,custom_schema
-```
-
-However, there's no way to ignore individual tables or objects within a schema.
-
-**pgschema** supports a [`.pgschemaignore`](/cli/ignore) file with pattern matching:
+pgschema uses a [`.pgschemaignore`](/cli/ignore) file with glob patterns per object type:
 
 ```toml
 [tables]
-patterns = ["temp_*", "test_*", "!test_core_*"]
-
-[views]
-patterns = ["debug_*", "analytics_*"]
-
-[functions]
-patterns = ["fn_test_*"]
+patterns = ["temp_*", "!temp_core_*"]
 ```
 
-This is useful for:
-- **Gradual adoption** - onboard tables incrementally without managing everything at once
-- **Temporary objects** - exclude debug views, temp tables, development-only objects
-- **Legacy objects** - ignore deprecated tables while managing new ones
+It is less expressive than a profile, but it is documented and takes a minute to write. Neither tool's mechanism is a superset of the other's.
 
 ## Summary
 
-| Aspect | Supabase | pgschema |
-|--------|----------|----------|
-| **License** | Apache 2.0 | Apache 2.0 |
-| **Workflow** | Schema files → migrations → history table | Schema files → plan → apply (git history, fingerprinting) |
-| **Database object support** | Limited by migra (no RLS, triggers, partitions) | Comprehensive schema-level support |
-| **Online DDL** | Manual | Auto-generates CONCURRENTLY, NOT VALID |
-| **Multi-file schemas** | config.toml with glob patterns | PostgreSQL-native `\i` directive |
-| **Ignore patterns** | Schema-level only | Granular `.pgschemaignore` with wildcards |
-| **Database compatibility** | Supabase-hosted PostgreSQL | Any PostgreSQL database |
+| Aspect | pg-delta | pgschema |
+|---|---|---|
+| License | PostgreSQL License | Apache 2.0 |
+| Language / runtime | TypeScript, Node 20+ | Go, single binary |
+| Maturity | Alpha, breaking changes expected | Stable |
+| Workflow (Supabase CLI) | Schema files → migration files → history table | n/a |
+| Workflow (standalone) | Schema files or DB → fingerprinted plan → apply | Schema files → fingerprinted plan → apply |
+| Object coverage | Schema + database + cluster level | Schema level only |
+| Online DDL | Transaction segments, destructive-action gating, lock-table splitting; concurrent indexes and timeouts via library only; no NOT VALID rewrite | CONCURRENTLY, NOT VALID + VALIDATE, lock timeout, transaction handling, all default and on the CLI |
+| Verification | `prove` on a clone, `drift`, `schema lint` | Test suite and staging runs |
+| Shadow database | Docker/Podman (Supabase CLI) or user-supplied | Embedded Postgres or `--plan-host` |
+| Excluding objects | Profiles (rule DSL documented only in source) | `.pgschemaignore` globs |
+| Renames | Opt-in detection, off by default | Drop + create |
 
 ## Conclusion
 
-Both tools embrace declarative schema management - define your desired state, let the tool generate the migration. This approach reduces manual SQL writing and eliminates migration ordering headaches.
+The old version of this article could point at a long list of Postgres features Supabase simply could not diff. pg-delta closes that list and then goes past pgschema on roles, extensions, publications, foreign data wrappers, ownership, and extension-managed state. It also adds a `prove` step that pgschema lacks. Credit where due: it is a serious engine.
 
-**Choose Supabase** if you're fully invested in the Supabase ecosystem (Auth, Storage, Edge Functions) and your schema uses basic objects. The integrated tooling provides a cohesive experience.
+**Choose Supabase with pg-delta** if you are on Supabase, want roles and extensions managed in the same files as your tables, and are comfortable with an alpha package behind an experimental flag. If you are not on Supabase, the standalone `pgdelta` CLI is still worth a look for its coverage and `prove`.
 
-**Choose pgschema** if you need broader PostgreSQL support (RLS, triggers, partitions), online DDL for production safety, or database portability across AWS RDS, Cloud SQL, self-hosted, or Supabase.
+**Choose pgschema** if you need the migration to be safe to run against a live production database without hand-editing it, want a dependency-free binary in CI, or prefer a stable tool that scopes itself to the schema level and leaves roles and extensions to your provisioning layer.
 
-Both tools are open source. Try them on a test database and see which workflow fits your team.
+Both are open source and both work against any PostgreSQL 14 to 18. Try each on a copy of your database. The gaps that matter to you will show up in the first plan.
 
-For those who are considering migrating from Supabase declarative schema to pgschema, you can check out the experience/gaps from the [community discussion](https://github.com/pgplex/pgschema/issues/227).
-
+If you are moving from Supabase's declarative schemas to pgschema, the [community discussion](https://github.com/pgplex/pgschema/issues/227) covers the experience and gaps others hit.
