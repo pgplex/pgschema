@@ -115,19 +115,20 @@ On ownership: pgschema deliberately ignores `OWNER TO`, like `pg_dump --no-owner
 
 ### Database- and cluster-level objects
 
-pgschema does not manage this layer, and says so in its docs. It expects schemas, roles, and extensions to be created once by infrastructure tooling or a setup script. Roles referenced in grants and policies are stubbed during planning so the schema file still loads. pg-delta made the opposite choice and diffs all of it.
+pgschema does not manage this layer at all. Its [docs](/syntax/unsupported) scope it out in one sentence: the tool operates at the schema level, and anything above that is expected to come from infrastructure tooling or a setup script. Roles referenced in grants and policies are stubbed during planning so the schema file still loads, but nothing at this level is dumped or diffed.
 
-| Object | pg-delta | pgschema |
-|---|---|---|
-| Schemas (`CREATE SCHEMA`) | ✅ | ❌ by design |
-| Roles, role config, memberships | ✅ | ❌ by design |
-| Extensions (`CREATE EXTENSION`) | ✅ | ❌ by design |
-| Global `ALTER DEFAULT PRIVILEGES` | ✅ | ❌ by design |
-| Event triggers | ✅ | ❌ |
-| Publications, subscriptions | ✅ | ❌ |
-| Foreign data wrappers, servers, user mappings | ✅ | ❌ |
-| Collations | ✅ | ❌ |
-| Languages, parameter ACLs, large objects | ❌ (reported as `unmodeled_kind`) | ❌ |
+pg-delta made the opposite choice. It models:
+
+- Schemas
+- Roles, role configuration, and memberships
+- Extensions
+- Global `ALTER DEFAULT PRIVILEGES`
+- Event triggers
+- Publications and subscriptions
+- Foreign data wrappers, servers, and user mappings
+- Collations
+
+It does not model languages, parameter ACLs, or large objects, and reports those as `unmodeled_kind`.
 
 If you want one tool to reconcile roles and extensions alongside tables, pg-delta does that today. There is an open pgschema issue, [pgplex/pgschema#627](https://github.com/pgplex/pgschema/issues/627), proposing opt-in declarative roles, memberships, and ownership, but nothing has shipped.
 
