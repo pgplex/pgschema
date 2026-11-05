@@ -115,32 +115,32 @@ On ownership: pgschema deliberately ignores `OWNER TO`, like `pg_dump --no-owner
 
 ### Database- and cluster-level objects
 
-pgschema does not manage this layer, and says so in its docs. It expects schemas, roles, and extensions to be created once by infrastructure tooling or a setup script. Roles referenced in grants and policies are stubbed during planning so the schema file still loads. pg-delta made the opposite choice and diffs all of it.
+pgschema does not manage this layer at all. Its [docs](/syntax/unsupported) scope it out in one sentence: the tool operates at the schema level, and anything above that is expected to come from infrastructure tooling or a setup script. Roles referenced in grants and policies are stubbed during planning so the schema file still loads, but nothing at this level is dumped or diffed.
 
-| Object | pg-delta | pgschema |
-|---|---|---|
-| Schemas (`CREATE SCHEMA`) | ✅ | ❌ by design |
-| Roles, role config, memberships | ✅ | ❌ by design |
-| Extensions (`CREATE EXTENSION`) | ✅ | ❌ by design |
-| Global `ALTER DEFAULT PRIVILEGES` | ✅ | ❌ by design |
-| Event triggers | ✅ | ❌ |
-| Publications, subscriptions | ✅ | ❌ |
-| Foreign data wrappers, servers, user mappings | ✅ | ❌ |
-| Collations | ✅ | ❌ |
-| Languages, parameter ACLs, large objects | ❌ (reported as `unmodeled_kind`) | ❌ |
+pg-delta made the opposite choice. It models:
+
+- Schemas
+- Roles, role configuration, and memberships
+- Extensions
+- Global `ALTER DEFAULT PRIVILEGES`
+- Event triggers
+- Publications and subscriptions
+- Foreign data wrappers, servers, and user mappings
+- Collations
+
+It does not model languages, parameter ACLs, or large objects, and reports those as `unmodeled_kind`.
 
 If you want one tool to reconcile roles and extensions alongside tables, pg-delta does that today. There is an open pgschema issue, [pgplex/pgschema#627](https://github.com/pgplex/pgschema/issues/627), proposing opt-in declarative roles, memberships, and ownership, but nothing has shipped.
 
 ### Extension-managed state
 
-This is a layer neither pg_dump nor a catalog diff sees, because the state lives in ordinary tables. pg-delta's extension intent handlers read those tables and emit the extension's own API calls instead of DDL.
+Some extensions keep their configuration in ordinary tables rather than the catalog. Neither pg_dump nor a plain catalog diff sees it, and pgschema does not manage it. pg-delta's extension intent handlers read those tables and emit the extension's own API calls instead of DDL:
 
-| Extension | pg-delta | pgschema |
-|---|---|---|
-| pg_cron jobs | ✅ (`cron.schedule_in_database`, `cron.unschedule`) | ❌ |
-| pgmq queues | ✅ (`pgmq.create`, `pgmq.drop_queue`) | ❌ |
-| pg_partman configuration | ✅ | ❌ |
-| Supabase Storage buckets | ❌ (rows, not diffed) | ❌ |
+- pg_cron jobs, via `cron.schedule_in_database` and `cron.unschedule`
+- pgmq queues, via `pgmq.create` and `pgmq.drop_queue`
+- pg_partman configuration
+
+Supabase Storage buckets are not covered by either tool. They are rows, and pg-delta does not diff rows outside these handlers.
 
 This is a genuinely novel feature, and pgschema has nothing comparable. Objects of a kind pg-delta cannot model surface as `unmodeled_kind` warnings, and `--strict-coverage` turns them into failures. pgschema warns on some skipped statements (`OWNER TO`, global default privileges) but does not inventory every unsupported object kind in the target.
 
