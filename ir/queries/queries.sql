@@ -137,6 +137,13 @@ WITH column_base AS (
                     ELSE
                         dn.nspname::text || '.' || dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                 END
+            WHEN dt.typtype IN ('r', 'm') THEN
+                -- Range and multirange types: built-in ones (int4range, int4multirange)
+                -- stay bare, user-defined ones are schema-qualified like enums
+                CASE
+                    WHEN dn.nspname = 'pg_catalog' THEN dt.typname::text
+                    ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
+                END
             ELSE c.udt_name::text
         END AS resolved_type,
         c.is_identity,
@@ -281,6 +288,13 @@ WITH column_base AS (
                         dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                     ELSE
                         dn.nspname::text || '.' || dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
+                END
+            WHEN dt.typtype IN ('r', 'm') THEN
+                -- Range and multirange types: built-in ones (int4range, int4multirange)
+                -- stay bare, user-defined ones are schema-qualified like enums
+                CASE
+                    WHEN dn.nspname = 'pg_catalog' THEN dt.typname::text
+                    ELSE quote_ident(dn.nspname) || '.' || quote_ident(dt.typname)
                 END
             ELSE c.udt_name::text
         END AS resolved_type,
@@ -784,6 +798,14 @@ WHERE
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
+    -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+    -- a range type's constructors, for example, depend internally on the type
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+            AND dep.objid = p.oid
+            AND dep.deptype = 'i'
+    )
 ORDER BY r.routine_schema, r.routine_name;
 
 -- GetProcedures retrieves all user-defined procedures (excluding extension members)
@@ -815,6 +837,14 @@ WHERE
             AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
+    )
+    -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+    -- a range type's constructors, for example, depend internally on the type
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+            AND dep.objid = p.oid
+            AND dep.deptype = 'i'
     )
 ORDER BY r.routine_schema, r.routine_name;
 
@@ -871,6 +901,14 @@ WHERE p.prokind = 'a'  -- Only aggregates
             AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
+    )
+    -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+    -- a range type's constructors, for example, depend internally on the type
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+            AND dep.objid = p.oid
+            AND dep.deptype = 'i'
     )
 ORDER BY n.nspname, p.proname;
 
@@ -1711,6 +1749,14 @@ WHERE r.routine_schema = $1
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
     )
+    -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+    -- a range type's constructors, for example, depend internally on the type
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+            AND dep.objid = p.oid
+            AND dep.deptype = 'i'
+    )
 ORDER BY r.routine_schema, r.routine_name;
 
 -- GetProceduresForSchema retrieves all user-defined procedures for a specific schema
@@ -1744,6 +1790,14 @@ WHERE r.routine_schema = $1
             AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
+    )
+    -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+    -- a range type's constructors, for example, depend internally on the type
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+            AND dep.objid = p.oid
+            AND dep.deptype = 'i'
     )
 ORDER BY r.routine_schema, r.routine_name;
 
@@ -1860,6 +1914,14 @@ WHERE p.prokind = 'a'  -- Only aggregates
             AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
             AND dep.refobjsubid = 0
             AND dep.deptype = 'e'
+    )
+    -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+    -- a range type's constructors, for example, depend internally on the type
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+            AND dep.objid = p.oid
+            AND dep.deptype = 'i'
     )
 ORDER BY n.nspname, p.proname;
 
@@ -2252,6 +2314,14 @@ WITH acl_data AS (
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
         )
+        -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+        -- a range type's constructors, for example, depend internally on the type
+        AND NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_depend dep
+            WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+                AND dep.objid = p.oid
+                AND dep.deptype = 'i'
+        )
         AND p.prokind = 'f'
         AND p.proacl IS NOT NULL
 
@@ -2275,6 +2345,14 @@ WITH acl_data AS (
                 AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
+        )
+        -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+        -- a range type's constructors, for example, depend internally on the type
+        AND NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_depend dep
+            WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+                AND dep.objid = p.oid
+                AND dep.deptype = 'i'
         )
         AND p.prokind = 'p'
         AND p.proacl IS NOT NULL
@@ -2357,6 +2435,14 @@ WITH objects_with_acl AS (
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
         )
+        -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+        -- a range type's constructors, for example, depend internally on the type
+        AND NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_depend dep
+            WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+                AND dep.objid = p.oid
+                AND dep.deptype = 'i'
+        )
         AND p.prokind = 'f'
 
     UNION ALL
@@ -2377,6 +2463,14 @@ WITH objects_with_acl AS (
                 AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
+        )
+        -- Skip functions PostgreSQL created for another object (pg_dump does the same):
+        -- a range type's constructors, for example, depend internally on the type
+        AND NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_depend dep
+            WHERE dep.classid = 'pg_catalog.pg_proc'::regclass
+                AND dep.objid = p.oid
+                AND dep.deptype = 'i'
         )
         AND p.prokind = 'p'
 

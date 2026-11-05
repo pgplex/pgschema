@@ -1,0 +1,9 @@
+{
+  "name": "range",
+  "description": "User-defined range types: subtype_diff, an explicit multirange name, a cross-schema range with collation and operator class, and a table using range, multirange and built-in range columns",
+  "notes": [
+    "PostgreSQL creates five constructor functions (LANGUAGE internal) for every range type; they depend internally on the type and are not dumped, as in pg_dump.",
+    "A column of a range or multirange type from another schema keeps its schema prefix; built-in int4range and int4multirange stay bare.",
+    "The CREATE TYPE ... AS RANGE statements themselves are not yet dumped (Phase 2 of docs/plans/2026-11-05-range-types-design.md)."
+  ]
+}
