@@ -13,7 +13,7 @@ While database migrations have traditionally been imperative (writing step-by-st
 
 `pgschema` differentiates itself from other declarative tools by:
 
-- **Comprehensive Postgres Support**: Handles virtually all schema-level database objects - tables, indexes, views, functions, procedures, triggers, policies, types, and more. Thoroughly tested against Postgres versions 14 through 18.
+- **Comprehensive Postgres Support**: Handles virtually all schema-level database objects - tables, indexes, views, functions, procedures, triggers, policies, types, and more. Thoroughly tested against Postgres versions 14 through 17.
 
 - **Schema-Level Focus**: Designed for real-world Postgres usage patterns, from single-schema applications to multi-tenant architectures.
 
@@ -23,32 +23,31 @@ While database migrations have traditionally been imperative (writing step-by-st
 
 - **Concurrent Change Detection**: Built-in fingerprinting ensures the database hasn't changed between planning and execution.
 
-- **Online DDL Support**: Automatically rewrites index creation to `CREATE INDEX CONCURRENTLY` and constraint additions to `NOT VALID` plus `VALIDATE CONSTRAINT`, with a configurable lock timeout, to minimize blocking during schema changes.
+- **Online DDL Support**: Automatically uses PostgreSQL's non-blocking strategies to minimize downtime during schema changes.
 
-- **Adaptive Transaction**: Groups migration steps into transactions where possible, and isolates operations like concurrent index creation that cannot run inside one.
+- **Adaptive Transaction**: Intelligently wraps migrations in transactions when possible, with automatic handling of operations like concurrent index creation that require special treatment.
 
 - **Modular Schema Organization**: Supports multi-file schema definitions for better team collaboration and ownership.
 
 - **Dependency Management**: Automatically resolves complex dependencies between database objects using topological sorting, ensuring operations execute in the correct order.
 
-- **No Shadow Database to Manage**: An embedded PostgreSQL instance is started on demand to resolve your desired state. No Docker, no extra database to provision, no shadow database flags to learn.
+- **No Shadow Database Required**: Unlike other declarative tools, it works directly with your schema files and target database - no temporary databases, no extra infrastructure.
 
 ## Comprehensive Postgres Support
 
 `pgschema` supports a wide range of [Postgres features](/syntax/create_table), including:
 
-- Tables, columns, and constraints (primary keys, foreign keys, unique constraints, check constraints, exclusion constraints)
-- Partitioned tables and partitions
+- Tables, columns, and constraints (primary keys, foreign keys, unique constraints, check constraints)
 - Indexes (including partial, functional, and concurrent indexes)
 - Views and materialized views
-- Functions, stored procedures, and aggregates
-- Custom types (enum, composite) and domains
+- Functions and stored procedures
+- Custom types and domains
+- Schemas and permissions
 - Row-level security (RLS) policies
 - Triggers and sequences
-- Privileges (`GRANT`/`REVOKE`, including column-level) and default privileges
 - Comments on database objects
 
-The tool is thoroughly tested against [Postgres versions 14 through 18](https://github.com/pgplex/pgschema/blob/main/.github/workflows/release.yml)
+The tool is thoroughly tested against [Postgres versions 14 through 17](https://github.com/pgplex/pgschema/blob/a41ffe8616f430ba36e6b39982c4455632a0dfa7/.github/workflows/release.yml#L44-L47)
 with [extensive test suites](https://github.com/pgplex/pgschema/tree/main/testdata).
 
 
@@ -161,44 +160,75 @@ This compares your desired schema (from the file) with the current database stat
 The human-readable format is perfect for reviewing changes during development
 
 ```
-Plan: 1 to modify.
+Plan: 1 to alter.
 
 Summary by type:
-  tables: 1 to modify
+  tables: 1 to alter
 
 Tables:
   ~ users
-    + name (column)
+
+Transaction: true
 
 DDL to be executed:
 --------------------------------------------------
 
--- Transaction Group #1
 ALTER TABLE users ADD COLUMN name varchar(100);
 ```
 </Tab>
 <Tab title="JSON Format">
 
-The JSON format enables easy integration with CI/CD pipelines and approval workflows. Steps are grouped by transaction boundary, and the plan carries a fingerprint of the database it was planned against.
+The JSON format enables easy integration with CI/CD pipelines and approval workflows
 
 ```json
 {
   "version": "1.0.0",
-  "pgschema_version": "1.13.4",
+  "pgschema_version": "1.0.0",
   "created_at": "2025-08-13T10:30:15+08:00",
   "source_fingerprint": {
     "hash": "7a8b9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b"
   },
-  "groups": [
+  "diffs": [
     {
-      "steps": [
-        {
-          "sql": "ALTER TABLE users ADD COLUMN name varchar(100);",
-          "type": "table.column",
-          "operation": "create",
-          "path": "public.users.name"
-        }
-      ]
+      "sql": "ALTER TABLE users ADD COLUMN name varchar(100);",
+      "type": "table",
+      "operation": "alter",
+      "path": "public.users",
+      "source": {
+        "schema": "public",
+        "name": "users",
+        "type": "BASE_TABLE",
+        "columns": [
+          {
+            "name": "id",
+            "position": 1,
+            "data_type": "integer",
+            "is_nullable": false
+          },
+          {
+            "name": "email",
+            "position": 2,
+            "data_type": "character varying",
+            "character_maximum_length": 255,
+            "is_nullable": false
+          },
+          {
+            "name": "created_at",
+            "position": 3,
+            "data_type": "timestamp without time zone",
+            "is_nullable": true,
+            "column_default": "now()"
+          },
+          {
+            "name": "name",
+            "position": 4,
+            "data_type": "character varying",
+            "character_maximum_length": 100,
+            "is_nullable": true
+          }
+        ],
+        "can_run_in_transaction": true
+      }
     }
   ]
 }
@@ -237,7 +267,7 @@ Traditional imperative migration tools maintain a migration history table (often
 
 `pgschema` eliminates these complexities through a **state-based** approach. Instead of tracking which changes were applied, it determines what needs to change by:
 
-1. **Reading Desired State**: Load your schema files into a temporary embedded PostgreSQL and inspect the result
+1. **Reading Desired State**: Parse your schema files to understand what you want
 2. **Inspecting Current State**: Query the database to understand what currently exists
 3. **Computing Differences**: Compare the two states to determine necessary changes
 
@@ -293,7 +323,7 @@ The tool solves this with **fingerprinting** - a cryptographic mechanism that en
   "source_fingerprint": {
     "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
   },
-  "groups": [...]
+  "diffs": [...]
 }
 ```
 
@@ -361,11 +391,12 @@ This fingerprinting mechanism maintains the integrity of the Plan-Review-Apply w
 
 ## Online DDL Operations
 
-The tool automatically uses PostgreSQL's non-blocking features to minimize downtime during schema changes. You write ordinary DDL in your schema file, and the plan rewrites it into the online form.
+The tool automatically uses PostgreSQL's non-blocking features to minimize downtime during schema changes, including concurrent index creation, NOT VALID constraint patterns, and safe NOT NULL additions.
 
-**Concurrent index creation**: `CREATE INDEX` becomes `CREATE INDEX CONCURRENTLY`, followed by a progress poll so apply waits for the build to finish:
+**Example - Concurrent Index Creation**: Index operations automatically use `CREATE INDEX CONCURRENTLY` to avoid blocking table writes:
 
 ```sql
+-- Generated migration for index addition
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_status ON users (email, status DESC);
 
 -- pgschema:wait - Built-in progress monitoring
@@ -381,45 +412,46 @@ LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
 WHERE c.relname = 'idx_users_email_status';
 ```
 
-**Constraints without a full-table lock**: adding a foreign key or check constraint becomes `ADD CONSTRAINT ... NOT VALID`, which takes only a brief lock, followed by `VALIDATE CONSTRAINT` in its own transaction so the validation scan runs without holding the stronger lock:
-
-```sql
--- Transaction Group #1
-ALTER TABLE orders
-ADD CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) NOT VALID;
-
--- Transaction Group #2
-ALTER TABLE orders VALIDATE CONSTRAINT orders_user_id_fkey;
-```
-
-**Lock timeout**: `apply --lock-timeout 30s` bounds how long any statement waits for a lock, so a migration fails fast instead of queueing behind a long transaction and blocking everything behind it.
+The `pgschema:wait` directive blocks migration execution, polls the database to monitor progress, and automatically continues when operations complete.
 
 For comprehensive details, see the [Online DDL documentation](/workflow/online-ddl).
 
 ## Adaptive Transaction
 
-The plan is split into **transaction groups**. Consecutive steps that can run inside a transaction are batched into one group and executed atomically. A step that cannot run inside a transaction, or that must run alone, gets a group of its own.
+The system automatically determines transaction boundaries based on the SQL operations in your migration plan. Each diff in the plan contains a `can_run_in_transaction` field that indicates whether that particular SQL can run inside a transaction.
 
+```json plan.json snippet
+  "diffs": [
+    ...
+    {
+      "sql": "ALTER TABLE department\nADD CONSTRAINT department_dept_name_key UNIQUE (dept_name);",
+      "type": "table.constraint",
+      "operation": "create",
+      "path": "public.department.department_dept_name_key",
+      "source": {
+        "schema": "public",
+        "table": "department",
+        "name": "department_dept_name_key",
+        "type": "UNIQUE",
+        "columns": [
+          {
+            "name": "dept_name",
+            "position": 1
+          }
+        ]
+      },
+      "can_run_in_transaction": true <--------- transaction indication
+    },
+    ...
+  ]
 ```
--- Transaction Group #1
-ALTER TABLE code ADD COLUMN a varchar(20);
 
-ALTER TABLE code
-ADD CONSTRAINT code_a_check CHECK (a IS NULL OR a::text LIKE 'p-%') NOT VALID;
+### Smart Transaction Wrapping
 
--- Transaction Group #2
-ALTER TABLE code VALIDATE CONSTRAINT code_a_check;
+- **If all diffs can run in a transaction**: The entire plan is wrapped in a single transaction for maximum atomicity
+- **If any diff cannot run in a transaction**: Each diff runs in its own transaction to maintain isolation
 
--- Transaction Group #3
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_code_a ON code (a);
-```
-
-Two kinds of step are isolated:
-
-- **Steps that PostgreSQL refuses to run in a transaction block**, which at the schema level means `CREATE INDEX CONCURRENTLY`.
-- **Steps that would defeat the online rewrite if batched**, such as `VALIDATE CONSTRAINT`. Running it in the same transaction as `ADD CONSTRAINT ... NOT VALID` would hold the strong lock through the validation scan.
-
-Everything else runs in as few transactions as the plan allows, so a failure in the middle of a group rolls the whole group back.
+Operating at the schema level, among all the DDL operations supported, only `CREATE INDEX CONCURRENTLY` cannot run inside a transaction.
 
 ## Modular Schema Organization
 
@@ -655,43 +687,52 @@ The topological sort algorithm ensures that:
 This automatic dependency management eliminates manual ordering errors and ensures migrations always execute successfully.
 
 
-## No Shadow Database to Manage
+## No Shadow Database Required
 
-Many declarative tools ask you to provide a "shadow" or "dev" database. They apply your desired schema to it, then compare it with the target. Users stumble on the extra connection flags, need permissions to create and drop databases, and run into version or extension mismatches between the shadow and the target.
+Unlike many declarative schema migration tools, this approach doesn't require a separate "shadow" or "dev" database to compute schema differences. Other tools typically create a temporary database, apply your desired schema to it, then compare this shadow database with your target database to generate migrations.
 
-`pgschema` takes the same idea, resolving the desired state inside a real PostgreSQL, but removes the infrastructure. The `plan` command starts an **embedded PostgreSQL** instance on demand, matching the target's major version, loads your schema files into it, and reads the result back from the system catalogs. The instance is thrown away when the plan is done. No Docker, no extra database to provision, nothing to clean up.
+This shadow database approach has several drawbacks:
+- **Counterintuitive Configuration**: Most developers stumble on the additional shadow database flags and need to read documentation to understand what they're used for
+- **Complex Setup**: Requires permissions for temporary database creation and cleanup of temporary databases  
+- **Additional Infrastructure**: Demands extra database resources, maintenance, and can cause inconsistencies with different Postgres versions or extensions
+
+### IR Normalization
+This tool eliminates these complexities by working directly with your schema files and target database through an **Intermediate Representation (IR)** system:
 
 ```plain
-   Schema Files            Target Database
-        |                        |
-        | load                   |
-        v                        |
-  Embedded Postgres              |
-  (temporary)                    |
-        |                        |
-        | inspect                | inspect
-        v                        v
-     IR (Desired)           IR (Current)
-              \              /
-               v            v
-                Diff Engine
-                     |
-                     v
-               Migration Plan
+SQL Files      Database System Catalogs
+    v             v
+(Desired)      (Current)
+    |             |
+    | Parse       | Query
+    v             v
+           IR
+      (Normalized)
+           |
+           v
+      Diff Engine
+           |
+           v
+     Migration Plan
 ```
 
-Because both sides come from catalog inspection, there is no SQL parser to keep in sync with PostgreSQL's grammar. Whatever PostgreSQL accepts, `pgschema` understands, and the two states are always represented the same way.
+**1. SQL Parsing**: Your desired state SQL files are parsed and converted into a normalized Intermediate Representation.
 
-The embedded instance mirrors the contrib extensions installed on the target (`pg_trgm`, `citext`, `hstore`, and so on). For third-party extensions such as `postgis` or `pgvector`, or for platforms where the embedded binary cannot run, you can point `plan` at [an external database](/cli/plan-db) with the `--plan-host` flags. It creates a temporary schema there instead of a temporary instance.
+**2. Database Introspection**: The target database schema is introspected through Postgres system catalogs (`pg_class`, `pg_attribute`, `pg_constraint`, etc.) and converted into the same normalized IR format.
+
+**3. Direct Comparison**: The diff engine compares these two normalized IR structures directly, identifying what changes are needed without requiring any temporary databases.
+
+**4. Migration Generation**: The differences are converted into properly ordered DDL statements that transform the current state into the desired state.
+
+The IR normalization ensures that regardless of whether schema information comes from SQL parsing or database introspection, it's represented consistently for accurate comparison - enabling precise migrations without the overhead and complexity of shadow databases.
 
 ## Acknowledgements
 
 `pgschema` wouldn't exist without these amazing open source projects:
 
-- [sqlc](https://github.com/sqlc-dev/sqlc) - For generating type-safe code to extract schema from the system catalogs
-- [embedded-postgres](https://github.com/fergusstrange/embedded-postgres) - For running a real PostgreSQL inside the `plan` command and the test suite, with no Docker required
-- [pgx](https://github.com/jackc/pgx) - The Go driver underneath every connection
-- [pg_query_go](https://github.com/pganalyze/pg_query_go) - Early versions of `pgschema` parsed schema files with these libpg_query bindings. The parser has since been retired in favor of embedded Postgres, but it carried the project through its first releases.
+- [sqlc](https://github.com/sqlc-dev/sqlc) - For generating code to extract schema from target databases
+- [pg_query_go](https://github.com/pganalyze/pg_query_go) - Go bindings for libpg_query, enabling reliable Postgres SQL parsing. In fact, sqlc also uses pg_query_go under the hood! It's the secret weapon in the Postgres ecosystem that allows tools to build near-perfect Postgres compatibility.
+- [testcontainers](https://github.com/testcontainers/) - Enabling comprehensive integration testing with real Postgres instances
 
 **Design reference** came from:
 
