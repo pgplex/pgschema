@@ -95,12 +95,18 @@ Rules PostgreSQL enforces that shape the diff:
 - `subtype_diff` takes two subtype arguments and returns `float8`; it can be
   written in SQL or PL/pgSQL and does not reference the range type, so it only
   needs to exist before the `CREATE TYPE`.
-- `canonical` takes and returns the range type itself, so it cannot be created
-  until a shell type exists: `CREATE TYPE r;` then the function, then
-  `CREATE TYPE r AS RANGE (...)`. A SQL-language function cannot accept a
-  shell type at all; PL/pgSQL and C can (with a NOTICE). pg_dump registers a
-  shell type for every range and prints it only when the canonical function
-  needs it.
+- `canonical` takes and returns the range type itself, so it can only be
+  created against a shell type: `CREATE TYPE r;` then the function, then
+  `CREATE TYPE r AS RANGE (...)`. A shell type is a pseudo-type
+  (`typtype = 'p'`, `typisdefined = false`), and only C and `internal`
+  functions accept one. Verified: a SQL function fails with "SQL function
+  cannot accept shell type", and a PL/pgSQL function fails with "PL/pgSQL
+  functions cannot return type" even with `check_function_bodies = off`,
+  because the PL/pgSQL validator rejects pseudo-type arguments and return
+  types before it looks at that setting. So every canonical function is a C
+  function backed by a shared library, which in practice means an extension.
+  pg_dump registers a shell type for every range and prints it only when the
+  canonical function needs it; pgschema does not need that bootstrap.
 
 pg_dump's rendering (reference for the canonical format), options in this
 order, each printed only when applicable:
@@ -248,7 +254,7 @@ CREATE TYPE floatspan AS RANGE (
   `extractTypeName`. Composite attributes and domain base types that name a
   range are already covered by the existing edges.
 - `collectMigrationSQL` type buckets (`diff.go` around `typesWithoutDeps`):
-  a range whose `SubtypeDiff` or `Canonical` names a function in
+  a range whose `SubtypeDiff` names a function in
   `newFunctionLookup` joins `domainsWithFunctionDepsOnly` (rename to
   `typesWithFunctionDepsOnly`) and its name goes into `functionDomainLookup`,
   so tables with a column of that type (or of its multirange: add both names
@@ -258,10 +264,10 @@ CREATE TYPE floatspan AS RANGE (
   diff, so a deferred range's `types/timerange.sql` is included after
   `functions/time_diff.sql`, exactly as a function-dependent domain is today.
   Verify with an include test.
-- Canonical functions (Phase 3): a range with `Canonical` set emits
-  `CREATE TYPE timerange;` in `typesWithoutDeps` and the full definition in
-  the deferred bucket. The shell statement is collected under the same
-  `Path` with `DiffOperationCreate`, so the two land in the same file.
+- `Canonical` is captured and rendered verbatim but never ordered against
+  anything: the function has to be C (see catalog facts), so pgschema cannot
+  create it and the type can only be created where it already exists, which
+  is an extension-provided function. No shell type is emitted.
 
 ### Modified range types
 
@@ -346,9 +352,8 @@ docs, and the first six diff cases plus the dump suite. Comparable to the
 domain support minus `ALTER DOMAIN`.
 
 **Phase 3 — functions and replacement.** Deferred bucket for
-`subtype_diff` / `canonical`, the shell type for `canonical`, the replace
-path for modified ranges, the remaining diff cases and include tests. About
-half of Phase 2.
+`subtype_diff`, the replace path for modified ranges, the remaining diff
+cases and include tests. About half of Phase 2.
 
 Phase 2 ships on its own: until Phase 3, a range whose `subtype_diff` names
 a function created in the same plan is emitted before that function and
@@ -363,5 +368,8 @@ fails at apply, and a modified range is treated like a modified composite
   cross-schema enums and composites today.
 - `ALTER TYPE ... RENAME` / `SET SCHEMA`. pgschema has no rename detection
   for any object.
-- Canonical functions written in C. They need a shared library on the
-  server and belong to extensions, which pgschema already excludes.
+- Creating canonical functions. They can only be written in C (the shell
+  type they take is a pseudo-type that SQL and PL/pgSQL reject), so they need
+  a shared library on the server and belong to extensions, which pgschema
+  already excludes. `canonical = ...` is still dumped and compared when the
+  function exists on the target.
