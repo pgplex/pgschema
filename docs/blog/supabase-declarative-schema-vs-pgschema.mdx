@@ -134,14 +134,13 @@ If you want one tool to reconcile roles and extensions alongside tables, pg-delt
 
 ### Extension-managed state
 
-This is a layer neither pg_dump nor a catalog diff sees, because the state lives in ordinary tables. pg-delta's extension intent handlers read those tables and emit the extension's own API calls instead of DDL.
+Some extensions keep their configuration in ordinary tables rather than the catalog. Neither pg_dump nor a plain catalog diff sees it, and pgschema does not manage it. pg-delta's extension intent handlers read those tables and emit the extension's own API calls instead of DDL:
 
-| Extension | pg-delta | pgschema |
-|---|---|---|
-| pg_cron jobs | ✅ (`cron.schedule_in_database`, `cron.unschedule`) | ❌ |
-| pgmq queues | ✅ (`pgmq.create`, `pgmq.drop_queue`) | ❌ |
-| pg_partman configuration | ✅ | ❌ |
-| Supabase Storage buckets | ❌ (rows, not diffed) | ❌ |
+- pg_cron jobs, via `cron.schedule_in_database` and `cron.unschedule`
+- pgmq queues, via `pgmq.create` and `pgmq.drop_queue`
+- pg_partman configuration
+
+Supabase Storage buckets are not covered by either tool. They are rows, and pg-delta does not diff rows outside these handlers.
 
 This is a genuinely novel feature, and pgschema has nothing comparable. Objects of a kind pg-delta cannot model surface as `unmodeled_kind` warnings, and `--strict-coverage` turns them into failures. pgschema warns on some skipped statements (`OWNER TO`, global default privileges) but does not inventory every unsupported object kind in the target.
 
