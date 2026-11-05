@@ -187,6 +187,13 @@ func TestDumpCommand_Inherits(t *testing.T) {
 	runExactMatchTest(t, "inherits")
 }
 
+func TestDumpCommand_Range(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "range")
+}
+
 func TestDumpCommand_Issue421QuotedFKColumns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
