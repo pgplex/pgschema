@@ -3,11 +3,57 @@
   "pgschema_version": "1.13.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "5675f5aa0f5fb517ea3ba3881da8a6849041b368ceb6d6561c0c3f053f89105f"
+    "hash": "97f7d39a0bb818ca7ac954f344eaa84a8eea41733db36fbd3148edb36e63a797"
   },
   "groups": [
     {
       "steps": [
+        {
+          "sql": "DROP INDEX IF EXISTS entries_lookup_idx_pgschema_new;",
+          "type": "table.index",
+          "operation": "drop",
+          "path": "public.entries.entries_lookup_idx_pgschema_new"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS entries_lookup_idx_pgschema_new ON entries (b);",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.entries.entries_lookup_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nJOIN pg_namespace n ON c.relnamespace = n.oid\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'entries_lookup_idx_pgschema_new'\n  AND n.nspname = 'public';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index entries_lookup_idx_pgschema_new"
+          },
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.entries.entries_lookup_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "DROP INDEX IF EXISTS entries_lookup_idx;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.entries.entries_lookup_idx"
+        },
+        {
+          "sql": "ALTER INDEX entries_lookup_idx_pgschema_new RENAME TO entries_lookup_idx;",
+          "type": "table.index",
+          "operation": "alter",
+          "path": "public.entries.entries_lookup_idx"
+        },
         {
           "sql": "DROP INDEX IF EXISTS entries_sort_idx;",
           "type": "table.index",

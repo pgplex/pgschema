@@ -5,10 +5,38 @@ Summary by type:
 
 Tables:
   ~ entries
+    ~ entries_lookup_idx (index - concurrent rebuild)
+    - entries_lookup_idx_pgschema_new (index)
     ~ entries_sort_idx (index - concurrent rebuild)
 
 DDL to be executed:
 --------------------------------------------------
+
+-- Transaction Group #1
+DROP INDEX IF EXISTS entries_lookup_idx_pgschema_new;
+
+-- Transaction Group #2
+CREATE INDEX CONCURRENTLY IF NOT EXISTS entries_lookup_idx_pgschema_new ON entries (b);
+
+-- Transaction Group #3
+-- pgschema:wait
+SELECT 
+    COALESCE(i.indisvalid, false) as done,
+    CASE 
+        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total
+        ELSE 0
+    END as progress
+FROM pg_class c
+JOIN pg_namespace n ON c.relnamespace = n.oid
+LEFT JOIN pg_index i ON c.oid = i.indexrelid
+LEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid
+WHERE c.relname = 'entries_lookup_idx_pgschema_new'
+  AND n.nspname = 'public';
+
+-- Transaction Group #4
+DROP INDEX IF EXISTS entries_lookup_idx;
+
+ALTER INDEX entries_lookup_idx_pgschema_new RENAME TO entries_lookup_idx;
 
 DROP INDEX IF EXISTS entries_sort_idx;
 
