@@ -1538,14 +1538,17 @@ WHERE cn.nspname = $1
     AND a.attinhcount > 0
 ORDER BY cc.relname, a.attnum;
 
--- GetMergedInheritedChecksForSchema lists the CHECK constraints that regular
--- inheritance children in a schema share with a parent (coninhcount > 0) and
--- also declare themselves (conislocal). Such a copy survives the parent's
--- DROP CONSTRAINT as a local constraint. Partitions are excluded.
--- name: GetMergedInheritedChecksForSchema :many
+-- GetInheritedChecksForSchema lists the CHECK constraints that regular
+-- inheritance children in a schema share with a parent (coninhcount > 0),
+-- which GetConstraintsForSchema leaves out, and whether the child also
+-- declares them itself (conislocal): such a copy survives the parent's DROP
+-- CONSTRAINT as a local constraint. Their names still occupy the table's
+-- constraint namespace. Partitions are excluded.
+-- name: GetInheritedChecksForSchema :many
 SELECT
     cl.relname AS table_name,
-    c.conname AS constraint_name
+    c.conname AS constraint_name,
+    c.conislocal AS is_local
 FROM pg_catalog.pg_constraint c
 JOIN pg_catalog.pg_class cl ON cl.oid = c.conrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
@@ -1554,7 +1557,6 @@ WHERE n.nspname = $1
     AND NOT cl.relispartition
     AND c.contype = 'c'
     AND c.coninhcount > 0
-    AND c.conislocal
 ORDER BY cl.relname, c.conname;
 
 -- GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY, UNIQUE and

@@ -26,9 +26,11 @@ import (
 //     child's own children), the NOT NULL without ONLY, since NOT NULL
 //     recurses to the child's children in any case and ONLY is refused once
 //     it has any. The column is compared against the definition the parents
-//     merge to (inheritedColumnDefinition). Two cases keep the column in
-//     the CREATE TABLE instead: parents that disagree on the default, which
-//     PostgreSQL refuses unless the child settles it, and a child's own
+//     merge to (inheritedColumnDefinition). The column stays in the CREATE
+//     TABLE instead when the child declared it itself (it then survives the
+//     parent's DROP COLUMN, which the declaration preserves), when the
+//     parents disagree on the default or generation expression, which
+//     PostgreSQL refuses unless the child settles it, and for a child's own
 //     generation expression, which has no other place. An override on a
 //     column a parent only adds in this migration runs after the parent's
 //     ADD COLUMN, in the modify phase.
@@ -171,14 +173,20 @@ func inlineDeclarationNeedsDefaultNull(table *ir.Table, column *ir.Column, allTa
 	return merged != nil && conflict
 }
 
-// inheritedColumnDeclaredInline reports whether an inherited column must
-// still be declared in the child's CREATE TABLE: when its parents disagree
-// on the default, PostgreSQL refuses the table unless the child settles it,
-// and a child's own generation expression can only be given there. The
-// declaration merges with the parents' definition.
+// inheritedColumnDeclaredInline reports whether an inherited column is
+// declared in the child's CREATE TABLE as well: when the child declared it
+// itself (IsMergedInherited, kept so that the column goes on surviving the
+// parent's DROP COLUMN, as pg_dump keeps it), when its parents disagree on
+// the default or the generation expression, which PostgreSQL refuses unless
+// the child settles it, and when the child has a generation expression of
+// its own, which can only be given there. The declaration merges with the
+// parents' definition.
 func inheritedColumnDeclaredInline(table *ir.Table, column *ir.Column, allTables map[string]*ir.Table) bool {
 	if !column.IsInherited {
 		return false
+	}
+	if column.IsMergedInherited {
+		return true
 	}
 	merged, conflict := inheritedColumnDefinition(table, column.Name, allTables)
 	if merged == nil {

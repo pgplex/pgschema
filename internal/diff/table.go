@@ -1136,7 +1136,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 
 	// Add columns. Inherited ones come from the parents named in INHERITS;
 	// their local DEFAULT / NOT NULL follow the CREATE TABLE, unless the
-	// child has to declare the column itself (see inherit.go).
+	// child declares the column itself (see inherit.go).
 	var columnParts []string
 	for _, column := range table.Columns {
 		if column.IsInherited && !inheritedColumnDeclaredInline(table, column, allTables) {

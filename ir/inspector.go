@@ -891,7 +891,7 @@ func (i *Inspector) buildInheritance(ctx context.Context, schema *IR, targetSche
 			}
 		}
 	}
-	checks, err := i.queries.GetMergedInheritedChecksForSchema(ctx, targetSchema)
+	checks, err := i.queries.GetInheritedChecksForSchema(ctx, targetSchema)
 	if err != nil {
 		return err
 	}
@@ -900,10 +900,18 @@ func (i *Inspector) buildInheritance(ctx context.Context, schema *IR, targetSche
 		if child == nil {
 			continue
 		}
-		if child.MergedInheritedChecks == nil {
-			child.MergedInheritedChecks = make(map[string]bool)
+		// Not a managed constraint, but its name is taken (online rewrites
+		// pick collision-free names from AllConstraintNames)
+		if child.AllConstraintNames == nil {
+			child.AllConstraintNames = make(map[string]bool)
 		}
-		child.MergedInheritedChecks[row.ConstraintName] = true
+		child.AllConstraintNames[row.ConstraintName] = true
+		if row.IsLocal {
+			if child.MergedInheritedChecks == nil {
+				child.MergedInheritedChecks = make(map[string]bool)
+			}
+			child.MergedInheritedChecks[row.ConstraintName] = true
+		}
 	}
 	return nil
 }

@@ -2512,6 +2512,57 @@ func (q *Queries) GetInheritanceParentsForSchema(ctx context.Context, nspname st
 	return items, nil
 }
 
+const getInheritedChecksForSchema = `-- name: GetInheritedChecksForSchema :many
+SELECT
+    cl.relname AS table_name,
+    c.conname AS constraint_name,
+    c.conislocal AS is_local
+FROM pg_catalog.pg_constraint c
+JOIN pg_catalog.pg_class cl ON cl.oid = c.conrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
+WHERE n.nspname = $1
+    AND cl.relkind = 'r'
+    AND NOT cl.relispartition
+    AND c.contype = 'c'
+    AND c.coninhcount > 0
+ORDER BY cl.relname, c.conname
+`
+
+type GetInheritedChecksForSchemaRow struct {
+	TableName      string `db:"table_name" json:"table_name"`
+	ConstraintName string `db:"constraint_name" json:"constraint_name"`
+	IsLocal        bool   `db:"is_local" json:"is_local"`
+}
+
+// GetInheritedChecksForSchema lists the CHECK constraints that regular
+// inheritance children in a schema share with a parent (coninhcount > 0),
+// which GetConstraintsForSchema leaves out, and whether the child also
+// declares them itself (conislocal): such a copy survives the parent's DROP
+// CONSTRAINT as a local constraint. Their names still occupy the table's
+// constraint namespace. Partitions are excluded.
+func (q *Queries) GetInheritedChecksForSchema(ctx context.Context, nspname string) ([]GetInheritedChecksForSchemaRow, error) {
+	rows, err := q.db.QueryContext(ctx, getInheritedChecksForSchema, nspname)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetInheritedChecksForSchemaRow
+	for rows.Next() {
+		var i GetInheritedChecksForSchemaRow
+		if err := rows.Scan(&i.TableName, &i.ConstraintName, &i.IsLocal); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getInheritedColumnsForSchema = `-- name: GetInheritedColumnsForSchema :many
 SELECT
     cc.relname AS table_name,
@@ -2621,54 +2672,6 @@ func (q *Queries) GetInheritedPartitionConstraintsForSchema(ctx context.Context,
 			&i.ParentTable,
 			&i.ParentConstraintName,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getMergedInheritedChecksForSchema = `-- name: GetMergedInheritedChecksForSchema :many
-SELECT
-    cl.relname AS table_name,
-    c.conname AS constraint_name
-FROM pg_catalog.pg_constraint c
-JOIN pg_catalog.pg_class cl ON cl.oid = c.conrelid
-JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
-WHERE n.nspname = $1
-    AND cl.relkind = 'r'
-    AND NOT cl.relispartition
-    AND c.contype = 'c'
-    AND c.coninhcount > 0
-    AND c.conislocal
-ORDER BY cl.relname, c.conname
-`
-
-type GetMergedInheritedChecksForSchemaRow struct {
-	TableName      string `db:"table_name" json:"table_name"`
-	ConstraintName string `db:"constraint_name" json:"constraint_name"`
-}
-
-// GetMergedInheritedChecksForSchema lists the CHECK constraints that regular
-// inheritance children in a schema share with a parent (coninhcount > 0) and
-// also declare themselves (conislocal). Such a copy survives the parent's
-// DROP CONSTRAINT as a local constraint. Partitions are excluded.
-func (q *Queries) GetMergedInheritedChecksForSchema(ctx context.Context, nspname string) ([]GetMergedInheritedChecksForSchemaRow, error) {
-	rows, err := q.db.QueryContext(ctx, getMergedInheritedChecksForSchema, nspname)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetMergedInheritedChecksForSchemaRow
-	for rows.Next() {
-		var i GetMergedInheritedChecksForSchemaRow
-		if err := rows.Scan(&i.TableName, &i.ConstraintName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

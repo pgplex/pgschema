@@ -15,25 +15,13 @@
           "path": "public.cities"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS capitals (\n    state character(2) NOT NULL,\n    CONSTRAINT capitals_state_check CHECK (state <> ''::bpchar)\n) INHERITS (cities);",
+          "sql": "CREATE TABLE IF NOT EXISTS capitals (\n    elevation integer DEFAULT 0 NOT NULL,\n    state character(2) NOT NULL,\n    CONSTRAINT capitals_state_check CHECK (state <> ''::bpchar)\n) INHERITS (cities);",
           "type": "table",
           "operation": "create",
           "path": "public.capitals"
         },
         {
           "sql": "ALTER TABLE ONLY capitals ALTER COLUMN population SET DEFAULT 1;",
-          "type": "table",
-          "operation": "create",
-          "path": "public.capitals"
-        },
-        {
-          "sql": "ALTER TABLE ONLY capitals ALTER COLUMN elevation SET DEFAULT 0;",
-          "type": "table",
-          "operation": "create",
-          "path": "public.capitals"
-        },
-        {
-          "sql": "ALTER TABLE capitals ALTER COLUMN elevation SET NOT NULL;",
           "type": "table",
           "operation": "create",
           "path": "public.capitals"
