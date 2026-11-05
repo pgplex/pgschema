@@ -490,6 +490,12 @@ type ConstraintDiff struct {
 type IndexDiff struct {
 	Old *ir.Index
 	New *ir.Index
+	// ReusedCandidate names a valid index left behind by an earlier online
+	// rewrite of New that already matches the desired definition. The diff
+	// renames it into place instead of rebuilding it, and the plan keeps those
+	// statements as they are rather than rewriting them into a fresh
+	// CREATE INDEX CONCURRENTLY. (#672)
+	ReusedCandidate string
 }
 
 // policyDiff represents changes to a policy

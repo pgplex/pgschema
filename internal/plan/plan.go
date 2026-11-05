@@ -840,7 +840,7 @@ func (p *Plan) writeTableChanges(summary *strings.Builder, c *color.Color) {
 				if subRes.subType == diff.DiffTypeTableIndex.String() && subRes.operation == diff.DiffOperationAlter.String() {
 					subSymbol := c.PlanSymbol("change")
 					displaySubType := strings.TrimPrefix(subRes.subType, "table.")
-					fmt.Fprintf(summary, "    %s %s (%s - concurrent rebuild)\n", subSymbol, objectName, displaySubType)
+					fmt.Fprintf(summary, "    %s %s (%s - %s)\n", subSymbol, objectName, displaySubType, indexAlterLabel(subRes.source))
 					continue
 				}
 
@@ -998,6 +998,7 @@ func (p *Plan) writeMaterializedViewChanges(summary *strings.Builder, c *color.C
 		operation string
 		path      string
 		subType   string
+		source    diff.DiffSource
 	})
 
 	// Track all seen operations globally to avoid duplicates across groups
@@ -1033,10 +1034,12 @@ func (p *Plan) writeMaterializedViewChanges(summary *strings.Builder, c *color.C
 						operation string
 						path      string
 						subType   string
+						source    diff.DiffSource
 					}{
 						operation: step.Operation.String(),
 						path:      step.Path,
 						subType:   step.Type.String(),
+						source:    step.Source,
 					})
 				}
 			}
@@ -1102,7 +1105,7 @@ func (p *Plan) writeMaterializedViewChanges(summary *strings.Builder, c *color.C
 				if subRes.subType == diff.DiffTypeMaterializedViewIndex.String() && subRes.operation == diff.DiffOperationAlter.String() {
 					subSymbol := c.PlanSymbol("change")
 					displaySubType := strings.TrimPrefix(subRes.subType, "materialized_view.")
-					fmt.Fprintf(summary, "    %s %s (%s - concurrent rebuild)\n", subSymbol, getLastPathComponent(subRes.path), displaySubType)
+					fmt.Fprintf(summary, "    %s %s (%s - %s)\n", subSymbol, getLastPathComponent(subRes.path), displaySubType, indexAlterLabel(subRes.source))
 					continue
 				}
 
@@ -1205,6 +1208,16 @@ func getLastPathComponent(path string) string {
 
 // getObjectNameFromSource extracts the object name from the source object.
 // This preserves object names that contain dots (e.g., "public.idx_users")
+// indexAlterLabel describes an index alteration in the plan summary. An
+// online rewrite normally builds the index again concurrently; when the diff
+// adopted a finished candidate, no build runs and the summary says so. (#672)
+func indexAlterLabel(source diff.DiffSource) string {
+	if indexDiff, ok := source.(*diff.IndexDiff); ok && indexDiff.ReusedCandidate != "" {
+		return "adopt finished candidate"
+	}
+	return "concurrent rebuild"
+}
+
 func getObjectNameFromSource(source diff.DiffSource) string {
 	if source == nil {
 		return ""

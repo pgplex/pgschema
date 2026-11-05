@@ -2099,6 +2099,7 @@ WITH index_base AS (
         i.relname as indexname,
         idx.indisunique as is_unique,
         idx.indisprimary as is_primary,
+        idx.indisvalid as is_valid,
         (idx.indpred IS NOT NULL) as is_partial,
         am.amname as method,
         pg_get_indexdef(idx.indexrelid) as indexdef,
@@ -2148,6 +2149,7 @@ SELECT
     ib.indexname,
     ib.is_unique,
     ib.is_primary,
+    ib.is_valid,
     ib.is_partial,
     ib.method,
     ib.indexdef,
@@ -2175,6 +2177,7 @@ type GetIndexesRow struct {
 	Indexname        string         `db:"indexname" json:"indexname"`
 	IsUnique         bool           `db:"is_unique" json:"is_unique"`
 	IsPrimary        bool           `db:"is_primary" json:"is_primary"`
+	IsValid          bool           `db:"is_valid" json:"is_valid"`
 	IsPartial        sql.NullBool   `db:"is_partial" json:"is_partial"`
 	Method           string         `db:"method" json:"method"`
 	Indexdef         sql.NullString `db:"indexdef" json:"indexdef"`
@@ -2201,6 +2204,7 @@ func (q *Queries) GetIndexes(ctx context.Context) ([]GetIndexesRow, error) {
 			&i.Indexname,
 			&i.IsUnique,
 			&i.IsPrimary,
+			&i.IsValid,
 			&i.IsPartial,
 			&i.Method,
 			&i.Indexdef,
@@ -2230,6 +2234,7 @@ WITH index_base AS (
         COALESCE(pn.nspname, '') AS parent_index_schema,
         idx.indisunique as is_unique,
         idx.indisprimary as is_primary,
+        idx.indisvalid as is_valid,
         (idx.indpred IS NOT NULL) as is_partial,
         am.amname as method,
         pg_get_indexdef(idx.indexrelid) as indexdef,
@@ -2319,6 +2324,7 @@ SELECT
     ib.parent_index_schema,
     ib.is_unique,
     ib.is_primary,
+    ib.is_valid,
     ib.is_partial,
     ib.method,
     ib.indexdef,
@@ -2357,6 +2363,7 @@ type GetIndexesForSchemaRow struct {
 	ParentIndexSchema   sql.NullString `db:"parent_index_schema" json:"parent_index_schema"`
 	IsUnique            bool           `db:"is_unique" json:"is_unique"`
 	IsPrimary           bool           `db:"is_primary" json:"is_primary"`
+	IsValid             bool           `db:"is_valid" json:"is_valid"`
 	IsPartial           sql.NullBool   `db:"is_partial" json:"is_partial"`
 	Method              string         `db:"method" json:"method"`
 	Indexdef            sql.NullString `db:"indexdef" json:"indexdef"`
@@ -2394,6 +2401,7 @@ func (q *Queries) GetIndexesForSchema(ctx context.Context, dollar_1 sql.NullStri
 			&i.ParentIndexSchema,
 			&i.IsUnique,
 			&i.IsPrimary,
+			&i.IsValid,
 			&i.IsPartial,
 			&i.Method,
 			&i.Indexdef,
@@ -2459,7 +2467,11 @@ type GetInheritedPartitionConstraintsForSchemaRow struct {
 // recreates them, but their catalog names are needed to recreate them
 // explicitly when a generated name would otherwise take a standalone index's
 // name (issue #653), and to reconcile the copies DETACH PARTITION leaves on
-// the child as local constraints (issue #639).
+// the child as local constraints (issue #639). The pg_inherits join keeps only
+// copies on a partition of the parent constraint's table: a foreign key that
+// references a partitioned table also owns one internal sub-constraint per
+// referenced partition, on the same table and with conparentid set, which is
+// no inherited copy.
 func (q *Queries) GetInheritedPartitionConstraintsForSchema(ctx context.Context, dollar_1 sql.NullString) ([]GetInheritedPartitionConstraintsForSchemaRow, error) {
 	rows, err := q.db.QueryContext(ctx, getInheritedPartitionConstraintsForSchema, dollar_1)
 	if err != nil {

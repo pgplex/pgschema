@@ -3,7 +3,6 @@ package plan
 import (
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/pgplex/pgschema/internal/diff"
 	"github.com/pgplex/pgschema/ir"
@@ -287,54 +286,8 @@ func TestGenerateIndexWaitQueryEscapesNames(t *testing.T) {
 	}
 }
 
-func TestOnlineIndexTempNameFitsTheIdentifierLimit(t *testing.T) {
-	long := strings.Repeat("i", maxIdentifierBytes)
-	almost := strings.Repeat("j", maxIdentifierBytes-1)
-
-	tests := []struct {
-		name string
-		want string // "" means: only the invariants below
-	}{
-		{name: "lookup", want: "lookup_pgschema_new"},
-		{name: long},
-		{name: almost},
-	}
-	for _, tt := range tests {
-		got := onlineIndexTempName(tt.name)
-		if tt.want != "" && got != tt.want {
-			t.Errorf("onlineIndexTempName(%q) = %q, want %q", tt.name, got, tt.want)
-		}
-		if len(got) > maxIdentifierBytes {
-			t.Errorf("onlineIndexTempName(%q) is %d bytes, over the %d-byte limit: %q", tt.name, len(got), maxIdentifierBytes, got)
-		}
-		if got == tt.name {
-			t.Errorf("onlineIndexTempName(%q) = the canonical name: the candidate would be truncated to it", tt.name)
-		}
-		if !strings.HasSuffix(got, onlineIndexTempNameSuffix) {
-			t.Errorf("onlineIndexTempName(%q) = %q, missing the %q suffix", tt.name, got, onlineIndexTempNameSuffix)
-		}
-	}
-
-	// Two names that share a long prefix still get distinct candidates.
-	first := onlineIndexTempName(strings.Repeat("k", maxIdentifierBytes-1) + "a")
-	second := onlineIndexTempName(strings.Repeat("k", maxIdentifierBytes-1) + "b")
-	if first == second {
-		t.Errorf("two long names share the candidate %q", first)
-	}
-
-	// A name with multi-byte characters is cut on a rune boundary.
-	utf8Name := strings.Repeat("é", maxIdentifierBytes)
-	got := onlineIndexTempName(utf8Name)
-	if !utf8.ValidString(got) {
-		t.Errorf("onlineIndexTempName split a rune: %q", got)
-	}
-	if len(got) > maxIdentifierBytes {
-		t.Errorf("onlineIndexTempName(%q) is %d bytes, over the limit", utf8Name, len(got))
-	}
-}
-
 func TestIndexChangeRewriteUsesACandidateThatFits(t *testing.T) {
-	name := strings.Repeat("i", maxIdentifierBytes)
+	name := strings.Repeat("i", 63) // PostgreSQL's identifier limit
 	index := &ir.Index{
 		Schema: "registry",
 		Table:  "entries",
@@ -359,7 +312,7 @@ func TestIndexChangeRewriteUsesACandidateThatFits(t *testing.T) {
 			renamed = step.SQL
 		}
 	}
-	candidate := onlineIndexTempName(name)
+	candidate := diff.OnlineIndexTempName(name)
 	if !strings.Contains(created, candidate) {
 		t.Errorf("create step does not name the candidate %q: %s", candidate, created)
 	}

@@ -65,6 +65,20 @@ This approach ensures:
 - Query performance is maintained throughout the migration
 - Rollback is possible until the old index is dropped
 
+**Resuming an interrupted rewrite.** If the apply stops after the concurrent build
+finishes but before the cutover, the `_pgschema_new` index stays behind. The next
+plan adopts it instead of rebuilding it, as long as it is valid, sits on the same
+table, and matches the desired definition exactly:
+
+```sql
+DROP INDEX IF EXISTS idx_users_email;
+
+ALTER INDEX idx_users_email_pgschema_new RENAME TO idx_users_email;
+```
+
+A leftover that PostgreSQL marked invalid, or one whose definition differs from
+the desired index, is dropped and built again.
+
 ## Constraint Operations
 
 **Supported constraint types:**

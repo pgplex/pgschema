@@ -931,6 +931,7 @@ func (i *Inspector) buildIndexes(ctx context.Context, schema *IR, targetSchema s
 			IsExpression:       hasExpressions,
 			Where:              "",
 			StorageParameters:  indexRow.Reloptions,
+			IsValid:            indexRow.IsValid,
 			ParentIndex:        indexRow.ParentIndex.String,
 			ParentIndexSchema:  indexRow.ParentIndexSchema.String,
 			AttachedPartitions: attachedPartitions[IndexRef{Schema: schemaName, Name: indexName}],

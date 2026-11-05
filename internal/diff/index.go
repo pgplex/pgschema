@@ -1,12 +1,52 @@
 package diff
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pgplex/pgschema/ir"
 )
+
+// OnlineIndexTempNameSuffix marks the index built during an online rewrite.
+const OnlineIndexTempNameSuffix = "_pgschema_new"
+
+// maxIdentifierBytes is PostgreSQL's NAMEDATALEN-1: identifiers longer than this
+// are truncated by the server.
+const maxIdentifierBytes = 63
+
+// OnlineIndexTempName returns the name of the index built during an online
+// rewrite of the index called name.
+//
+// Appending the suffix to a long name can exceed PostgreSQL's 63-byte
+// identifier limit. The server then truncates the candidate back to the
+// canonical name, so CREATE INDEX CONCURRENTLY IF NOT EXISTS skips the build,
+// the wait returns at once, and the final DROP/ALTER pair fails on a relation
+// that is already gone. When the suffix does not fit, the canonical part is
+// shortened and a digest of the full name takes the tail, so the candidate fits,
+// differs from the canonical name, and stays distinct for names that share a
+// long prefix.
+func OnlineIndexTempName(name string) string {
+	if len(name)+len(OnlineIndexTempNameSuffix) <= maxIdentifierBytes {
+		return name + OnlineIndexTempNameSuffix
+	}
+	sum := sha256.Sum256([]byte(name))
+	digest := hex.EncodeToString(sum[:4]) // 8 hex characters
+	budget := maxIdentifierBytes - len(OnlineIndexTempNameSuffix) - len(digest) - 1
+	stem := name
+	if len(stem) > budget {
+		stem = stem[:budget]
+		// Do not cut a multi-byte character in half: the server counts bytes,
+		// but a truncated rune would produce a name PostgreSQL rejects.
+		for len(stem) > 0 && !utf8.ValidString(stem) {
+			stem = stem[:len(stem)-1]
+		}
+	}
+	return stem + "-" + digest + OnlineIndexTempNameSuffix
+}
 
 // generateCreateIndexesSQL generates CREATE INDEX statements for table indexes
 func generateCreateIndexesSQL(indexes []*ir.Index, targetSchema string, collector *diffCollector) {
@@ -188,11 +228,15 @@ func generateIndexSQLWithOptions(index *ir.Index, indexName string, targetSchema
 }
 
 // generateIndexModifications handles index drops, adds, and online replacements
-// Works for both table indexes and materialized view indexes
+// Works for both table indexes and materialized view indexes.
+// recreatedColumns names the columns applied as DROP COLUMN + ADD COLUMN; an
+// index on one of them is gone by the time the index steps run, so it can
+// never serve as a finished candidate.
 func generateIndexModifications(
 	droppedIndexes []*ir.Index,
 	addedIndexes []*ir.Index,
 	modifiedIndexes []*IndexDiff,
+	recreatedColumns map[string]bool,
 	targetSchema string,
 	indexDiffType DiffType,
 	commentDiffType DiffType,
@@ -200,6 +244,7 @@ func generateIndexModifications(
 ) {
 	// Identify indexes that need online replacement (dropped and added with same name)
 	onlineReplacements := make(map[string]*ir.Index)
+	replacedIndexes := make(map[string]*ir.Index)
 	regularDrops := []*ir.Index{}
 
 	for _, droppedIndex := range droppedIndexes {
@@ -207,6 +252,7 @@ func generateIndexModifications(
 		for _, addedIndex := range addedIndexes {
 			if droppedIndex.Name == addedIndex.Name {
 				onlineReplacements[droppedIndex.Name] = addedIndex
+				replacedIndexes[droppedIndex.Name] = droppedIndex
 				foundReplacement = true
 				break
 			}
@@ -215,6 +261,45 @@ func generateIndexModifications(
 			regularDrops = append(regularDrops, droppedIndex)
 		}
 	}
+
+	// A replacement whose candidate already exists, valid and matching the
+	// desired definition, is resumed: the candidate is renamed into place
+	// instead of being dropped and rebuilt. Table replacements arrive as
+	// dropped/added pairs, materialized view replacements as structurally
+	// changed modifiedIndexes; both are rewritten online. (#672)
+	replacements := make(map[string]*ir.Index, len(onlineReplacements))
+	for indexName, newIndex := range onlineReplacements {
+		replacements[indexName] = newIndex
+	}
+	for _, indexDiff := range modifiedIndexes {
+		if !indexesStructurallyEqual(indexDiff.Old, indexDiff.New) {
+			replacements[indexDiff.New.Name] = indexDiff.New
+		}
+	}
+	// A candidate name claimed by two replacements (a long name whose digest
+	// form equals another index's plain suffix form) is left to the ordinary
+	// drop/rebuild sequence: adopting it for one would strand the other.
+	claims := make(map[string]int, len(replacements))
+	for indexName := range replacements {
+		claims[OnlineIndexTempName(indexName)]++
+	}
+	candidateNames := make(map[string]string, len(replacements))
+	for indexName := range replacements {
+		if candidate := OnlineIndexTempName(indexName); claims[candidate] == 1 {
+			candidateNames[candidate] = indexName
+		}
+	}
+	reusedCandidates := make(map[string]*ir.Index)
+	remainingDrops := []*ir.Index{}
+	for _, droppedIndex := range regularDrops {
+		indexName, isCandidate := candidateNames[droppedIndex.Name]
+		if isCandidate && isReusableCandidate(droppedIndex, replacements[indexName], recreatedColumns) {
+			reusedCandidates[indexName] = droppedIndex
+			continue
+		}
+		remainingDrops = append(remainingDrops, droppedIndex)
+	}
+	regularDrops = remainingDrops
 
 	// Remove replaced indexes from added list
 	remainingAdded := []*ir.Index{}
@@ -249,6 +334,13 @@ func generateIndexModifications(
 		} else {
 			// Structure changed - use online replacement approach
 			dropSQL := fmt.Sprintf("DROP INDEX IF EXISTS %s;", qualifyEntityName(indexDiff.Old.Schema, indexDiff.Old.Name, targetSchema))
+
+			if candidate := reusedCandidates[indexDiff.New.Name]; candidate != nil {
+				indexDiff.ReusedCandidate = candidate.Name
+				collectCandidateAdoption(indexDiff, candidate, dropSQL, targetSchema, indexDiffType, commentDiffType, collector)
+				continue
+			}
+
 			canonicalSQL := generateIndexSQL(indexDiff.New, targetSchema, false)
 
 			statements := []SQLStatement{
@@ -287,6 +379,17 @@ func generateIndexModifications(
 
 			// Step 1: DROP old index, Step 2: CREATE new index
 			dropSQL := fmt.Sprintf("DROP INDEX IF EXISTS %s;", qualifyEntityName(newIndex.Schema, indexName, targetSchema))
+
+			if candidate := reusedCandidates[indexName]; candidate != nil {
+				indexDiff := &IndexDiff{
+					Old:             replacedIndexes[indexName],
+					New:             newIndex,
+					ReusedCandidate: candidate.Name,
+				}
+				collectCandidateAdoption(indexDiff, candidate, dropSQL, targetSchema, indexDiffType, commentDiffType, collector)
+				continue
+			}
+
 			canonicalSQL := generateIndexSQL(newIndex, targetSchema, false)
 
 			statements := []SQLStatement{
@@ -334,6 +437,72 @@ func generateIndexModifications(
 		if index.Comment != "" {
 			generateIndexComment(index, targetSchema, commentDiffType, DiffOperationCreate, collector)
 		}
+	}
+}
+
+// isReusableCandidate reports whether candidate, an index left behind by an
+// earlier online rewrite of newIndex, can be renamed into place instead of
+// being rebuilt. The name alone proves nothing: any index may occupy it. The
+// candidate must sit on the same relation, be valid (an interrupted CREATE
+// INDEX CONCURRENTLY leaves an invalid index of that name behind), and match
+// the desired definition exactly. An index on a re-created column is dropped
+// with the column before the index steps run and so cannot be reused.
+func isReusableCandidate(candidate, newIndex *ir.Index, recreatedColumns map[string]bool) bool {
+	if candidate.Schema != newIndex.Schema || candidate.Table != newIndex.Table {
+		return false
+	}
+	if !candidate.IsValid {
+		return false
+	}
+	// A rewrite never attaches its candidate to a parent index. An attached
+	// index of that name belongs to a partition hierarchy, and dropping its
+	// parent elsewhere in the plan would take the adopted index with it.
+	if candidate.ParentIndex != "" {
+		return false
+	}
+	// Nor does a rewrite ever build a candidate on a partitioned parent:
+	// CREATE INDEX CONCURRENTLY is rejected there, so those replacements take
+	// the synchronous path. A partitioned index of that name may own child
+	// indexes whose own DROP would fail while the parent still stands.
+	if candidate.IsPartitioned {
+		return false
+	}
+	if indexReferencesColumns(candidate, recreatedColumns) {
+		return false
+	}
+	return indexesStructurallyEqual(candidate, newIndex)
+}
+
+// collectCandidateAdoption emits the resumed form of an index replacement:
+// the old index is dropped and the finished candidate takes its name. The
+// candidate's comment carries over with it, so only a differing comment is
+// re-set.
+func collectCandidateAdoption(
+	indexDiff *IndexDiff,
+	candidate *ir.Index,
+	dropSQL string,
+	targetSchema string,
+	indexDiffType DiffType,
+	commentDiffType DiffType,
+	collector *diffCollector,
+) {
+	newIndex := indexDiff.New
+	renameSQL := fmt.Sprintf("ALTER INDEX %s RENAME TO %s;",
+		qualifyEntityName(candidate.Schema, candidate.Name, targetSchema), ir.QuoteIdentifier(newIndex.Name))
+	statements := []SQLStatement{
+		{SQL: dropSQL, CanRunInTransaction: true},
+		{SQL: renameSQL, CanRunInTransaction: true},
+	}
+	alterContext := &diffContext{
+		Type:                indexDiffType,
+		Operation:           DiffOperationAlter,
+		Path:                fmt.Sprintf("%s.%s.%s", newIndex.Schema, newIndex.Table, newIndex.Name),
+		Source:              indexDiff,
+		CanRunInTransaction: true,
+	}
+	collector.collectStatements(alterContext, statements)
+	if newIndex.Comment != candidate.Comment {
+		generateIndexComment(newIndex, targetSchema, commentDiffType, DiffOperationAlter, collector)
 	}
 }
 
