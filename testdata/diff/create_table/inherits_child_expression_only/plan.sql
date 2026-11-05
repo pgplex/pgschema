@@ -1,1 +1,0 @@
-ALTER TABLE ONLY calibrated ALTER COLUMN scaled SET EXPRESSION AS ((raw * 4));

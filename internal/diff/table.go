@@ -1185,6 +1185,11 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		}
 	}
 
+	// CHECK constraints the child declares as well as inherits (see inherit.go)
+	for _, def := range mergedInheritedCheckSQL(table, targetSchema, qualifySchema, allTables) {
+		columnParts = append(columnParts, fmt.Sprintf("    %s", def))
+	}
+
 	parts = append(parts, strings.Join(columnParts, ",\n"))
 
 	parts = append(parts, ")"+inheritsClauseSQL(table, targetSchema, qualifySchema)+partitionClause+";")

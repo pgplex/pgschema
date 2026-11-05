@@ -1,0 +1,182 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS audited (\n    created_at timestamptz DEFAULT now() NOT NULL,\n    created_by text\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.audited"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS b_parent (\n    id integer,\n    CONSTRAINT b_parent_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.b_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS cities (\n    name text,\n    population real,\n    elevation integer,\n    CONSTRAINT cities_pkey PRIMARY KEY (name),\n    CONSTRAINT cities_pop_check CHECK (population >= 0::double precision)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.cities"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS capitals (\n    elevation integer DEFAULT 0 NOT NULL,\n    state character(2) NOT NULL,\n    CONSTRAINT capitals_state_check CHECK (state <> ''::bpchar)\n) INHERITS (cities);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.capitals"
+        },
+        {
+          "sql": "ALTER TABLE ONLY capitals ALTER COLUMN population SET DEFAULT 1;",
+          "type": "table",
+          "operation": "create",
+          "path": "public.capitals"
+        },
+        {
+          "sql": "CREATE INDEX IF NOT EXISTS capitals_state_idx ON capitals (state);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.capitals.capitals_state_idx"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS defaults_a (\n    x integer DEFAULT 1,\n    y integer\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.defaults_a"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS defaults_b (\n    x integer DEFAULT 2,\n    y integer DEFAULT 5\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.defaults_b"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS defaults_child (\n    x integer DEFAULT 3,\n    extra text\n) INHERITS (defaults_a, defaults_b);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.defaults_child"
+        },
+        {
+          "sql": "ALTER TABLE ONLY defaults_child ALTER COLUMN y DROP DEFAULT;",
+          "type": "table",
+          "operation": "create",
+          "path": "public.defaults_child"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS defaults_cleared (\n    x integer DEFAULT NULL\n) INHERITS (defaults_a, defaults_b);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.defaults_cleared"
+        },
+        {
+          "sql": "ALTER TABLE ONLY defaults_cleared ALTER COLUMN x DROP DEFAULT;",
+          "type": "table",
+          "operation": "create",
+          "path": "public.defaults_cleared"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS located (\n    region text NOT NULL,\n    CONSTRAINT located_region_check CHECK (region <> ''::text)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.located"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS measurements (\n    raw integer NOT NULL,\n    scaled integer GENERATED ALWAYS AS ((raw * 10)) STORED\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.measurements"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS calibrated (\n    scaled integer GENERATED ALWAYS AS (((raw * 10) + 1)) STORED,\n    device text\n) INHERITS (measurements);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.calibrated"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS orders (\n    id integer,\n    amount numeric(10,2),\n    CONSTRAINT orders_pkey PRIMARY KEY (id)\n) INHERITS (audited, located);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.orders"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS products (\n    id integer NOT NULL,\n    price numeric,\n    CONSTRAINT products_price_check CHECK (price >= 0::numeric)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.products"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS books (\n    isbn text,\n    CONSTRAINT products_price_check CHECK (price >= 0::numeric)\n) INHERITS (products);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.books"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS sensor_a (\n    raw integer NOT NULL,\n    scaled integer GENERATED ALWAYS AS ((raw * 10)) STORED\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.sensor_a"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS sensor_b (\n    raw integer NOT NULL,\n    scaled integer GENERATED ALWAYS AS ((raw * 20)) STORED\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.sensor_b"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS combined (\n    scaled integer GENERATED ALWAYS AS ((raw * 10)) STORED,\n    label text\n) INHERITS (sensor_a, sensor_b);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.combined"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS state_capitals (\n    founded date\n) INHERITS (capitals);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.state_capitals"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS z_parent (\n    code text NOT NULL,\n    favorite_uid integer\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.z_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS a_child (\n    uid integer NOT NULL,\n    parent_id integer,\n    CONSTRAINT a_child_uid_key UNIQUE (uid),\n    CONSTRAINT a_child_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES b_parent (id)\n) INHERITS (b_parent, z_parent);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.a_child"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION is_valid_code(\n    code text\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT code ~ '^[A-Z]{3}$'\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.is_valid_code"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS coded_parent (\n    code text NOT NULL,\n    CONSTRAINT coded_parent_code_check CHECK (is_valid_code(code))\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.coded_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS coded_child (\n    detail text\n) INHERITS (coded_parent);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.coded_child"
+        },
+        {
+          "sql": "ALTER TABLE z_parent\nADD CONSTRAINT z_parent_favorite_uid_fkey FOREIGN KEY (favorite_uid) REFERENCES a_child (uid);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.z_parent.z_parent_favorite_uid_fkey"
+        }
+      ]
+    }
+  ]
+}

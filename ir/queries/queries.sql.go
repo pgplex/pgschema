@@ -2685,6 +2685,55 @@ func (q *Queries) GetInheritedPartitionConstraintsForSchema(ctx context.Context,
 	return items, nil
 }
 
+const getLocalNotNullColumnsForSchema = `-- name: GetLocalNotNullColumnsForSchema :many
+SELECT
+    cl.relname AS table_name,
+    a.attname AS column_name
+FROM pg_catalog.pg_constraint c
+JOIN pg_catalog.pg_class cl ON cl.oid = c.conrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
+JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+WHERE n.nspname = $1
+    AND cl.relkind = 'r'
+    AND NOT cl.relispartition
+    AND c.contype = 'n'
+    AND c.conislocal
+ORDER BY cl.relname, a.attnum
+`
+
+type GetLocalNotNullColumnsForSchemaRow struct {
+	TableName  string `db:"table_name" json:"table_name"`
+	ColumnName string `db:"column_name" json:"column_name"`
+}
+
+// GetLocalNotNullColumnsForSchema lists the columns of regular inheritance
+// children in a schema whose NOT NULL constraint the child declares itself
+// (PostgreSQL 18+, where NOT NULL is a pg_constraint row with conislocal).
+// Such a NOT NULL survives the parent's DROP NOT NULL; before 18 the
+// recursion clears it regardless, and the query returns nothing.
+func (q *Queries) GetLocalNotNullColumnsForSchema(ctx context.Context, nspname string) ([]GetLocalNotNullColumnsForSchemaRow, error) {
+	rows, err := q.db.QueryContext(ctx, getLocalNotNullColumnsForSchema, nspname)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLocalNotNullColumnsForSchemaRow
+	for rows.Next() {
+		var i GetLocalNotNullColumnsForSchemaRow
+		if err := rows.Scan(&i.TableName, &i.ColumnName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPartitionChildren = `-- name: GetPartitionChildren :many
 SELECT 
     pn.nspname AS parent_schema,

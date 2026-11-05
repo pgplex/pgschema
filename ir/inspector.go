@@ -891,6 +891,20 @@ func (i *Inspector) buildInheritance(ctx context.Context, schema *IR, targetSche
 			}
 		}
 	}
+	localNotNulls, err := i.queries.GetLocalNotNullColumnsForSchema(ctx, targetSchema)
+	if err != nil {
+		return err
+	}
+	for _, row := range localNotNulls {
+		if child := children[row.TableName]; child != nil {
+			for _, column := range child.Columns {
+				if column.Name == row.ColumnName {
+					column.IsLocalNotNull = true
+					break
+				}
+			}
+		}
+	}
 	checks, err := i.queries.GetInheritedChecksForSchema(ctx, targetSchema)
 	if err != nil {
 		return err

@@ -275,7 +275,7 @@ Tests are organized by object type (150+ test cases):
 
 - `comment/` (12), `create_aggregate/` (4), `create_domain/` (5), `create_function/` (8), `create_index/` (2)
 - `create_materialized_view/` (3), `create_policy/` (10), `create_procedure/` (3), `create_sequence/` (3)
-- `create_table/` (64), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
+- `create_table/` (58), `create_trigger/` (7), `create_type/` (3), `create_view/` (4)
 - `default_privilege/` (9), `privilege/` (13)
 - `dependency/` (13), `online/` (15), `migrate/` (5)
 

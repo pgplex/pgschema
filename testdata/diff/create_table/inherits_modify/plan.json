@@ -1,0 +1,620 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "33b98d6f97225ca462c7311862da1899e14f8d5da1b20d1afd95824a556dfb39"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE fleet_boats NO INHERIT fleet;",
+          "type": "table.inherit",
+          "operation": "no_inherit",
+          "path": "public.fleet_boats"
+        },
+        {
+          "sql": "ALTER TABLE moving_child NO INHERIT base_a;",
+          "type": "table.inherit",
+          "operation": "no_inherit",
+          "path": "public.moving_child"
+        },
+        {
+          "sql": "ALTER TABLE multi_child NO INHERIT multi_b;",
+          "type": "table.inherit",
+          "operation": "no_inherit",
+          "path": "public.multi_child"
+        },
+        {
+          "sql": "ALTER TABLE orphan NO INHERIT old_parent;",
+          "type": "table.inherit",
+          "operation": "no_inherit",
+          "path": "public.orphan"
+        },
+        {
+          "sql": "DROP TABLE IF EXISTS old_parent CASCADE;",
+          "type": "table",
+          "operation": "drop",
+          "path": "public.old_parent"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS pages (\n    pager text\n) INHERITS (events);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.pages"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS runs (\n    started_at timestamptz\n) INHERITS (batches);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.runs"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS trucks (\n    payload numeric\n) INHERITS (vehicles);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.trucks"
+        },
+        {
+          "sql": "ALTER TABLE a_base DROP COLUMN common;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.a_base.common"
+        },
+        {
+          "sql": "ALTER TABLE archived_gauge_readings DROP CONSTRAINT gauge_readings_value_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.archived_gauge_readings.gauge_readings_value_check"
+        },
+        {
+          "sql": "ALTER TABLE ONLY batches ALTER COLUMN priority SET DEFAULT 3;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.batches.priority"
+        },
+        {
+          "sql": "ALTER TABLE ONLY runs ALTER COLUMN priority SET DEFAULT 3;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.runs.priority"
+        },
+        {
+          "sql": "ALTER TABLE ONLY calibrated_samples ALTER COLUMN scaled SET EXPRESSION AS ((raw * 4));",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.calibrated_samples.scaled"
+        },
+        {
+          "sql": "ALTER TABLE check_a DROP CONSTRAINT shared_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.check_a.shared_check"
+        },
+        {
+          "sql": "ALTER TABLE contacts ALTER COLUMN phone DROP NOT NULL;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.contacts.phone"
+        },
+        {
+          "sql": "ALTER TABLE events ADD COLUMN priority integer DEFAULT 1;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.events.priority"
+        },
+        {
+          "sql": "ALTER TABLE events ADD COLUMN country text DEFAULT 'US' NOT NULL;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.events.country"
+        },
+        {
+          "sql": "ALTER TABLE alerts ADD CONSTRAINT alerts_priority_not_null NOT NULL priority NOT VALID;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.alerts.priority"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE alerts VALIDATE CONSTRAINT alerts_priority_not_null;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.alerts.priority"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE ONLY alerts ALTER COLUMN priority SET DEFAULT 2;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.alerts.priority"
+        },
+        {
+          "sql": "ALTER TABLE ONLY pages ALTER COLUMN priority SET DEFAULT 3;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.pages.priority"
+        },
+        {
+          "sql": "ALTER TABLE events\nADD CONSTRAINT events_pop_check CHECK (population >= 0::double precision) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_pop_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE events VALIDATE CONSTRAINT events_pop_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_pop_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "COMMENT ON COLUMN alerts.priority IS 'Paging priority for this alert';",
+          "type": "table.column.comment",
+          "operation": "alter",
+          "path": "public.alerts.priority"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS alerts_country_idx ON alerts (country);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.alerts.alerts_country_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nJOIN pg_namespace n ON c.relnamespace = n.oid\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'alerts_country_idx'\n  AND n.nspname = 'public';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index alerts_country_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.alerts.alerts_country_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE ONLY fleet DROP COLUMN wheels;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.fleet.wheels"
+        },
+        {
+          "sql": "ALTER TABLE fleet_boats DROP COLUMN wheels;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.fleet_boats.wheels"
+        },
+        {
+          "sql": "ALTER TABLE moving_child DROP COLUMN label_a;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.moving_child.label_a"
+        },
+        {
+          "sql": "ALTER TABLE moving_child ADD COLUMN label_b text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.moving_child.label_b"
+        },
+        {
+          "sql": "ALTER TABLE multi_a ADD COLUMN added text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.multi_a.added"
+        },
+        {
+          "sql": "ALTER TABLE multi_child DROP COLUMN label_b;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.multi_child.label_b"
+        },
+        {
+          "sql": "ALTER TABLE orphan DROP CONSTRAINT old_parent_pop_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.orphan.old_parent_pop_check"
+        },
+        {
+          "sql": "ALTER TABLE products DROP CONSTRAINT products_price_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.products.products_price_check"
+        },
+        {
+          "sql": "ALTER TABLE products DROP COLUMN legacy_code;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.products.legacy_code"
+        },
+        {
+          "sql": "ALTER TABLE queue_events ADD COLUMN priority integer DEFAULT 1;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.queue_events.priority"
+        },
+        {
+          "sql": "ALTER TABLE readings ALTER COLUMN scaled SET EXPRESSION AS ((raw * 4));",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.readings.scaled"
+        },
+        {
+          "sql": "ALTER TABLE ONLY scaled_readings ALTER COLUMN scaled SET EXPRESSION AS ((raw * 3));",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.scaled_readings.scaled"
+        },
+        {
+          "sql": "ALTER TABLE regions DROP CONSTRAINT regions_pop_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.regions.regions_pop_check"
+        },
+        {
+          "sql": "ALTER TABLE regions DROP COLUMN elevation;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.regions.elevation"
+        },
+        {
+          "sql": "ALTER TABLE regions ALTER COLUMN population TYPE bigint USING population::bigint;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.regions.population"
+        },
+        {
+          "sql": "ALTER TABLE ONLY root_docs DROP COLUMN legacy;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.root_docs.legacy"
+        },
+        {
+          "sql": "ALTER TABLE shared_a DROP COLUMN shared;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.shared_a.shared"
+        },
+        {
+          "sql": "ALTER TABLE shared_b DROP COLUMN shared;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.shared_b.shared"
+        },
+        {
+          "sql": "ALTER TABLE tickets ALTER COLUMN priority SET DEFAULT 2;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.tickets.priority"
+        },
+        {
+          "sql": "ALTER TABLE ONLY incidents ALTER COLUMN priority SET DEFAULT 9;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.incidents.priority"
+        },
+        {
+          "sql": "ALTER TABLE ONLY outages ALTER COLUMN priority SET DEFAULT 9;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.outages.priority"
+        },
+        {
+          "sql": "ALTER TABLE users ADD CONSTRAINT users_email_not_null NOT NULL email NOT VALID;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.users.email"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE users VALIDATE CONSTRAINT users_email_not_null;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.users.email"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE ONLY vehicles DROP COLUMN wheels;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.vehicles.wheels"
+        },
+        {
+          "sql": "ALTER TABLE villages ADD CONSTRAINT villages_population_not_null NOT NULL population NOT VALID;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.villages.population"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE villages VALIDATE CONSTRAINT villages_population_not_null;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.villages.population"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE ONLY villages ALTER COLUMN population SET DEFAULT 1;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.villages.population"
+        },
+        {
+          "sql": "ALTER TABLE ONLY villages ALTER COLUMN elevation DROP DEFAULT;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.villages.elevation"
+        },
+        {
+          "sql": "ALTER TABLE z_base DROP COLUMN common;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.z_base.common"
+        },
+        {
+          "sql": "ALTER TABLE z_root ADD COLUMN region text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.z_root.region"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS a_leaf_region_idx ON a_leaf (region);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.a_leaf.a_leaf_region_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nJOIN pg_namespace n ON c.relnamespace = n.oid\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'a_leaf_region_idx'\n  AND n.nspname = 'public';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index a_leaf_region_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.a_leaf.a_leaf_region_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE z_hub ADD COLUMN region text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.z_hub.region"
+        },
+        {
+          "sql": "ALTER TABLE a_spoke\nADD CONSTRAINT a_spoke_uid_key UNIQUE (uid);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.a_spoke.a_spoke_uid_key"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS a_spoke_region_idx ON a_spoke (region);",
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.a_spoke.a_spoke_region_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "SELECT \n    COALESCE(i.indisvalid, false) as done,\n    CASE \n        WHEN p.blocks_total > 0 THEN p.blocks_done * 100 / p.blocks_total\n        ELSE 0\n    END as progress\nFROM pg_class c\nJOIN pg_namespace n ON c.relnamespace = n.oid\nLEFT JOIN pg_index i ON c.oid = i.indexrelid\nLEFT JOIN pg_stat_progress_create_index p ON c.oid = p.index_relid\nWHERE c.relname = 'a_spoke_region_idx'\n  AND n.nspname = 'public';",
+          "directive": {
+            "type": "wait",
+            "message": "Creating index a_spoke_region_idx"
+          },
+          "type": "table.index",
+          "operation": "create",
+          "path": "public.a_spoke.a_spoke_region_idx"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE boats DROP COLUMN wheels;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.boats.wheels"
+        },
+        {
+          "sql": "ALTER TABLE books DROP COLUMN legacy_code;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.books.legacy_code"
+        },
+        {
+          "sql": "ALTER TABLE m_middle DROP COLUMN common;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.m_middle.common"
+        },
+        {
+          "sql": "ALTER TABLE ONLY mid_docs DROP COLUMN legacy;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.mid_docs.legacy"
+        },
+        {
+          "sql": "ALTER TABLE shared_child DROP COLUMN shared;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.shared_child.shared"
+        },
+        {
+          "sql": "ALTER TABLE trucks DROP COLUMN wheels;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.trucks.wheels"
+        },
+        {
+          "sql": "ALTER TABLE g_leaf DROP COLUMN common;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.g_leaf.common"
+        },
+        {
+          "sql": "ALTER TABLE books DROP CONSTRAINT products_price_check;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.books.products_price_check"
+        },
+        {
+          "sql": "ALTER TABLE archived_gauge_readings\nADD CONSTRAINT gauge_readings_value_check CHECK (value > 10) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.archived_gauge_readings.gauge_readings_value_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE archived_gauge_readings VALIDATE CONSTRAINT gauge_readings_value_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.archived_gauge_readings.gauge_readings_value_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE archived_gauge_readings INHERIT gauge_readings;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.archived_gauge_readings"
+        },
+        {
+          "sql": "ALTER TABLE attach_child\nADD CONSTRAINT attach_parent_pop_check CHECK (population >= 0::double precision) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.attach_child.attach_parent_pop_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE attach_child VALIDATE CONSTRAINT attach_parent_pop_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.attach_child.attach_parent_pop_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE attach_child INHERIT attach_parent;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.attach_child"
+        },
+        {
+          "sql": "ALTER TABLE join_child INHERIT join_b;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.join_child"
+        },
+        {
+          "sql": "ALTER TABLE moving_child\nADD CONSTRAINT base_b_id_check CHECK (id > 0) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.moving_child.base_b_id_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE moving_child VALIDATE CONSTRAINT base_b_id_check;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.moving_child.base_b_id_check"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE moving_child INHERIT base_b;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.moving_child"
+        },
+        {
+          "sql": "ALTER TABLE queue_alerts INHERIT queue_events;",
+          "type": "table.inherit",
+          "operation": "inherit",
+          "path": "public.queue_alerts"
+        },
+        {
+          "sql": "ALTER TABLE z_hub\nADD CONSTRAINT z_hub_favorite_uid_fkey FOREIGN KEY (favorite_uid) REFERENCES a_spoke (uid) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.z_hub.z_hub_favorite_uid_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE z_hub VALIDATE CONSTRAINT z_hub_favorite_uid_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.z_hub.z_hub_favorite_uid_fkey"
+        }
+      ]
+    }
+  ]
+}

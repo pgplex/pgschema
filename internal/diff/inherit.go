@@ -31,9 +31,11 @@ import (
 //     parent's DROP COLUMN, which the declaration preserves), when the
 //     parents disagree on the default or generation expression, which
 //     PostgreSQL refuses unless the child settles it, and for a child's own
-//     generation expression, which has no other place. An override on a
-//     column a parent only adds in this migration runs after the parent's
-//     ADD COLUMN, in the modify phase.
+//     generation expression, which has no other place. A CHECK the child
+//     declared as well as inherits (MergedInheritedChecks) is declared
+//     again for the same reason. An override on a column a parent only
+//     adds in this migration runs after the parent's ADD COLUMN, in the
+//     modify phase.
 //   - On a modified child, a column it gets from a parent it keeps is
 //     neither added nor dropped, and only its DEFAULT, NOT NULL, generation
 //     expression and comment are diffed, rendered the same way; the
@@ -326,6 +328,39 @@ func inheritedColumnOverrideSQL(table *ir.Table, targetSchema string, qualifySch
 		statements = append(statements, inheritedColumnOverrideStatements(table, column, tableName, allTables)...)
 	}
 	return statements
+}
+
+// mergedInheritedCheckSQL returns the CHECK constraints a child declares as
+// well as inherits (MergedInheritedChecks), rendered for its CREATE TABLE as
+// pg_dump renders them: PostgreSQL merges them with the parents' copies, and
+// the declaration keeps them on the child when a parent drops its own. The
+// definition is the parent's, which the child's copy must match. Names whose
+// parent is not among allTables are left out.
+func mergedInheritedCheckSQL(table *ir.Table, targetSchema string, qualifySchema bool, allTables map[string]*ir.Table) []string {
+	if len(table.MergedInheritedChecks) == 0 {
+		return nil
+	}
+	var supplied []*ir.Constraint
+	for _, parent := range table.Inherits {
+		supplied = append(supplied, inheritableCheckConstraints(allTables, allTables[parent.Schema+"."+parent.Name])...)
+	}
+	var parts []string
+	for _, name := range sortedKeys(table.MergedInheritedChecks) {
+		for _, source := range supplied {
+			if source.Name != name {
+				continue
+			}
+			declared := *source
+			declared.Schema = table.Schema
+			declared.Table = table.Name
+			declared.Comment = ""
+			if def := generateConstraintSQL(&declared, targetSchema, qualifySchema); def != "" {
+				parts = append(parts, def)
+			}
+			break
+		}
+	}
+	return parts
 }
 
 // inheritanceChildren indexes the tables of one state by the schema.name of
@@ -640,6 +675,13 @@ func (p *inheritanceEffectsPlanner) planOverrides(td *tableDiff, key string) {
 			left := *desired
 			left.IsNullable = e.after.IsNullable
 			left.InvalidNotNullConstraint = ""
+			// A NOT NULL the descendant declares itself survives the parent's
+			// DROP NOT NULL (PostgreSQL 18+), and adding it again is refused
+			if e.after.IsNullable && existed {
+				if before := findColumn(p.oldTables[descendantKey], name); before != nil && !before.IsNullable && before.IsLocalNotNull {
+					left.IsNullable = desired.IsNullable
+				}
+			}
 			if e.defaultRecurses || !existed {
 				left.DefaultValue = e.after.DefaultValue
 			}
@@ -676,8 +718,17 @@ func generateInheritanceChildDropsSQL(effects inheritanceChildEffects, targetSch
 		depth[k] = max(depth[k], drop.depth)
 	}
 	// Parents before children: a child's copy can only go once the tables
-	// above it have let go of the column
-	slices.SortStableFunc(order, func(a, b dropKey) int { return depth[a] - depth[b] })
+	// above it have let go of the column. Then by table and column, since
+	// the drops were planned in the (unsorted) order of the modified tables.
+	slices.SortStableFunc(order, func(a, b dropKey) int {
+		if depth[a] != depth[b] {
+			return depth[a] - depth[b]
+		}
+		if a.table != b.table {
+			return strings.Compare(a.table, b.table)
+		}
+		return strings.Compare(a.column, b.column)
+	})
 	for _, k := range order {
 		table := tables[k]
 		tableName := getTableNameWithSchema(table.Schema, table.Name, targetSchema)
@@ -693,8 +744,12 @@ func generateInheritanceChildDropsSQL(effects inheritanceChildEffects, targetSch
 		}, fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", tableName, ir.QuoteIdentifier(k.column)))
 	}
 
+	checkDrops := slices.Clone(effects.checkDrops)
+	slices.SortStableFunc(checkDrops, func(a, b childConstraintDrop) int {
+		return strings.Compare(a.table.Schema+"."+a.table.Name+"."+a.constraint, b.table.Schema+"."+b.table.Name+"."+b.constraint)
+	})
 	seen := map[string]bool{}
-	for _, drop := range effects.checkDrops {
+	for _, drop := range checkDrops {
 		k := drop.table.Schema + "." + drop.table.Name + "." + drop.constraint
 		if seen[k] {
 			continue

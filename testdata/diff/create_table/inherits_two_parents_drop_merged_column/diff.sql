@@ -1,5 +1,0 @@
-ALTER TABLE base_a DROP COLUMN shared;
-
-ALTER TABLE base_b DROP COLUMN shared;
-
-ALTER TABLE child DROP COLUMN shared;

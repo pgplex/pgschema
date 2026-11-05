@@ -152,6 +152,11 @@ type Column struct {
 	// a local column, so the child must drop it on its own. Inspection
 	// metadata, excluded from serialization and fingerprints.
 	IsMergedInherited bool `json:"-"`
+	// IsLocalNotNull is true when the table declares the column's NOT NULL
+	// itself (PostgreSQL 18+, where NOT NULL is a constraint with conislocal),
+	// so it survives a parent's DROP NOT NULL. Set only on INHERITS children.
+	// Inspection metadata, excluded from serialization and fingerprints.
+	IsLocalNotNull bool `json:"-"`
 	// IsSerial is true when the column was created with the SERIAL shorthand:
 	// its default is nextval() on a sequence that is owned by this column
 	// (pg_depend) and that carries PostgreSQL's default <table>_<column>_seq

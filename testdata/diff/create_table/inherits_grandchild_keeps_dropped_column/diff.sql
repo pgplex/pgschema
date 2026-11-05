@@ -1,3 +1,0 @@
-ALTER TABLE ONLY p_root DROP COLUMN legacy;
-
-ALTER TABLE ONLY m_middle DROP COLUMN legacy;

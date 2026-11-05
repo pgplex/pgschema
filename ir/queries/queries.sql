@@ -1559,6 +1559,26 @@ WHERE n.nspname = $1
     AND c.coninhcount > 0
 ORDER BY cl.relname, c.conname;
 
+-- GetLocalNotNullColumnsForSchema lists the columns of regular inheritance
+-- children in a schema whose NOT NULL constraint the child declares itself
+-- (PostgreSQL 18+, where NOT NULL is a pg_constraint row with conislocal).
+-- Such a NOT NULL survives the parent's DROP NOT NULL; before 18 the
+-- recursion clears it regardless, and the query returns nothing.
+-- name: GetLocalNotNullColumnsForSchema :many
+SELECT
+    cl.relname AS table_name,
+    a.attname AS column_name
+FROM pg_catalog.pg_constraint c
+JOIN pg_catalog.pg_class cl ON cl.oid = c.conrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
+JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+WHERE n.nspname = $1
+    AND cl.relkind = 'r'
+    AND NOT cl.relispartition
+    AND c.contype = 'n'
+    AND c.conislocal
+ORDER BY cl.relname, a.attnum;
+
 -- GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY, UNIQUE and
 -- FOREIGN KEY constraints PostgreSQL copied onto partitions from their parent's
 -- constraints (conparentid != 0), with the parent constraint each one derives
