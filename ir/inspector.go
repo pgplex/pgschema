@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1300,22 +1301,30 @@ func (i *Inspector) buildFunctionDependencies(ctx context.Context, schema *IR, t
 		return nil
 	}
 
+	// The argument lists are format_type renderings of the input types; strip
+	// the function's own schema from each, as parseParametersFromSignature
+	// does for the Parameters that Function.GetArguments joins, so the keys
+	// match on both sides.
+	argKey := func(args sql.NullString, routineSchema string) string {
+		if !args.Valid || args.String == "" {
+			return ""
+		}
+		var types []string
+		for _, t := range splitParameterString(args.String) {
+			if t = strings.TrimSpace(t); t != "" {
+				types = append(types, i.stripSameSchemaPrefix(t, routineSchema))
+			}
+		}
+		return strings.Join(types, ", ")
+	}
+
 	// Build a map of dependencies by dependent function key
 	depMap := make(map[string][]string)
 	for _, dep := range deps {
-		dependentArgs := ""
-		if dep.DependentArgs.Valid {
-			dependentArgs = dep.DependentArgs.String
-		}
-		dependentKey := dep.DependentName + "(" + dependentArgs + ")"
-
-		referencedArgs := ""
-		if dep.ReferencedArgs.Valid {
-			referencedArgs = dep.ReferencedArgs.String
-		}
+		dependentKey := dep.DependentName + "(" + argKey(dep.DependentArgs, dep.DependentSchema) + ")"
 
 		// Store as schema.name(args) for cross-schema support
-		referencedKey := dep.ReferencedSchema + "." + dep.ReferencedName + "(" + referencedArgs + ")"
+		referencedKey := dep.ReferencedSchema + "." + dep.ReferencedName + "(" + argKey(dep.ReferencedArgs, dep.ReferencedSchema) + ")"
 		depMap[dependentKey] = append(depMap[dependentKey], referencedKey)
 	}
 
@@ -1323,6 +1332,24 @@ func (i *Inspector) buildFunctionDependencies(ctx context.Context, schema *IR, t
 	for funcKey, fn := range dbSchema.Functions {
 		if deps, ok := depMap[funcKey]; ok {
 			fn.Dependencies = deps
+		}
+	}
+
+	// Types the functions depend on (signature, SQL-standard body, parameter
+	// defaults), keyed the same way; used to order drops.
+	typeDeps, err := i.queries.GetFunctionTypeDependencies(ctx, sql.NullString{String: targetSchema, Valid: true})
+	if err != nil {
+		return err
+	}
+	typeDepMap := make(map[string][]string)
+	for _, dep := range typeDeps {
+		key := dep.FunctionName + "(" + argKey(dep.FunctionArgs, dep.FunctionSchema) + ")"
+		typeDepMap[key] = append(typeDepMap[key], dep.TypeSchema+"."+dep.TypeName)
+	}
+	for funcKey, fn := range dbSchema.Functions {
+		if deps, ok := typeDepMap[funcKey]; ok {
+			sort.Strings(deps)
+			fn.TypeDependencies = slices.Compact(deps)
 		}
 	}
 
@@ -2384,6 +2411,12 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 		return err
 	}
 
+	// Get range types
+	rangeTypes, err := i.queries.GetRangeTypesForSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
+	if err != nil {
+		return err
+	}
+
 	// Get enum values for ENUM types
 	enumValues, err := i.queries.GetEnumValuesForSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
 	if err != nil {
@@ -2519,6 +2552,28 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 		}
 
 		dbSchema.SetType(domainName, domainType)
+	}
+
+	// Create range types. The auto-created multirange and array types are not
+	// types of their own: they are dropped with the range and never listed.
+	for _, r := range rangeTypes {
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreType(r.TypeName) {
+			continue
+		}
+
+		dbSchema := schema.getOrCreateSchema(r.TypeSchema)
+		dbSchema.SetType(r.TypeName, &Type{
+			Schema:             r.TypeSchema,
+			Name:               r.TypeName,
+			Kind:               TypeKindRange,
+			Comment:            r.TypeComment.String,
+			Subtype:            r.Subtype.String,
+			SubtypeOpclass:     r.SubtypeOpclass.String,
+			Collation:          r.Collation.String,
+			Canonical:          r.Canonical.String,
+			SubtypeDiff:        r.SubtypeDiff.String,
+			MultirangeTypeName: r.MultirangeTypeName.String,
+		})
 	}
 
 	return nil

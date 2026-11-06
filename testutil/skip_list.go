@@ -59,6 +59,7 @@ var essentialTests = []string{
 	// Types and domains
 	"create_type/add_type",
 	"create_type/add_value",
+	"create_type/range_types",
 	"create_domain/add_domain",
 
 	// Triggers (non-view based)

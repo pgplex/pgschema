@@ -681,6 +681,9 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			for i := range fn.Dependencies {
 				fn.Dependencies[i] = replaceString(fn.Dependencies[i])
 			}
+			for i := range fn.TypeDependencies {
+				fn.TypeDependencies[i] = replaceString(fn.TypeDependencies[i])
+			}
 		}
 
 		// Procedures
@@ -697,6 +700,10 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			typ.Schema = toSchema
 			typ.BaseType = replaceString(typ.BaseType)
 			typ.Default = replaceString(typ.Default)
+			typ.Subtype = replaceString(typ.Subtype)
+			typ.MultirangeTypeName = replaceString(typ.MultirangeTypeName)
+			typ.SubtypeOpclass = replaceString(typ.SubtypeOpclass)
+			typ.Collation = replaceString(typ.Collation)
 			for _, col := range typ.Columns {
 				col.DataType = replaceString(col.DataType)
 			}

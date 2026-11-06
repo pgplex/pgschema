@@ -1,0 +1,222 @@
+Plan: 22 to add, 24 to drop.
+
+Summary by type:
+  types: 14 to add, 11 to drop
+  functions: 3 to add, 9 to drop
+  tables: 2 to add, 2 to drop
+  privileges: 1 to add
+
+Types:
+  - a_span
+  - band
+  + booking
+  + floatrange
+  + level
+  + level_band
+  + period
+  - positive_span
+  + pricerange
+  - severity
+  + shift_slot
+  + span
+  - span_gains
+  + span_gains
+  - span_loses
+  + span_loses
+  - span_subtype
+  + span_subtype
+  - span_table
+  + span_table
+  + stamp_span
+  + textrange
+  - timerange
+  - z_span
+  - z_status
+
+Functions:
+  - a_diff
+  - is_positive
+  + new_diff
+  - old_diff
+  - positive_diff
+  - severity_diff
+  - severity_num
+  + stamp_length
+  - time_diff
+  - time_diff
+  + ts_diff
+  - z_diff
+
+Tables:
+  + reservations
+  - shifts
+  + stamps
+  - windows
+
+Privileges:
+  + app_role
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP FUNCTION IF EXISTS time_diff(timerange);
+
+DROP TABLE IF EXISTS windows CASCADE;
+
+DROP TABLE IF EXISTS shifts CASCADE;
+
+DROP TYPE IF EXISTS z_span RESTRICT;
+
+DROP TYPE IF EXISTS timerange RESTRICT;
+
+DROP TYPE IF EXISTS span_table RESTRICT;
+
+DROP TYPE IF EXISTS span_subtype RESTRICT;
+
+DROP TYPE IF EXISTS span_loses RESTRICT;
+
+DROP TYPE IF EXISTS span_gains RESTRICT;
+
+DROP TYPE IF EXISTS positive_span RESTRICT;
+
+DROP DOMAIN IF EXISTS band_set RESTRICT;
+
+DROP TYPE IF EXISTS band RESTRICT;
+
+DROP FUNCTION IF EXISTS z_diff(integer, integer);
+
+DROP TYPE IF EXISTS a_span RESTRICT;
+
+DROP FUNCTION IF EXISTS time_diff(time without time zone, time without time zone);
+
+DROP FUNCTION IF EXISTS severity_diff(severity, severity);
+
+DROP FUNCTION IF EXISTS severity_num(severity);
+
+DROP TYPE IF EXISTS severity RESTRICT;
+
+DROP FUNCTION IF EXISTS positive_diff(positive, positive);
+
+DROP DOMAIN IF EXISTS positive RESTRICT;
+
+DROP FUNCTION IF EXISTS old_diff(integer, integer);
+
+DROP FUNCTION IF EXISTS is_positive(integer);
+
+DROP FUNCTION IF EXISTS a_diff(integer, integer);
+
+DROP TYPE IF EXISTS z_status RESTRICT;
+
+CREATE TYPE floatrange AS RANGE (
+    subtype = double precision
+);
+
+CREATE TYPE level AS ENUM (
+    'low',
+    'medium',
+    'high'
+);
+
+CREATE TYPE level_band AS RANGE (
+    subtype = level
+);
+
+CREATE TYPE period AS RANGE (
+    subtype = date
+);
+
+CREATE DOMAIN availability AS period_multirange;
+
+CREATE TYPE booking AS (room integer, slot period);
+
+CREATE TYPE pricerange AS RANGE (
+    subtype = numeric
+);
+
+CREATE TYPE span AS RANGE (
+    subtype = integer
+);
+
+CREATE TYPE span_loses AS RANGE (
+    subtype = bigint
+);
+
+CREATE TYPE span_subtype AS RANGE (
+    subtype = bigint
+);
+
+CREATE TYPE span_table AS RANGE (
+    subtype = bigint
+);
+
+CREATE TYPE textrange AS RANGE (
+    subtype = text,
+    multirange_type_name = textspans,
+    subtype_opclass = pg_catalog.text_pattern_ops,
+    collation = "C"
+);
+
+CREATE TABLE IF NOT EXISTS reservations (
+    id integer,
+    during floatrange,
+    gaps floatmultirange,
+    CONSTRAINT reservations_pkey PRIMARY KEY (id),
+    CONSTRAINT reservations_during_excl EXCLUDE USING gist (during WITH &&)
+);
+
+CREATE OR REPLACE FUNCTION new_diff(
+    x integer,
+    y integer
+)
+RETURNS double precision
+LANGUAGE sql
+IMMUTABLE
+STRICT
+AS $$SELECT (x - y)::double precision
+$$;
+
+CREATE OR REPLACE FUNCTION ts_diff(
+    x timestamp,
+    y timestamp
+)
+RETURNS double precision
+LANGUAGE sql
+IMMUTABLE
+STRICT
+AS $$SELECT EXTRACT(EPOCH FROM (x - y))
+$$;
+
+CREATE TYPE span_gains AS RANGE (
+    subtype = integer,
+    subtype_diff = new_diff
+);
+
+CREATE TYPE stamp_span AS RANGE (
+    subtype = timestamp without time zone,
+    subtype_diff = ts_diff
+);
+
+CREATE DOMAIN break_set AS stamp_span_multirange;
+
+CREATE TYPE shift_slot AS (room integer, during stamp_span);
+
+CREATE TABLE IF NOT EXISTS stamps (
+    id integer,
+    during stamp_span,
+    breaks stamp_span_multirange,
+    history stamp_span[],
+    past_breaks stamp_span_multirange[],
+    CONSTRAINT stamps_pkey PRIMARY KEY (id)
+);
+
+CREATE OR REPLACE FUNCTION stamp_length(
+    r stamp_span
+)
+RETURNS double precision
+LANGUAGE sql
+IMMUTABLE
+STRICT
+AS $$SELECT EXTRACT(EPOCH FROM (upper(r) - lower(r)))
+$$;
+
+GRANT USAGE ON TYPE floatrange TO app_role;

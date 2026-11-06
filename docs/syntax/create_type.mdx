@@ -7,10 +7,18 @@ title: "CREATE TYPE"
 ```sql
 create_type ::= CREATE TYPE type_name AS enum_type
               | CREATE TYPE type_name AS composite_type
+              | CREATE TYPE type_name AS RANGE ( range_option [, ...] )
 
 enum_type ::= ENUM ( [ enum_value [, ...] ] )
 
 composite_type ::= ( attribute_definition [, ...] )
+
+range_option ::= SUBTYPE = subtype
+               | SUBTYPE_OPCLASS = subtype_operator_class
+               | COLLATION = collation
+               | CANONICAL = canonical_function
+               | SUBTYPE_DIFF = subtype_diff_function
+               | MULTIRANGE_TYPE_NAME = multirange_type_name
 
 type_name ::= [schema.]name
 
@@ -30,6 +38,13 @@ pgschema understands the following `CREATE TYPE` features:
   - Multiple attributes with their data types
   - Any valid PostgreSQL data type for attributes
   - Named attributes for structured data
+- **Range types**: Ranges over a subtype that has a btree operator class
+  - Built-in subtypes, and enums or domains defined in the same schema
+  - `subtype_opclass` and `collation` when they differ from the subtype's defaults
+  - `subtype_diff`, including a function created in the same migration (the range is created after it)
+  - `canonical`, which PostgreSQL only accepts as a C function, so it is dumped and compared but never created by pgschema
+  - `multirange_type_name` when it differs from the default PostgreSQL derives (`timerange` → `timemultirange`, `floatspan` → `floatspan_multirange`)
+  - The multirange and array types PostgreSQL creates alongside the range are part of it: they are not listed as types of their own, and columns may use them directly
 
 ## Canonical Format
 
@@ -48,6 +63,16 @@ CREATE TYPE [schema.]type_name AS ENUM (
 
 -- Composite type (single line)
 CREATE TYPE [schema.]type_name AS (attribute1 data_type, attribute2 data_type);
+
+-- Range type (multi-line format, options in pg_dump's order, only those set)
+CREATE TYPE [schema.]type_name AS RANGE (
+    subtype = subtype,
+    multirange_type_name = multirange_type_name,
+    subtype_opclass = schema.operator_class,
+    collation = collation,
+    canonical = canonical_function,
+    subtype_diff = subtype_diff_function
+);
 ```
 
 **Key characteristics of the canonical format:**
@@ -59,5 +84,7 @@ CREATE TYPE [schema.]type_name AS (attribute1 data_type, attribute2 data_type);
 - Composite types use single-line format with attributes separated by commas
 - For DROP operations: `DROP TYPE IF EXISTS type_name RESTRICT;`
 - ENUM types can be modified by adding values with `ALTER TYPE type_name ADD VALUE 'new_value' AFTER 'existing_value';`
+- Range types print `multirange_type_name` only when it is not the default, and `subtype_opclass` / `collation` only when they are not the subtype's defaults
+- PostgreSQL has no `ALTER TYPE` for a range's definition, so a changed range is dropped and recreated (`DROP TYPE ... RESTRICT;` then `CREATE TYPE ... AS RANGE`). The `DROP` fails while a column, domain or composite attribute still uses the range or its multirange; change or drop that use in the same migration.
 
 **Note**: Composite type modifications in pgschema currently require dropping and recreating the type, as PostgreSQL has limited ALTER TYPE support for composite types and complex dependencies make in-place modifications challenging.

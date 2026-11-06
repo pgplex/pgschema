@@ -4,16 +4,25 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pgplex/pgschema/ir"
 )
 
-// generateCreateTypesSQL generates CREATE TYPE statements
-func generateCreateTypesSQL(types []*ir.Type, targetSchema string, collector *diffCollector) {
+// generateCreateTypesSQL generates CREATE TYPE statements. A type listed in
+// replaced (by graph key) is an existing one whose definition changed and has
+// no ALTER: the drop phase dropped the old definition, and the new one is
+// created here in the slot a new type of that definition gets. The step's
+// source is the typeDiff, so the plan ties the drop and the create together.
+func generateCreateTypesSQL(types []*ir.Type, replaced map[string]*typeDiff, targetSchema string, collector *diffCollector) {
 	// Sort types topologically to handle dependencies (e.g., composite types referencing enum types)
 	sortedTypes := topologicallySortTypes(types)
 
 	for _, typeObj := range sortedTypes {
+		var source DiffSource = typeObj
+		if diff, ok := replaced[typeGraphKey(typeObj.Schema, typeObj.Name)]; ok {
+			source = diff
+		}
 		sql := generateTypeSQL(typeObj, targetSchema, collector.qualifySchema)
 
 		// Determine DiffType based on type kind
@@ -30,7 +39,7 @@ func generateCreateTypesSQL(types []*ir.Type, targetSchema string, collector *di
 			Type:                diffType,
 			Operation:           DiffOperationCreate,
 			Path:                fmt.Sprintf("%s.%s", typeObj.Schema, typeObj.Name),
-			Source:              typeObj,
+			Source:              source,
 			CanRunInTransaction: true,
 		}
 
@@ -78,43 +87,49 @@ func generateModifyDomainsSQL(diffs []*typeDiff, targetSchema string, collector 
 	}
 }
 
-// generateDropTypesSQL generates DROP TYPE statements
+// generateDropTypesSQL generates DROP TYPE statements, dependents first: a
+// domain over an enum, a composite with a range attribute or a range over a
+// domain must go before the type it is built on (RESTRICT refuses otherwise).
 func generateDropTypesSQL(types []*ir.Type, targetSchema string, collector *diffCollector) {
-	// Sort types by name for consistent ordering
 	sortedTypes := make([]*ir.Type, len(types))
 	copy(sortedTypes, types)
 	sort.Slice(sortedTypes, func(i, j int) bool {
 		return sortedTypes[i].Name < sortedTypes[j].Name
 	})
+	sortedTypes = reverseSlice(topologicallySortTypes(sortedTypes))
 
 	for _, typeObj := range sortedTypes {
-		typeName := qualifyEntityName(typeObj.Schema, typeObj.Name, targetSchema)
-
-		var sql string
-		if typeObj.Kind == ir.TypeKindDomain {
-			sql = fmt.Sprintf("DROP DOMAIN IF EXISTS %s RESTRICT;", typeName)
-		} else {
-			sql = fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName)
-		}
-
-		// Create context for this statement
-		var diffType DiffType
-		if typeObj.Kind == ir.TypeKindDomain {
-			diffType = DiffTypeDomain
-		} else {
-			diffType = DiffTypeType
-		}
-
-		context := &diffContext{
-			Type:                diffType,
-			Operation:           DiffOperationDrop,
-			Path:                fmt.Sprintf("%s.%s", typeObj.Schema, typeObj.Name),
-			Source:              typeObj,
-			CanRunInTransaction: true,
-		}
-
-		collector.collect(context, sql)
+		generateDropTypeSQL(typeObj, typeObj, targetSchema, collector)
 	}
+}
+
+// generateDropTypeSQL emits the DROP for one type. source is the plan step's
+// source: the type itself, or the typeDiff when the drop is the first half of
+// a replacement.
+func generateDropTypeSQL(typeObj *ir.Type, source DiffSource, targetSchema string, collector *diffCollector) {
+	typeName := qualifyEntityName(typeObj.Schema, typeObj.Name, targetSchema)
+
+	var sql string
+	if typeObj.Kind == ir.TypeKindDomain {
+		sql = fmt.Sprintf("DROP DOMAIN IF EXISTS %s RESTRICT;", typeName)
+	} else {
+		sql = fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName)
+	}
+
+	var diffType DiffType
+	if typeObj.Kind == ir.TypeKindDomain {
+		diffType = DiffTypeDomain
+	} else {
+		diffType = DiffTypeType
+	}
+
+	collector.collect(&diffContext{
+		Type:                diffType,
+		Operation:           DiffOperationDrop,
+		Path:                fmt.Sprintf("%s.%s", typeObj.Schema, typeObj.Name),
+		Source:              source,
+		CanRunInTransaction: true,
+	}, sql)
 }
 
 // generateAlterTypeEnumStatements generates ALTER TYPE ADD VALUE statements for enum changes
@@ -295,9 +310,84 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 		}
 
 		return strings.Join(lines, "\n") + ";"
+	case ir.TypeKindRange:
+		// Options in pg_dump's order, each only when it carries information:
+		// the inspector leaves the opclass and collation empty when they are
+		// the subtype's defaults, and the multirange name is printed only when
+		// it is not the one PostgreSQL would pick.
+		subtype := stripSchemaPrefixMode(typeObj.Subtype, targetSchema, qualifySchema)
+		lines := []string{fmt.Sprintf("    subtype = %s", subtype)}
+		if multirange := stripSchemaPrefixMode(typeObj.MultirangeTypeName, targetSchema, qualifySchema); multirange != "" &&
+			(findLastUnquotedDot(multirange) != -1 || unquoteIdent(multirange) != defaultMultirangeTypeName(typeObj.Name)) {
+			lines = append(lines, fmt.Sprintf("    multirange_type_name = %s", multirange))
+		}
+		// An operator class or collation defined in the target schema loses
+		// its prefix like a column collation does, so the dump applies to
+		// another schema; pg_catalog and cross-schema references stay.
+		if typeObj.SubtypeOpclass != "" {
+			lines = append(lines, fmt.Sprintf("    subtype_opclass = %s", stripSchemaPrefixMode(typeObj.SubtypeOpclass, targetSchema, qualifySchema)))
+		}
+		if typeObj.Collation != "" {
+			lines = append(lines, fmt.Sprintf("    collation = %s", stripSchemaPrefixMode(typeObj.Collation, targetSchema, qualifySchema)))
+		}
+		if typeObj.Canonical != "" {
+			lines = append(lines, fmt.Sprintf("    canonical = %s", typeObj.Canonical))
+		}
+		if typeObj.SubtypeDiff != "" {
+			lines = append(lines, fmt.Sprintf("    subtype_diff = %s", typeObj.SubtypeDiff))
+		}
+		return fmt.Sprintf("CREATE TYPE %s AS RANGE (\n%s\n);", typeName, strings.Join(lines, ",\n"))
 	default:
 		return fmt.Sprintf("CREATE TYPE %s;", typeName)
 	}
+}
+
+// defaultMultirangeTypeName is a port of makeMultirangeTypeName in
+// src/backend/catalog/pg_type.c: the name PostgreSQL gives the multirange of
+// a range type when CREATE TYPE names none. "range" inside the name becomes
+// "multirange" at its first occurrence; otherwise "_multirange" is appended.
+// The result is clipped to the identifier limit like any generated name.
+func defaultMultirangeTypeName(rangeName string) string {
+	// Clip to a byte budget without cutting a multi-byte character, as the
+	// server's truncate_identifier does.
+	clip := func(s string, limit int) string {
+		for len(s) > limit {
+			_, size := utf8.DecodeLastRuneInString(s)
+			s = s[:len(s)-size]
+		}
+		return s
+	}
+	const suffix = "_multirange"
+	var name string
+	if idx := strings.Index(rangeName, "range"); idx != -1 {
+		name = rangeName[:idx] + "multi" + rangeName[idx:]
+	} else {
+		// The server reserves room for the suffix (NAMEDATALEN - 12 bytes
+		// of the range name) so it is never the part that gets cut.
+		name = clip(rangeName, maxIdentifierBytes-len(suffix)) + suffix
+	}
+	return clip(name, maxIdentifierBytes)
+}
+
+// replacedTypes returns the modified types whose definition has no ALTER
+// (today: ranges), keyed by graph key. PostgreSQL offers no ALTER TYPE for a
+// range's definition, so a changed subtype, opclass, collation, function or
+// multirange name means replacement: the drop phase drops the old definition
+// in dependency order with the other dropped types and functions (so it
+// precedes an old subtype_diff or subtype that goes away too), and the create
+// phase creates the new one in the slot a new type of that definition gets
+// (after a new function or type it needs, before the tables that use it).
+// The DROP uses RESTRICT: when a retained column still uses the type,
+// PostgreSQL's own dependency error is the honest outcome, and the user
+// changes or drops that column in the same file to proceed.
+func replacedTypes(diffs []*typeDiff) map[string]*typeDiff {
+	replaced := make(map[string]*typeDiff)
+	for _, diff := range diffs {
+		if diff.Old.Kind == ir.TypeKindRange && diff.New.Kind == ir.TypeKindRange {
+			replaced[typeGraphKey(diff.New.Schema, diff.New.Name)] = diff
+		}
+	}
+	return replaced
 }
 
 // typesEqual compares two types for equality
@@ -355,6 +445,18 @@ func typesEqual(old, new *ir.Type) bool {
 			if constraint.Name != newConstraint.Name || constraint.Definition != newConstraint.Definition {
 				return false
 			}
+		}
+
+	case ir.TypeKindRange:
+		// Both sides come from inspection, so the multirange name is always
+		// populated and compares directly; a renamed multirange is a change.
+		if old.Subtype != new.Subtype ||
+			old.SubtypeOpclass != new.SubtypeOpclass ||
+			old.Collation != new.Collation ||
+			old.Canonical != new.Canonical ||
+			old.SubtypeDiff != new.SubtypeDiff ||
+			old.MultirangeTypeName != new.MultirangeTypeName {
+			return false
 		}
 	}
 

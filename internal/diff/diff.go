@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -2030,12 +2031,13 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Separate types into three buckets:
 	// 1. Types/domains with no deps on new functions or tables — created immediately.
-	// 2. Domains with function deps ONLY (no table dep) — created after functions
-	//    but before tables, so tables that use the domain as a column type work.
+	// 2. Domains with function deps ONLY (no table dep), and range types whose
+	//    subtype_diff is a new function — created after functions but before
+	//    tables, so tables that use the type as a column type work.
 	// 3. Domains with table deps (with or without function deps) — created after
 	//    ALL tables, because the domain's base type is a table's implicit row type.
 	typesWithoutDeps := []*ir.Type{}
-	domainsWithFunctionDepsOnly := []*ir.Type{}
+	typesWithFunctionDepsOnly := []*ir.Type{}
 	domainsWithTableDeps := []*ir.Type{}
 	// Two separate lookups so table classification can distinguish which
 	// deferred-domain bucket a column type belongs to.
@@ -2043,29 +2045,85 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	tableDomainLookup := make(map[string]struct{})
 
 	addToLookup := func(lookup map[string]struct{}, typeObj *ir.Type) {
-		lookup[strings.ToLower(typeObj.Name)] = struct{}{}
-		if typeObj.Schema != "" {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
-			lookup[qualified] = struct{}{}
+		add := func(name string) {
+			lookup[strings.ToLower(name)] = struct{}{}
+			if typeObj.Schema != "" && !strings.Contains(name, ".") {
+				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(name))
+				lookup[qualified] = struct{}{}
+			}
+		}
+		add(typeObj.Name)
+		// A column of the range's multirange waits for the range as well.
+		if typeObj.Kind == ir.TypeKindRange && typeObj.MultirangeTypeName != "" {
+			add(unquoteIdent(typeObj.MultirangeTypeName))
 		}
 	}
 
-	for _, typeObj := range d.addedTypes {
-		if typeObj.Kind != ir.TypeKindDomain {
+	// A modified type with no ALTER (a range) is replaced in the slot its new
+	// definition would get as a new type: after the drop phase has removed
+	// the old dependents, and after any new function or type it needs.
+	replaced := replacedTypes(d.modifiedTypes)
+	candidateTypes := append([]*ir.Type{}, d.addedTypes...)
+	for _, diff := range replaced {
+		candidateTypes = append(candidateTypes, diff.New)
+	}
+	sort.SliceStable(candidateTypes, func(i, j int) bool {
+		return typeGraphKey(candidateTypes[i].Schema, candidateTypes[i].Name) < typeGraphKey(candidateTypes[j].Schema, candidateTypes[j].Name)
+	})
+
+	for _, typeObj := range candidateTypes {
+		if typeObj.Kind != ir.TypeKindDomain && typeObj.Kind != ir.TypeKindRange {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 			continue
 		}
 		hasTableDep := domainReferencesNewTable(typeObj, newTableNameLookup)
-		hasFunctionDep := domainReferencesNewFunction(typeObj, newFunctionLookup)
+		hasFunctionDep := typeReferencesNewFunction(typeObj, newFunctionLookup)
 		if hasTableDep {
 			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
 			addToLookup(tableDomainLookup, typeObj)
 		} else if hasFunctionDep {
-			domainsWithFunctionDepsOnly = append(domainsWithFunctionDepsOnly, typeObj)
+			typesWithFunctionDepsOnly = append(typesWithFunctionDepsOnly, typeObj)
 			addToLookup(functionDomainLookup, typeObj)
 		} else {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 		}
+	}
+	// A type built on a deferred one (a composite with a range attribute, a
+	// domain over a range's multirange, a range over a deferred domain) waits
+	// with it, and anything built on that waits too.
+	if len(domainsWithTableDeps) > 0 || len(typesWithFunctionDepsOnly) > 0 {
+		afterTables := make(map[*ir.Type]bool)
+		for _, t := range dependentTypes(candidateTypes, domainsWithTableDeps) {
+			afterTables[t] = true
+		}
+		afterFunctions := make(map[*ir.Type]bool)
+		for _, t := range dependentTypes(candidateTypes, typesWithFunctionDepsOnly) {
+			afterFunctions[t] = true
+		}
+		var stay []*ir.Type
+		for _, t := range typesWithoutDeps {
+			switch {
+			case afterTables[t]:
+				domainsWithTableDeps = append(domainsWithTableDeps, t)
+				addToLookup(tableDomainLookup, t)
+			case afterFunctions[t]:
+				typesWithFunctionDepsOnly = append(typesWithFunctionDepsOnly, t)
+				addToLookup(functionDomainLookup, t)
+			default:
+				stay = append(stay, t)
+			}
+		}
+		typesWithoutDeps = stay
+		var keep []*ir.Type
+		for _, t := range typesWithFunctionDepsOnly {
+			if afterTables[t] {
+				domainsWithTableDeps = append(domainsWithTableDeps, t)
+				addToLookup(tableDomainLookup, t)
+			} else {
+				keep = append(keep, t)
+			}
+		}
+		typesWithFunctionDepsOnly = keep
 	}
 	// Combined lookup for all deferred domains (used by table classification
 	// to detect ANY deferred domain dependency).
@@ -2078,7 +2136,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
-	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
+	generateCreateTypesSQL(typesWithoutDeps, replaced, targetSchema, collector)
 
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, d.deferredSequenceOwners, targetSchema, collector)
@@ -2224,16 +2282,20 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
 	var functionsAfterAllTables []*ir.Function
-	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 {
+	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 || len(deferredDomainLookup) > 0 {
 		tablesWithDepsLookup := buildTableLookup(tablesWithDeps)
 		lastBatchLookup := buildTableLookup(tablesAfterTableDomains)
 		functionsWithoutTableDeps = nil
 		for _, fn := range functionsWithoutViewDeps {
-			if functionReferencesNewTable(fn, lastBatchLookup) {
+			// A function whose signature uses a deferred type (a domain or
+			// range created after the first functions, or after all tables)
+			// cannot be created before that type exists.
+			switch {
+			case functionReferencesNewTable(fn, lastBatchLookup) || functionSignatureReferencesRelation(fn, tableDomainLookup):
 				functionsAfterAllTables = append(functionsAfterAllTables, fn)
-			} else if functionReferencesNewTable(fn, tablesWithDepsLookup) {
+			case functionReferencesNewTable(fn, tablesWithDepsLookup) || functionSignatureReferencesRelation(fn, functionDomainLookup):
 				functionsWithTableDeps = append(functionsWithTableDeps, fn)
-			} else {
+			default:
 				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
 			}
 		}
@@ -2241,7 +2303,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		// validated at creation, so one referencing a hierarchy that completes
 		// in a later batch moves after that batch, unless an earlier table or
 		// domain needs it first.
-		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, domainsWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
+		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, typesWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
@@ -2254,7 +2316,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create domains that only depend on functions (not tables). These must come
 	// after functions but before tables, because tables may use these domains as
 	// column types.
-	generateCreateTypesSQL(domainsWithFunctionDepsOnly, targetSchema, collector)
+	generateCreateTypesSQL(typesWithFunctionDepsOnly, replaced, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	// A procedure whose body may depend on a postponed key (issue #653) waits
@@ -2273,7 +2335,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create domains whose base type is a new table's implicit row type (issue #535).
 	// Emitted after ALL other tables so the row type exists, even if the domain also
 	// depends on a function (which was already created above).
-	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
+	generateCreateTypesSQL(domainsWithTableDeps, replaced, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
@@ -2571,8 +2633,21 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// transition/final functions (issue #416).
 	generateDropAggregatesSQL(d.droppedAggregates, targetSchema, collector)
 
-	// Drop functions
-	generateDropFunctionsSQL(d.droppedFunctions, targetSchema, collector)
+	// Drop functions. A function that a dropped type still references (a
+	// range's subtype_diff, a domain's CHECK or default) cannot go until the
+	// type has, and the type cannot go until the tables using it have, so
+	// those functions wait for the end of the drop phase.
+	// The old definition of a replaced type (a changed range) is dropped here
+	// as well; its new definition is created in the create phase.
+	replaced := replacedTypes(d.modifiedTypes)
+	droppedTypes := append([]*ir.Type{}, d.droppedTypes...)
+	replacedOld := make(map[*ir.Type]*typeDiff, len(replaced))
+	for _, diff := range replaced {
+		droppedTypes = append(droppedTypes, diff.Old)
+		replacedOld[diff.Old] = diff
+	}
+	functionsToDrop, functionsAfterTypes := holdBackFunctionsOfDroppedTypes(d.droppedFunctions, droppedTypes)
+	generateDropFunctionsSQL(functionsToDrop, targetSchema, collector)
 
 	// Drop procedures
 	generateDropProceduresSQL(d.droppedProcedures, targetSchema, collector)
@@ -2594,8 +2669,20 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Drop sequences
 	generateDropSequencesSQL(d.droppedSequences, targetSchema, collector)
 
-	// Drop types
-	generateDropTypesSQL(d.droppedTypes, targetSchema, collector)
+	// Drop types, interleaved with the held-back functions in dependency
+	// order: a range before its subtype_diff function, that function before
+	// the subtype its signature takes, a domain before its CHECK function.
+	for _, node := range orderTypeAndFunctionDrops(droppedTypes, functionsAfterTypes) {
+		if node.function != nil {
+			generateDropFunctionsSQL([]*ir.Function{node.function}, targetSchema, collector)
+			continue
+		}
+		var source DiffSource = node.typeObj
+		if diff, ok := replacedOld[node.typeObj]; ok {
+			source = diff
+		}
+		generateDropTypeSQL(node.typeObj, source, targetSchema, collector)
+	}
 
 	// Drop schemas
 	// Note: Schema deletion is out of scope for schema-level comparisons
@@ -3028,6 +3115,9 @@ func buildRoutineLookup(functions []*ir.Function, aggregates []*ir.Aggregate) ma
 	}
 	for _, fn := range functions {
 		add(fn.Schema, fn.Name)
+		// Identity keys, for references that name a signature rather than a
+		// call (a range's subtype_diff takes two arguments of the subtype).
+		add(fn.Schema, fn.Name+"("+fn.GetArguments()+")")
 	}
 	for _, agg := range aggregates {
 		add(agg.Schema, agg.Name)
@@ -3223,7 +3313,7 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 			}
 		}
 		for _, domain := range domains {
-			if !needed[fn] && domainReferencesNewFunction(domain, lookup) {
+			if !needed[fn] && typeReferencesNewFunction(domain, lookup) {
 				needed[fn] = true
 			}
 		}
@@ -3827,17 +3917,9 @@ func tableUsesDeferredDomain(table *ir.Table, deferredDomains map[string]struct{
 		if col.DataType == "" {
 			continue
 		}
-		// Normalize the type name for lookup
-		typeName := strings.ToLower(col.DataType)
-		if _, ok := deferredDomains[typeName]; ok {
+		// An array of the type, or a quoted name, still needs the type.
+		if typeMatchesLookup(extractBaseTypeName(col.DataType), table.Schema, deferredDomains) {
 			return true
-		}
-		// Try with table's schema prefix
-		if table.Schema != "" && !strings.Contains(typeName, ".") {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), typeName)
-			if _, ok := deferredDomains[qualified]; ok {
-				return true
-			}
 		}
 	}
 	return false
@@ -3854,10 +3936,223 @@ func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) b
 	return typeMatchesLookup(baseName, typeObj.Schema, newTables)
 }
 
-// domainReferencesNewFunction determines if a domain references any newly added functions
-// in its CHECK constraints or default value.
-func domainReferencesNewFunction(typeObj *ir.Type, newFunctions map[string]struct{}) bool {
-	if len(newFunctions) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
+// holdBackFunctionsOfDroppedTypes splits the dropped functions into those that
+// can go in the usual slot and those a dropped type still references, which
+// must wait until after the types are dropped. A function a held function
+// depends on (a callee recorded in Dependencies) is held as well, since it
+// cannot be dropped while its caller exists. Order within each part is kept.
+func holdBackFunctionsOfDroppedTypes(functions []*ir.Function, types []*ir.Type) (now, afterTypes []*ir.Function) {
+	if len(functions) == 0 || len(types) == 0 {
+		return functions, nil
+	}
+	held := make(map[*ir.Function]bool)
+	for _, fn := range functions {
+		lookup := buildFunctionLookup([]*ir.Function{fn})
+		for _, typeObj := range types {
+			if typeReferencesNewFunction(typeObj, lookup) {
+				held[fn] = true
+				break
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for caller := range held {
+			for _, callee := range functions {
+				if held[callee] {
+					continue
+				}
+				key := callee.Schema + "." + callee.Name + "(" + callee.GetArguments() + ")"
+				if slices.Contains(caller.Dependencies, key) {
+					held[callee] = true
+					changed = true
+				}
+			}
+		}
+	}
+	for _, fn := range functions {
+		if held[fn] {
+			afterTypes = append(afterTypes, fn)
+		} else {
+			now = append(now, fn)
+		}
+	}
+	return now, afterTypes
+}
+
+// functionDependsOnType reports whether PostgreSQL records fn as depending on
+// the type, or on a range's multirange: a parameter or return type, a type a
+// SQL-standard body casts to or a parameter default names (pg_depend, loaded
+// into Function.TypeDependencies as schema.name).
+func functionDependsOnType(fn *ir.Function, t *ir.Type) bool {
+	if len(fn.TypeDependencies) == 0 {
+		return false
+	}
+	keys := map[string]bool{t.Schema + "." + t.Name: true}
+	if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+		if idx := findLastUnquotedDot(t.MultirangeTypeName); idx != -1 {
+			keys[unquoteIdent(t.MultirangeTypeName[:idx])+"."+unquoteIdent(t.MultirangeTypeName[idx+1:])] = true
+		} else {
+			keys[t.Schema+"."+unquoteIdent(t.MultirangeTypeName)] = true
+		}
+	}
+	for _, dep := range fn.TypeDependencies {
+		if keys[dep] {
+			return true
+		}
+	}
+	return false
+}
+
+// droppedTypeOrFunction is one node of the joint drop order below.
+type droppedTypeOrFunction struct {
+	typeObj  *ir.Type
+	function *ir.Function
+}
+
+// orderTypeAndFunctionDrops interleaves the dropped types and the held-back
+// functions so that every object goes before what it depends on: a type
+// before the type it is built on, a type before the function it names (a
+// range's subtype_diff, a domain's CHECK), a function before the type its
+// signature uses (that subtype_diff takes the subtype), and a caller before
+// its callee. Ties break with types first, then by name, so the output stays
+// deterministic.
+func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []droppedTypeOrFunction {
+	typeMap, _, typeEdges := buildTypeGraph(types)
+	typeKey := func(t *ir.Type) string { return "t\x00" + typeGraphKey(t.Schema, t.Name) }
+	fnKey := func(f *ir.Function) string { return "f\x00" + f.Schema + "." + f.Name + "(" + f.GetArguments() + ")" }
+
+	nodes := make(map[string]droppedTypeOrFunction, len(types)+len(functions))
+	for _, t := range types {
+		nodes[typeKey(t)] = droppedTypeOrFunction{typeObj: t}
+	}
+	for _, f := range functions {
+		nodes[fnKey(f)] = droppedTypeOrFunction{function: f}
+	}
+
+	// after[a] lists the nodes that must be dropped after a.
+	after := make(map[string][]string, len(nodes))
+	inDegree := make(map[string]int, len(nodes))
+	addEdge := func(first, second string) {
+		if first == second {
+			return
+		}
+		after[first] = append(after[first], second)
+		inDegree[second]++
+	}
+	// Every edge is a catalog fact: type structure, a type naming a
+	// function, a function's signature or recorded type dependencies, and
+	// recorded function-to-function dependencies.
+	for dep, dependents := range typeEdges {
+		for _, dependent := range dependents {
+			addEdge("t\x00"+dependent, "t\x00"+dep)
+		}
+	}
+	for _, f := range functions {
+		lookup := buildFunctionLookup([]*ir.Function{f})
+		names := make(map[string]struct{})
+		for _, t := range types {
+			if typeReferencesNewFunction(t, lookup) {
+				addEdge(typeKey(t), fnKey(f))
+			}
+		}
+		for key, t := range typeMap {
+			clear(names)
+			names[strings.ToLower(t.Name)] = struct{}{}
+			names[strings.ToLower(t.Schema)+"."+strings.ToLower(t.Name)] = struct{}{}
+			if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+				multirange := strings.ToLower(unquoteIdent(t.MultirangeTypeName))
+				names[multirange] = struct{}{}
+				if !strings.Contains(multirange, ".") {
+					names[strings.ToLower(t.Schema)+"."+multirange] = struct{}{}
+				}
+			}
+			if functionSignatureReferencesRelation(f, names) || functionDependsOnType(f, t) {
+				addEdge(fnKey(f), "t\x00"+key)
+			}
+		}
+		for _, callee := range functions {
+			if slices.Contains(f.Dependencies, callee.Schema+"."+callee.Name+"("+callee.GetArguments()+")") {
+				addEdge(fnKey(f), fnKey(callee))
+			}
+		}
+	}
+
+	var ready []string
+	for key := range nodes {
+		if inDegree[key] == 0 {
+			ready = append(ready, key)
+		}
+	}
+	sort.Strings(ready) // "f\x00" sorts before "t\x00"; reversed below so types lead
+	var result []droppedTypeOrFunction
+	done := make(map[string]bool, len(nodes))
+	for len(result) < len(nodes) {
+		if len(ready) == 0 {
+			// A cycle cannot occur in PostgreSQL's catalog; keep going
+			// deterministically rather than drop nodes on the floor.
+			var pending []string
+			for key := range nodes {
+				if !done[key] {
+					pending = append(pending, key)
+				}
+			}
+			sort.Strings(pending)
+			ready = append(ready, pending[len(pending)-1])
+		}
+		current := ready[len(ready)-1]
+		ready = ready[:len(ready)-1]
+		if done[current] {
+			continue
+		}
+		done[current] = true
+		result = append(result, nodes[current])
+		for _, next := range after[current] {
+			inDegree[next]--
+			if inDegree[next] <= 0 && !done[next] {
+				ready = append(ready, next)
+				sort.Strings(ready)
+			}
+		}
+	}
+	return result
+}
+
+// typeReferencesNewFunction determines if a domain references any newly added
+// functions in its CHECK constraints or default value, or if a range type names
+// one as its subtype_diff. (A canonical function can only be C, so it is never
+// one pgschema creates.)
+func typeReferencesNewFunction(typeObj *ir.Type, newFunctions map[string]struct{}) bool {
+	if len(newFunctions) == 0 || typeObj == nil {
+		return false
+	}
+	if typeObj.Kind == ir.TypeKindRange {
+		if typeObj.SubtypeDiff == "" {
+			return false
+		}
+		// Match the signature, not just the name: an overload of the same
+		// name that takes the range itself depends on the range instead.
+		// The subtype is a format_type rendering; parameter types are
+		// normalized (timestamp without time zone -> timestamp), so apply
+		// the same normalization after stripping the schema as the
+		// inspector does for parameters.
+		subtype := ir.NormalizeTypeName(stripSchemaPrefixMode(typeObj.Subtype, typeObj.Schema, false))
+		identity := "(" + subtype + ", " + subtype + ")"
+		name := normalizeFunctionIdentifier(typeObj.SubtypeDiff)
+		if name == "" {
+			return false
+		}
+		if _, ok := newFunctions[name+identity]; ok {
+			return true
+		}
+		if !strings.Contains(name, "\x00") && typeObj.Schema != "" {
+			if _, ok := newFunctions[functionGraphKey(typeObj.Schema, name+identity)]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	if typeObj.Kind != ir.TypeKindDomain {
 		return false
 	}
 
@@ -3890,20 +4185,27 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 		if len(match) < 2 {
 			continue
 		}
-		identifier := normalizeFunctionIdentifier(match[1])
-		if identifier == "" {
-			continue
-		}
-
-		if _, ok := newFunctions[identifier]; ok {
+		if functionNameInLookup(match[1], defaultSchema, newFunctions) {
 			return true
 		}
+	}
+	return false
+}
 
-		if !strings.Contains(identifier, "\x00") && defaultSchema != "" {
-			qualified := functionGraphKey(defaultSchema, identifier)
-			if _, ok := newFunctions[qualified]; ok {
-				return true
-			}
+// functionNameInLookup reports whether a (possibly schema-qualified, possibly
+// quoted) function name is one of the newFunctions, resolving a bare name
+// against defaultSchema the way referencesNewFunction does for a call.
+func functionNameInLookup(name, defaultSchema string, newFunctions map[string]struct{}) bool {
+	identifier := normalizeFunctionIdentifier(name)
+	if identifier == "" {
+		return false
+	}
+	if _, ok := newFunctions[identifier]; ok {
+		return true
+	}
+	if !strings.Contains(identifier, "\x00") && defaultSchema != "" {
+		if _, ok := newFunctions[functionGraphKey(defaultSchema, identifier)]; ok {
+			return true
 		}
 	}
 	return false

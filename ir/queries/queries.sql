@@ -2145,6 +2145,81 @@ WHERE t.typtype = 'd'  -- Domain types only
     )
 ORDER BY n.nspname, t.typname, c.conname;
 
+-- GetRangeTypesForSchema retrieves all user-defined range types for a specific schema.
+-- The subtype column follows the GetDomainsForSchema base_type convention;
+-- function references are bare when they live in the range's own schema and
+-- qualified otherwise (as for aggregates); subtype_opclass and collation are
+-- empty when they are the subtype's defaults, which is what pg_dump prints.
+-- name: GetRangeTypesForSchema :many
+SELECT
+    n.nspname AS type_schema,
+    t.typname AS type_name,
+    CASE
+        WHEN sn.nspname = 'pg_catalog' THEN
+            format_type(r.rngsubtype, NULL)
+        WHEN st.typcategory = 'A' THEN
+            CASE
+                WHEN seln.nspname = 'pg_catalog' THEN sel.typname::text
+                ELSE quote_ident(seln.nspname) || '.' || quote_ident(sel.typname)
+            END || '[]'
+        ELSE
+            quote_ident(sn.nspname) || '.' || quote_ident(st.typname)
+    END AS subtype,
+    CASE
+        WHEN opc.opcdefault THEN ''
+        ELSE quote_ident(opcn.nspname) || '.' || quote_ident(opc.opcname)
+    END AS subtype_opclass,
+    CASE
+        WHEN r.rngcollation = 0 OR r.rngcollation = st.typcollation THEN ''
+        WHEN colln.nspname = 'pg_catalog' THEN quote_ident(coll.collname)
+        ELSE quote_ident(colln.nspname) || '.' || quote_ident(coll.collname)
+    END AS collation,
+    CASE
+        WHEN canon.oid IS NULL THEN ''
+        WHEN canonn.nspname = n.nspname THEN quote_ident(canon.proname)
+        ELSE quote_ident(canonn.nspname) || '.' || quote_ident(canon.proname)
+    END AS canonical,
+    CASE
+        WHEN sdiff.oid IS NULL THEN ''
+        WHEN sdiffn.nspname = n.nspname THEN quote_ident(sdiff.proname)
+        ELSE quote_ident(sdiffn.nspname) || '.' || quote_ident(sdiff.proname)
+    END AS subtype_diff,
+    CASE
+        WHEN mn.nspname = n.nspname THEN quote_ident(mt.typname)
+        ELSE quote_ident(mn.nspname) || '.' || quote_ident(mt.typname)
+    END AS multirange_type_name,
+    COALESCE(d.description, '') AS type_comment
+FROM pg_range r
+JOIN pg_type t ON t.oid = r.rngtypid
+JOIN pg_namespace n ON t.typnamespace = n.oid
+JOIN pg_type st ON st.oid = r.rngsubtype
+JOIN pg_namespace sn ON st.typnamespace = sn.oid
+LEFT JOIN pg_type sel ON st.typelem = sel.oid
+LEFT JOIN pg_namespace seln ON sel.typnamespace = seln.oid
+JOIN pg_opclass opc ON opc.oid = r.rngsubopc
+JOIN pg_namespace opcn ON opc.opcnamespace = opcn.oid
+LEFT JOIN pg_collation coll ON coll.oid = r.rngcollation
+LEFT JOIN pg_namespace colln ON coll.collnamespace = colln.oid
+LEFT JOIN pg_proc canon ON canon.oid = r.rngcanonical
+LEFT JOIN pg_namespace canonn ON canon.pronamespace = canonn.oid
+LEFT JOIN pg_proc sdiff ON sdiff.oid = r.rngsubdiff
+LEFT JOIN pg_namespace sdiffn ON sdiff.pronamespace = sdiffn.oid
+JOIN pg_type mt ON mt.oid = r.rngmultitypid
+JOIN pg_namespace mn ON mt.typnamespace = mn.oid
+LEFT JOIN pg_description d ON d.objoid = t.oid AND d.classoid = 'pg_type'::regclass
+WHERE t.typtype = 'r'
+    AND n.nspname = $1
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_depend dep
+        WHERE dep.classid = 'pg_catalog.pg_type'::regclass
+            AND dep.objid = t.oid
+            AND dep.objsubid = 0
+            AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
+            AND dep.refobjsubid = 0
+            AND dep.deptype = 'e'
+    )
+ORDER BY n.nspname, t.typname;
+
 -- GetEnumValuesForSchema retrieves enum values for ENUM types in a specific schema
 -- name: GetEnumValuesForSchema :many
 SELECT 
@@ -2378,7 +2453,7 @@ WITH acl_data AS (
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
         )
-        AND t.typtype IN ('e', 'c', 'd')
+        AND t.typtype IN ('e', 'c', 'd', 'r')
         AND NOT EXISTS (
             SELECT 1 FROM pg_catalog.pg_depend dep
             WHERE dep.classid = 'pg_catalog.pg_class'::regclass
@@ -2493,7 +2568,7 @@ WITH objects_with_acl AS (
                 AND dep.refobjsubid = 0
                 AND dep.deptype = 'e'
         )
-        AND t.typtype IN ('e', 'c', 'd')
+        AND t.typtype IN ('e', 'c', 'd', 'r')
         AND NOT EXISTS (
             SELECT 1 FROM pg_catalog.pg_depend dep
             WHERE dep.classid = 'pg_catalog.pg_class'::regclass
@@ -2568,15 +2643,40 @@ FROM exploded e
 LEFT JOIN pg_roles r ON r.oid = e.grantee
 ORDER BY e.table_name, e.column_name, e.grantee, e.privilege_type;
 
--- GetFunctionDependencies retrieves function-to-function dependencies for topological sorting
+-- GetFunctionTypeDependencies retrieves the types a function depends on as
+-- PostgreSQL records them: parameter and return types, and the types a
+-- SQL-standard body or a parameter default names. An array type is reported
+-- as its element type. The argument list is types only, as in
+-- GetFunctionDependencies, so the keys match the Functions map.
+-- name: GetFunctionTypeDependencies :many
+SELECT
+    fn.nspname AS function_schema,
+    p.proname AS function_name,
+    oidvectortypes(p.proargtypes) AS function_args,
+    tn.nspname AS type_schema,
+    t.typname AS type_name
+FROM pg_depend d
+JOIN pg_proc p ON d.objid = p.oid
+JOIN pg_namespace fn ON p.pronamespace = fn.oid
+JOIN pg_type ref ON d.refobjid = ref.oid
+JOIN pg_type t ON t.oid = CASE WHEN ref.typcategory = 'A' AND ref.typelem <> 0 THEN ref.typelem ELSE ref.oid END
+JOIN pg_namespace tn ON t.typnamespace = tn.oid
+WHERE d.classid = 'pg_proc'::regclass
+  AND d.refclassid = 'pg_type'::regclass
+  AND d.deptype = 'n'
+  AND fn.nspname = $1;
+
+-- GetFunctionDependencies retrieves function-to-function dependencies for topological sorting.
+-- The argument lists are input types only (no names, modes or defaults), as
+-- Function.GetArguments renders them, so the keys match the Functions map.
 -- name: GetFunctionDependencies :many
 SELECT
     dependent_ns.nspname AS dependent_schema,
     dependent_proc.proname AS dependent_name,
-    pg_get_function_identity_arguments(dependent_proc.oid) AS dependent_args,
+    oidvectortypes(dependent_proc.proargtypes) AS dependent_args,
     referenced_ns.nspname AS referenced_schema,
     referenced_proc.proname AS referenced_name,
-    pg_get_function_identity_arguments(referenced_proc.oid) AS referenced_args
+    oidvectortypes(referenced_proc.proargtypes) AS referenced_args
 FROM pg_depend d
 JOIN pg_proc dependent_proc ON d.objid = dependent_proc.oid
 JOIN pg_namespace dependent_ns ON dependent_proc.pronamespace = dependent_ns.oid
