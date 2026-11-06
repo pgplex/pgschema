@@ -1097,7 +1097,14 @@ SELECT
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
-    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns,
+    ARRAY(
+        SELECT ia.attname::text
+        FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute ia ON ia.attrelid = c.conrelid AND ia.attnum = k.attnum
+        WHERE c.contype IN ('p', 'u') AND k.ord > i.indnkeyatts
+        ORDER BY k.ord
+    )::text[] AS include_columns
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1105,6 +1112,7 @@ LEFT JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
 LEFT JOIN pg_class fcl ON c.confrelid = fcl.oid
 LEFT JOIN pg_namespace fn ON fcl.relnamespace = fn.oid
 LEFT JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
+LEFT JOIN pg_index i ON i.indexrelid = c.conindid
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(da.attname ORDER BY e.ord)::text AS delete_set_columns
     FROM jsonb_array_elements_text(
@@ -1173,6 +1181,7 @@ type GetConstraintsRow struct {
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 	MatchFull              sql.NullBool   `db:"match_full" json:"match_full"`
 	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
+	IncludeColumns         []string       `db:"include_columns" json:"include_columns"`
 }
 
 // GetConstraints retrieves all table constraints
@@ -1207,6 +1216,7 @@ func (q *Queries) GetConstraints(ctx context.Context) ([]GetConstraintsRow, erro
 			&i.NoInherit,
 			&i.MatchFull,
 			&i.DeleteSetColumns,
+			pq.Array(&i.IncludeColumns),
 		); err != nil {
 			return nil, err
 		}
@@ -1279,7 +1289,14 @@ SELECT
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
-    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns,
+    ARRAY(
+        SELECT ia.attname::text
+        FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute ia ON ia.attrelid = c.conrelid AND ia.attnum = k.attnum
+        WHERE c.contype IN ('p', 'u') AND k.ord > i.indnkeyatts
+        ORDER BY k.ord
+    )::text[] AS include_columns
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1356,6 +1373,7 @@ type GetConstraintsForSchemaRow struct {
 	NullsNotDistinct       sql.NullBool   `db:"nulls_not_distinct" json:"nulls_not_distinct"`
 	MatchFull              sql.NullBool   `db:"match_full" json:"match_full"`
 	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
+	IncludeColumns         []string       `db:"include_columns" json:"include_columns"`
 }
 
 // GetConstraintsForSchema retrieves all table constraints for a specific schema
@@ -1392,6 +1410,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.NullsNotDistinct,
 			&i.MatchFull,
 			&i.DeleteSetColumns,
+			pq.Array(&i.IncludeColumns),
 		); err != nil {
 			return nil, err
 		}
