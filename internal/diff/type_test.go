@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -239,6 +240,22 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "span,span_diff,z_status" {
 		t.Fatalf("got %v", names)
+	}
+
+	// A body mention that contradicts a certain edge is ignored: the
+	// subtype_diff body names the range (as a parameter here), which must
+	// not reverse the range-before-function order the catalog guarantees.
+	selfFn := &ir.Function{Schema: "public", Name: "span_diff", Definition: "SELECT span + 1", Parameters: []*ir.Parameter{{Mode: "IN", Name: "span", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
+	names = nil
+	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{status, intSpan}, []*ir.Function{selfFn}) {
+		if node.function != nil {
+			names = append(names, node.function.Name)
+		} else {
+			names = append(names, node.typeObj.Name)
+		}
+	}
+	if slices.Index(names, "span") > slices.Index(names, "span_diff") {
+		t.Fatalf("textual hint must not reverse the certain order, got %v", names)
 	}
 
 	// No held functions: plain reverse dependency order of the types.

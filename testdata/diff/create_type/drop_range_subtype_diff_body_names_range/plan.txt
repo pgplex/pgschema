@@ -1,0 +1,21 @@
+Plan: 3 to drop.
+
+Summary by type:
+  types: 2 to drop
+  functions: 1 to drop
+
+Types:
+  - span
+  - z_status
+
+Functions:
+  - span_diff
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP TYPE IF EXISTS span RESTRICT;
+
+DROP FUNCTION IF EXISTS span_diff(integer, integer);
+
+DROP TYPE IF EXISTS z_status RESTRICT;

@@ -4053,11 +4053,36 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 		after[first] = append(after[first], second)
 		inDegree[second]++
 	}
+	// reaches reports whether to can be reached from from through the edges
+	// added so far.
+	reaches := func(from, to string) bool {
+		seen := map[string]bool{from: true}
+		stack := []string{from}
+		for len(stack) > 0 {
+			current := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			for _, next := range after[current] {
+				if next == to {
+					return true
+				}
+				if !seen[next] {
+					seen[next] = true
+					stack = append(stack, next)
+				}
+			}
+		}
+		return false
+	}
+
+	// Certain edges first: type structure, a type naming a function, a
+	// function's signature, recorded function dependencies.
 	for dep, dependents := range typeEdges {
 		for _, dependent := range dependents {
 			addEdge("t\x00"+dependent, "t\x00"+dep)
 		}
 	}
+	type edge struct{ first, second string }
+	var textual []edge
 	for _, f := range functions {
 		lookup := buildFunctionLookup([]*ir.Function{f})
 		names := make(map[string]struct{})
@@ -4077,14 +4102,28 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 					names[strings.ToLower(t.Schema)+"."+multirange] = struct{}{}
 				}
 			}
-			if functionSignatureReferencesRelation(f, names) || functionTextReferencesType(f, t) {
+			if functionSignatureReferencesRelation(f, names) {
 				addEdge(fnKey(f), "t\x00"+key)
+			} else if functionTextReferencesType(f, t) {
+				textual = append(textual, edge{fnKey(f), "t\x00" + key})
 			}
 		}
 		for _, callee := range functions {
 			if slices.Contains(f.Dependencies, callee.Schema+"."+callee.Name+"("+callee.GetArguments()+")") {
 				addEdge(fnKey(f), fnKey(callee))
 			}
+		}
+	}
+	// A body or default naming a type is a hint, not a catalog fact: the
+	// name may be a parameter or a column. Such an edge is added only when
+	// it does not contradict the certain ones, so it can over-order a drop
+	// (harmless) but never reverse one.
+	sort.Slice(textual, func(i, j int) bool {
+		return textual[i].first+textual[i].second < textual[j].first+textual[j].second
+	})
+	for _, e := range textual {
+		if !reaches(e.second, e.first) {
+			addEdge(e.first, e.second)
 		}
 	}
 

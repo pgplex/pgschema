@@ -176,6 +176,10 @@ CREATE TYPE rprobe.timerange AS RANGE (
 > - In the joint drop order a held function also precedes a type its body or
 >   a parameter default names, since PostgreSQL records that dependency for
 >   SQL-standard bodies and defaults (`drop_range_subtype_diff_body_type`).
+>   That textual match is a hint, not a catalog fact (the name may be a
+>   parameter or a literal), so it is added only when it does not contradict
+>   a certain edge: it can over-order a drop but never reverse one
+>   (`drop_range_subtype_diff_body_names_range`).
 > - `makeMultirangeTypeName` clips the range name to NAMEDATALEN-12 bytes
 >   before appending `_multirange`; the port does the same.
 > - Grants on a replaced range are lost, like grants on a recreated function
