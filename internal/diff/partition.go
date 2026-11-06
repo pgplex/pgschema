@@ -294,10 +294,15 @@ func (td *tableDiff) partitionContext(operation DiffOperation) *diffContext {
 // once every copy exists: after the tables, the attachments and the deferred
 // foreign keys. A copy whose family statements already carried its comment
 // (see partitionIndexCreationPlan) is skipped. A copy recreated with its
-// parent's constraint lost its comment, so its old comment counts as empty.
-// tables keys every table of each state by schema.name (issue #674).
-func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.Table, modifiedTables []*tableDiff, plan *partitionIndexCreationPlan, targetSchema string, collector *diffCollector) {
+// parent's constraint, including a foreign key dropped and re-added around a
+// replaced key (fkPreDrops, issue #439), lost its comment, so its old comment
+// counts as empty. tables keys every table of each state by schema.name
+// (issue #674).
+func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.Table, modifiedTables []*tableDiff, fkPreDrops []*ir.Constraint, plan *partitionIndexCreationPlan, targetSchema string, collector *diffCollector) {
 	recreated := make(map[string]bool)
+	for _, constraint := range fkPreDrops {
+		recreated[constraintPathKey(constraint)] = true
+	}
 	for _, td := range modifiedTables {
 		for _, constraint := range td.DroppedConstraints {
 			recreated[constraintPathKey(constraint)] = true

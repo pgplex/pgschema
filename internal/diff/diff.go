@@ -2528,7 +2528,7 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Comments on partitions' copies of inherited constraints, now that every
 	// copy exists (see partition.go)
-	generatePartitionConstraintCommentsSQL(d.oldTables, d.allNewTables, d.modifiedTables, d.partitionIndexes, targetSchema, collector)
+	generatePartitionConstraintCommentsSQL(d.oldTables, d.allNewTables, d.modifiedTables, d.fkPreDrops, d.partitionIndexes, targetSchema, collector)
 
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit

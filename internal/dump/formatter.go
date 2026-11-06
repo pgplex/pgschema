@@ -114,13 +114,16 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			dir = f.getObjectDirectory(step.Type.String())
 		}
 		key := fileKey{dir: dir, name: f.getGroupingName(step)}
-		if step.Type == diff.DiffTypeTableConstraint {
-			// Keep postponed constraints at their position in the diff sequence.
-			// Bundling them with CREATE TABLE can put an FK before its target.
-			// A sequence number also avoids collisions between constraint names
-			// on different tables and names that sanitize to the same filename.
+		// Keep postponed constraints at their position in the diff sequence.
+		// Bundling them with CREATE TABLE can put an FK before its target.
+		// A sequence number also avoids collisions between constraint names
+		// on different tables and names that sanitize to the same filename.
+		constraintFile := func() fileKey {
 			constraintIndex++
-			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+			return fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+		}
+		if step.Type == diff.DiffTypeTableConstraint {
+			key = constraintFile()
 		}
 		if step.Type == diff.DiffTypeTableConstraintComment && i > 0 {
 			// A constraint comment must follow its constraint: it stays in the
@@ -132,8 +135,7 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			case prevStep.Type == diff.DiffTypeTableConstraint && prevStep.Path == step.Path:
 				key = prevKey
 			default:
-				constraintIndex++
-				key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+				key = constraintFile()
 			}
 		}
 

@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "98f87c83040ff26f086b912cf693e8d40544b8913883933b327e2f57bb5eba49"
+    "hash": "8460811b358eaa20a7d08978d16e8f71493630b4496de68f1e34597eb2d038c4"
   },
   "groups": [
     {
@@ -25,6 +25,12 @@
           "type": "table.constraint.comment",
           "operation": "create",
           "path": "public.invoices.invoices_id_check"
+        },
+        {
+          "sql": "ALTER TABLE events DROP CONSTRAINT events_region_fk;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.events.events_region_fk"
         },
         {
           "sql": "COMMENT ON CONSTRAINT customers_email_key ON customers IS NULL;",
@@ -57,10 +63,54 @@
           "path": "public.orders.orders_total_check"
         },
         {
+          "sql": "ALTER TABLE regions DROP CONSTRAINT regions_pkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.regions.regions_pkey"
+        },
+        {
+          "sql": "ALTER TABLE regions\nADD CONSTRAINT regions_id_key PRIMARY KEY (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.regions.regions_id_key"
+        },
+        {
+          "sql": "ALTER TABLE events\nADD CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_region_fk"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE events VALIDATE CONSTRAINT events_region_fk;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_region_fk"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.events.events_region_fk"
+        },
+        {
           "sql": "COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';",
           "type": "table.constraint.comment",
           "operation": "alter",
           "path": "public.events_leaf.events_leaf_pkey"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.events_leaf.events_region_fk"
         }
       ]
     }

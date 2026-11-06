@@ -26,8 +26,21 @@ CREATE TABLE invoices (
 COMMENT ON CONSTRAINT invoices_pkey ON invoices IS 'invoice identifier';
 COMMENT ON CONSTRAINT invoices_id_check ON invoices IS 'positive identifiers only';
 
-CREATE TABLE events (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+CREATE TABLE regions (
+    id integer,
+    CONSTRAINT regions_id_key PRIMARY KEY (id)
+);
+
+CREATE TABLE events (
+    id integer PRIMARY KEY,
+    region_id integer,
+    CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id)
+) PARTITION BY RANGE (id);
 CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
 
 COMMENT ON CONSTRAINT events_pkey ON events IS 'parent key';
+-- Renaming regions_pkey drops and re-adds events_region_fk, recreating the
+-- partition's copy without its comment; the plan must restore both.
+COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key';
+COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';
 COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';
