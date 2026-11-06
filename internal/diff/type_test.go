@@ -158,6 +158,15 @@ func TestHoldBackFunctionsOfDroppedTypes(t *testing.T) {
 		t.Fatalf("expected the referenced functions to wait in order, got %v", after)
 	}
 
+	// The subtype keeps the format_type spelling while parameter types are
+	// normalized to the short one; they must still match.
+	tsParam := &ir.Parameter{Mode: "IN", DataType: "timestamp"}
+	tsDiff := &ir.Function{Schema: "public", Name: "ts_diff", Parameters: []*ir.Parameter{tsParam, tsParam}}
+	tsRange := &ir.Type{Schema: "public", Name: "stamp_span", Kind: ir.TypeKindRange, Subtype: "timestamp without time zone", SubtypeDiff: "ts_diff"}
+	if now, _ := holdBackFunctionsOfDroppedTypes([]*ir.Function{tsDiff}, []*ir.Type{tsRange}); len(now) != 0 {
+		t.Fatalf("timestamp subtype must match the normalized parameter type")
+	}
+
 	// Same name, different signature: an overload taking the range is not
 	// its subtype_diff and is not held.
 	overload := &ir.Function{Schema: "public", Name: "time_diff", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "timerange"}}}
@@ -213,6 +222,23 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 	want := []string{"busy", "positive_span", "positive_diff", "positive", "is_positive"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("got %v, want %v", names, want)
+	}
+
+	// A held function whose body names a type drops before that type even
+	// though no type references it through a signature.
+	status := &ir.Type{Schema: "public", Name: "z_status", Kind: ir.TypeKindEnum}
+	bodyFn := &ir.Function{Schema: "public", Name: "span_diff", Definition: "SELECT 'on'::z_status", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
+	intSpan := &ir.Type{Schema: "public", Name: "span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "span_diff", MultirangeTypeName: "span_multirange"}
+	names = nil
+	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{status, intSpan}, []*ir.Function{bodyFn}) {
+		if node.function != nil {
+			names = append(names, node.function.Name)
+		} else {
+			names = append(names, node.typeObj.Name)
+		}
+	}
+	if strings.Join(names, ",") != "span,span_diff,z_status" {
+		t.Fatalf("got %v", names)
 	}
 
 	// No held functions: plain reverse dependency order of the types.

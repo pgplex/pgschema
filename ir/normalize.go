@@ -1859,3 +1859,12 @@ func stripInheritedIdentity(schema *Schema) {
 		}
 	}
 }
+
+// NormalizeTypeName maps a type name to the canonical spelling that function
+// parameter and return types use after normalization (timestamp without time
+// zone -> timestamp, character varying -> varchar, ...), so a reference that
+// must match a function signature by argument types can be built from a
+// format_type rendering such as a range's subtype.
+func NormalizeTypeName(typeName string) string {
+	return normalizePostgreSQLType(typeName)
+}

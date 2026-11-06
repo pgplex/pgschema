@@ -3980,6 +3980,43 @@ func holdBackFunctionsOfDroppedTypes(functions []*ir.Function, types []*ir.Type)
 	return now, afterTypes
 }
 
+// functionTextReferencesType reports whether a function's body or a parameter
+// default names the type (or a range's multirange). PostgreSQL records such
+// a dependency for SQL-standard bodies and defaults, so the function must be
+// dropped before the type; matching every body over-orders a PL/pgSQL
+// function at worst, which is harmless.
+func functionTextReferencesType(fn *ir.Function, t *ir.Type) bool {
+	var texts []string
+	if fn.Definition != "" {
+		texts = append(texts, fn.Definition)
+	}
+	for _, p := range fn.Parameters {
+		if p.DefaultValue != nil && *p.DefaultValue != "" {
+			texts = append(texts, *p.DefaultValue)
+		}
+	}
+	if len(texts) == 0 {
+		return false
+	}
+	names := [][]string{{t.Name}, {t.Schema, t.Name}}
+	if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+		multirange := unquoteIdent(t.MultirangeTypeName)
+		if idx := findLastUnquotedDot(t.MultirangeTypeName); idx != -1 {
+			names = append(names, []string{unquoteIdent(t.MultirangeTypeName[:idx]), unquoteIdent(t.MultirangeTypeName[idx+1:])})
+		} else {
+			names = append(names, []string{multirange}, []string{t.Schema, multirange})
+		}
+	}
+	for _, text := range texts {
+		for _, parts := range names {
+			if identifierRegexp(relationMatch, parts...).MatchString(text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // droppedTypeOrFunction is one node of the joint drop order below.
 type droppedTypeOrFunction struct {
 	typeObj  *ir.Type
@@ -4040,7 +4077,7 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 					names[strings.ToLower(t.Schema)+"."+multirange] = struct{}{}
 				}
 			}
-			if functionSignatureReferencesRelation(f, names) {
+			if functionSignatureReferencesRelation(f, names) || functionTextReferencesType(f, t) {
 				addEdge(fnKey(f), "t\x00"+key)
 			}
 		}
@@ -4105,7 +4142,11 @@ func typeReferencesNewFunction(typeObj *ir.Type, newFunctions map[string]struct{
 		}
 		// Match the signature, not just the name: an overload of the same
 		// name that takes the range itself depends on the range instead.
-		subtype := stripSchemaPrefixMode(typeObj.Subtype, typeObj.Schema, false)
+		// The subtype is a format_type rendering; parameter types are
+		// normalized (timestamp without time zone -> timestamp), so apply
+		// the same normalization after stripping the schema as the
+		// inspector does for parameters.
+		subtype := ir.NormalizeTypeName(stripSchemaPrefixMode(typeObj.Subtype, typeObj.Schema, false))
 		identity := "(" + subtype + ", " + subtype + ")"
 		name := normalizeFunctionIdentifier(typeObj.SubtypeDiff)
 		if name == "" {

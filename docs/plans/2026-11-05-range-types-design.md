@@ -168,6 +168,14 @@ CREATE TYPE rprobe.timerange AS RANGE (
 >   (with parameter names) while the Functions map is keyed by types, so
 >   named-parameter functions never had dependencies. It now uses
 >   `oidvectortypes`.
+> - `subtype_diff` is matched by signature (`name(subtype, subtype)`), with
+>   the subtype normalized the way parameter types are (`timestamp without
+>   time zone` -> `timestamp`), so an overload taking the range itself is a
+>   dependent of the range, not its support function
+>   (`drop_range_subtype_diff_overload`, `add_range_subtype_diff_timestamp`).
+> - In the joint drop order a held function also precedes a type its body or
+>   a parameter default names, since PostgreSQL records that dependency for
+>   SQL-standard bodies and defaults (`drop_range_subtype_diff_body_type`).
 > - `makeMultirangeTypeName` clips the range name to NAMEDATALEN-12 bytes
 >   before appending `_multirange`; the port does the same.
 > - Grants on a replaced range are lost, like grants on a recreated function
