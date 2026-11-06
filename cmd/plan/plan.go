@@ -681,6 +681,9 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			for i := range fn.Dependencies {
 				fn.Dependencies[i] = replaceString(fn.Dependencies[i])
 			}
+			for i := range fn.TypeDependencies {
+				fn.TypeDependencies[i] = replaceString(fn.TypeDependencies[i])
+			}
 		}
 
 		// Procedures

@@ -231,6 +231,7 @@ type Function struct {
 	Parallel          string       `json:"parallel,omitempty"`            // SAFE, UNSAFE, RESTRICTED
 	SetConfig         []string     `json:"set_config,omitempty"`          // SET clauses from pg_proc.proconfig (e.g., "search_path=public", "TimeZone=UTC")
 	Dependencies      []string     `json:"dependencies,omitempty"`        // Function keys (name(args)) this function depends on
+	TypeDependencies  []string     `json:"-"`                             // schema.name of the types this function depends on per pg_depend (signature, SQL-standard body, defaults); ordering data, kept out of the fingerprint
 }
 
 // GetArguments returns the function arguments string (types only) for function identification.

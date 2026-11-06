@@ -225,10 +225,11 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 		t.Fatalf("got %v, want %v", names, want)
 	}
 
-	// A held function whose body names a type drops before that type even
-	// though no type references it through a signature.
+	// A held function that the catalog records as depending on a type (a
+	// SQL-standard body cast) drops before that type even though no type
+	// references it through a signature.
 	status := &ir.Type{Schema: "public", Name: "z_status", Kind: ir.TypeKindEnum}
-	bodyFn := &ir.Function{Schema: "public", Name: "span_diff", Definition: "SELECT 'on'::z_status", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
+	bodyFn := &ir.Function{Schema: "public", Name: "span_diff", TypeDependencies: []string{"public.z_status"}, Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
 	intSpan := &ir.Type{Schema: "public", Name: "span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "span_diff", MultirangeTypeName: "span_multirange"}
 	names = nil
 	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{status, intSpan}, []*ir.Function{bodyFn}) {
@@ -242,20 +243,23 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 		t.Fatalf("got %v", names)
 	}
 
-	// A body mention that contradicts a certain edge is ignored: the
-	// subtype_diff body names the range (as a parameter here), which must
-	// not reverse the range-before-function order the catalog guarantees.
-	selfFn := &ir.Function{Schema: "public", Name: "span_diff", Definition: "SELECT span + 1", Parameters: []*ir.Parameter{{Mode: "IN", Name: "span", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
+	// Two ranges whose difference functions cross-reference: a_diff's body
+	// only mentions z_span in a literal (no recorded dependency), z_diff's
+	// body casts to a_span (recorded). z_diff must drop before a_span.
+	aDiff := &ir.Function{Schema: "public", Name: "a_diff", Definition: "SELECT 'z_span'", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
+	zDiff := &ir.Function{Schema: "public", Name: "z_diff", TypeDependencies: []string{"public.a_span"}, Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
+	aSpan := &ir.Type{Schema: "public", Name: "a_span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "a_diff", MultirangeTypeName: "a_span_multirange"}
+	zSpan := &ir.Type{Schema: "public", Name: "z_span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "z_diff", MultirangeTypeName: "z_span_multirange"}
 	names = nil
-	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{status, intSpan}, []*ir.Function{selfFn}) {
+	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{aSpan, zSpan}, []*ir.Function{aDiff, zDiff}) {
 		if node.function != nil {
 			names = append(names, node.function.Name)
 		} else {
 			names = append(names, node.typeObj.Name)
 		}
 	}
-	if slices.Index(names, "span") > slices.Index(names, "span_diff") {
-		t.Fatalf("textual hint must not reverse the certain order, got %v", names)
+	if slices.Index(names, "z_diff") > slices.Index(names, "a_span") || slices.Index(names, "a_span") > slices.Index(names, "a_diff") || slices.Index(names, "z_span") > slices.Index(names, "z_diff") {
+		t.Fatalf("got %v", names)
 	}
 
 	// No held functions: plain reverse dependency order of the types.

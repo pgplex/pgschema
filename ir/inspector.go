@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1331,6 +1332,24 @@ func (i *Inspector) buildFunctionDependencies(ctx context.Context, schema *IR, t
 	for funcKey, fn := range dbSchema.Functions {
 		if deps, ok := depMap[funcKey]; ok {
 			fn.Dependencies = deps
+		}
+	}
+
+	// Types the functions depend on (signature, SQL-standard body, parameter
+	// defaults), keyed the same way; used to order drops.
+	typeDeps, err := i.queries.GetFunctionTypeDependencies(ctx, sql.NullString{String: targetSchema, Valid: true})
+	if err != nil {
+		return err
+	}
+	typeDepMap := make(map[string][]string)
+	for _, dep := range typeDeps {
+		key := dep.FunctionName + "(" + argKey(dep.FunctionArgs, dep.FunctionSchema) + ")"
+		typeDepMap[key] = append(typeDepMap[key], dep.TypeSchema+"."+dep.TypeName)
+	}
+	for funcKey, fn := range dbSchema.Functions {
+		if deps, ok := typeDepMap[funcKey]; ok {
+			sort.Strings(deps)
+			fn.TypeDependencies = slices.Compact(deps)
 		}
 	}
 

@@ -2643,6 +2643,29 @@ FROM exploded e
 LEFT JOIN pg_roles r ON r.oid = e.grantee
 ORDER BY e.table_name, e.column_name, e.grantee, e.privilege_type;
 
+-- GetFunctionTypeDependencies retrieves the types a function depends on as
+-- PostgreSQL records them: parameter and return types, and the types a
+-- SQL-standard body or a parameter default names. An array type is reported
+-- as its element type. The argument list is types only, as in
+-- GetFunctionDependencies, so the keys match the Functions map.
+-- name: GetFunctionTypeDependencies :many
+SELECT
+    fn.nspname AS function_schema,
+    p.proname AS function_name,
+    oidvectortypes(p.proargtypes) AS function_args,
+    tn.nspname AS type_schema,
+    t.typname AS type_name
+FROM pg_depend d
+JOIN pg_proc p ON d.objid = p.oid
+JOIN pg_namespace fn ON p.pronamespace = fn.oid
+JOIN pg_type ref ON d.refobjid = ref.oid
+JOIN pg_type t ON t.oid = CASE WHEN ref.typcategory = 'A' AND ref.typelem <> 0 THEN ref.typelem ELSE ref.oid END
+JOIN pg_namespace tn ON t.typnamespace = tn.oid
+WHERE d.classid = 'pg_proc'::regclass
+  AND d.refclassid = 'pg_type'::regclass
+  AND d.deptype = 'n'
+  AND fn.nspname = $1;
+
 -- GetFunctionDependencies retrieves function-to-function dependencies for topological sorting.
 -- The argument lists are input types only (no names, modes or defaults), as
 -- Function.GetArguments renders them, so the keys match the Functions map.

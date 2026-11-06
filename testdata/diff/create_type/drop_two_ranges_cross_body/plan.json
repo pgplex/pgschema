@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "d21bda9956533235df1018624a3bb0ff37285ca7cd90d3ba5b5d193ea754600f"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP TYPE IF EXISTS z_span RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.z_span"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS z_diff(integer, integer);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.z_diff"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS a_span RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.a_span"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS a_diff(integer, integer);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.a_diff"
+        }
+      ]
+    }
+  ]
+}

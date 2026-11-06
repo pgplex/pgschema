@@ -1940,6 +1940,67 @@ func (q *Queries) GetFunctionDependencies(ctx context.Context, dollar_1 sql.Null
 	return items, nil
 }
 
+const getFunctionTypeDependencies = `-- name: GetFunctionTypeDependencies :many
+SELECT
+    fn.nspname AS function_schema,
+    p.proname AS function_name,
+    oidvectortypes(p.proargtypes) AS function_args,
+    tn.nspname AS type_schema,
+    t.typname AS type_name
+FROM pg_depend d
+JOIN pg_proc p ON d.objid = p.oid
+JOIN pg_namespace fn ON p.pronamespace = fn.oid
+JOIN pg_type ref ON d.refobjid = ref.oid
+JOIN pg_type t ON t.oid = CASE WHEN ref.typcategory = 'A' AND ref.typelem <> 0 THEN ref.typelem ELSE ref.oid END
+JOIN pg_namespace tn ON t.typnamespace = tn.oid
+WHERE d.classid = 'pg_proc'::regclass
+  AND d.refclassid = 'pg_type'::regclass
+  AND d.deptype = 'n'
+  AND fn.nspname = $1
+`
+
+type GetFunctionTypeDependenciesRow struct {
+	FunctionSchema string         `db:"function_schema" json:"function_schema"`
+	FunctionName   string         `db:"function_name" json:"function_name"`
+	FunctionArgs   sql.NullString `db:"function_args" json:"function_args"`
+	TypeSchema     string         `db:"type_schema" json:"type_schema"`
+	TypeName       string         `db:"type_name" json:"type_name"`
+}
+
+// GetFunctionTypeDependencies retrieves the types a function depends on as
+// PostgreSQL records them: parameter and return types, and the types a
+// SQL-standard body or a parameter default names. An array type is reported
+// as its element type. The argument list is types only, as in
+// GetFunctionDependencies, so the keys match the Functions map.
+func (q *Queries) GetFunctionTypeDependencies(ctx context.Context, dollar_1 sql.NullString) ([]GetFunctionTypeDependenciesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getFunctionTypeDependencies, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetFunctionTypeDependenciesRow
+	for rows.Next() {
+		var i GetFunctionTypeDependenciesRow
+		if err := rows.Scan(
+			&i.FunctionSchema,
+			&i.FunctionName,
+			&i.FunctionArgs,
+			&i.TypeSchema,
+			&i.TypeName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFunctions = `-- name: GetFunctions :many
 SELECT
     r.routine_schema,

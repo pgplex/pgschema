@@ -3980,38 +3980,25 @@ func holdBackFunctionsOfDroppedTypes(functions []*ir.Function, types []*ir.Type)
 	return now, afterTypes
 }
 
-// functionTextReferencesType reports whether a function's body or a parameter
-// default names the type (or a range's multirange). PostgreSQL records such
-// a dependency for SQL-standard bodies and defaults, so the function must be
-// dropped before the type; matching every body over-orders a PL/pgSQL
-// function at worst, which is harmless.
-func functionTextReferencesType(fn *ir.Function, t *ir.Type) bool {
-	var texts []string
-	if fn.Definition != "" {
-		texts = append(texts, fn.Definition)
-	}
-	for _, p := range fn.Parameters {
-		if p.DefaultValue != nil && *p.DefaultValue != "" {
-			texts = append(texts, *p.DefaultValue)
-		}
-	}
-	if len(texts) == 0 {
+// functionDependsOnType reports whether PostgreSQL records fn as depending on
+// the type, or on a range's multirange: a parameter or return type, a type a
+// SQL-standard body casts to or a parameter default names (pg_depend, loaded
+// into Function.TypeDependencies as schema.name).
+func functionDependsOnType(fn *ir.Function, t *ir.Type) bool {
+	if len(fn.TypeDependencies) == 0 {
 		return false
 	}
-	names := [][]string{{t.Name}, {t.Schema, t.Name}}
+	keys := map[string]bool{t.Schema + "." + t.Name: true}
 	if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
-		multirange := unquoteIdent(t.MultirangeTypeName)
 		if idx := findLastUnquotedDot(t.MultirangeTypeName); idx != -1 {
-			names = append(names, []string{unquoteIdent(t.MultirangeTypeName[:idx]), unquoteIdent(t.MultirangeTypeName[idx+1:])})
+			keys[unquoteIdent(t.MultirangeTypeName[:idx])+"."+unquoteIdent(t.MultirangeTypeName[idx+1:])] = true
 		} else {
-			names = append(names, []string{multirange}, []string{t.Schema, multirange})
+			keys[t.Schema+"."+unquoteIdent(t.MultirangeTypeName)] = true
 		}
 	}
-	for _, text := range texts {
-		for _, parts := range names {
-			if identifierRegexp(relationMatch, parts...).MatchString(text) {
-				return true
-			}
+	for _, dep := range fn.TypeDependencies {
+		if keys[dep] {
+			return true
 		}
 	}
 	return false
@@ -4053,36 +4040,14 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 		after[first] = append(after[first], second)
 		inDegree[second]++
 	}
-	// reaches reports whether to can be reached from from through the edges
-	// added so far.
-	reaches := func(from, to string) bool {
-		seen := map[string]bool{from: true}
-		stack := []string{from}
-		for len(stack) > 0 {
-			current := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			for _, next := range after[current] {
-				if next == to {
-					return true
-				}
-				if !seen[next] {
-					seen[next] = true
-					stack = append(stack, next)
-				}
-			}
-		}
-		return false
-	}
-
-	// Certain edges first: type structure, a type naming a function, a
-	// function's signature, recorded function dependencies.
+	// Every edge is a catalog fact: type structure, a type naming a
+	// function, a function's signature or recorded type dependencies, and
+	// recorded function-to-function dependencies.
 	for dep, dependents := range typeEdges {
 		for _, dependent := range dependents {
 			addEdge("t\x00"+dependent, "t\x00"+dep)
 		}
 	}
-	type edge struct{ first, second string }
-	var textual []edge
 	for _, f := range functions {
 		lookup := buildFunctionLookup([]*ir.Function{f})
 		names := make(map[string]struct{})
@@ -4102,28 +4067,14 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 					names[strings.ToLower(t.Schema)+"."+multirange] = struct{}{}
 				}
 			}
-			if functionSignatureReferencesRelation(f, names) {
+			if functionSignatureReferencesRelation(f, names) || functionDependsOnType(f, t) {
 				addEdge(fnKey(f), "t\x00"+key)
-			} else if functionTextReferencesType(f, t) {
-				textual = append(textual, edge{fnKey(f), "t\x00" + key})
 			}
 		}
 		for _, callee := range functions {
 			if slices.Contains(f.Dependencies, callee.Schema+"."+callee.Name+"("+callee.GetArguments()+")") {
 				addEdge(fnKey(f), fnKey(callee))
 			}
-		}
-	}
-	// A body or default naming a type is a hint, not a catalog fact: the
-	// name may be a parameter or a column. Such an edge is added only when
-	// it does not contradict the certain ones, so it can over-order a drop
-	// (harmless) but never reverse one.
-	sort.Slice(textual, func(i, j int) bool {
-		return textual[i].first+textual[i].second < textual[j].first+textual[j].second
-	})
-	for _, e := range textual {
-		if !reaches(e.second, e.first) {
-			addEdge(e.first, e.second)
 		}
 	}
 
