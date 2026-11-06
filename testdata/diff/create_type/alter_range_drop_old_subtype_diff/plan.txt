@@ -1,0 +1,23 @@
+Plan: 1 to add, 2 to drop.
+
+Summary by type:
+  types: 1 to add, 1 to drop
+  functions: 1 to drop
+
+Types:
+  - span
+  + span
+
+Functions:
+  - int_diff
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP TYPE IF EXISTS span RESTRICT;
+
+DROP FUNCTION IF EXISTS int_diff(integer, integer);
+
+CREATE TYPE span AS RANGE (
+    subtype = bigint
+);

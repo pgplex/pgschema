@@ -11,15 +11,17 @@ import (
 
 // generateCreateTypesSQL generates CREATE TYPE statements. A type listed in
 // replaced (by graph key) is an existing one whose definition changed and has
-// no ALTER: it is dropped and recreated in its slot, as one plan step.
+// no ALTER: the drop phase dropped the old definition, and the new one is
+// created here in the slot a new type of that definition gets. The step's
+// source is the typeDiff, so the plan ties the drop and the create together.
 func generateCreateTypesSQL(types []*ir.Type, replaced map[string]*typeDiff, targetSchema string, collector *diffCollector) {
 	// Sort types topologically to handle dependencies (e.g., composite types referencing enum types)
 	sortedTypes := topologicallySortTypes(types)
 
 	for _, typeObj := range sortedTypes {
+		var source DiffSource = typeObj
 		if diff, ok := replaced[typeGraphKey(typeObj.Schema, typeObj.Name)]; ok {
-			generateReplaceTypeSQL(diff, targetSchema, collector)
-			continue
+			source = diff
 		}
 		sql := generateTypeSQL(typeObj, targetSchema, collector.qualifySchema)
 
@@ -37,7 +39,7 @@ func generateCreateTypesSQL(types []*ir.Type, replaced map[string]*typeDiff, tar
 			Type:                diffType,
 			Operation:           DiffOperationCreate,
 			Path:                fmt.Sprintf("%s.%s", typeObj.Schema, typeObj.Name),
-			Source:              typeObj,
+			Source:              source,
 			CanRunInTransaction: true,
 		}
 
@@ -97,33 +99,37 @@ func generateDropTypesSQL(types []*ir.Type, targetSchema string, collector *diff
 	sortedTypes = reverseSlice(topologicallySortTypes(sortedTypes))
 
 	for _, typeObj := range sortedTypes {
-		typeName := qualifyEntityName(typeObj.Schema, typeObj.Name, targetSchema)
-
-		var sql string
-		if typeObj.Kind == ir.TypeKindDomain {
-			sql = fmt.Sprintf("DROP DOMAIN IF EXISTS %s RESTRICT;", typeName)
-		} else {
-			sql = fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName)
-		}
-
-		// Create context for this statement
-		var diffType DiffType
-		if typeObj.Kind == ir.TypeKindDomain {
-			diffType = DiffTypeDomain
-		} else {
-			diffType = DiffTypeType
-		}
-
-		context := &diffContext{
-			Type:                diffType,
-			Operation:           DiffOperationDrop,
-			Path:                fmt.Sprintf("%s.%s", typeObj.Schema, typeObj.Name),
-			Source:              typeObj,
-			CanRunInTransaction: true,
-		}
-
-		collector.collect(context, sql)
+		generateDropTypeSQL(typeObj, typeObj, targetSchema, collector)
 	}
+}
+
+// generateDropTypeSQL emits the DROP for one type. source is the plan step's
+// source: the type itself, or the typeDiff when the drop is the first half of
+// a replacement.
+func generateDropTypeSQL(typeObj *ir.Type, source DiffSource, targetSchema string, collector *diffCollector) {
+	typeName := qualifyEntityName(typeObj.Schema, typeObj.Name, targetSchema)
+
+	var sql string
+	if typeObj.Kind == ir.TypeKindDomain {
+		sql = fmt.Sprintf("DROP DOMAIN IF EXISTS %s RESTRICT;", typeName)
+	} else {
+		sql = fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName)
+	}
+
+	var diffType DiffType
+	if typeObj.Kind == ir.TypeKindDomain {
+		diffType = DiffTypeDomain
+	} else {
+		diffType = DiffTypeType
+	}
+
+	collector.collect(&diffContext{
+		Type:                diffType,
+		Operation:           DiffOperationDrop,
+		Path:                fmt.Sprintf("%s.%s", typeObj.Schema, typeObj.Name),
+		Source:              source,
+		CanRunInTransaction: true,
+	}, sql)
 }
 
 // generateAlterTypeEnumStatements generates ALTER TYPE ADD VALUE statements for enum changes
@@ -315,11 +321,14 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 			(findLastUnquotedDot(multirange) != -1 || unquoteIdent(multirange) != defaultMultirangeTypeName(typeObj.Name)) {
 			lines = append(lines, fmt.Sprintf("    multirange_type_name = %s", multirange))
 		}
+		// An operator class or collation defined in the target schema loses
+		// its prefix like a column collation does, so the dump applies to
+		// another schema; pg_catalog and cross-schema references stay.
 		if typeObj.SubtypeOpclass != "" {
-			lines = append(lines, fmt.Sprintf("    subtype_opclass = %s", typeObj.SubtypeOpclass))
+			lines = append(lines, fmt.Sprintf("    subtype_opclass = %s", stripSchemaPrefixMode(typeObj.SubtypeOpclass, targetSchema, qualifySchema)))
 		}
 		if typeObj.Collation != "" {
-			lines = append(lines, fmt.Sprintf("    collation = %s", typeObj.Collation))
+			lines = append(lines, fmt.Sprintf("    collation = %s", stripSchemaPrefixMode(typeObj.Collation, targetSchema, qualifySchema)))
 		}
 		if typeObj.Canonical != "" {
 			lines = append(lines, fmt.Sprintf("    canonical = %s", typeObj.Canonical))
@@ -361,8 +370,16 @@ func defaultMultirangeTypeName(rangeName string) string {
 }
 
 // replacedTypes returns the modified types whose definition has no ALTER
-// (today: ranges), keyed by graph key, so the create phase can drop and
-// recreate each one in the slot a new type of that definition would get.
+// (today: ranges), keyed by graph key. PostgreSQL offers no ALTER TYPE for a
+// range's definition, so a changed subtype, opclass, collation, function or
+// multirange name means replacement: the drop phase drops the old definition
+// in dependency order with the other dropped types and functions (so it
+// precedes an old subtype_diff or subtype that goes away too), and the create
+// phase creates the new one in the slot a new type of that definition gets
+// (after a new function or type it needs, before the tables that use it).
+// The DROP uses RESTRICT: when a retained column still uses the type,
+// PostgreSQL's own dependency error is the honest outcome, and the user
+// changes or drops that column in the same file to proceed.
 func replacedTypes(diffs []*typeDiff) map[string]*typeDiff {
 	replaced := make(map[string]*typeDiff)
 	for _, diff := range diffs {
@@ -371,26 +388,6 @@ func replacedTypes(diffs []*typeDiff) map[string]*typeDiff {
 		}
 	}
 	return replaced
-}
-
-// generateReplaceTypeSQL drops and recreates a modified type as one plan step.
-// PostgreSQL offers no ALTER TYPE for a range's definition, so a changed
-// subtype, opclass, collation, function or multirange name means replacement.
-// The DROP uses RESTRICT: when a column still uses the type, PostgreSQL's own
-// dependency error is the honest outcome, and the user changes or drops that
-// column in the same file to proceed.
-func generateReplaceTypeSQL(diff *typeDiff, targetSchema string, collector *diffCollector) {
-	typeName := qualifyEntityName(diff.New.Schema, diff.New.Name, targetSchema)
-	context := &diffContext{
-		Type:      DiffTypeType,
-		Operation: DiffOperationAlter,
-		Path:      fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
-		Source:    diff,
-	}
-	collector.collectStatements(context, []SQLStatement{
-		{SQL: fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName), CanRunInTransaction: true},
-		{SQL: generateTypeSQL(diff.New, targetSchema, collector.qualifySchema), CanRunInTransaction: true},
-	})
 }
 
 // typesEqual compares two types for equality

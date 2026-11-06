@@ -144,20 +144,26 @@ CREATE TYPE rprobe.timerange AS RANGE (
 > (`drop_range_with_subtype_diff`).
 >
 > Review of PR #684 moved a few things from the text below:
-> - A modified range is not replaced in the enum-ADD VALUE slot. The drop
->   phase comes first in a plan, so the replacement (still one DROP + CREATE
->   step) is scheduled in the create phase through the same buckets a new
->   range uses: after the tables that used the old definition are dropped,
->   and after a new `subtype_diff` function or subtype it needs
->   (`alter_range_with_dropped_table`, `alter_range_add_subtype_diff`).
+> - A modified range is not replaced in the enum-ADD VALUE slot, and not as
+>   one step. The old definition is dropped in the drop phase, ordered with
+>   the other dropped types and functions (so it precedes an old
+>   `subtype_diff` or subtype that goes away too), and the new one is created
+>   in the create phase through the same buckets a new range uses (after a
+>   new function or type it needs, before the tables that use it). The plan
+>   reports it as one drop and one add of the same type, which is what runs
+>   (`alter_range_with_dropped_table`, `alter_range_add_subtype_diff`,
+>   `alter_range_drop_old_subtype_diff`). A range column removed from a
+>   retained table is still dropped in the modify phase, after the DROP
+>   TYPE, so that combination fails with PostgreSQL's dependency error.
 > - Deferral propagates: a composite with a range attribute, a domain over
 >   its multirange, a table with an array column of either, and a function
 >   whose signature uses the range all wait for a deferred range
 >   (`add_range_subtype_diff`).
-> - Types are dropped in reverse dependency order, and a held-back
->   `subtype_diff` function is dropped between the types that reference it
->   and the types its signature uses, with the functions it calls held too
->   (`drop_range_subtype_diff_chain`). That last part exposed an inspector
+> - Dropped types and held-back functions are ordered together by
+>   dependency (`orderTypeAndFunctionDrops`): a type before the type it is
+>   built on, a type before the function it names, a function before the
+>   type its signature uses, a caller before its callee
+>   (`drop_range_subtype_diff_chain`, `drop_range_over_checked_domain`). That last part exposed an inspector
 >   bug: `GetFunctionDependencies` keyed functions by identity arguments
 >   (with parameter names) while the Functions map is keyed by types, so
 >   named-parameter functions never had dependencies. It now uses
@@ -166,6 +172,12 @@ CREATE TYPE rprobe.timerange AS RANGE (
 >   before appending `_multirange`; the port does the same.
 > - Grants on a replaced range are lost, like grants on a recreated function
 >   or view today (noted under #677); not addressed here.
+> - The create phase has no such joint ordering: a chain of function ->
+>   domain (CHECK) -> function (taking the domain) -> range (subtype_diff)
+>   puts the range in the same bucket as the domain, before the second
+>   function. Domains already have this limit (a CHECK function taking
+>   another function-checked domain); it needs interleaved scheduling of
+>   types and functions, which is its own change.
 
 
 ### IR

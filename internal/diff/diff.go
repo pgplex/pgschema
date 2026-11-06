@@ -2637,7 +2637,16 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// range's subtype_diff, a domain's CHECK or default) cannot go until the
 	// type has, and the type cannot go until the tables using it have, so
 	// those functions wait for the end of the drop phase.
-	functionsToDrop, functionsAfterTypes := holdBackFunctionsOfDroppedTypes(d.droppedFunctions, d.droppedTypes)
+	// The old definition of a replaced type (a changed range) is dropped here
+	// as well; its new definition is created in the create phase.
+	replaced := replacedTypes(d.modifiedTypes)
+	droppedTypes := append([]*ir.Type{}, d.droppedTypes...)
+	replacedOld := make(map[*ir.Type]*typeDiff, len(replaced))
+	for _, diff := range replaced {
+		droppedTypes = append(droppedTypes, diff.Old)
+		replacedOld[diff.Old] = diff
+	}
+	functionsToDrop, functionsAfterTypes := holdBackFunctionsOfDroppedTypes(d.droppedFunctions, droppedTypes)
 	generateDropFunctionsSQL(functionsToDrop, targetSchema, collector)
 
 	// Drop procedures
@@ -2660,13 +2669,20 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Drop sequences
 	generateDropSequencesSQL(d.droppedSequences, targetSchema, collector)
 
-	// Drop types. Those that reference a held-back function, and the types
-	// built on them, go first; then those functions; then the rest, which may
-	// include a type the functions' signatures still need (a range's subtype).
-	typesBeforeFunctions, typesAfterFunctions := splitDroppedTypesAroundFunctions(d.droppedTypes, functionsAfterTypes)
-	generateDropTypesSQL(typesBeforeFunctions, targetSchema, collector)
-	generateDropFunctionsSQL(functionsAfterTypes, targetSchema, collector)
-	generateDropTypesSQL(typesAfterFunctions, targetSchema, collector)
+	// Drop types, interleaved with the held-back functions in dependency
+	// order: a range before its subtype_diff function, that function before
+	// the subtype its signature takes, a domain before its CHECK function.
+	for _, node := range orderTypeAndFunctionDrops(droppedTypes, functionsAfterTypes) {
+		if node.function != nil {
+			generateDropFunctionsSQL([]*ir.Function{node.function}, targetSchema, collector)
+			continue
+		}
+		var source DiffSource = node.typeObj
+		if diff, ok := replacedOld[node.typeObj]; ok {
+			source = diff
+		}
+		generateDropTypeSQL(node.typeObj, source, targetSchema, collector)
+	}
 
 	// Drop schemas
 	// Note: Schema deletion is out of scope for schema-level comparisons
@@ -3099,6 +3115,9 @@ func buildRoutineLookup(functions []*ir.Function, aggregates []*ir.Aggregate) ma
 	}
 	for _, fn := range functions {
 		add(fn.Schema, fn.Name)
+		// Identity keys, for references that name a signature rather than a
+		// call (a range's subtype_diff takes two arguments of the subtype).
+		add(fn.Schema, fn.Name+"("+fn.GetArguments()+")")
 	}
 	for _, agg := range aggregates {
 		add(agg.Schema, agg.Name)
@@ -3961,36 +3980,115 @@ func holdBackFunctionsOfDroppedTypes(functions []*ir.Function, types []*ir.Type)
 	return now, afterTypes
 }
 
-// splitDroppedTypesAroundFunctions puts the dropped types that reference one
-// of the held-back functions, and every type built on those, before the
-// functions; the rest go after, so a type a held function's signature uses
-// (the subtype of a range whose subtype_diff takes it) outlives the function.
-func splitDroppedTypesAroundFunctions(types []*ir.Type, heldFunctions []*ir.Function) (before, after []*ir.Type) {
-	if len(heldFunctions) == 0 {
-		return nil, types
-	}
-	lookup := buildFunctionLookup(heldFunctions)
-	var seeds []*ir.Type
-	for _, typeObj := range types {
-		if typeReferencesNewFunction(typeObj, lookup) {
-			seeds = append(seeds, typeObj)
-		}
-	}
-	first := make(map[*ir.Type]bool, len(seeds))
-	for _, t := range seeds {
-		first[t] = true
-	}
-	for _, t := range dependentTypes(types, seeds) {
-		first[t] = true
-	}
+// droppedTypeOrFunction is one node of the joint drop order below.
+type droppedTypeOrFunction struct {
+	typeObj  *ir.Type
+	function *ir.Function
+}
+
+// orderTypeAndFunctionDrops interleaves the dropped types and the held-back
+// functions so that every object goes before what it depends on: a type
+// before the type it is built on, a type before the function it names (a
+// range's subtype_diff, a domain's CHECK), a function before the type its
+// signature uses (that subtype_diff takes the subtype), and a caller before
+// its callee. Ties break with types first, then by name, so the output stays
+// deterministic.
+func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []droppedTypeOrFunction {
+	typeMap, _, typeEdges := buildTypeGraph(types)
+	typeKey := func(t *ir.Type) string { return "t\x00" + typeGraphKey(t.Schema, t.Name) }
+	fnKey := func(f *ir.Function) string { return "f\x00" + f.Schema + "." + f.Name + "(" + f.GetArguments() + ")" }
+
+	nodes := make(map[string]droppedTypeOrFunction, len(types)+len(functions))
 	for _, t := range types {
-		if first[t] {
-			before = append(before, t)
-		} else {
-			after = append(after, t)
+		nodes[typeKey(t)] = droppedTypeOrFunction{typeObj: t}
+	}
+	for _, f := range functions {
+		nodes[fnKey(f)] = droppedTypeOrFunction{function: f}
+	}
+
+	// after[a] lists the nodes that must be dropped after a.
+	after := make(map[string][]string, len(nodes))
+	inDegree := make(map[string]int, len(nodes))
+	addEdge := func(first, second string) {
+		if first == second {
+			return
+		}
+		after[first] = append(after[first], second)
+		inDegree[second]++
+	}
+	for dep, dependents := range typeEdges {
+		for _, dependent := range dependents {
+			addEdge("t\x00"+dependent, "t\x00"+dep)
 		}
 	}
-	return before, after
+	for _, f := range functions {
+		lookup := buildFunctionLookup([]*ir.Function{f})
+		names := make(map[string]struct{})
+		for _, t := range types {
+			if typeReferencesNewFunction(t, lookup) {
+				addEdge(typeKey(t), fnKey(f))
+			}
+		}
+		for key, t := range typeMap {
+			clear(names)
+			names[strings.ToLower(t.Name)] = struct{}{}
+			names[strings.ToLower(t.Schema)+"."+strings.ToLower(t.Name)] = struct{}{}
+			if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+				multirange := strings.ToLower(unquoteIdent(t.MultirangeTypeName))
+				names[multirange] = struct{}{}
+				if !strings.Contains(multirange, ".") {
+					names[strings.ToLower(t.Schema)+"."+multirange] = struct{}{}
+				}
+			}
+			if functionSignatureReferencesRelation(f, names) {
+				addEdge(fnKey(f), "t\x00"+key)
+			}
+		}
+		for _, callee := range functions {
+			if slices.Contains(f.Dependencies, callee.Schema+"."+callee.Name+"("+callee.GetArguments()+")") {
+				addEdge(fnKey(f), fnKey(callee))
+			}
+		}
+	}
+
+	var ready []string
+	for key := range nodes {
+		if inDegree[key] == 0 {
+			ready = append(ready, key)
+		}
+	}
+	sort.Strings(ready) // "f\x00" sorts before "t\x00"; reversed below so types lead
+	var result []droppedTypeOrFunction
+	done := make(map[string]bool, len(nodes))
+	for len(result) < len(nodes) {
+		if len(ready) == 0 {
+			// A cycle cannot occur in PostgreSQL's catalog; keep going
+			// deterministically rather than drop nodes on the floor.
+			var pending []string
+			for key := range nodes {
+				if !done[key] {
+					pending = append(pending, key)
+				}
+			}
+			sort.Strings(pending)
+			ready = append(ready, pending[len(pending)-1])
+		}
+		current := ready[len(ready)-1]
+		ready = ready[:len(ready)-1]
+		if done[current] {
+			continue
+		}
+		done[current] = true
+		result = append(result, nodes[current])
+		for _, next := range after[current] {
+			inDegree[next]--
+			if inDegree[next] <= 0 && !done[next] {
+				ready = append(ready, next)
+				sort.Strings(ready)
+			}
+		}
+	}
+	return result
 }
 
 // typeReferencesNewFunction determines if a domain references any newly added
@@ -4002,7 +4100,26 @@ func typeReferencesNewFunction(typeObj *ir.Type, newFunctions map[string]struct{
 		return false
 	}
 	if typeObj.Kind == ir.TypeKindRange {
-		return functionNameInLookup(typeObj.SubtypeDiff, typeObj.Schema, newFunctions)
+		if typeObj.SubtypeDiff == "" {
+			return false
+		}
+		// Match the signature, not just the name: an overload of the same
+		// name that takes the range itself depends on the range instead.
+		subtype := stripSchemaPrefixMode(typeObj.Subtype, typeObj.Schema, false)
+		identity := "(" + subtype + ", " + subtype + ")"
+		name := normalizeFunctionIdentifier(typeObj.SubtypeDiff)
+		if name == "" {
+			return false
+		}
+		if _, ok := newFunctions[name+identity]; ok {
+			return true
+		}
+		if !strings.Contains(name, "\x00") && typeObj.Schema != "" {
+			if _, ok := newFunctions[functionGraphKey(typeObj.Schema, name+identity)]; ok {
+				return true
+			}
+		}
+		return false
 	}
 	if typeObj.Kind != ir.TypeKindDomain {
 		return false

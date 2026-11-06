@@ -1,17 +1,20 @@
-Plan: 1 to add, 1 to modify.
+Plan: 2 to add, 1 to drop.
 
 Summary by type:
-  types: 1 to modify
+  types: 1 to add, 1 to drop
   functions: 1 to add
 
 Types:
-  ~ span
+  - span
+  + span
 
 Functions:
   + int_diff
 
 DDL to be executed:
 --------------------------------------------------
+
+DROP TYPE IF EXISTS span RESTRICT;
 
 CREATE OR REPLACE FUNCTION int_diff(
     x integer,
@@ -23,8 +26,6 @@ IMMUTABLE
 STRICT
 AS $$SELECT (x - y)::double precision
 $$;
-
-DROP TYPE IF EXISTS span RESTRICT;
 
 CREATE TYPE span AS RANGE (
     subtype = integer,

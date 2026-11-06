@@ -1,0 +1,2 @@
+-- Everything goes: the overload taking the range first, then the range, then
+-- the real subtype_diff function.

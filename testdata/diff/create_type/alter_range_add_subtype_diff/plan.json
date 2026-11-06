@@ -9,21 +9,21 @@
     {
       "steps": [
         {
+          "sql": "DROP TYPE IF EXISTS span RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.span"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION int_diff(\n    x integer,\n    y integer\n)\nRETURNS double precision\nLANGUAGE sql\nIMMUTABLE\nSTRICT\nAS $$SELECT (x - y)::double precision\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.int_diff"
         },
         {
-          "sql": "DROP TYPE IF EXISTS span RESTRICT;",
-          "type": "type",
-          "operation": "alter",
-          "path": "public.span"
-        },
-        {
           "sql": "CREATE TYPE span AS RANGE (\n    subtype = integer,\n    subtype_diff = int_diff\n);",
           "type": "type",
-          "operation": "alter",
+          "operation": "create",
           "path": "public.span"
         }
       ]

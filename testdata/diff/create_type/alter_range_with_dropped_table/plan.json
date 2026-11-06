@@ -17,13 +17,13 @@
         {
           "sql": "DROP TYPE IF EXISTS span RESTRICT;",
           "type": "type",
-          "operation": "alter",
+          "operation": "drop",
           "path": "public.span"
         },
         {
           "sql": "CREATE TYPE span AS RANGE (\n    subtype = bigint\n);",
           "type": "type",
-          "operation": "alter",
+          "operation": "create",
           "path": "public.span"
         }
       ]

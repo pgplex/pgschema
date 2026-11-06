@@ -1,11 +1,12 @@
-Plan: 1 to modify, 1 to drop.
+Plan: 1 to add, 2 to drop.
 
 Summary by type:
-  types: 1 to modify
+  types: 1 to add, 1 to drop
   tables: 1 to drop
 
 Types:
-  ~ span
+  - span
+  + span
 
 Tables:
   - windows

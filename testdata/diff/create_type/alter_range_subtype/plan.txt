@@ -1,10 +1,11 @@
-Plan: 1 to modify.
+Plan: 1 to add, 1 to drop.
 
 Summary by type:
-  types: 1 to modify
+  types: 1 to add, 1 to drop
 
 Types:
-  ~ span
+  - span
+  + span
 
 DDL to be executed:
 --------------------------------------------------

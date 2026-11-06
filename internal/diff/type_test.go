@@ -66,6 +66,15 @@ func TestGenerateTypeSQLRange(t *testing.T) {
 			want: "CREATE TYPE floatspan AS RANGE (\n    subtype = double precision,\n    multirange_type_name = other.floatspan_multirange\n);",
 		},
 		{
+			name: "opclass and collation in the target schema lose the prefix",
+			typ: &ir.Type{
+				Schema: "public", Name: "textrange", Kind: ir.TypeKindRange,
+				Subtype: "text", MultirangeTypeName: "textmultirange",
+				SubtypeOpclass: "public.my_text_ops", Collation: "public.my_coll",
+			},
+			want: "CREATE TYPE textrange AS RANGE (\n    subtype = text,\n    subtype_opclass = my_text_ops,\n    collation = my_coll\n);",
+		},
+		{
 			name: "same-schema subtype prefix is stripped",
 			typ: &ir.Type{
 				Schema: "public", Name: "band", Kind: ir.TypeKindRange,
@@ -132,11 +141,12 @@ func TestTopologicallySortTypesRange(t *testing.T) {
 }
 
 func TestHoldBackFunctionsOfDroppedTypes(t *testing.T) {
-	diffFn := &ir.Function{Schema: "public", Name: "time_diff"}
+	timeParam := &ir.Parameter{Mode: "IN", DataType: "time without time zone"}
+	diffFn := &ir.Function{Schema: "public", Name: "time_diff", Parameters: []*ir.Parameter{timeParam, timeParam}}
 	checkFn := &ir.Function{Schema: "public", Name: "is_valid"}
 	other := &ir.Function{Schema: "public", Name: "unrelated"}
 	types := []*ir.Type{
-		{Schema: "public", Name: "timerange", Kind: ir.TypeKindRange, SubtypeDiff: "time_diff"},
+		{Schema: "public", Name: "timerange", Kind: ir.TypeKindRange, Subtype: "time without time zone", SubtypeDiff: "time_diff"},
 		{Schema: "public", Name: "code", Kind: ir.TypeKindDomain, Constraints: []*ir.DomainConstraint{{Definition: "CHECK (is_valid(VALUE))"}}},
 	}
 
@@ -146,6 +156,14 @@ func TestHoldBackFunctionsOfDroppedTypes(t *testing.T) {
 	}
 	if len(after) != 2 || after[0] != diffFn || after[1] != checkFn {
 		t.Fatalf("expected the referenced functions to wait in order, got %v", after)
+	}
+
+	// Same name, different signature: an overload taking the range is not
+	// its subtype_diff and is not held.
+	overload := &ir.Function{Schema: "public", Name: "time_diff", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "timerange"}}}
+	now, _ = holdBackFunctionsOfDroppedTypes([]*ir.Function{overload}, types[:1])
+	if len(now) != 1 {
+		t.Fatalf("overload taking the range must not be held as its subtype_diff")
 	}
 
 	now, after = holdBackFunctionsOfDroppedTypes([]*ir.Function{other}, nil)
@@ -177,22 +195,32 @@ func TestDependentTypes(t *testing.T) {
 	}
 }
 
-func TestSplitDroppedTypesAroundFunctions(t *testing.T) {
-	severity := &ir.Type{Schema: "public", Name: "severity", Kind: ir.TypeKindEnum}
-	band := &ir.Type{Schema: "public", Name: "band", Kind: ir.TypeKindRange, Subtype: "public.severity", SubtypeDiff: "severity_diff", MultirangeTypeName: "band_multirange"}
-	bandSet := &ir.Type{Schema: "public", Name: "band_set", Kind: ir.TypeKindDomain, BaseType: "public.band_multirange"}
-	held := []*ir.Function{{Schema: "public", Name: "severity_diff"}}
+func TestOrderTypeAndFunctionDrops(t *testing.T) {
+	isPositive := &ir.Function{Schema: "public", Name: "is_positive", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}}}
+	positive := &ir.Type{Schema: "public", Name: "positive", Kind: ir.TypeKindDomain, BaseType: "integer", Constraints: []*ir.DomainConstraint{{Definition: "CHECK (is_positive(VALUE))"}}}
+	positiveDiff := &ir.Function{Schema: "public", Name: "positive_diff", Parameters: []*ir.Parameter{{Mode: "IN", DataType: "positive"}, {Mode: "IN", DataType: "positive"}}}
+	span := &ir.Type{Schema: "public", Name: "positive_span", Kind: ir.TypeKindRange, Subtype: "public.positive", SubtypeDiff: "positive_diff", MultirangeTypeName: "positive_span_multirange"}
+	spanSet := &ir.Type{Schema: "public", Name: "busy", Kind: ir.TypeKindDomain, BaseType: "public.positive_span_multirange"}
 
-	before, after := splitDroppedTypesAroundFunctions([]*ir.Type{band, bandSet, severity}, held)
-	if len(before) != 2 || before[0] != band || before[1] != bandSet {
-		t.Fatalf("expected band and band_set before the function, got %v", before)
+	var names []string
+	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{positive, span, spanSet}, []*ir.Function{isPositive, positiveDiff}) {
+		if node.function != nil {
+			names = append(names, node.function.Name)
+		} else {
+			names = append(names, node.typeObj.Name)
+		}
 	}
-	if len(after) != 1 || after[0] != severity {
-		t.Fatalf("expected severity after the function, got %v", after)
+	want := []string{"busy", "positive_span", "positive_diff", "positive", "is_positive"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", names, want)
 	}
 
-	before, after = splitDroppedTypesAroundFunctions([]*ir.Type{severity}, nil)
-	if before != nil || len(after) != 1 {
-		t.Fatal("no held functions must leave every type in the later group")
+	// No held functions: plain reverse dependency order of the types.
+	names = nil
+	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{positive, span}, nil) {
+		names = append(names, node.typeObj.Name)
+	}
+	if strings.Join(names, ",") != "positive_span,positive" {
+		t.Fatalf("got %v", names)
 	}
 }
