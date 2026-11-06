@@ -31,14 +31,17 @@ CREATE TABLE regions (
     CONSTRAINT regions_id_key PRIMARY KEY (id)
 );
 
+-- Renaming the partitioned key drops and recreates the partition's copy under
+-- its unchanged generated name; its unchanged comment must be restored.
 CREATE TABLE events (
-    id integer PRIMARY KEY,
+    id integer,
     region_id integer,
+    CONSTRAINT events_id_key PRIMARY KEY (id),
     CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id)
 ) PARTITION BY RANGE (id);
 CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
 
-COMMENT ON CONSTRAINT events_pkey ON events IS 'parent key';
+COMMENT ON CONSTRAINT events_id_key ON events IS 'parent key';
 -- Renaming regions_pkey drops and re-adds events_region_fk, recreating the
 -- partition's copy without its comment; the plan must restore both.
 COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key, updated';

@@ -3,7 +3,7 @@
   "pgschema_version": "1.13.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "4cf0e199326387ee97d44f6cfe7d68398577f010d4ecaa13886ef46b54ce98a4"
+    "hash": "45289af96d876fe50db54ead9dfd59a42bcfd0a7189f563a2664e343db2bf98c"
   },
   "groups": [
     {
@@ -37,6 +37,24 @@
           "type": "table.constraint.comment",
           "operation": "alter",
           "path": "public.customers.customers_email_key"
+        },
+        {
+          "sql": "ALTER TABLE events DROP CONSTRAINT events_pkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "ALTER TABLE events\nADD CONSTRAINT events_id_key PRIMARY KEY (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_id_key"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT events_id_key ON events IS 'parent key';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.events.events_id_key"
         },
         {
           "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_customer_total_key UNIQUE (customer_id, total);",

@@ -12,6 +12,13 @@ ALTER TABLE events DROP CONSTRAINT events_region_fk;
 
 COMMENT ON CONSTRAINT customers_email_key ON customers IS NULL;
 
+ALTER TABLE events DROP CONSTRAINT events_pkey;
+
+ALTER TABLE events
+ADD CONSTRAINT events_id_key PRIMARY KEY (id);
+
+COMMENT ON CONSTRAINT events_id_key ON events IS 'parent key';
+
 ALTER TABLE orders
 ADD CONSTRAINT orders_customer_total_key UNIQUE (customer_id, total);
 

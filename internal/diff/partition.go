@@ -324,13 +324,19 @@ func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.
 				continue
 			}
 			// A copy of an unmanaged (for example ignored) parent constraint
-			// is not created by the migration, so its comment is not managed
-			if resolveInheritedConstraint(newTables, parent, parentName) == nil {
+			// is not created by the migration, so its comment is not managed.
+			// A parent outside the managed scope is not inspected at all; its
+			// copies exist on the child, so their comments are.
+			if parent != nil && resolveInheritedConstraint(newTables, parent, parentName) == nil {
 				continue
 			}
 			newComment := table.InheritedConstraintComments[childName]
 			oldComment := ""
-			if oldTable != nil && !inheritedConstraintRecreated(newTables, table, parentName, recreated) {
+			// The copy is recreated when the constraint above it in either
+			// state's hierarchy is: a parent key replaced under a new name
+			// recreates the copy under its unchanged generated name.
+			if oldTable != nil && !inheritedConstraintRecreated(newTables, table, parentName, recreated) &&
+				!oldCopyRecreated(oldTables, oldTable, childName, recreated) {
 				if hadInheritedConstraint(oldTable, childName) {
 					// The copy existed under the same name, whatever its parent
 					// constraint was called: a partition moved to a parent with
@@ -364,6 +370,17 @@ func hadInheritedConstraint(table *ir.Table, name string) bool {
 	for _, copyName := range table.InheritedConstraints {
 		if copyName == name {
 			return true
+		}
+	}
+	return false
+}
+
+// oldCopyRecreated reports whether the constraint the old partition's copy
+// named name descended from is dropped or recreated by this migration.
+func oldCopyRecreated(oldTables map[string]*ir.Table, oldTable *ir.Table, name string, recreated map[string]bool) bool {
+	for parentName, copyName := range oldTable.InheritedConstraints {
+		if copyName == name {
+			return inheritedConstraintRecreated(oldTables, oldTable, parentName, recreated)
 		}
 	}
 	return false
