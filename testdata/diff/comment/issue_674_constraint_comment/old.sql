@@ -27,9 +27,11 @@ CREATE TABLE events (
     CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id)
 ) PARTITION BY RANGE (id);
 CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+CREATE TABLE events_old PARTITION OF events FOR VALUES FROM (10) TO (20);
 
 COMMENT ON CONSTRAINT events_pkey ON events IS 'parent key';
 COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';
+COMMENT ON CONSTRAINT events_old_pkey ON events_old IS 'comment to drop on a retained key';
 -- Renaming regions_pkey drops and re-adds events_region_fk, recreating the
 -- partition's copy without its comment; the plan must restore both.
 COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key';

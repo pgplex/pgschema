@@ -3,11 +3,17 @@
   "pgschema_version": "1.13.4",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "45289af96d876fe50db54ead9dfd59a42bcfd0a7189f563a2664e343db2bf98c"
+    "hash": "1c63a1bbc574b7309965f95aa9ec2e82b1a1ea871b0cee7fdeeec0a35df6c735"
   },
   "groups": [
     {
       "steps": [
+        {
+          "sql": "ALTER TABLE events DETACH PARTITION events_old;",
+          "type": "table.partition",
+          "operation": "detach",
+          "path": "public.events_old"
+        },
         {
           "sql": "CREATE TABLE IF NOT EXISTS invoices (\n    id integer,\n    CONSTRAINT invoices_pkey PRIMARY KEY (id),\n    CONSTRAINT invoices_id_check CHECK (id > 0)\n);",
           "type": "table",
@@ -93,6 +99,12 @@
           "path": "public.regions.regions_id_key"
         },
         {
+          "sql": "ALTER TABLE events ATTACH PARTITION events_old FOR VALUES FROM (10) TO (30);",
+          "type": "table.partition",
+          "operation": "attach",
+          "path": "public.events_old"
+        },
+        {
           "sql": "ALTER TABLE events\nADD CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id) NOT VALID;",
           "type": "table.constraint",
           "operation": "create",
@@ -129,6 +141,12 @@
           "type": "table.constraint.comment",
           "operation": "alter",
           "path": "public.events_leaf.events_region_fk"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT events_old_pkey ON events_old IS NULL;",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.events_old.events_old_pkey"
         }
       ]
     }

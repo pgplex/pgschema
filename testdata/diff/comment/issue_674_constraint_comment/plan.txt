@@ -1,7 +1,7 @@
-Plan: 1 to add, 5 to modify.
+Plan: 1 to add, 6 to modify.
 
 Summary by type:
-  tables: 1 to add, 5 to modify
+  tables: 1 to add, 6 to modify
 
 Tables:
   ~ customers
@@ -16,6 +16,10 @@ Tables:
   ~ events_leaf
     ~ events_leaf_pkey (constraint.comment)
     ~ events_region_fk (constraint.comment)
+  ~ events_old
+    ~ events_old_pkey (constraint.comment)
+    ~ events_old (detach partition)
+    ~ events_old (attach partition)
   + invoices
     + invoices_id_check (constraint.comment)
     + invoices_pkey (constraint.comment)
@@ -32,6 +36,8 @@ DDL to be executed:
 --------------------------------------------------
 
 -- Transaction Group #1
+ALTER TABLE events DETACH PARTITION events_old;
+
 CREATE TABLE IF NOT EXISTS invoices (
     id integer,
     CONSTRAINT invoices_pkey PRIMARY KEY (id),
@@ -67,6 +73,8 @@ ALTER TABLE regions DROP CONSTRAINT regions_pkey;
 ALTER TABLE regions
 ADD CONSTRAINT regions_id_key PRIMARY KEY (id);
 
+ALTER TABLE events ATTACH PARTITION events_old FOR VALUES FROM (10) TO (30);
+
 ALTER TABLE events
 ADD CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id) NOT VALID;
 
@@ -79,3 +87,5 @@ COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key, updated
 COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';
 
 COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';
+
+COMMENT ON CONSTRAINT events_old_pkey ON events_old IS NULL;

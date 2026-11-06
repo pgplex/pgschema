@@ -303,12 +303,19 @@ func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.
 	for _, constraint := range fkPreDrops {
 		recreated[constraintPathKey(constraint)] = true
 	}
+	// A partition detached in this migration (for a new bound or parent)
+	// keeps its copies as local constraints, comments included, and ATTACH
+	// adopts them (#639), whatever happens to the parent's constraints.
+	detached := make(map[string]bool)
 	for _, td := range modifiedTables {
 		for _, constraint := range td.DroppedConstraints {
 			recreated[constraintPathKey(constraint)] = true
 		}
 		for _, change := range td.ModifiedConstraints {
 			recreated[constraintPathKey(change.Old)] = true
+		}
+		if td.PartitionChanged && td.OldPartitionOf != "" {
+			detached[td.Table.Schema+"."+td.Table.Name] = true
 		}
 	}
 	for _, key := range sortedKeys(newTables) {
@@ -335,8 +342,9 @@ func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.
 			// The copy is recreated when the constraint above it in either
 			// state's hierarchy is: a parent key replaced under a new name
 			// recreates the copy under its unchanged generated name.
-			if oldTable != nil && !inheritedConstraintRecreated(newTables, table, parentName, recreated) &&
-				!oldCopyRecreated(oldTables, oldTable, childName, recreated) {
+			if oldTable != nil && (detached[key] ||
+				!inheritedConstraintRecreated(newTables, table, parentName, recreated) &&
+					!oldCopyRecreated(oldTables, oldTable, childName, recreated)) {
 				if hadInheritedConstraint(oldTable, childName) {
 					// The copy existed under the same name, whatever its parent
 					// constraint was called: a partition moved to a parent with

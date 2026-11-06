@@ -1,3 +1,5 @@
+ALTER TABLE events DETACH PARTITION events_old;
+
 CREATE TABLE IF NOT EXISTS invoices (
     id integer,
     CONSTRAINT invoices_pkey PRIMARY KEY (id),
@@ -33,6 +35,8 @@ ALTER TABLE regions DROP CONSTRAINT regions_pkey;
 ALTER TABLE regions
 ADD CONSTRAINT regions_id_key PRIMARY KEY (id);
 
+ALTER TABLE events ATTACH PARTITION events_old FOR VALUES FROM (10) TO (30);
+
 ALTER TABLE events
 ADD CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id);
 
@@ -41,3 +45,5 @@ COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key, updated
 COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';
 
 COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';
+
+COMMENT ON CONSTRAINT events_old_pkey ON events_old IS NULL;

@@ -40,6 +40,9 @@ CREATE TABLE events (
     CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id)
 ) PARTITION BY RANGE (id);
 CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+-- A new bound detaches and re-attaches events_old, which keeps its key copy
+-- and the copy's comment through both; the dropped comment needs IS NULL.
+CREATE TABLE events_old PARTITION OF events FOR VALUES FROM (10) TO (30);
 
 COMMENT ON CONSTRAINT events_id_key ON events IS 'parent key';
 -- Renaming regions_pkey drops and re-adds events_region_fk, recreating the
