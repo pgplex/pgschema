@@ -294,64 +294,15 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 		return types
 	}
 
-	// Build maps for efficient lookup
-	typeMap := make(map[string]*ir.Type)
-	var insertionOrder []string
-	for _, t := range types {
-		key := typeGraphKey(t.Schema, t.Name)
-		typeMap[key] = t
-		insertionOrder = append(insertionOrder, key)
-	}
+	typeMap, insertionOrder, adjList := buildTypeGraph(types)
 
-	// Build dependency graph
-	inDegree := make(map[string]int)
-	adjList := make(map[string][]string)
-
-	// Initialize
+	inDegree := make(map[string]int, len(typeMap))
 	for key := range typeMap {
 		inDegree[key] = 0
-		adjList[key] = []string{}
 	}
-
-	// A range type's multirange is created with it, so a reference to the
-	// multirange is a dependency on the range.
-	multirangeOwner := make(map[string]string)
-	for key, t := range typeMap {
-		if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
-			if owner := extractTypeName(t.MultirangeTypeName, t.Schema); owner != "" {
-				multirangeOwner[owner] = key
-			}
-		}
-	}
-
-	// Build edges: if typeA references typeB (composite type column uses typeB), add edge typeB -> typeA
-	addEdge := func(keyA, dataType, schema string) {
-		// Extract type name from DataType (may include schema prefix or array notation)
-		referencedType := extractTypeName(dataType, schema)
-		if referencedType == "" {
-			return
-		}
-		if _, exists := typeMap[referencedType]; !exists {
-			referencedType = multirangeOwner[referencedType]
-		}
-		// Check if the referenced type exists in our set
-		if _, exists := typeMap[referencedType]; exists && keyA != referencedType {
-			adjList[referencedType] = append(adjList[referencedType], keyA)
-			inDegree[keyA]++
-		}
-	}
-	for keyA, typeA := range typeMap {
-		switch typeA.Kind {
-		case ir.TypeKindComposite:
-			for _, col := range typeA.Columns {
-				addEdge(keyA, col.DataType, typeA.Schema)
-			}
-		case ir.TypeKindDomain:
-			// Domain types may reference other types as their base type
-			addEdge(keyA, typeA.BaseType, typeA.Schema)
-		case ir.TypeKindRange:
-			// A range over an enum or domain needs its subtype first
-			addEdge(keyA, typeA.Subtype, typeA.Schema)
+	for _, dependents := range adjList {
+		for _, dependent := range dependents {
+			inDegree[dependent]++
 		}
 	}
 
@@ -434,6 +385,96 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 	}
 
 	return sortedTypes
+}
+
+// buildTypeGraph maps the types by graph key and returns their insertion
+// order and the dependency edges: adjList[dep] lists the keys of the types that
+// reference dep (a composite attribute, a domain base type, a range subtype),
+// so dep must be created first and dropped last. A reference to a range's
+// multirange counts as a reference to the range, which creates it.
+func buildTypeGraph(types []*ir.Type) (typeMap map[string]*ir.Type, insertionOrder []string, adjList map[string][]string) {
+	typeMap = make(map[string]*ir.Type, len(types))
+	adjList = make(map[string][]string, len(types))
+	for _, t := range types {
+		key := typeGraphKey(t.Schema, t.Name)
+		typeMap[key] = t
+		insertionOrder = append(insertionOrder, key)
+		adjList[key] = []string{}
+	}
+
+	multirangeOwner := make(map[string]string)
+	for key, t := range typeMap {
+		if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+			if owner := extractTypeName(t.MultirangeTypeName, t.Schema); owner != "" {
+				multirangeOwner[owner] = key
+			}
+		}
+	}
+
+	addEdge := func(keyA, dataType, schema string) {
+		referencedType := extractTypeName(dataType, schema)
+		if referencedType == "" {
+			return
+		}
+		if _, exists := typeMap[referencedType]; !exists {
+			referencedType = multirangeOwner[referencedType]
+		}
+		if _, exists := typeMap[referencedType]; exists && keyA != referencedType {
+			adjList[referencedType] = append(adjList[referencedType], keyA)
+		}
+	}
+	for keyA, typeA := range typeMap {
+		switch typeA.Kind {
+		case ir.TypeKindComposite:
+			for _, col := range typeA.Columns {
+				addEdge(keyA, col.DataType, typeA.Schema)
+			}
+		case ir.TypeKindDomain:
+			addEdge(keyA, typeA.BaseType, typeA.Schema)
+		case ir.TypeKindRange:
+			addEdge(keyA, typeA.Subtype, typeA.Schema)
+		}
+	}
+	return typeMap, insertionOrder, adjList
+}
+
+// dependentTypes returns the types among all that depend, directly or through
+// other types, on one of the seeds, in the order of all. The seeds themselves
+// are not included.
+func dependentTypes(all []*ir.Type, seeds []*ir.Type) []*ir.Type {
+	if len(seeds) == 0 || len(all) == 0 {
+		return nil
+	}
+	_, _, adjList := buildTypeGraph(all)
+	reached := make(map[string]bool, len(seeds))
+	var queue []string
+	for _, seed := range seeds {
+		key := typeGraphKey(seed.Schema, seed.Name)
+		reached[key] = true
+		queue = append(queue, key)
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, dependent := range adjList[current] {
+			if !reached[dependent] {
+				reached[dependent] = true
+				queue = append(queue, dependent)
+			}
+		}
+	}
+	seedKeys := make(map[string]bool, len(seeds))
+	for _, seed := range seeds {
+		seedKeys[typeGraphKey(seed.Schema, seed.Name)] = true
+	}
+	var result []*ir.Type
+	for _, t := range all {
+		key := typeGraphKey(t.Schema, t.Name)
+		if reached[key] && !seedKeys[key] {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // typeGraphKey builds the lookup key used to identify a type in the dependency

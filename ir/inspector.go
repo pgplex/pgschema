@@ -1300,22 +1300,30 @@ func (i *Inspector) buildFunctionDependencies(ctx context.Context, schema *IR, t
 		return nil
 	}
 
+	// The argument lists are format_type renderings of the input types; strip
+	// the function's own schema from each, as parseParametersFromSignature
+	// does for the Parameters that Function.GetArguments joins, so the keys
+	// match on both sides.
+	argKey := func(args sql.NullString, routineSchema string) string {
+		if !args.Valid || args.String == "" {
+			return ""
+		}
+		var types []string
+		for _, t := range splitParameterString(args.String) {
+			if t = strings.TrimSpace(t); t != "" {
+				types = append(types, i.stripSameSchemaPrefix(t, routineSchema))
+			}
+		}
+		return strings.Join(types, ", ")
+	}
+
 	// Build a map of dependencies by dependent function key
 	depMap := make(map[string][]string)
 	for _, dep := range deps {
-		dependentArgs := ""
-		if dep.DependentArgs.Valid {
-			dependentArgs = dep.DependentArgs.String
-		}
-		dependentKey := dep.DependentName + "(" + dependentArgs + ")"
-
-		referencedArgs := ""
-		if dep.ReferencedArgs.Valid {
-			referencedArgs = dep.ReferencedArgs.String
-		}
+		dependentKey := dep.DependentName + "(" + argKey(dep.DependentArgs, dep.DependentSchema) + ")"
 
 		// Store as schema.name(args) for cross-schema support
-		referencedKey := dep.ReferencedSchema + "." + dep.ReferencedName + "(" + referencedArgs + ")"
+		referencedKey := dep.ReferencedSchema + "." + dep.ReferencedName + "(" + argKey(dep.ReferencedArgs, dep.ReferencedSchema) + ")"
 		depMap[dependentKey] = append(depMap[dependentKey], referencedKey)
 	}
 

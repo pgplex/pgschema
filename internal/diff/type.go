@@ -9,12 +9,18 @@ import (
 	"github.com/pgplex/pgschema/ir"
 )
 
-// generateCreateTypesSQL generates CREATE TYPE statements
-func generateCreateTypesSQL(types []*ir.Type, targetSchema string, collector *diffCollector) {
+// generateCreateTypesSQL generates CREATE TYPE statements. A type listed in
+// replaced (by graph key) is an existing one whose definition changed and has
+// no ALTER: it is dropped and recreated in its slot, as one plan step.
+func generateCreateTypesSQL(types []*ir.Type, replaced map[string]*typeDiff, targetSchema string, collector *diffCollector) {
 	// Sort types topologically to handle dependencies (e.g., composite types referencing enum types)
 	sortedTypes := topologicallySortTypes(types)
 
 	for _, typeObj := range sortedTypes {
+		if diff, ok := replaced[typeGraphKey(typeObj.Schema, typeObj.Name)]; ok {
+			generateReplaceTypeSQL(diff, targetSchema, collector)
+			continue
+		}
 		sql := generateTypeSQL(typeObj, targetSchema, collector.qualifySchema)
 
 		// Determine DiffType based on type kind
@@ -79,14 +85,16 @@ func generateModifyDomainsSQL(diffs []*typeDiff, targetSchema string, collector 
 	}
 }
 
-// generateDropTypesSQL generates DROP TYPE statements
+// generateDropTypesSQL generates DROP TYPE statements, dependents first: a
+// domain over an enum, a composite with a range attribute or a range over a
+// domain must go before the type it is built on (RESTRICT refuses otherwise).
 func generateDropTypesSQL(types []*ir.Type, targetSchema string, collector *diffCollector) {
-	// Sort types by name for consistent ordering
 	sortedTypes := make([]*ir.Type, len(types))
 	copy(sortedTypes, types)
 	sort.Slice(sortedTypes, func(i, j int) bool {
 		return sortedTypes[i].Name < sortedTypes[j].Name
 	})
+	sortedTypes = reverseSlice(topologicallySortTypes(sortedTypes))
 
 	for _, typeObj := range sortedTypes {
 		typeName := qualifyEntityName(typeObj.Schema, typeObj.Name, targetSchema)
@@ -331,45 +339,58 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 // "multirange" at its first occurrence; otherwise "_multirange" is appended.
 // The result is clipped to the identifier limit like any generated name.
 func defaultMultirangeTypeName(rangeName string) string {
+	// Clip to a byte budget without cutting a multi-byte character, as the
+	// server's truncate_identifier does.
+	clip := func(s string, limit int) string {
+		for len(s) > limit {
+			_, size := utf8.DecodeLastRuneInString(s)
+			s = s[:len(s)-size]
+		}
+		return s
+	}
+	const suffix = "_multirange"
 	var name string
 	if idx := strings.Index(rangeName, "range"); idx != -1 {
 		name = rangeName[:idx] + "multi" + rangeName[idx:]
 	} else {
-		name = rangeName + "_multirange"
+		// The server reserves room for the suffix (NAMEDATALEN - 12 bytes
+		// of the range name) so it is never the part that gets cut.
+		name = clip(rangeName, maxIdentifierBytes-len(suffix)) + suffix
 	}
-	// Clip to NAMEDATALEN-1 bytes without cutting a multi-byte character, as
-	// the server's truncate_identifier does.
-	for len(name) > maxIdentifierBytes {
-		_, size := utf8.DecodeLastRuneInString(name)
-		name = name[:len(name)-size]
-	}
-	return name
+	return clip(name, maxIdentifierBytes)
 }
 
-// generateReplaceRangeTypesSQL drops and recreates modified range types.
+// replacedTypes returns the modified types whose definition has no ALTER
+// (today: ranges), keyed by graph key, so the create phase can drop and
+// recreate each one in the slot a new type of that definition would get.
+func replacedTypes(diffs []*typeDiff) map[string]*typeDiff {
+	replaced := make(map[string]*typeDiff)
+	for _, diff := range diffs {
+		if diff.Old.Kind == ir.TypeKindRange && diff.New.Kind == ir.TypeKindRange {
+			replaced[typeGraphKey(diff.New.Schema, diff.New.Name)] = diff
+		}
+	}
+	return replaced
+}
+
+// generateReplaceTypeSQL drops and recreates a modified type as one plan step.
 // PostgreSQL offers no ALTER TYPE for a range's definition, so a changed
 // subtype, opclass, collation, function or multirange name means replacement.
 // The DROP uses RESTRICT: when a column still uses the type, PostgreSQL's own
 // dependency error is the honest outcome, and the user changes or drops that
 // column in the same file to proceed.
-func generateReplaceRangeTypesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
-	for _, diff := range diffs {
-		if diff.Old.Kind != ir.TypeKindRange || diff.New.Kind != ir.TypeKindRange {
-			continue
-		}
-		typeName := qualifyEntityName(diff.New.Schema, diff.New.Name, targetSchema)
-		context := &diffContext{
-			Type:      DiffTypeType,
-			Operation: DiffOperationAlter,
-			Path:      fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
-			Source:    diff,
-		}
-		// One step with two statements, so the plan reports one modified type.
-		collector.collectStatements(context, []SQLStatement{
-			{SQL: fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName), CanRunInTransaction: true},
-			{SQL: generateTypeSQL(diff.New, targetSchema, collector.qualifySchema), CanRunInTransaction: true},
-		})
+func generateReplaceTypeSQL(diff *typeDiff, targetSchema string, collector *diffCollector) {
+	typeName := qualifyEntityName(diff.New.Schema, diff.New.Name, targetSchema)
+	context := &diffContext{
+		Type:      DiffTypeType,
+		Operation: DiffOperationAlter,
+		Path:      fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+		Source:    diff,
 	}
+	collector.collectStatements(context, []SQLStatement{
+		{SQL: fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName), CanRunInTransaction: true},
+		{SQL: generateTypeSQL(diff.New, targetSchema, collector.qualifySchema), CanRunInTransaction: true},
+	})
 }
 
 // typesEqual compares two types for equality

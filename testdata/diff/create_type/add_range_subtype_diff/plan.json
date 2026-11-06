@@ -21,10 +21,28 @@
           "path": "public.timerange"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS shifts (\n    id integer,\n    during timerange,\n    breaks timemultirange,\n    CONSTRAINT shifts_pkey PRIMARY KEY (id)\n);",
+          "sql": "CREATE DOMAIN break_set AS timemultirange;",
+          "type": "domain",
+          "operation": "create",
+          "path": "public.break_set"
+        },
+        {
+          "sql": "CREATE TYPE shift_slot AS (room integer, during timerange);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.shift_slot"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS shifts (\n    id integer,\n    during timerange,\n    breaks timemultirange,\n    history timerange[],\n    past_breaks timemultirange[],\n    CONSTRAINT shifts_pkey PRIMARY KEY (id)\n);",
           "type": "table",
           "operation": "create",
           "path": "public.shifts"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION shift_length(\n    r timerange\n)\nRETURNS double precision\nLANGUAGE sql\nIMMUTABLE\nSTRICT\nAS $$SELECT EXTRACT(EPOCH FROM (upper(r) - lower(r)))\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.shift_length"
         }
       ]
     }

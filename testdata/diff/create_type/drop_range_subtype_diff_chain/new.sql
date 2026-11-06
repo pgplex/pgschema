@@ -1,0 +1,3 @@
+-- Everything goes. The order has to follow the dependencies: the domain over
+-- the multirange, then the range, then its subtype_diff function and the
+-- helper that function calls, and only then the enum both functions take.

@@ -1,0 +1,22 @@
+Plan: 1 to modify, 1 to drop.
+
+Summary by type:
+  types: 1 to modify
+  tables: 1 to drop
+
+Types:
+  ~ span
+
+Tables:
+  - windows
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP TABLE IF EXISTS windows CASCADE;
+
+DROP TYPE IF EXISTS span RESTRICT;
+
+CREATE TYPE span AS RANGE (
+    subtype = bigint
+);

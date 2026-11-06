@@ -1883,10 +1883,10 @@ const getFunctionDependencies = `-- name: GetFunctionDependencies :many
 SELECT
     dependent_ns.nspname AS dependent_schema,
     dependent_proc.proname AS dependent_name,
-    pg_get_function_identity_arguments(dependent_proc.oid) AS dependent_args,
+    oidvectortypes(dependent_proc.proargtypes) AS dependent_args,
     referenced_ns.nspname AS referenced_schema,
     referenced_proc.proname AS referenced_name,
-    pg_get_function_identity_arguments(referenced_proc.oid) AS referenced_args
+    oidvectortypes(referenced_proc.proargtypes) AS referenced_args
 FROM pg_depend d
 JOIN pg_proc dependent_proc ON d.objid = dependent_proc.oid
 JOIN pg_namespace dependent_ns ON dependent_proc.pronamespace = dependent_ns.oid
@@ -1907,7 +1907,9 @@ type GetFunctionDependenciesRow struct {
 	ReferencedArgs   sql.NullString `db:"referenced_args" json:"referenced_args"`
 }
 
-// GetFunctionDependencies retrieves function-to-function dependencies for topological sorting
+// GetFunctionDependencies retrieves function-to-function dependencies for topological sorting.
+// The argument lists are input types only (no names, modes or defaults), as
+// Function.GetArguments renders them, so the keys match the Functions map.
 func (q *Queries) GetFunctionDependencies(ctx context.Context, dollar_1 sql.NullString) ([]GetFunctionDependenciesRow, error) {
 	rows, err := q.db.QueryContext(ctx, getFunctionDependencies, dollar_1)
 	if err != nil {

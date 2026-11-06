@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1763,10 +1764,6 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// ADD VALUE only depends on the enum itself, which already exists.
 	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
 
-	// A modified range type is dropped and recreated here, before the create
-	// phase, so a new table can use the new definition.
-	generateReplaceRangeTypesSQL(d.modifiedTypes, targetSchema, collector)
-
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
 	preDroppedViews := d.generatePreDropMaterializedViewsSQL(targetSchema, collector)
@@ -2062,7 +2059,19 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		}
 	}
 
-	for _, typeObj := range d.addedTypes {
+	// A modified type with no ALTER (a range) is replaced in the slot its new
+	// definition would get as a new type: after the drop phase has removed
+	// the old dependents, and after any new function or type it needs.
+	replaced := replacedTypes(d.modifiedTypes)
+	candidateTypes := append([]*ir.Type{}, d.addedTypes...)
+	for _, diff := range replaced {
+		candidateTypes = append(candidateTypes, diff.New)
+	}
+	sort.SliceStable(candidateTypes, func(i, j int) bool {
+		return typeGraphKey(candidateTypes[i].Schema, candidateTypes[i].Name) < typeGraphKey(candidateTypes[j].Schema, candidateTypes[j].Name)
+	})
+
+	for _, typeObj := range candidateTypes {
 		if typeObj.Kind != ir.TypeKindDomain && typeObj.Kind != ir.TypeKindRange {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 			continue
@@ -2079,6 +2088,43 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 		}
 	}
+	// A type built on a deferred one (a composite with a range attribute, a
+	// domain over a range's multirange, a range over a deferred domain) waits
+	// with it, and anything built on that waits too.
+	if len(domainsWithTableDeps) > 0 || len(typesWithFunctionDepsOnly) > 0 {
+		afterTables := make(map[*ir.Type]bool)
+		for _, t := range dependentTypes(candidateTypes, domainsWithTableDeps) {
+			afterTables[t] = true
+		}
+		afterFunctions := make(map[*ir.Type]bool)
+		for _, t := range dependentTypes(candidateTypes, typesWithFunctionDepsOnly) {
+			afterFunctions[t] = true
+		}
+		var stay []*ir.Type
+		for _, t := range typesWithoutDeps {
+			switch {
+			case afterTables[t]:
+				domainsWithTableDeps = append(domainsWithTableDeps, t)
+				addToLookup(tableDomainLookup, t)
+			case afterFunctions[t]:
+				typesWithFunctionDepsOnly = append(typesWithFunctionDepsOnly, t)
+				addToLookup(functionDomainLookup, t)
+			default:
+				stay = append(stay, t)
+			}
+		}
+		typesWithoutDeps = stay
+		var keep []*ir.Type
+		for _, t := range typesWithFunctionDepsOnly {
+			if afterTables[t] {
+				domainsWithTableDeps = append(domainsWithTableDeps, t)
+				addToLookup(tableDomainLookup, t)
+			} else {
+				keep = append(keep, t)
+			}
+		}
+		typesWithFunctionDepsOnly = keep
+	}
 	// Combined lookup for all deferred domains (used by table classification
 	// to detect ANY deferred domain dependency).
 	deferredDomainLookup := make(map[string]struct{}, len(functionDomainLookup)+len(tableDomainLookup))
@@ -2090,7 +2136,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 
 	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
-	generateCreateTypesSQL(typesWithoutDeps, targetSchema, collector)
+	generateCreateTypesSQL(typesWithoutDeps, replaced, targetSchema, collector)
 
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, d.deferredSequenceOwners, targetSchema, collector)
@@ -2236,16 +2282,20 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
 	var functionsAfterAllTables []*ir.Function
-	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 {
+	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 || len(deferredDomainLookup) > 0 {
 		tablesWithDepsLookup := buildTableLookup(tablesWithDeps)
 		lastBatchLookup := buildTableLookup(tablesAfterTableDomains)
 		functionsWithoutTableDeps = nil
 		for _, fn := range functionsWithoutViewDeps {
-			if functionReferencesNewTable(fn, lastBatchLookup) {
+			// A function whose signature uses a deferred type (a domain or
+			// range created after the first functions, or after all tables)
+			// cannot be created before that type exists.
+			switch {
+			case functionReferencesNewTable(fn, lastBatchLookup) || functionSignatureReferencesRelation(fn, tableDomainLookup):
 				functionsAfterAllTables = append(functionsAfterAllTables, fn)
-			} else if functionReferencesNewTable(fn, tablesWithDepsLookup) {
+			case functionReferencesNewTable(fn, tablesWithDepsLookup) || functionSignatureReferencesRelation(fn, functionDomainLookup):
 				functionsWithTableDeps = append(functionsWithTableDeps, fn)
-			} else {
+			default:
 				functionsWithoutTableDeps = append(functionsWithoutTableDeps, fn)
 			}
 		}
@@ -2266,7 +2316,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create domains that only depend on functions (not tables). These must come
 	// after functions but before tables, because tables may use these domains as
 	// column types.
-	generateCreateTypesSQL(typesWithFunctionDepsOnly, targetSchema, collector)
+	generateCreateTypesSQL(typesWithFunctionDepsOnly, replaced, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	// A procedure whose body may depend on a postponed key (issue #653) waits
@@ -2285,7 +2335,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create domains whose base type is a new table's implicit row type (issue #535).
 	// Emitted after ALL other tables so the row type exists, even if the domain also
 	// depends on a function (which was already created above).
-	generateCreateTypesSQL(domainsWithTableDeps, targetSchema, collector)
+	generateCreateTypesSQL(domainsWithTableDeps, replaced, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
@@ -2610,11 +2660,13 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Drop sequences
 	generateDropSequencesSQL(d.droppedSequences, targetSchema, collector)
 
-	// Drop types
-	generateDropTypesSQL(d.droppedTypes, targetSchema, collector)
-
-	// Drop the functions those types depended on
+	// Drop types. Those that reference a held-back function, and the types
+	// built on them, go first; then those functions; then the rest, which may
+	// include a type the functions' signatures still need (a range's subtype).
+	typesBeforeFunctions, typesAfterFunctions := splitDroppedTypesAroundFunctions(d.droppedTypes, functionsAfterTypes)
+	generateDropTypesSQL(typesBeforeFunctions, targetSchema, collector)
 	generateDropFunctionsSQL(functionsAfterTypes, targetSchema, collector)
+	generateDropTypesSQL(typesAfterFunctions, targetSchema, collector)
 
 	// Drop schemas
 	// Note: Schema deletion is out of scope for schema-level comparisons
@@ -3846,17 +3898,9 @@ func tableUsesDeferredDomain(table *ir.Table, deferredDomains map[string]struct{
 		if col.DataType == "" {
 			continue
 		}
-		// Normalize the type name for lookup
-		typeName := strings.ToLower(col.DataType)
-		if _, ok := deferredDomains[typeName]; ok {
+		// An array of the type, or a quoted name, still needs the type.
+		if typeMatchesLookup(extractBaseTypeName(col.DataType), table.Schema, deferredDomains) {
 			return true
-		}
-		// Try with table's schema prefix
-		if table.Schema != "" && !strings.Contains(typeName, ".") {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(table.Schema), typeName)
-			if _, ok := deferredDomains[qualified]; ok {
-				return true
-			}
 		}
 	}
 	return false
@@ -3875,27 +3919,78 @@ func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) b
 
 // holdBackFunctionsOfDroppedTypes splits the dropped functions into those that
 // can go in the usual slot and those a dropped type still references, which
-// must wait until after the types are dropped. Order within each part is kept.
+// must wait until after the types are dropped. A function a held function
+// depends on (a callee recorded in Dependencies) is held as well, since it
+// cannot be dropped while its caller exists. Order within each part is kept.
 func holdBackFunctionsOfDroppedTypes(functions []*ir.Function, types []*ir.Type) (now, afterTypes []*ir.Function) {
 	if len(functions) == 0 || len(types) == 0 {
 		return functions, nil
 	}
+	held := make(map[*ir.Function]bool)
 	for _, fn := range functions {
 		lookup := buildFunctionLookup([]*ir.Function{fn})
-		held := false
 		for _, typeObj := range types {
 			if typeReferencesNewFunction(typeObj, lookup) {
-				held = true
+				held[fn] = true
 				break
 			}
 		}
-		if held {
+	}
+	for changed := true; changed; {
+		changed = false
+		for caller := range held {
+			for _, callee := range functions {
+				if held[callee] {
+					continue
+				}
+				key := callee.Schema + "." + callee.Name + "(" + callee.GetArguments() + ")"
+				if slices.Contains(caller.Dependencies, key) {
+					held[callee] = true
+					changed = true
+				}
+			}
+		}
+	}
+	for _, fn := range functions {
+		if held[fn] {
 			afterTypes = append(afterTypes, fn)
 		} else {
 			now = append(now, fn)
 		}
 	}
 	return now, afterTypes
+}
+
+// splitDroppedTypesAroundFunctions puts the dropped types that reference one
+// of the held-back functions, and every type built on those, before the
+// functions; the rest go after, so a type a held function's signature uses
+// (the subtype of a range whose subtype_diff takes it) outlives the function.
+func splitDroppedTypesAroundFunctions(types []*ir.Type, heldFunctions []*ir.Function) (before, after []*ir.Type) {
+	if len(heldFunctions) == 0 {
+		return nil, types
+	}
+	lookup := buildFunctionLookup(heldFunctions)
+	var seeds []*ir.Type
+	for _, typeObj := range types {
+		if typeReferencesNewFunction(typeObj, lookup) {
+			seeds = append(seeds, typeObj)
+		}
+	}
+	first := make(map[*ir.Type]bool, len(seeds))
+	for _, t := range seeds {
+		first[t] = true
+	}
+	for _, t := range dependentTypes(types, seeds) {
+		first[t] = true
+	}
+	for _, t := range types {
+		if first[t] {
+			before = append(before, t)
+		} else {
+			after = append(after, t)
+		}
+	}
+	return before, after
 }
 
 // typeReferencesNewFunction determines if a domain references any newly added

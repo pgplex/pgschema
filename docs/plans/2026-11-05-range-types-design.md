@@ -142,6 +142,30 @@ CREATE TYPE rprobe.timerange AS RANGE (
 > drop phase now holds back a dropped function that a dropped type (range or
 > domain) still references until after the types are gone
 > (`drop_range_with_subtype_diff`).
+>
+> Review of PR #684 moved a few things from the text below:
+> - A modified range is not replaced in the enum-ADD VALUE slot. The drop
+>   phase comes first in a plan, so the replacement (still one DROP + CREATE
+>   step) is scheduled in the create phase through the same buckets a new
+>   range uses: after the tables that used the old definition are dropped,
+>   and after a new `subtype_diff` function or subtype it needs
+>   (`alter_range_with_dropped_table`, `alter_range_add_subtype_diff`).
+> - Deferral propagates: a composite with a range attribute, a domain over
+>   its multirange, a table with an array column of either, and a function
+>   whose signature uses the range all wait for a deferred range
+>   (`add_range_subtype_diff`).
+> - Types are dropped in reverse dependency order, and a held-back
+>   `subtype_diff` function is dropped between the types that reference it
+>   and the types its signature uses, with the functions it calls held too
+>   (`drop_range_subtype_diff_chain`). That last part exposed an inspector
+>   bug: `GetFunctionDependencies` keyed functions by identity arguments
+>   (with parameter names) while the Functions map is keyed by types, so
+>   named-parameter functions never had dependencies. It now uses
+>   `oidvectortypes`.
+> - `makeMultirangeTypeName` clips the range name to NAMEDATALEN-12 bytes
+>   before appending `_multirange`; the port does the same.
+> - Grants on a replaced range are lost, like grants on a recreated function
+>   or view today (noted under #677); not addressed here.
 
 
 ### IR

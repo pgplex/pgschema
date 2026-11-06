@@ -20,9 +20,16 @@ func TestDefaultMultirangeTypeName(t *testing.T) {
 		}
 	}
 
+	// Without "range" in the name the server clips the range name to
+	// NAMEDATALEN-12 bytes and keeps the whole suffix.
 	long := strings.Repeat("a", 60) + "span"
-	if got := defaultMultirangeTypeName(long); len(got) != 63 || !strings.HasPrefix(got, strings.Repeat("a", 60)) {
-		t.Errorf("long name not clipped to 63 bytes: %q (%d)", got, len(got))
+	if got, want := defaultMultirangeTypeName(long), strings.Repeat("a", 52)+"_multirange"; got != want {
+		t.Errorf("long name: got %q, want %q", got, want)
+	}
+	// With "range" in the name the combined name is clipped at the end.
+	longRange := strings.Repeat("b", 55) + "range"
+	if got, want := defaultMultirangeTypeName(longRange), strings.Repeat("b", 55)+"multiran"; got != want {
+		t.Errorf("long range name: got %q, want %q", got, want)
 	}
 }
 
@@ -144,5 +151,48 @@ func TestHoldBackFunctionsOfDroppedTypes(t *testing.T) {
 	now, after = holdBackFunctionsOfDroppedTypes([]*ir.Function{other}, nil)
 	if len(now) != 1 || after != nil {
 		t.Fatalf("no dropped types must leave the functions untouched")
+	}
+}
+
+func TestDependentTypes(t *testing.T) {
+	period := &ir.Type{Schema: "public", Name: "period", Kind: ir.TypeKindRange, Subtype: "date", MultirangeTypeName: "period_multirange"}
+	booking := &ir.Type{Schema: "public", Name: "booking", Kind: ir.TypeKindComposite, Columns: []*ir.TypeColumn{{Name: "slot", DataType: "public.period"}}}
+	availability := &ir.Type{Schema: "public", Name: "availability", Kind: ir.TypeKindDomain, BaseType: "public.period_multirange"}
+	window := &ir.Type{Schema: "public", Name: "window", Kind: ir.TypeKindRange, Subtype: "public.availability", MultirangeTypeName: "window_multirange"}
+	unrelated := &ir.Type{Schema: "public", Name: "color", Kind: ir.TypeKindEnum, EnumValues: []string{"red"}}
+	all := []*ir.Type{availability, booking, unrelated, period, window}
+
+	got := dependentTypes(all, []*ir.Type{period})
+	want := []*ir.Type{availability, booking, window} // in the order of all, seeds excluded
+	if len(got) != len(want) {
+		t.Fatalf("got %d dependents, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("dependent %d: got %s, want %s", i, got[i].Name, want[i].Name)
+		}
+	}
+	if dependentTypes(all, nil) != nil {
+		t.Fatal("no seeds must give no dependents")
+	}
+}
+
+func TestSplitDroppedTypesAroundFunctions(t *testing.T) {
+	severity := &ir.Type{Schema: "public", Name: "severity", Kind: ir.TypeKindEnum}
+	band := &ir.Type{Schema: "public", Name: "band", Kind: ir.TypeKindRange, Subtype: "public.severity", SubtypeDiff: "severity_diff", MultirangeTypeName: "band_multirange"}
+	bandSet := &ir.Type{Schema: "public", Name: "band_set", Kind: ir.TypeKindDomain, BaseType: "public.band_multirange"}
+	held := []*ir.Function{{Schema: "public", Name: "severity_diff"}}
+
+	before, after := splitDroppedTypesAroundFunctions([]*ir.Type{band, bandSet, severity}, held)
+	if len(before) != 2 || before[0] != band || before[1] != bandSet {
+		t.Fatalf("expected band and band_set before the function, got %v", before)
+	}
+	if len(after) != 1 || after[0] != severity {
+		t.Fatalf("expected severity after the function, got %v", after)
+	}
+
+	before, after = splitDroppedTypesAroundFunctions([]*ir.Type{severity}, nil)
+	if before != nil || len(after) != 1 {
+		t.Fatal("no held functions must leave every type in the later group")
 	}
 }

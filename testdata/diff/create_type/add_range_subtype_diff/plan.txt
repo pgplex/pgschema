@@ -1,14 +1,16 @@
-Plan: 3 to add.
+Plan: 6 to add.
 
 Summary by type:
-  types: 1 to add
-  functions: 1 to add
+  types: 2 to add
+  functions: 2 to add
   tables: 1 to add
 
 Types:
+  + shift_slot
   + timerange
 
 Functions:
+  + shift_length
   + time_diff
 
 Tables:
@@ -33,9 +35,25 @@ CREATE TYPE timerange AS RANGE (
     subtype_diff = time_diff
 );
 
+CREATE DOMAIN break_set AS timemultirange;
+
+CREATE TYPE shift_slot AS (room integer, during timerange);
+
 CREATE TABLE IF NOT EXISTS shifts (
     id integer,
     during timerange,
     breaks timemultirange,
+    history timerange[],
+    past_breaks timemultirange[],
     CONSTRAINT shifts_pkey PRIMARY KEY (id)
 );
+
+CREATE OR REPLACE FUNCTION shift_length(
+    r timerange
+)
+RETURNS double precision
+LANGUAGE sql
+IMMUTABLE
+STRICT
+AS $$SELECT EXTRACT(EPOCH FROM (upper(r) - lower(r)))
+$$;
