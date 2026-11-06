@@ -1857,8 +1857,13 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 		}
 	}
 
-	// Comment-only changes keep the constraint (#674)
+	// Comment-only changes keep the constraint (#674). A foreign key dropped
+	// in the pre-drop step is recreated by the post-add step, which writes
+	// the desired comment with it.
 	for _, change := range td.ConstraintCommentChanges {
+		if preDroppedFKSet[constraintPathKey(change.Old)] {
+			continue
+		}
 		generateConstraintComment(change.New, targetSchema, DiffOperationAlter, collector)
 	}
 

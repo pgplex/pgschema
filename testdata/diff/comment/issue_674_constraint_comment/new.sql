@@ -41,6 +41,6 @@ CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
 COMMENT ON CONSTRAINT events_pkey ON events IS 'parent key';
 -- Renaming regions_pkey drops and re-adds events_region_fk, recreating the
 -- partition's copy without its comment; the plan must restore both.
-COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key';
+COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key, updated';
 COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';
 COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';

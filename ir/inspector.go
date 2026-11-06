@@ -794,6 +794,11 @@ func (i *Inspector) buildInheritedConstraints(ctx context.Context, schema *IR, t
 			table.InheritedConstraints = make(map[string]string)
 		}
 		table.InheritedConstraints[row.ParentConstraintName] = row.ConstraintName
+		// The name stays recorded for planning even when the copy or its
+		// parent constraint is ignored; only the comment is left unmanaged.
+		if i.ignoreConfig != nil && (i.ignoreConfig.ShouldIgnoreConstraint(row.ConstraintName) || i.ignoreConfig.ShouldIgnoreConstraint(row.ParentConstraintName)) {
+			continue
+		}
 		if comment := row.ConstraintComment.String; comment != "" {
 			if table.InheritedConstraintComments == nil {
 				table.InheritedConstraintComments = make(map[string]string)

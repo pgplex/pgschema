@@ -317,15 +317,24 @@ func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.
 			continue
 		}
 		oldTable := oldTables[key]
+		parent := newTables[partitionParentKey(table)]
 		for _, parentName := range sortedKeys(table.InheritedConstraints) {
 			childName := table.InheritedConstraints[parentName]
 			if plan.commentEmitted(table, childName) {
 				continue
 			}
+			// A copy of an unmanaged (for example ignored) parent constraint
+			// is not created by the migration, so its comment is not managed
+			if resolveInheritedConstraint(newTables, parent, parentName) == nil {
+				continue
+			}
 			newComment := table.InheritedConstraintComments[childName]
 			oldComment := ""
 			if oldTable != nil && !inheritedConstraintRecreated(newTables, table, parentName, recreated) {
-				if oldTable.InheritedConstraints[parentName] == childName {
+				if hadInheritedConstraint(oldTable, childName) {
+					// The copy existed under the same name, whatever its parent
+					// constraint was called: a partition moved to a parent with
+					// compatible keys keeps it through DETACH and ATTACH
 					oldComment = oldTable.InheritedConstraintComments[childName]
 				} else if local := oldTable.Constraints[childName]; local != nil {
 					// A local constraint ATTACH PARTITION adopted as the copy
@@ -347,6 +356,17 @@ func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.
 			}, targetSchema, operation, collector)
 		}
 	}
+}
+
+// hadInheritedConstraint reports whether name is one of the partition's
+// inherited constraint copies.
+func hadInheritedConstraint(table *ir.Table, name string) bool {
+	for _, copyName := range table.InheritedConstraints {
+		if copyName == name {
+			return true
+		}
+	}
+	return false
 }
 
 // inheritedConstraintRecreated reports whether the constraint a partition's

@@ -29,7 +29,7 @@ ADD CONSTRAINT regions_id_key PRIMARY KEY (id);
 ALTER TABLE events
 ADD CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id);
 
-COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key';
+COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key, updated';
 
 COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';
 
