@@ -150,8 +150,10 @@ func getInlineConstraintsForTable(table *ir.Table) []*ir.Constraint {
 	return inlineConstraints
 }
 
-// constraintsEqual compares two constraints for equality
-func constraintsEqual(old, new *ir.Constraint) bool {
+// constraintsStructurallyEqual compares two constraints' definitions. A
+// comment-only difference is applied with COMMENT ON CONSTRAINT instead of
+// recreating the constraint (issue #674).
+func constraintsStructurallyEqual(old, new *ir.Constraint) bool {
 	// Basic properties
 	if old.Name != new.Name {
 		return false
@@ -216,11 +218,6 @@ func constraintsEqual(old, new *ir.Constraint) bool {
 		}
 	}
 
-	// Comments
-	if old.Comment != new.Comment {
-		return false
-	}
-
 	// Compare columns (skip for CHECK and EXCLUDE constraints as column detection may differ)
 	if old.Type != ir.ConstraintTypeCheck && old.Type != ir.ConstraintTypeExclusion {
 		if len(old.Columns) != len(new.Columns) {
@@ -264,4 +261,26 @@ func onDeleteClause(constraint *ir.Constraint) string {
 		clause += fmt.Sprintf(" (%s)", strings.Join(cols, ", "))
 	}
 	return clause
+}
+
+// constraintCommentSQL renders COMMENT ON CONSTRAINT for the constraint,
+// clearing the comment when it is empty.
+func constraintCommentSQL(constraint *ir.Constraint, targetSchema string, qualifySchema bool) string {
+	tableName := qualifyEntityNameMode(constraint.Schema, constraint.Table, targetSchema, qualifySchema)
+	if constraint.Comment == "" {
+		return fmt.Sprintf("COMMENT ON CONSTRAINT %s ON %s IS NULL;", ir.QuoteIdentifier(constraint.Name), tableName)
+	}
+	return fmt.Sprintf("COMMENT ON CONSTRAINT %s ON %s IS %s;", ir.QuoteIdentifier(constraint.Name), tableName, quoteString(constraint.Comment))
+}
+
+// generateConstraintComment emits the constraint's COMMENT ON CONSTRAINT as
+// its own step, after the statement that created the constraint (issue #674).
+func generateConstraintComment(constraint *ir.Constraint, targetSchema string, operation DiffOperation, collector *diffCollector) {
+	collector.collect(&diffContext{
+		Type:                DiffTypeTableConstraintComment,
+		Operation:           operation,
+		Path:                fmt.Sprintf("%s.%s.%s", constraint.Schema, constraint.Table, constraint.Name),
+		Source:              constraint,
+		CanRunInTransaction: true,
+	}, constraintCommentSQL(constraint, targetSchema, collector.qualifySchema))
 }

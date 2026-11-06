@@ -163,7 +163,7 @@ func withConstraintsRetainedByDetach(oldTable *ir.Table, tables map[string]*ir.T
 		retained.Schema = oldTable.Schema
 		retained.Table = oldTable.Name
 		retained.Name = childName
-		retained.Comment = ""
+		retained.Comment = oldTable.InheritedConstraintComments[childName]
 		table.Constraints[childName] = &retained
 	}
 	return &table
@@ -286,4 +286,87 @@ func (td *tableDiff) partitionContext(operation DiffOperation) *diffContext {
 		Source:              td.Table,
 		CanRunInTransaction: true,
 	}
+}
+
+// generatePartitionConstraintCommentsSQL emits the comments on partitions'
+// copies of inherited PRIMARY KEY, UNIQUE and FOREIGN KEY constraints. The
+// copies are not managed constraints, so their comments are reconciled here,
+// once every copy exists: after the tables, the attachments and the deferred
+// foreign keys. A copy whose family statements already carried its comment
+// (see partitionIndexCreationPlan) is skipped. A copy recreated with its
+// parent's constraint lost its comment, so its old comment counts as empty.
+// tables keys every table of each state by schema.name (issue #674).
+func generatePartitionConstraintCommentsSQL(oldTables, newTables map[string]*ir.Table, modifiedTables []*tableDiff, plan *partitionIndexCreationPlan, targetSchema string, collector *diffCollector) {
+	recreated := make(map[string]bool)
+	for _, td := range modifiedTables {
+		for _, constraint := range td.DroppedConstraints {
+			recreated[constraintPathKey(constraint)] = true
+		}
+		for _, change := range td.ModifiedConstraints {
+			recreated[constraintPathKey(change.Old)] = true
+		}
+	}
+	for _, key := range sortedKeys(newTables) {
+		table := newTables[key]
+		if table.PartitionOf == "" || len(table.InheritedConstraints) == 0 {
+			continue
+		}
+		oldTable := oldTables[key]
+		for _, parentName := range sortedKeys(table.InheritedConstraints) {
+			childName := table.InheritedConstraints[parentName]
+			if plan.commentEmitted(table, childName) {
+				continue
+			}
+			newComment := table.InheritedConstraintComments[childName]
+			oldComment := ""
+			if oldTable != nil && !inheritedConstraintRecreated(newTables, table, parentName, recreated) {
+				if oldTable.InheritedConstraints[parentName] == childName {
+					oldComment = oldTable.InheritedConstraintComments[childName]
+				} else if local := oldTable.Constraints[childName]; local != nil {
+					// A local constraint ATTACH PARTITION adopted as the copy
+					oldComment = local.Comment
+				}
+			}
+			if newComment == oldComment {
+				continue
+			}
+			operation := DiffOperationAlter
+			if oldTable == nil {
+				operation = DiffOperationCreate
+			}
+			generateConstraintComment(&ir.Constraint{
+				Schema:  table.Schema,
+				Table:   table.Name,
+				Name:    childName,
+				Comment: newComment,
+			}, targetSchema, operation, collector)
+		}
+	}
+}
+
+// inheritedConstraintRecreated reports whether the constraint a partition's
+// copy descends from, at any level up the hierarchy, is dropped or recreated
+// by this migration, which recreates the copies below it. parentName is the
+// name of the constraint one level above table.
+func inheritedConstraintRecreated(tables map[string]*ir.Table, table *ir.Table, parentName string, recreated map[string]bool) bool {
+	for parent := tables[partitionParentKey(table)]; parent != nil; parent = tables[partitionParentKey(table)] {
+		if recreated[parent.Schema+"."+parent.Name+"."+parentName] {
+			return true
+		}
+		if parent.PartitionOf == "" {
+			return false
+		}
+		next := ""
+		for candidate, copyName := range parent.InheritedConstraints {
+			if copyName == parentName {
+				next = candidate
+				break
+			}
+		}
+		if next == "" {
+			return false
+		}
+		table, parentName = parent, next
+	}
+	return false
 }

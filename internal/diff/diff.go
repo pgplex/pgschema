@@ -25,6 +25,7 @@ const (
 	DiffTypeTableComment
 	DiffTypeTableColumnComment
 	DiffTypeTableIndexComment
+	DiffTypeTableConstraintComment
 	DiffTypeTablePersistence
 	DiffTypeTablePartition
 	DiffTypeTableInherit
@@ -71,6 +72,8 @@ func (d DiffType) String() string {
 		return "table.column.comment"
 	case DiffTypeTableIndexComment:
 		return "table.index.comment"
+	case DiffTypeTableConstraintComment:
+		return "table.constraint.comment"
 	case DiffTypeTablePersistence:
 		return "table.persistence"
 	case DiffTypeTablePartition:
@@ -151,6 +154,8 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeTableColumnComment
 	case "table.index.comment":
 		*d = DiffTypeTableIndexComment
+	case "table.constraint.comment":
+		*d = DiffTypeTableConstraintComment
 	case "table.persistence":
 		*d = DiffTypeTablePersistence
 	case "table.partition":
@@ -316,6 +321,7 @@ type ddlDiff struct {
 	droppedTables      []*ir.Table
 	modifiedTables     []*tableDiff
 	allNewTables       map[string]*ir.Table
+	oldTables          map[string]*ir.Table
 	partitionIndexes   *partitionIndexCreationPlan
 	// inheritanceChildEffects are the DROP COLUMN and DROP CONSTRAINT
 	// statements inheritance descendants need after their parents' drops
@@ -470,12 +476,15 @@ type tableDiff struct {
 	AddedConstraints    []*ir.Constraint
 	DroppedConstraints  []*ir.Constraint
 	ModifiedConstraints []*ConstraintDiff
-	AddedIndexes        []*ir.Index
-	DroppedIndexes      []*ir.Index
-	ModifiedIndexes     []*IndexDiff
-	AddedTriggers       []*ir.Trigger
-	DroppedTriggers     []*ir.Trigger
-	ModifiedTriggers    []*triggerDiff
+	// ConstraintCommentChanges lists constraints whose only change is their
+	// comment; they keep their definition and get COMMENT ON CONSTRAINT (#674).
+	ConstraintCommentChanges []*ConstraintDiff
+	AddedIndexes             []*ir.Index
+	DroppedIndexes           []*ir.Index
+	ModifiedIndexes          []*IndexDiff
+	AddedTriggers            []*ir.Trigger
+	DroppedTriggers          []*ir.Trigger
+	ModifiedTriggers         []*triggerDiff
 	// RecreatedColumns names columns applied as DROP COLUMN + ADD COLUMN
 	// because their generation clause cannot be altered in place (issue #591).
 	// They appear in both DroppedColumns and AddedColumns; dependent objects
@@ -765,6 +774,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	}
 
 	diff.allNewTables = newTables
+	diff.oldTables = oldTables
 
 	// What a parent's column changes do to its inheritance children (see inherit.go)
 	diff.inheritanceChildEffects = planInheritanceEffects(diff.modifiedTables, oldTables, newTables, diff.droppedTables, targetSchema)
@@ -2516,6 +2526,10 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// (Re)create the dependent foreign keys now that the replacement constraints exist
 	generateDeferredConstraintsSQL(d.fkPostAdds, targetSchema, collector)
 
+	// Comments on partitions' copies of inherited constraints, now that every
+	// copy exists (see partition.go)
+	generatePartitionConstraintCommentsSQL(d.oldTables, d.allNewTables, d.modifiedTables, d.partitionIndexes, targetSchema, collector)
+
 	// Create views deferred from generateCreateSQL — their bodies reference
 	// columns just added by ALTER TABLE above (issue #414). Likewise, emit
 	// any functions whose view dependency was on those deferred views.
@@ -2910,6 +2924,9 @@ func sortTableObjects(tables []*tableDiff) {
 				return oi < oj
 			}
 			return tableDiff.ModifiedConstraints[i].New.Name < tableDiff.ModifiedConstraints[j].New.Name
+		})
+		sort.Slice(tableDiff.ConstraintCommentChanges, func(i, j int) bool {
+			return tableDiff.ConstraintCommentChanges[i].New.Name < tableDiff.ConstraintCommentChanges[j].New.Name
 		})
 
 		// Sort dropped policies

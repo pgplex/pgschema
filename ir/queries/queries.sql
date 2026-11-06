@@ -443,7 +443,9 @@ SELECT
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
-    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns,
+    -- COMMENT ON CONSTRAINT (issue #674)
+    COALESCE(obj_description(c.oid, 'pg_constraint'), '') AS constraint_comment
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1474,7 +1476,9 @@ SELECT
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
-    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns,
+    -- COMMENT ON CONSTRAINT (issue #674)
+    COALESCE(obj_description(c.oid, 'pg_constraint'), '') AS constraint_comment
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1636,7 +1640,9 @@ SELECT
     c.conname AS constraint_name,
     pn.nspname AS parent_schema,
     pcl.relname AS parent_table,
-    pc.conname AS parent_constraint_name
+    pc.conname AS parent_constraint_name,
+    -- The copy's own comment; PostgreSQL does not propagate the parent's (issue #674)
+    COALESCE(obj_description(c.oid, 'pg_constraint'), '') AS constraint_comment
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid

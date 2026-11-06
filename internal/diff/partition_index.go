@@ -127,6 +127,9 @@ type partitionIndexCreationPlan struct {
 	// whose bodies depend on the key.
 	created map[string]bool
 	emitted map[string]map[string]bool
+	// commented records, by schema.table.constraint, the partition copies
+	// whose comment the family statements carried (issue #674).
+	commented map[string]bool
 }
 
 func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[string]*ir.Table, dump bool) *partitionIndexCreationPlan {
@@ -139,6 +142,7 @@ func planPartitionIndexCreation(addedTables []*ir.Table, desiredTables map[strin
 		roots:        make(map[string]string),
 		created:      make(map[string]bool),
 		emitted:      make(map[string]map[string]bool),
+		commented:    make(map[string]bool),
 	}
 	added := make(map[string]*ir.Table)
 	available := availablePartitionIndexes(addedTables)
@@ -432,11 +436,20 @@ func (p *partitionIndexCreationPlan) appendConstraintFamily(statements *[]SQLSta
 		SQL:                 fmt.Sprintf("ALTER TABLE ONLY %s ADD %s;", tableName, generateConstraintSQL(constraint, targetSchema, qualifySchema)),
 		CanRunInTransaction: true,
 	})
+	if constraint.Comment != "" {
+		*statements = append(*statements, SQLStatement{
+			SQL:                 constraintCommentSQL(constraint, targetSchema, qualifySchema),
+			CanRunInTransaction: true,
+		})
+	}
 	for _, child := range p.partitions[table.Schema+"."+table.Name] {
 		childConstraint := *constraint
 		childConstraint.Schema = child.Schema
 		childConstraint.Table = child.Name
 		childConstraint.Name = child.InheritedConstraints[constraint.Name]
+		// Each copy carries its own comment; the parent's is not inherited
+		childConstraint.Comment = child.InheritedConstraintComments[childConstraint.Name]
+		p.commented[constraintPathKey(&childConstraint)] = true
 		p.appendConstraintFamily(statements, child, &childConstraint, targetSchema, qualifySchema)
 		*statements = append(*statements, SQLStatement{
 			SQL: fmt.Sprintf("ALTER INDEX %s ATTACH PARTITION %s;",
@@ -445,6 +458,12 @@ func (p *partitionIndexCreationPlan) appendConstraintFamily(statements *[]SQLSta
 			CanRunInTransaction: true,
 		})
 	}
+}
+
+// commentEmitted reports whether the family statements already carried the
+// comment on the named copy of table's inherited constraint.
+func (p *partitionIndexCreationPlan) commentEmitted(table *ir.Table, name string) bool {
+	return p != nil && p.commented[table.Schema+"."+table.Name+"."+name]
 }
 
 func (p *partitionIndexCreationPlan) defersForeignKey(table *ir.Table, constraint *ir.Constraint) bool {

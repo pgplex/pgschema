@@ -1,0 +1,9 @@
+{
+  "name": "issue_674_constraint_comment",
+  "description": "Dump dropped COMMENT ON CONSTRAINT for table constraints, including a partition's own comment on its inherited primary key copy",
+  "source": "https://github.com/pgplex/pgschema/issues/674",
+  "notes": [
+    "Constraint comments are read from pg_description (obj_description(oid, 'pg_constraint')) and emitted after the statement that creates the constraint.",
+    "A partition's copy of a parent's PRIMARY KEY/UNIQUE constraint does not inherit the parent's comment; each copy carries its own, emitted with the explicit constraint family."
+  ]
+}
