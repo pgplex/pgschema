@@ -1,5 +1,0 @@
-DROP TYPE IF EXISTS span RESTRICT;
-
-DROP FUNCTION IF EXISTS span_diff(integer, integer);
-
-DROP TYPE IF EXISTS z_status RESTRICT;

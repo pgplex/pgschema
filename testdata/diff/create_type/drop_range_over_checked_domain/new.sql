@@ -1,3 +1,0 @@
--- Everything goes. The range references positive_diff, whose signature uses
--- the domain, whose CHECK uses is_positive: range, then positive_diff, then
--- the domain, then is_positive.

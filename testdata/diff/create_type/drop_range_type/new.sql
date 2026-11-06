@@ -1,2 +1,0 @@
--- Both the table and the range type are removed: the table goes first, then
--- the type (its multirange and array types go with it).

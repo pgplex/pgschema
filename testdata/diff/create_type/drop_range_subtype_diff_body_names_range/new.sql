@@ -1,1 +1,0 @@
--- Everything goes: the range, then its subtype_diff function, then the enum.

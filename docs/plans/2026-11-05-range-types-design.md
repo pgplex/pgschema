@@ -133,15 +133,15 @@ CREATE TYPE rprobe.timerange AS RANGE (
 > Phases 2 and 3 landed together after that. Two deviations from the text
 > below: `COMMENT ON TYPE` is not generated for any type kind today (the IR
 > captures `Type.Comment`, but no diff code emits it), so range comments are
-> not round-tripped either and the `add_range_type` case carries no comment;
+> not round-tripped either and the `range_types` case carries no comment;
 > and the `subtype_diff` include case was dropped because `main.sql` includes
 > the whole `types/` folder before any function, so it cannot express that
-> ordering. The `add_range_subtype_diff` diff case covers it through apply.
+> ordering. The `range_types` diff case covers it through apply.
 > One addition: functions are dropped before types, so dropping a range and
 > its `subtype_diff` function together failed with a dependency error; the
 > drop phase now holds back a dropped function that a dropped type (range or
 > domain) still references until after the types are gone
-> (`drop_range_with_subtype_diff`).
+> (`range_types`).
 >
 > Review of PR #684 moved a few things from the text below:
 > - A modified range is not replaced in the enum-ADD VALUE slot, and not as
@@ -151,19 +151,18 @@ CREATE TYPE rprobe.timerange AS RANGE (
 >   in the create phase through the same buckets a new range uses (after a
 >   new function or type it needs, before the tables that use it). The plan
 >   reports it as one drop and one add of the same type, which is what runs
->   (`alter_range_with_dropped_table`, `alter_range_add_subtype_diff`,
->   `alter_range_drop_old_subtype_diff`). A range column removed from a
+>   (`range_types`). A range column removed from a
 >   retained table is still dropped in the modify phase, after the DROP
 >   TYPE, so that combination fails with PostgreSQL's dependency error.
 > - Deferral propagates: a composite with a range attribute, a domain over
 >   its multirange, a table with an array column of either, and a function
 >   whose signature uses the range all wait for a deferred range
->   (`add_range_subtype_diff`).
+>   (`range_types`).
 > - Dropped types and held-back functions are ordered together by
 >   dependency (`orderTypeAndFunctionDrops`): a type before the type it is
 >   built on, a type before the function it names, a function before the
 >   type its signature uses, a caller before its callee
->   (`drop_range_subtype_diff_chain`, `drop_range_over_checked_domain`). That last part exposed an inspector
+>   (`range_types`). That last part exposed an inspector
 >   bug: `GetFunctionDependencies` keyed functions by identity arguments
 >   (with parameter names) while the Functions map is keyed by types, so
 >   named-parameter functions never had dependencies. It now uses
@@ -172,7 +171,7 @@ CREATE TYPE rprobe.timerange AS RANGE (
 >   the subtype normalized the way parameter types are (`timestamp without
 >   time zone` -> `timestamp`), so an overload taking the range itself is a
 >   dependent of the range, not its support function
->   (`drop_range_subtype_diff_overload`, `add_range_subtype_diff_timestamp`).
+>   (`range_types`).
 > - In the joint drop order a held function also precedes a type PostgreSQL
 >   records it as depending on: a new `GetFunctionTypeDependencies` query
 >   reads `pg_depend` from `pg_proc` to `pg_type` (signature, SQL-standard
@@ -180,8 +179,7 @@ CREATE TYPE rprobe.timerange AS RANGE (
 >   `Function.TypeDependencies`. A textual match of the body was tried first
 >   and dropped: a literal or parameter named like a type makes a false edge,
 >   and two such hints can hide a real one
->   (`drop_range_subtype_diff_body_type`,
->   `drop_range_subtype_diff_body_names_range`, `drop_two_ranges_cross_body`).
+>   (`range_types`).
 > - `makeMultirangeTypeName` clips the range name to NAMEDATALEN-12 bytes
 >   before appending `_multirange`; the port does the same.
 > - Grants on a replaced range are lost, like grants on a recreated function
@@ -368,22 +366,32 @@ inspected.
 
 ## Tests
 
-Diff cases under `testdata/diff/create_type/` (each with `old.sql`,
-`new.sql`, generated `diff.sql` / `plan.*`):
+One diff case, `testdata/diff/create_type/range_types/` (`old.sql`,
+`new.sql`, generated `diff.sql` / `plan.*`), whose single transition covers
+every range behavior at once, since each case carries its own fixture and
+apply overhead:
 
-| Case | Checks |
-|---|---|
-| `add_range_type` | From empty: `CREATE TYPE floatrange AS RANGE (subtype = double precision)` printed before a table with a `floatrange` column, a `floatmultirange` column and `EXCLUDE USING gist (r WITH &&)`; `COMMENT ON TYPE`; no constructor functions in the plan. Added to `essentialTests` so 14-17 cover it. |
-| `add_range_options` | `text` subtype with `collation = "C"`, `subtype_opclass = pg_catalog.text_pattern_ops` and `multirange_type_name = textspans`; all three rendered; a second range with the default multirange name prints no `multirange_type_name`. |
-| `add_range_subtype_diff` | Function, range and table in one file: function first, range after the functions phase, table after the range. |
-| `add_range_enum_subtype` | Range over a new enum: enum before range. |
-| `add_range_in_composite_and_domain` | A composite with a range attribute and a domain over a range: range first. |
-| `drop_range_type` | Table and range removed: `DROP TABLE` then `DROP TYPE ... RESTRICT`. |
-| `alter_range_subtype` | Subtype changes with no dependents: `DROP TYPE` then `CREATE TYPE` in the alter slot. |
-| `range_column_unchanged` | Both sides have the range and a column using it: no changes detected. |
+- Drops: a table, an overload taking the range, the range, its
+  `subtype_diff`; a chain domain-over-multirange -> range -> `subtype_diff`
+  -> helper callee -> enum; a chain range -> `subtype_diff` -> checked
+  domain -> CHECK function; and two ranges whose `subtype_diff` bodies
+  cross-reference (a recorded cast to the other range and to an enum, a
+  string literal naming a range that is not a dependency).
+- Replaces: subtype change only; gains a `subtype_diff` created in the plan;
+  loses one dropped in the plan; loses the table that used it.
+- Adds: a bare range with a table using it and its default-named multirange
+  (EXCLUDE, no constructor functions in the plan, `GRANT USAGE` round-trip);
+  every non-function option and both default multirange name rules; a range
+  over a new enum; a composite and a domain over a new range; a range whose
+  `subtype_diff` is created in the plan (`timestamp` spelling normalized)
+  with a composite, a domain, a table with array columns and a function
+  waiting for it.
+- Keeps: a range with a `subtype_diff`, a range with every option, and a
+  table using both; none of it appears in the plan.
 
-`privilege/` gets `grant_type_range` (`GRANT USAGE ON TYPE`), and
-`comment/` gets a range case only if the comment path turns out to need one.
+It is in `essentialTests`, so 14-17 run it too. `privilege/` needs no range
+case: the grant is part of `range_types`. `comment/` gets a range case
+only if the comment path turns out to need one.
 
 A `testdata/dump/range/` suite (`manifest.json`, `raw.sql`, `pgdump.sql`,
 `pgschema.sql`) built from the probe schema above, registered with

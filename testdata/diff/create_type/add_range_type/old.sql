@@ -1,1 +1,0 @@
--- Empty starting state: the range type and the table using it are both new

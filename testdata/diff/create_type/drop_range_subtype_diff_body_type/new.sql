@@ -1,2 +1,0 @@
--- Everything goes: the range, then its subtype_diff function, then the enum
--- that function's body depends on (even though the range does not).

@@ -1,9 +1,0 @@
-DROP DOMAIN IF EXISTS band_set RESTRICT;
-
-DROP TYPE IF EXISTS band RESTRICT;
-
-DROP FUNCTION IF EXISTS severity_diff(severity, severity);
-
-DROP FUNCTION IF EXISTS severity_num(severity);
-
-DROP TYPE IF EXISTS severity RESTRICT;

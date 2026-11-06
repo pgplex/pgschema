@@ -1,2 +1,0 @@
--- The range depends on its subtype_diff function, so the function can only
--- be dropped after the type, which can only be dropped after the table.

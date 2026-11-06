@@ -1,2 +1,0 @@
--- Everything goes: z_span, then z_diff (which depends on a_span), then
--- a_span, then a_diff.

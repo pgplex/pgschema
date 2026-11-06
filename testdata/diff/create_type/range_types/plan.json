@@ -1,0 +1,290 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "ab64ab2db361a221e646452619112d80254df9a01458faab44a2937de5f83ed6"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP FUNCTION IF EXISTS time_diff(timerange);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.time_diff"
+        },
+        {
+          "sql": "DROP TABLE IF EXISTS windows CASCADE;",
+          "type": "table",
+          "operation": "drop",
+          "path": "public.windows"
+        },
+        {
+          "sql": "DROP TABLE IF EXISTS shifts CASCADE;",
+          "type": "table",
+          "operation": "drop",
+          "path": "public.shifts"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS z_span RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.z_span"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS timerange RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.timerange"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS span_table RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.span_table"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS span_subtype RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.span_subtype"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS span_loses RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.span_loses"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS span_gains RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.span_gains"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS positive_span RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.positive_span"
+        },
+        {
+          "sql": "DROP DOMAIN IF EXISTS band_set RESTRICT;",
+          "type": "domain",
+          "operation": "drop",
+          "path": "public.band_set"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS band RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.band"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS z_diff(integer, integer);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.z_diff"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS a_span RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.a_span"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS time_diff(time without time zone, time without time zone);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.time_diff"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS severity_diff(severity, severity);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.severity_diff"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS severity_num(severity);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.severity_num"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS severity RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.severity"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS positive_diff(positive, positive);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.positive_diff"
+        },
+        {
+          "sql": "DROP DOMAIN IF EXISTS positive RESTRICT;",
+          "type": "domain",
+          "operation": "drop",
+          "path": "public.positive"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS old_diff(integer, integer);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.old_diff"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS is_positive(integer);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.is_positive"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS a_diff(integer, integer);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.a_diff"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS z_status RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.z_status"
+        },
+        {
+          "sql": "CREATE TYPE floatrange AS RANGE (\n    subtype = double precision\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.floatrange"
+        },
+        {
+          "sql": "CREATE TYPE level AS ENUM (\n    'low',\n    'medium',\n    'high'\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.level"
+        },
+        {
+          "sql": "CREATE TYPE level_band AS RANGE (\n    subtype = level\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.level_band"
+        },
+        {
+          "sql": "CREATE TYPE period AS RANGE (\n    subtype = date\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.period"
+        },
+        {
+          "sql": "CREATE DOMAIN availability AS period_multirange;",
+          "type": "domain",
+          "operation": "create",
+          "path": "public.availability"
+        },
+        {
+          "sql": "CREATE TYPE booking AS (room integer, slot period);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.booking"
+        },
+        {
+          "sql": "CREATE TYPE pricerange AS RANGE (\n    subtype = numeric\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.pricerange"
+        },
+        {
+          "sql": "CREATE TYPE span AS RANGE (\n    subtype = integer\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.span"
+        },
+        {
+          "sql": "CREATE TYPE span_loses AS RANGE (\n    subtype = bigint\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.span_loses"
+        },
+        {
+          "sql": "CREATE TYPE span_subtype AS RANGE (\n    subtype = bigint\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.span_subtype"
+        },
+        {
+          "sql": "CREATE TYPE span_table AS RANGE (\n    subtype = bigint\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.span_table"
+        },
+        {
+          "sql": "CREATE TYPE textrange AS RANGE (\n    subtype = text,\n    multirange_type_name = textspans,\n    subtype_opclass = pg_catalog.text_pattern_ops,\n    collation = \"C\"\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.textrange"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS reservations (\n    id integer,\n    during floatrange,\n    gaps floatmultirange,\n    CONSTRAINT reservations_pkey PRIMARY KEY (id),\n    CONSTRAINT reservations_during_excl EXCLUDE USING gist (during WITH &&)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.reservations"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION new_diff(\n    x integer,\n    y integer\n)\nRETURNS double precision\nLANGUAGE sql\nIMMUTABLE\nSTRICT\nAS $$SELECT (x - y)::double precision\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.new_diff"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION ts_diff(\n    x timestamp,\n    y timestamp\n)\nRETURNS double precision\nLANGUAGE sql\nIMMUTABLE\nSTRICT\nAS $$SELECT EXTRACT(EPOCH FROM (x - y))\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.ts_diff"
+        },
+        {
+          "sql": "CREATE TYPE span_gains AS RANGE (\n    subtype = integer,\n    subtype_diff = new_diff\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.span_gains"
+        },
+        {
+          "sql": "CREATE TYPE stamp_span AS RANGE (\n    subtype = timestamp without time zone,\n    subtype_diff = ts_diff\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.stamp_span"
+        },
+        {
+          "sql": "CREATE DOMAIN break_set AS stamp_span_multirange;",
+          "type": "domain",
+          "operation": "create",
+          "path": "public.break_set"
+        },
+        {
+          "sql": "CREATE TYPE shift_slot AS (room integer, during stamp_span);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.shift_slot"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS stamps (\n    id integer,\n    during stamp_span,\n    breaks stamp_span_multirange,\n    history stamp_span[],\n    past_breaks stamp_span_multirange[],\n    CONSTRAINT stamps_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.stamps"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION stamp_length(\n    r stamp_span\n)\nRETURNS double precision\nLANGUAGE sql\nIMMUTABLE\nSTRICT\nAS $$SELECT EXTRACT(EPOCH FROM (upper(r) - lower(r)))\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.stamp_length"
+        },
+        {
+          "sql": "GRANT USAGE ON TYPE floatrange TO app_role;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TYPE.floatrange.app_role"
+        }
+      ]
+    }
+  ]
+}
