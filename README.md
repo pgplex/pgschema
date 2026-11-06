@@ -85,7 +85,7 @@ pgschema covers all the schema objects developers use in real-world Postgres app
 | **Aggregates** | SFUNC/STYPE/FINALFUNC/INITCOND, COMBINEFUNC and SERIALFUNC/DESERIALFUNC, moving-aggregate support, SORTOP, PARALLEL, ordered-set/hypothetical-set |
 | **Triggers** | BEFORE/AFTER/INSTEAD OF, INSERT/UPDATE/DELETE/TRUNCATE, ROW/STATEMENT level, WHEN conditions, constraint triggers, REFERENCING OLD/NEW TABLE |
 | **Sequences** | START WITH, INCREMENT BY, MINVALUE/MAXVALUE, CYCLE, CACHE, OWNED BY |
-| **Types** | ENUM (add values in-place), composite types |
+| **Types** | ENUM (add values in-place), composite types, range types |
 | **Domains** | Base type, DEFAULT, NOT NULL, named and anonymous CHECK constraints |
 | **Policies** | Row-level security (RLS), PERMISSIVE/RESTRICTIVE, ALL/SELECT/INSERT/UPDATE/DELETE commands, USING/WITH CHECK expressions, ENABLE/DISABLE/FORCE ROW LEVEL SECURITY |
 | **Privileges** | GRANT/REVOKE for tables (including column-level), sequences, functions, procedures, types/domains; WITH GRANT OPTION |

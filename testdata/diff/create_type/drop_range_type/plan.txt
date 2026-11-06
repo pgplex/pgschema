@@ -1,0 +1,18 @@
+Plan: 2 to drop.
+
+Summary by type:
+  types: 1 to drop
+  tables: 1 to drop
+
+Types:
+  - floatrange
+
+Tables:
+  - reservations
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP TABLE IF EXISTS reservations CASCADE;
+
+DROP TYPE IF EXISTS floatrange RESTRICT;

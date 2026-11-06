@@ -4,6 +4,8 @@
   "notes": [
     "PostgreSQL creates five constructor functions (LANGUAGE internal) for every range type; they depend internally on the type and are not dumped, as in pg_dump.",
     "A column of a range or multirange type from another schema keeps its schema prefix; built-in int4range and int4multirange stay bare.",
-    "The CREATE TYPE ... AS RANGE statements themselves are not yet dumped (Phase 2 of docs/plans/2026-11-05-range-types-design.md)."
+    "multirange_type_name is printed only when it is not the default PostgreSQL would pick (floatspans vs floatspan_multirange); timemultirange is omitted.",
+    "timerange names time_diff as its subtype_diff, so it is dumped after the function.",
+    "COMMENT ON TYPE is not dumped for any type kind yet, so the comment on timerange is not round-tripped."
   ]
 }

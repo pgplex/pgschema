@@ -476,6 +476,7 @@ const (
 	TypeKindEnum      TypeKind = "ENUM"
 	TypeKindComposite TypeKind = "COMPOSITE"
 	TypeKindDomain    TypeKind = "DOMAIN"
+	TypeKindRange     TypeKind = "RANGE"
 )
 
 // TypeColumn represents a column in a composite type
@@ -503,6 +504,22 @@ type Type struct {
 	NotNull     bool                `json:"not_null,omitempty"`    // For DOMAIN types
 	Default     string              `json:"default,omitempty"`     // For DOMAIN types
 	Constraints []*DomainConstraint `json:"constraints,omitempty"` // For DOMAIN types
+
+	// Range types (Kind == TypeKindRange). Subtype follows the domain BaseType
+	// convention: format_type for pg_catalog types, otherwise quote_ident-qualified,
+	// with the target-schema prefix stripped at render time. Function references
+	// follow the aggregate convention: bare when in the type's own schema,
+	// qualified otherwise, emitted verbatim. SubtypeOpclass and Collation are
+	// empty when they are the subtype's defaults, matching what pg_dump prints.
+	// MultirangeTypeName is always populated by the inspector (bare when it lives
+	// in the range's schema); the renderer prints it only when it differs from
+	// the PostgreSQL default.
+	Subtype            string `json:"subtype,omitempty"`
+	SubtypeOpclass     string `json:"subtype_opclass,omitempty"`
+	Collation          string `json:"collation,omitempty"`
+	Canonical          string `json:"canonical,omitempty"`
+	SubtypeDiff        string `json:"subtype_diff,omitempty"`
+	MultirangeTypeName string `json:"multirange_type_name,omitempty"`
 }
 
 // Aggregate represents a database aggregate function.

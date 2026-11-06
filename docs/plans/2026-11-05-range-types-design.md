@@ -129,6 +129,19 @@ CREATE TYPE rprobe.timerange AS RANGE (
 > `queries.sql` (functions, procedures, aggregates, privileges), and the
 > `testdata/dump/range/` suite was added with a `pgschema.sql` that still
 > lacks the `CREATE TYPE ... AS RANGE` statements; Phase 2 regenerates it.
+>
+> Phases 2 and 3 landed together after that. Two deviations from the text
+> below: `COMMENT ON TYPE` is not generated for any type kind today (the IR
+> captures `Type.Comment`, but no diff code emits it), so range comments are
+> not round-tripped either and the `add_range_type` case carries no comment;
+> and the `subtype_diff` include case was dropped because `main.sql` includes
+> the whole `types/` folder before any function, so it cannot express that
+> ordering. The `add_range_subtype_diff` diff case covers it through apply.
+> One addition: functions are dropped before types, so dropping a range and
+> its `subtype_diff` function together failed with a dependency error; the
+> drop phase now holds back a dropped function that a dropped type (range or
+> domain) still references until after the types are gone
+> (`drop_range_with_subtype_diff`).
 
 
 ### IR

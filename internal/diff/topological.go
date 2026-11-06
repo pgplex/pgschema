@@ -313,29 +313,45 @@ func topologicallySortTypes(types []*ir.Type) []*ir.Type {
 		adjList[key] = []string{}
 	}
 
+	// A range type's multirange is created with it, so a reference to the
+	// multirange is a dependency on the range.
+	multirangeOwner := make(map[string]string)
+	for key, t := range typeMap {
+		if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+			if owner := extractTypeName(t.MultirangeTypeName, t.Schema); owner != "" {
+				multirangeOwner[owner] = key
+			}
+		}
+	}
+
 	// Build edges: if typeA references typeB (composite type column uses typeB), add edge typeB -> typeA
+	addEdge := func(keyA, dataType, schema string) {
+		// Extract type name from DataType (may include schema prefix or array notation)
+		referencedType := extractTypeName(dataType, schema)
+		if referencedType == "" {
+			return
+		}
+		if _, exists := typeMap[referencedType]; !exists {
+			referencedType = multirangeOwner[referencedType]
+		}
+		// Check if the referenced type exists in our set
+		if _, exists := typeMap[referencedType]; exists && keyA != referencedType {
+			adjList[referencedType] = append(adjList[referencedType], keyA)
+			inDegree[keyA]++
+		}
+	}
 	for keyA, typeA := range typeMap {
-		if typeA.Kind == ir.TypeKindComposite {
+		switch typeA.Kind {
+		case ir.TypeKindComposite:
 			for _, col := range typeA.Columns {
-				// Extract type name from DataType (may include schema prefix or array notation)
-				referencedType := extractTypeName(col.DataType, typeA.Schema)
-				if referencedType != "" {
-					// Check if the referenced type exists in our set
-					if _, exists := typeMap[referencedType]; exists && keyA != referencedType {
-						adjList[referencedType] = append(adjList[referencedType], keyA)
-						inDegree[keyA]++
-					}
-				}
+				addEdge(keyA, col.DataType, typeA.Schema)
 			}
-		} else if typeA.Kind == ir.TypeKindDomain {
+		case ir.TypeKindDomain:
 			// Domain types may reference other types as their base type
-			referencedType := extractTypeName(typeA.BaseType, typeA.Schema)
-			if referencedType != "" {
-				if _, exists := typeMap[referencedType]; exists && keyA != referencedType {
-					adjList[referencedType] = append(adjList[referencedType], keyA)
-					inDegree[keyA]++
-				}
-			}
+			addEdge(keyA, typeA.BaseType, typeA.Schema)
+		case ir.TypeKindRange:
+			// A range over an enum or domain needs its subtype first
+			addEdge(keyA, typeA.Subtype, typeA.Schema)
 		}
 	}
 

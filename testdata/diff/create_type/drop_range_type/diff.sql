@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS reservations CASCADE;
+
+DROP TYPE IF EXISTS floatrange RESTRICT;

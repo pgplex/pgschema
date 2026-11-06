@@ -186,7 +186,7 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 - **Procedures**: Parameters, signatures, language
 - **Triggers**: Timing, events, levels, WHEN conditions, constraint triggers, REFERENCING OLD/NEW TABLE
 - **Sequences**: Start, increment, min/max, cycle, cache, owned by tracking
-- **Types**: Enum, composite, domain types with constraints
+- **Types**: Enum, composite, domain types with constraints, range types (subtype, operator class, collation, subtype_diff, multirange name)
 - **Policies**: Row-level security with commands, roles, USING/WITH CHECK expressions
 - **Aggregates**: Custom aggregates with the full option set (transition/final/combine/serial/deserial functions, moving-aggregate support, SSPACE, SORTOP, PARALLEL, ordered-set/hypothetical-set)
 - **Privileges**: GRANT/REVOKE for tables, functions, sequences, types

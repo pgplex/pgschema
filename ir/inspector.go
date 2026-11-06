@@ -2384,6 +2384,12 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 		return err
 	}
 
+	// Get range types
+	rangeTypes, err := i.queries.GetRangeTypesForSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
+	if err != nil {
+		return err
+	}
+
 	// Get enum values for ENUM types
 	enumValues, err := i.queries.GetEnumValuesForSchema(ctx, sql.NullString{String: targetSchema, Valid: true})
 	if err != nil {
@@ -2519,6 +2525,28 @@ func (i *Inspector) buildTypes(ctx context.Context, schema *IR, targetSchema str
 		}
 
 		dbSchema.SetType(domainName, domainType)
+	}
+
+	// Create range types. The auto-created multirange and array types are not
+	// types of their own: they are dropped with the range and never listed.
+	for _, r := range rangeTypes {
+		if i.ignoreConfig != nil && i.ignoreConfig.ShouldIgnoreType(r.TypeName) {
+			continue
+		}
+
+		dbSchema := schema.getOrCreateSchema(r.TypeSchema)
+		dbSchema.SetType(r.TypeName, &Type{
+			Schema:             r.TypeSchema,
+			Name:               r.TypeName,
+			Kind:               TypeKindRange,
+			Comment:            r.TypeComment.String,
+			Subtype:            r.Subtype.String,
+			SubtypeOpclass:     r.SubtypeOpclass.String,
+			Collation:          r.Collation.String,
+			Canonical:          r.Canonical.String,
+			SubtypeDiff:        r.SubtypeDiff.String,
+			MultirangeTypeName: r.MultirangeTypeName.String,
+		})
 	}
 
 	return nil

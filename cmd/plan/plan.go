@@ -697,6 +697,8 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			typ.Schema = toSchema
 			typ.BaseType = replaceString(typ.BaseType)
 			typ.Default = replaceString(typ.Default)
+			typ.Subtype = replaceString(typ.Subtype)
+			typ.MultirangeTypeName = replaceString(typ.MultirangeTypeName)
 			for _, col := range typ.Columns {
 				col.DataType = replaceString(col.DataType)
 			}

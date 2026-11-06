@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pgplex/pgschema/ir"
 )
@@ -295,8 +296,79 @@ func generateTypeSQL(typeObj *ir.Type, targetSchema string, qualifySchema bool) 
 		}
 
 		return strings.Join(lines, "\n") + ";"
+	case ir.TypeKindRange:
+		// Options in pg_dump's order, each only when it carries information:
+		// the inspector leaves the opclass and collation empty when they are
+		// the subtype's defaults, and the multirange name is printed only when
+		// it is not the one PostgreSQL would pick.
+		subtype := stripSchemaPrefixMode(typeObj.Subtype, targetSchema, qualifySchema)
+		lines := []string{fmt.Sprintf("    subtype = %s", subtype)}
+		if multirange := stripSchemaPrefixMode(typeObj.MultirangeTypeName, targetSchema, qualifySchema); multirange != "" &&
+			(findLastUnquotedDot(multirange) != -1 || unquoteIdent(multirange) != defaultMultirangeTypeName(typeObj.Name)) {
+			lines = append(lines, fmt.Sprintf("    multirange_type_name = %s", multirange))
+		}
+		if typeObj.SubtypeOpclass != "" {
+			lines = append(lines, fmt.Sprintf("    subtype_opclass = %s", typeObj.SubtypeOpclass))
+		}
+		if typeObj.Collation != "" {
+			lines = append(lines, fmt.Sprintf("    collation = %s", typeObj.Collation))
+		}
+		if typeObj.Canonical != "" {
+			lines = append(lines, fmt.Sprintf("    canonical = %s", typeObj.Canonical))
+		}
+		if typeObj.SubtypeDiff != "" {
+			lines = append(lines, fmt.Sprintf("    subtype_diff = %s", typeObj.SubtypeDiff))
+		}
+		return fmt.Sprintf("CREATE TYPE %s AS RANGE (\n%s\n);", typeName, strings.Join(lines, ",\n"))
 	default:
 		return fmt.Sprintf("CREATE TYPE %s;", typeName)
+	}
+}
+
+// defaultMultirangeTypeName is a port of makeMultirangeTypeName in
+// src/backend/catalog/pg_type.c: the name PostgreSQL gives the multirange of
+// a range type when CREATE TYPE names none. "range" inside the name becomes
+// "multirange" at its first occurrence; otherwise "_multirange" is appended.
+// The result is clipped to the identifier limit like any generated name.
+func defaultMultirangeTypeName(rangeName string) string {
+	var name string
+	if idx := strings.Index(rangeName, "range"); idx != -1 {
+		name = rangeName[:idx] + "multi" + rangeName[idx:]
+	} else {
+		name = rangeName + "_multirange"
+	}
+	// Clip to NAMEDATALEN-1 bytes without cutting a multi-byte character, as
+	// the server's truncate_identifier does.
+	for len(name) > maxIdentifierBytes {
+		_, size := utf8.DecodeLastRuneInString(name)
+		name = name[:len(name)-size]
+	}
+	return name
+}
+
+// generateReplaceRangeTypesSQL drops and recreates modified range types.
+// PostgreSQL offers no ALTER TYPE for a range's definition, so a changed
+// subtype, opclass, collation, function or multirange name means replacement.
+// The DROP uses RESTRICT: when a column still uses the type, PostgreSQL's own
+// dependency error is the honest outcome, and the user changes or drops that
+// column in the same file to proceed.
+func generateReplaceRangeTypesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindRange || diff.New.Kind != ir.TypeKindRange {
+			continue
+		}
+		typeName := qualifyEntityName(diff.New.Schema, diff.New.Name, targetSchema)
+		context := &diffContext{
+			Type:      DiffTypeType,
+			Operation: DiffOperationAlter,
+			Path:      fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+			Source:    diff,
+		}
+		// One step with two statements, so the plan reports one modified type.
+		collector.collectStatements(context, []SQLStatement{
+			{SQL: fmt.Sprintf("DROP TYPE IF EXISTS %s RESTRICT;", typeName), CanRunInTransaction: true},
+			{SQL: generateTypeSQL(diff.New, targetSchema, collector.qualifySchema), CanRunInTransaction: true},
+		})
 	}
 }
 
@@ -355,6 +427,18 @@ func typesEqual(old, new *ir.Type) bool {
 			if constraint.Name != newConstraint.Name || constraint.Definition != newConstraint.Definition {
 				return false
 			}
+		}
+
+	case ir.TypeKindRange:
+		// Both sides come from inspection, so the multirange name is always
+		// populated and compares directly; a renamed multirange is a change.
+		if old.Subtype != new.Subtype ||
+			old.SubtypeOpclass != new.SubtypeOpclass ||
+			old.Collation != new.Collation ||
+			old.Canonical != new.Canonical ||
+			old.SubtypeDiff != new.SubtypeDiff ||
+			old.MultirangeTypeName != new.MultirangeTypeName {
+			return false
 		}
 	}
 

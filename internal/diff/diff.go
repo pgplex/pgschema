@@ -1763,6 +1763,10 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// ADD VALUE only depends on the enum itself, which already exists.
 	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
 
+	// A modified range type is dropped and recreated here, before the create
+	// phase, so a new table can use the new definition.
+	generateReplaceRangeTypesSQL(d.modifiedTypes, targetSchema, collector)
+
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
 	preDroppedViews := d.generatePreDropMaterializedViewsSQL(targetSchema, collector)
@@ -2030,12 +2034,13 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// Separate types into three buckets:
 	// 1. Types/domains with no deps on new functions or tables — created immediately.
-	// 2. Domains with function deps ONLY (no table dep) — created after functions
-	//    but before tables, so tables that use the domain as a column type work.
+	// 2. Domains with function deps ONLY (no table dep), and range types whose
+	//    subtype_diff is a new function — created after functions but before
+	//    tables, so tables that use the type as a column type work.
 	// 3. Domains with table deps (with or without function deps) — created after
 	//    ALL tables, because the domain's base type is a table's implicit row type.
 	typesWithoutDeps := []*ir.Type{}
-	domainsWithFunctionDepsOnly := []*ir.Type{}
+	typesWithFunctionDepsOnly := []*ir.Type{}
 	domainsWithTableDeps := []*ir.Type{}
 	// Two separate lookups so table classification can distinguish which
 	// deferred-domain bucket a column type belongs to.
@@ -2043,25 +2048,32 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	tableDomainLookup := make(map[string]struct{})
 
 	addToLookup := func(lookup map[string]struct{}, typeObj *ir.Type) {
-		lookup[strings.ToLower(typeObj.Name)] = struct{}{}
-		if typeObj.Schema != "" {
-			qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(typeObj.Name))
-			lookup[qualified] = struct{}{}
+		add := func(name string) {
+			lookup[strings.ToLower(name)] = struct{}{}
+			if typeObj.Schema != "" && !strings.Contains(name, ".") {
+				qualified := fmt.Sprintf("%s.%s", strings.ToLower(typeObj.Schema), strings.ToLower(name))
+				lookup[qualified] = struct{}{}
+			}
+		}
+		add(typeObj.Name)
+		// A column of the range's multirange waits for the range as well.
+		if typeObj.Kind == ir.TypeKindRange && typeObj.MultirangeTypeName != "" {
+			add(unquoteIdent(typeObj.MultirangeTypeName))
 		}
 	}
 
 	for _, typeObj := range d.addedTypes {
-		if typeObj.Kind != ir.TypeKindDomain {
+		if typeObj.Kind != ir.TypeKindDomain && typeObj.Kind != ir.TypeKindRange {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 			continue
 		}
 		hasTableDep := domainReferencesNewTable(typeObj, newTableNameLookup)
-		hasFunctionDep := domainReferencesNewFunction(typeObj, newFunctionLookup)
+		hasFunctionDep := typeReferencesNewFunction(typeObj, newFunctionLookup)
 		if hasTableDep {
 			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
 			addToLookup(tableDomainLookup, typeObj)
 		} else if hasFunctionDep {
-			domainsWithFunctionDepsOnly = append(domainsWithFunctionDepsOnly, typeObj)
+			typesWithFunctionDepsOnly = append(typesWithFunctionDepsOnly, typeObj)
 			addToLookup(functionDomainLookup, typeObj)
 		} else {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
@@ -2241,7 +2253,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		// validated at creation, so one referencing a hierarchy that completes
 		// in a later batch moves after that batch, unless an earlier table or
 		// domain needs it first.
-		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, domainsWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
+		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, typesWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
@@ -2254,7 +2266,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create domains that only depend on functions (not tables). These must come
 	// after functions but before tables, because tables may use these domains as
 	// column types.
-	generateCreateTypesSQL(domainsWithFunctionDepsOnly, targetSchema, collector)
+	generateCreateTypesSQL(typesWithFunctionDepsOnly, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	// A procedure whose body may depend on a postponed key (issue #653) waits
@@ -2571,8 +2583,12 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// transition/final functions (issue #416).
 	generateDropAggregatesSQL(d.droppedAggregates, targetSchema, collector)
 
-	// Drop functions
-	generateDropFunctionsSQL(d.droppedFunctions, targetSchema, collector)
+	// Drop functions. A function that a dropped type still references (a
+	// range's subtype_diff, a domain's CHECK or default) cannot go until the
+	// type has, and the type cannot go until the tables using it have, so
+	// those functions wait for the end of the drop phase.
+	functionsToDrop, functionsAfterTypes := holdBackFunctionsOfDroppedTypes(d.droppedFunctions, d.droppedTypes)
+	generateDropFunctionsSQL(functionsToDrop, targetSchema, collector)
 
 	// Drop procedures
 	generateDropProceduresSQL(d.droppedProcedures, targetSchema, collector)
@@ -2596,6 +2612,9 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 
 	// Drop types
 	generateDropTypesSQL(d.droppedTypes, targetSchema, collector)
+
+	// Drop the functions those types depended on
+	generateDropFunctionsSQL(functionsAfterTypes, targetSchema, collector)
 
 	// Drop schemas
 	// Note: Schema deletion is out of scope for schema-level comparisons
@@ -3223,7 +3242,7 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 			}
 		}
 		for _, domain := range domains {
-			if !needed[fn] && domainReferencesNewFunction(domain, lookup) {
+			if !needed[fn] && typeReferencesNewFunction(domain, lookup) {
 				needed[fn] = true
 			}
 		}
@@ -3854,10 +3873,43 @@ func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) b
 	return typeMatchesLookup(baseName, typeObj.Schema, newTables)
 }
 
-// domainReferencesNewFunction determines if a domain references any newly added functions
-// in its CHECK constraints or default value.
-func domainReferencesNewFunction(typeObj *ir.Type, newFunctions map[string]struct{}) bool {
-	if len(newFunctions) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
+// holdBackFunctionsOfDroppedTypes splits the dropped functions into those that
+// can go in the usual slot and those a dropped type still references, which
+// must wait until after the types are dropped. Order within each part is kept.
+func holdBackFunctionsOfDroppedTypes(functions []*ir.Function, types []*ir.Type) (now, afterTypes []*ir.Function) {
+	if len(functions) == 0 || len(types) == 0 {
+		return functions, nil
+	}
+	for _, fn := range functions {
+		lookup := buildFunctionLookup([]*ir.Function{fn})
+		held := false
+		for _, typeObj := range types {
+			if typeReferencesNewFunction(typeObj, lookup) {
+				held = true
+				break
+			}
+		}
+		if held {
+			afterTypes = append(afterTypes, fn)
+		} else {
+			now = append(now, fn)
+		}
+	}
+	return now, afterTypes
+}
+
+// typeReferencesNewFunction determines if a domain references any newly added
+// functions in its CHECK constraints or default value, or if a range type names
+// one as its subtype_diff. (A canonical function can only be C, so it is never
+// one pgschema creates.)
+func typeReferencesNewFunction(typeObj *ir.Type, newFunctions map[string]struct{}) bool {
+	if len(newFunctions) == 0 || typeObj == nil {
+		return false
+	}
+	if typeObj.Kind == ir.TypeKindRange {
+		return functionNameInLookup(typeObj.SubtypeDiff, typeObj.Schema, newFunctions)
+	}
+	if typeObj.Kind != ir.TypeKindDomain {
 		return false
 	}
 
@@ -3890,20 +3942,27 @@ func referencesNewFunction(expr, defaultSchema string, newFunctions map[string]s
 		if len(match) < 2 {
 			continue
 		}
-		identifier := normalizeFunctionIdentifier(match[1])
-		if identifier == "" {
-			continue
-		}
-
-		if _, ok := newFunctions[identifier]; ok {
+		if functionNameInLookup(match[1], defaultSchema, newFunctions) {
 			return true
 		}
+	}
+	return false
+}
 
-		if !strings.Contains(identifier, "\x00") && defaultSchema != "" {
-			qualified := functionGraphKey(defaultSchema, identifier)
-			if _, ok := newFunctions[qualified]; ok {
-				return true
-			}
+// functionNameInLookup reports whether a (possibly schema-qualified, possibly
+// quoted) function name is one of the newFunctions, resolving a bare name
+// against defaultSchema the way referencesNewFunction does for a call.
+func functionNameInLookup(name, defaultSchema string, newFunctions map[string]struct{}) bool {
+	identifier := normalizeFunctionIdentifier(name)
+	if identifier == "" {
+		return false
+	}
+	if _, ok := newFunctions[identifier]; ok {
+		return true
+	}
+	if !strings.Contains(identifier, "\x00") && defaultSchema != "" {
+		if _, ok := newFunctions[functionGraphKey(defaultSchema, identifier)]; ok {
+			return true
 		}
 	}
 	return false

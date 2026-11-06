@@ -17,6 +17,13 @@ CREATE TYPE order_status AS ENUM (
     'completed'
 );
 --
+-- Name: price_range; Type: TYPE; Schema: -; Owner: -
+--
+
+CREATE TYPE price_range AS RANGE (
+    subtype = numeric
+);
+--
 -- Name: user_status; Type: TYPE; Schema: -; Owner: -
 --
 
