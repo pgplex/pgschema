@@ -91,6 +91,11 @@ type Table struct {
 	// uses them to reconcile the copies the child keeps (issue #639).
 	// Inspection metadata, excluded from serialization and fingerprints.
 	InheritedConstraints map[string]string `json:"-"`
+	// InheritedConstraintComments maps the name of such a copy to the comment
+	// set on it. PostgreSQL does not propagate a parent constraint's comment to
+	// the copies, so each carries its own (issue #674). Unlike the names, the
+	// comments are managed state and take part in fingerprints.
+	InheritedConstraintComments map[string]string `json:"inherited_constraint_comments,omitempty"`
 	// Inherits lists the parents of a regular inheritance child
 	// (CREATE TABLE ... INHERITS), in inhseqno order. Empty for partitions,
 	// which record their parent in PartitionOf instead.

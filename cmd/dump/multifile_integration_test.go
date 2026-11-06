@@ -324,3 +324,150 @@ ORDER BY c.conrelid::regclass::text, c.conname`)
 	}
 	return catalog
 }
+
+// Constraint comments must replay from both output layouts: one on a
+// constraint created inline with its table, one on a deferred foreign key,
+// one on a postponed partition key family, and the partitions' own comments
+// on their inherited copies (issue #674).
+func TestDumpCommand_MultiFileConstraintComments(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	embeddedPG := testutil.SetupPostgres(t)
+	defer embeddedPG.Stop()
+	conn, host, port, dbname, user, password := testutil.ConnectToPostgres(t, embeddedPG)
+	defer conn.Close()
+	ctx := context.Background()
+
+	const setup = `
+CREATE TABLE regions (id int PRIMARY KEY);
+CREATE TABLE events (
+    id int PRIMARY KEY,
+    region_id int,
+    CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id)
+) PARTITION BY RANGE (id);
+CREATE TABLE events_leaf PARTITION OF events FOR VALUES FROM (0) TO (10);
+CREATE TABLE orders (
+    id int PRIMARY KEY,
+    event_id int,
+    total numeric,
+    CONSTRAINT orders_total_check CHECK (total >= 0),
+    CONSTRAINT orders_event_fk FOREIGN KEY (event_id) REFERENCES events (id)
+);
+COMMENT ON CONSTRAINT regions_pkey ON regions IS 'inline with its table';
+COMMENT ON CONSTRAINT events_pkey ON events IS 'parent key';
+COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';
+COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key';
+COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';
+COMMENT ON CONSTRAINT orders_total_check ON orders IS 'never negative';
+COMMENT ON CONSTRAINT orders_event_fk ON orders IS 'deferred foreign key';
+`
+	for _, flags := range []struct {
+		name          string
+		qualifySchema bool
+	}{
+		{name: "default"},
+		{name: "qualified", qualifySchema: true},
+	} {
+		t.Run(flags.name, func(t *testing.T) {
+			if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`+setup); err != nil {
+				t.Fatalf("Failed to set up schema: %v", err)
+			}
+			want := constraintCommentCatalog(t, conn)
+			if len(want) != 7 {
+				t.Fatalf("Expected 7 fixture constraint comments, got %v", want)
+			}
+			outDir := t.TempDir()
+			mainPath := filepath.Join(outDir, "schema.sql")
+			config := &DumpConfig{
+				Host: host, Port: port, DB: dbname, User: user, Password: password,
+				Schema: "public", SSLMode: "disable", MultiFile: true, File: mainPath,
+				QualifySchema: flags.qualifySchema,
+			}
+			if _, err := ExecuteDump(config); err != nil {
+				t.Fatalf("Dump command failed: %v", err)
+			}
+			mainContent, err := os.ReadFile(mainPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
+				t.Fatal(err)
+			}
+			for line := range strings.SplitSeq(string(mainContent), "\n") {
+				inc, ok := strings.CutPrefix(line, `\i `)
+				if !ok {
+					continue
+				}
+				sqlBytes, err := os.ReadFile(filepath.Join(outDir, inc))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := conn.ExecContext(ctx, string(sqlBytes)); err != nil {
+					t.Fatalf("Replaying %s failed: %v\n%s", inc, err, sqlBytes)
+				}
+			}
+			if got := constraintCommentCatalog(t, conn); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Constraint comments changed after multi-file replay:\ngot: %v\nwant: %v", got, want)
+			}
+
+			planConfig := &plan.PlanConfig{
+				Host: host, Port: port, DB: dbname, User: user, Password: password,
+				Schema: "public", SSLMode: "disable", File: mainPath,
+			}
+			provider, err := plan.CreateDesiredStateProvider(planConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer provider.Stop()
+			migrationPlan, err := plan.GeneratePlan(planConfig, provider)
+			if err != nil {
+				t.Fatalf("Follow-up plan failed: %v", err)
+			}
+			if len(migrationPlan.Groups) != 0 {
+				t.Fatalf("Expected empty follow-up plan, got: %+v", migrationPlan.Groups)
+			}
+
+			config.MultiFile = false
+			singleSQL, err := ExecuteDump(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`+singleSQL); err != nil {
+				t.Fatalf("Single-file replay failed: %v\n%s", err, singleSQL)
+			}
+			if got := constraintCommentCatalog(t, conn); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Constraint comments changed after single-file replay:\ngot: %v\nwant: %v", got, want)
+			}
+		})
+	}
+}
+
+// constraintCommentCatalog lists every commented constraint in public as
+// "table.constraint: comment".
+func constraintCommentCatalog(t *testing.T, conn *sql.DB) []string {
+	t.Helper()
+	rows, err := conn.QueryContext(context.Background(), `
+SELECT c.conrelid::regclass::text, c.conname, d.description
+FROM pg_constraint c
+JOIN pg_namespace n ON n.oid = c.connamespace
+JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_constraint'::regclass
+WHERE n.nspname = 'public'
+ORDER BY 1, 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var catalog []string
+	for rows.Next() {
+		var table, name, comment string
+		if err := rows.Scan(&table, &name, &comment); err != nil {
+			t.Fatal(err)
+		}
+		catalog = append(catalog, table+"."+name+": "+comment)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}

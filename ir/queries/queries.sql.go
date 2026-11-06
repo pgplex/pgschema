@@ -1097,7 +1097,9 @@ SELECT
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
-    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns,
+    -- COMMENT ON CONSTRAINT (issue #674)
+    COALESCE(obj_description(c.oid, 'pg_constraint'), '') AS constraint_comment
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1173,6 +1175,7 @@ type GetConstraintsRow struct {
 	NoInherit              bool           `db:"no_inherit" json:"no_inherit"`
 	MatchFull              sql.NullBool   `db:"match_full" json:"match_full"`
 	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
+	ConstraintComment      sql.NullString `db:"constraint_comment" json:"constraint_comment"`
 }
 
 // GetConstraints retrieves all table constraints
@@ -1207,6 +1210,7 @@ func (q *Queries) GetConstraints(ctx context.Context) ([]GetConstraintsRow, erro
 			&i.NoInherit,
 			&i.MatchFull,
 			&i.DeleteSetColumns,
+			&i.ConstraintComment,
 		); err != nil {
 			return nil, err
 		}
@@ -1279,7 +1283,9 @@ SELECT
     -- ON DELETE SET NULL/SET DEFAULT (column list), PG15+ (pg_constraint.confdelsetcols).
     -- Rendered as a JSON array of column names so it survives the per-column row fan-out
     -- and stays a single scalar on PG14 (where the attribute does not exist). Issue #589.
-    COALESCE(ds.delete_set_columns, '') AS delete_set_columns
+    COALESCE(ds.delete_set_columns, '') AS delete_set_columns,
+    -- COMMENT ON CONSTRAINT (issue #674)
+    COALESCE(obj_description(c.oid, 'pg_constraint'), '') AS constraint_comment
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -1356,6 +1362,7 @@ type GetConstraintsForSchemaRow struct {
 	NullsNotDistinct       sql.NullBool   `db:"nulls_not_distinct" json:"nulls_not_distinct"`
 	MatchFull              sql.NullBool   `db:"match_full" json:"match_full"`
 	DeleteSetColumns       sql.NullString `db:"delete_set_columns" json:"delete_set_columns"`
+	ConstraintComment      sql.NullString `db:"constraint_comment" json:"constraint_comment"`
 }
 
 // GetConstraintsForSchema retrieves all table constraints for a specific schema
@@ -1392,6 +1399,7 @@ func (q *Queries) GetConstraintsForSchema(ctx context.Context, dollar_1 sql.Null
 			&i.NullsNotDistinct,
 			&i.MatchFull,
 			&i.DeleteSetColumns,
+			&i.ConstraintComment,
 		); err != nil {
 			return nil, err
 		}
@@ -2729,7 +2737,9 @@ SELECT
     c.conname AS constraint_name,
     pn.nspname AS parent_schema,
     pcl.relname AS parent_table,
-    pc.conname AS parent_constraint_name
+    pc.conname AS parent_constraint_name,
+    -- The copy's own comment; PostgreSQL does not propagate the parent's (issue #674)
+    COALESCE(obj_description(c.oid, 'pg_constraint'), '') AS constraint_comment
 FROM pg_constraint c
 JOIN pg_class cl ON c.conrelid = cl.oid
 JOIN pg_namespace n ON cl.relnamespace = n.oid
@@ -2744,12 +2754,13 @@ ORDER BY n.nspname, cl.relname, c.conname
 `
 
 type GetInheritedPartitionConstraintsForSchemaRow struct {
-	TableSchema          string `db:"table_schema" json:"table_schema"`
-	TableName            string `db:"table_name" json:"table_name"`
-	ConstraintName       string `db:"constraint_name" json:"constraint_name"`
-	ParentSchema         string `db:"parent_schema" json:"parent_schema"`
-	ParentTable          string `db:"parent_table" json:"parent_table"`
-	ParentConstraintName string `db:"parent_constraint_name" json:"parent_constraint_name"`
+	TableSchema          string         `db:"table_schema" json:"table_schema"`
+	TableName            string         `db:"table_name" json:"table_name"`
+	ConstraintName       string         `db:"constraint_name" json:"constraint_name"`
+	ParentSchema         string         `db:"parent_schema" json:"parent_schema"`
+	ParentTable          string         `db:"parent_table" json:"parent_table"`
+	ParentConstraintName string         `db:"parent_constraint_name" json:"parent_constraint_name"`
+	ConstraintComment    sql.NullString `db:"constraint_comment" json:"constraint_comment"`
 }
 
 // GetInheritedPartitionConstraintsForSchema lists the PRIMARY KEY, UNIQUE and
@@ -2780,6 +2791,7 @@ func (q *Queries) GetInheritedPartitionConstraintsForSchema(ctx context.Context,
 			&i.ParentSchema,
 			&i.ParentTable,
 			&i.ParentConstraintName,
+			&i.ConstraintComment,
 		); err != nil {
 			return nil, err
 		}

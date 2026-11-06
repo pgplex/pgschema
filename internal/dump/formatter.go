@@ -103,8 +103,9 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 	// statements, so the previous step's file tells the two apart.
 	policyFiles := make(map[string]fileKey)
 	var prevKey fileKey
+	var prevStep diff.Diff
 
-	for _, step := range diffs {
+	for i, step := range diffs {
 		var dir string
 		if step.Type == diff.DiffTypeComment {
 			// Special handling for comments - use parent directory
@@ -113,13 +114,29 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 			dir = f.getObjectDirectory(step.Type.String())
 		}
 		key := fileKey{dir: dir, name: f.getGroupingName(step)}
-		if step.Type == diff.DiffTypeTableConstraint {
-			// Keep postponed constraints at their position in the diff sequence.
-			// Bundling them with CREATE TABLE can put an FK before its target.
-			// A sequence number also avoids collisions between constraint names
-			// on different tables and names that sanitize to the same filename.
+		// Keep postponed constraints at their position in the diff sequence.
+		// Bundling them with CREATE TABLE can put an FK before its target.
+		// A sequence number also avoids collisions between constraint names
+		// on different tables and names that sanitize to the same filename.
+		constraintFile := func() fileKey {
 			constraintIndex++
-			key = fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+			return fileKey{dir: "constraints", name: fmt.Sprintf("%04d_%s", constraintIndex, key.name)}
+		}
+		if step.Type == diff.DiffTypeTableConstraint {
+			key = constraintFile()
+		}
+		if step.Type == diff.DiffTypeTableConstraintComment && i > 0 {
+			// A constraint comment must follow its constraint: it stays in the
+			// table file when it directly follows that table's statements,
+			// joins a postponed constraint's file when it follows it, and
+			// otherwise keeps its own position in the sequence.
+			switch {
+			case prevKey == key:
+			case prevStep.Type == diff.DiffTypeTableConstraint && prevStep.Path == step.Path:
+				key = prevKey
+			default:
+				key = constraintFile()
+			}
 		}
 
 		if policy, ok := step.Source.(*ir.RLSPolicy); ok && step.Type == diff.DiffTypeTablePolicy && len(fileOrder) > 0 && prevKey != key {
@@ -151,6 +168,7 @@ func (f *DumpFormatter) FormatMultiFile(diffs []diff.Diff, outputPath string) er
 		}
 		stepsByFile[key] = append(stepsByFile[key], step)
 		prevKey = key
+		prevStep = step
 
 		switch src := step.Source.(type) {
 		case *ir.Table:
@@ -374,7 +392,7 @@ func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 		return "views"
 	case "materialized_view":
 		return "materialized_views"
-	case "table.index", "table.trigger", "table.constraint", "table.policy", "table.rls", "table.comment", "table.column", "table.column.comment", "table.index.comment", "table.inherit":
+	case "table.index", "table.trigger", "table.constraint", "table.policy", "table.rls", "table.comment", "table.column", "table.column.comment", "table.index.comment", "table.constraint.comment", "table.inherit":
 		// These are included with their tables
 		return "tables"
 	case "view.trigger":
@@ -402,7 +420,7 @@ func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 func (f *DumpFormatter) getGroupingName(step diff.Diff) string {
 	// For table-related objects, try to extract the table name from Source
 	switch step.Type {
-	case diff.DiffTypeTableIndex, diff.DiffTypeTableTrigger, diff.DiffTypeTableConstraint, diff.DiffTypeTablePolicy, diff.DiffTypeTableRLS, diff.DiffTypeTableComment, diff.DiffTypeTableColumn, diff.DiffTypeTableColumnComment, diff.DiffTypeTableIndexComment, diff.DiffTypeTableInherit:
+	case diff.DiffTypeTableIndex, diff.DiffTypeTableTrigger, diff.DiffTypeTableConstraint, diff.DiffTypeTablePolicy, diff.DiffTypeTableRLS, diff.DiffTypeTableComment, diff.DiffTypeTableColumn, diff.DiffTypeTableColumnComment, diff.DiffTypeTableIndexComment, diff.DiffTypeTableConstraintComment, diff.DiffTypeTableInherit:
 		if tableName := f.extractTableNameFromContext(step); tableName != "" {
 			return tableName
 		}

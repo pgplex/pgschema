@@ -1,0 +1,136 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.13.4",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "45289af96d876fe50db54ead9dfd59a42bcfd0a7189f563a2664e343db2bf98c"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS invoices (\n    id integer,\n    CONSTRAINT invoices_pkey PRIMARY KEY (id),\n    CONSTRAINT invoices_id_check CHECK (id > 0)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.invoices"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT invoices_pkey ON invoices IS 'invoice identifier';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.invoices.invoices_pkey"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT invoices_id_check ON invoices IS 'positive identifiers only';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.invoices.invoices_id_check"
+        },
+        {
+          "sql": "ALTER TABLE events DROP CONSTRAINT events_region_fk;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.events.events_region_fk"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT customers_email_key ON customers IS NULL;",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.customers.customers_email_key"
+        },
+        {
+          "sql": "ALTER TABLE events DROP CONSTRAINT events_pkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "ALTER TABLE events\nADD CONSTRAINT events_id_key PRIMARY KEY (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_id_key"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT events_id_key ON events IS 'parent key';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.events.events_id_key"
+        },
+        {
+          "sql": "ALTER TABLE orders\nADD CONSTRAINT orders_customer_total_key UNIQUE (customer_id, total);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.orders.orders_customer_total_key"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT orders_customer_total_key ON orders IS 'added with its constraint';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.orders.orders_customer_total_key"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT orders_customer_id_fkey ON orders IS 'owning customer';",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.orders.orders_customer_id_fkey"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT orders_total_check ON orders IS 'totals are never negative';",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.orders.orders_total_check"
+        },
+        {
+          "sql": "ALTER TABLE regions DROP CONSTRAINT regions_pkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.regions.regions_pkey"
+        },
+        {
+          "sql": "ALTER TABLE regions\nADD CONSTRAINT regions_id_key PRIMARY KEY (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.regions.regions_id_key"
+        },
+        {
+          "sql": "ALTER TABLE events\nADD CONSTRAINT events_region_fk FOREIGN KEY (region_id) REFERENCES regions (id) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_region_fk"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE events VALIDATE CONSTRAINT events_region_fk;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_region_fk"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "COMMENT ON CONSTRAINT events_region_fk ON events IS 'parent foreign key, updated';",
+          "type": "table.constraint.comment",
+          "operation": "create",
+          "path": "public.events.events_region_fk"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT events_leaf_pkey ON events_leaf IS 'child key';",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.events_leaf.events_leaf_pkey"
+        },
+        {
+          "sql": "COMMENT ON CONSTRAINT events_region_fk ON events_leaf IS 'child foreign key';",
+          "type": "table.constraint.comment",
+          "operation": "alter",
+          "path": "public.events_leaf.events_region_fk"
+        }
+      ]
+    }
+  ]
+}

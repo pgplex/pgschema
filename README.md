@@ -90,7 +90,7 @@ pgschema covers all the schema objects developers use in real-world Postgres app
 | **Policies** | Row-level security (RLS), PERMISSIVE/RESTRICTIVE, ALL/SELECT/INSERT/UPDATE/DELETE commands, USING/WITH CHECK expressions, ENABLE/DISABLE/FORCE ROW LEVEL SECURITY |
 | **Privileges** | GRANT/REVOKE for tables (including column-level), sequences, functions, procedures, types/domains; WITH GRANT OPTION |
 | **Default Privileges** | ALTER DEFAULT PRIVILEGES for tables, sequences, functions, types |
-| **Comments** | COMMENT ON for tables, columns, views, materialized views, functions, procedures, aggregates, indexes |
+| **Comments** | COMMENT ON for tables, columns, constraints, views, materialized views, functions, procedures, aggregates, indexes |
 
 See [Unsupported](https://www.pgschema.com/syntax/unsupported) for objects that are explicitly out of scope.
 
