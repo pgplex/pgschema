@@ -2542,6 +2542,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
 	generateCreateTypesSQL(typesWithoutDeps, replaced, targetSchema, collector)
 
+	// Alter the attributes of modified composite types now that the types a
+	// new attribute may use exist, and before the tables, views and functions
+	// created below can refer to the new attributes (issue #625).
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector)
+
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, d.deferredSequenceOwners, targetSchema, collector)
 

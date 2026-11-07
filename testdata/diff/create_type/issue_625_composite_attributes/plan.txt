@@ -1,0 +1,30 @@
+Plan: 1 to add, 5 to modify.
+
+Summary by type:
+  types: 1 to add, 5 to modify
+
+Types:
+  ~ address
+  ~ address
+  ~ example_input
+  ~ example_input
+  ~ example_input
+  + priority
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TYPE priority AS ENUM (
+    'low',
+    'high'
+);
+
+ALTER TYPE address DROP ATTRIBUTE country;
+
+ALTER TYPE address ADD ATTRIBUTE city text;
+
+ALTER TYPE example_input ALTER ATTRIBUTE id TYPE bigint;
+
+ALTER TYPE example_input ADD ATTRIBUTE label text;
+
+ALTER TYPE example_input ADD ATTRIBUTE prio priority;

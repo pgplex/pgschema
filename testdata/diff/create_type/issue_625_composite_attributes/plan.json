@@ -1,0 +1,50 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "34d9a7983efbc704f71f4519bb7a85d0e826031ebafc0c807ca70c18a68b0449"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TYPE priority AS ENUM (\n    'low',\n    'high'\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.priority"
+        },
+        {
+          "sql": "ALTER TYPE address DROP ATTRIBUTE country;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.address"
+        },
+        {
+          "sql": "ALTER TYPE address ADD ATTRIBUTE city text;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.address"
+        },
+        {
+          "sql": "ALTER TYPE example_input ALTER ATTRIBUTE id TYPE bigint;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE label text;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE prio priority;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        }
+      ]
+    }
+  ]
+}
