@@ -844,7 +844,10 @@ func viewDependsOnTable(view *ir.View, tableSchema, tableName string) bool {
 }
 
 // buildModifiedTableAddedColumnLookup returns a map of lowercased schema.tableName
-// to a set of lowercased column names being added by ALTER TABLE on that table.
+// to a set of column names being added by ALTER TABLE on that table. Column
+// names keep their spelling: containsIdentifier matches a name that needs
+// quoting only in its exact quoted form, so "RequestId" must not become
+// requestid.
 func buildModifiedTableAddedColumnLookup(modifiedTables []*tableDiff) map[string]map[string]struct{} {
 	lookup := make(map[string]map[string]struct{})
 	for _, td := range modifiedTables {
@@ -854,7 +857,7 @@ func buildModifiedTableAddedColumnLookup(modifiedTables []*tableDiff) map[string
 		key := strings.ToLower(td.Table.Schema + "." + td.Table.Name)
 		cols := make(map[string]struct{}, len(td.AddedColumns))
 		for _, c := range td.AddedColumns {
-			cols[strings.ToLower(c.Name)] = struct{}{}
+			cols[c.Name] = struct{}{}
 		}
 		lookup[key] = cols
 	}

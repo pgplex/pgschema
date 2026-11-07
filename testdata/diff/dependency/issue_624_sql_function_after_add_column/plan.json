@@ -21,6 +21,30 @@
           "path": "public.entry.request_id"
         },
         {
+          "sql": "ALTER TABLE entry ADD COLUMN \"Priority\" integer;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.entry.Priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_open(\n    state bigint,\n    x bigint\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + x + (SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_open"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION entry_rows()\nRETURNS TABLE(id integer, request_id integer, \"Priority\" integer)\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT * FROM entry;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.entry_rows"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION high_priority()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry WHERE entry.\"Priority\" > 1;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.high_priority"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION open_requests()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL;\n$$;",
           "type": "function",
           "operation": "create",
@@ -31,6 +55,42 @@
           "type": "function",
           "operation": "create",
           "path": "public.has_open_requests"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_open(bigint) (\n    SFUNC = add_open,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_open"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_total(\n    state bigint,\n    x bigint\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + (SELECT sum_open(x));\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_total"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_total(bigint) (\n    SFUNC = add_total,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW open_summary AS\n SELECT open_requests() AS n;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.open_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW total_summary AS\n SELECT sum_total(id::bigint) AS t\n   FROM entry;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.total_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION summary_plus()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL) FROM open_summary;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.summary_plus"
         }
       ]
     }
