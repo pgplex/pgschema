@@ -4899,9 +4899,12 @@ SELECT
     vd.view_comment,
     vd.is_materialized,
     vd.reloptions,
-    -- Column names in attnum order, folded in here rather than fetched with
-    -- one pg_attribute query per view (issue #644).
-    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names
+    -- Column names and types in attnum order, folded in here rather than
+    -- fetched with one pg_attribute query per view (issue #644). The types
+    -- tell a column type change apart from a same-named column, which CREATE
+    -- OR REPLACE VIEW rejects (issue #687).
+    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names,
+    COALESCE(cols.column_types, '{}'::text[])::text[] AS column_types
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
@@ -4909,7 +4912,9 @@ CROSS JOIN LATERAL (
         pg_get_viewdef(vd.view_oid, true) as view_def
 ) sp
 LEFT JOIN LATERAL (
-    SELECT array_agg(a.attname::text ORDER BY a.attnum) AS column_names
+    SELECT
+        array_agg(a.attname::text ORDER BY a.attnum) AS column_names,
+        array_agg(format_type(a.atttypid, a.atttypmod) ORDER BY a.attnum) AS column_types
     FROM pg_attribute a
     WHERE a.attrelid = vd.view_oid
       AND a.attnum > 0
@@ -4926,6 +4931,7 @@ type GetViewsForSchemaRow struct {
 	IsMaterialized sql.NullBool   `db:"is_materialized" json:"is_materialized"`
 	Reloptions     []string       `db:"reloptions" json:"reloptions"`
 	ColumnNames    []string       `db:"column_names" json:"column_names"`
+	ColumnTypes    []string       `db:"column_types" json:"column_types"`
 }
 
 // GetViewsForSchema retrieves all views and materialized views for a specific schema
@@ -4949,6 +4955,7 @@ func (q *Queries) GetViewsForSchema(ctx context.Context, dollar_1 sql.NullString
 			&i.IsMaterialized,
 			pq.Array(&i.Reloptions),
 			pq.Array(&i.ColumnNames),
+			pq.Array(&i.ColumnTypes),
 		); err != nil {
 			return nil, err
 		}

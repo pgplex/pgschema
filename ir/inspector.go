@@ -1984,8 +1984,9 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			definition = strings.TrimSuffix(definition, ";")
 		}
 
-		// View column names in attnum order, from the batched query
+		// View column names and types in attnum order, from the batched query
 		columns := view.ColumnNames
+		columnTypes := view.ColumnTypes
 
 		// Copy and sort reloptions for deterministic comparison and output
 		options := append([]string(nil), view.Reloptions...)
@@ -1996,6 +1997,7 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 			Name:         viewName,
 			Definition:   definition,
 			Columns:      columns,
+			ColumnTypes:  columnTypes,
 			Options:      options,
 			Comment:      comment,
 			Materialized: view.IsMaterialized.Valid && view.IsMaterialized.Bool,

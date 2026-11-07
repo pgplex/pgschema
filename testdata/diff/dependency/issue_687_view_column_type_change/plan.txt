@@ -1,0 +1,44 @@
+Plan: 2 to add, 1 to modify, 1 to drop.
+
+Summary by type:
+  functions: 2 to add, 1 to drop
+  views: 1 to modify
+
+Functions:
+  - item_view_all
+  + item_view_all
+  + items_due_between
+
+Views:
+  ~ item_view
+
+DDL to be executed:
+--------------------------------------------------
+
+DROP FUNCTION IF EXISTS item_view_all();
+
+DROP VIEW IF EXISTS item_view RESTRICT;
+
+CREATE OR REPLACE VIEW item_view AS
+ SELECT id,
+    due
+   FROM items;
+
+CREATE OR REPLACE FUNCTION item_view_all()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_view;
+$$;
+
+CREATE OR REPLACE FUNCTION items_due_between(
+    p_start date,
+    p_end date
+)
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+AS $$
+SELECT id, due FROM items WHERE due BETWEEN p_start AND p_end;
+$$;

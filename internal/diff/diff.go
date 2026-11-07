@@ -379,6 +379,11 @@ type ddlDiff struct {
 	functionsAwaitingRecreatedViews  []*ir.Function
 	aggregatesAwaitingRecreatedViews []*ir.Aggregate
 	viewsAwaitingRecreatedViews      []*ir.View
+	// Live functions whose return/parameter type is a view being recreated. They
+	// pin the view's row type and would block its RESTRICT drop (SQLSTATE 2BP01),
+	// so they are dropped before any view drop; their desired-state definitions
+	// are created again through functionsAwaitingRecreatedViews (issue #687).
+	functionsPinningRecreatedViews []*ir.Function
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
 	// modifications (fkPreDrops) and desired-state ones are (re)created
@@ -1203,6 +1208,32 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// the view's ACL, so their grants are re-issued below (#591).
 	recreatedViewKeys := collectRecreatedViewKeys(diff.allNewViews, diff.modifiedViews, diff.addedViews)
 
+	// Functions already in the database whose signature is typed on a view
+	// being recreated pin its row type and would block the view's RESTRICT
+	// drop. Drop them ahead of the view and create them again from the desired
+	// state after it, whether or not they changed themselves (issue #687).
+	if recreatedViewLookup := buildRecreatedViewLookup(diff.modifiedViews); len(recreatedViewLookup) > 0 {
+		pinning := make(map[*ir.Function]bool)
+		for _, key := range functionKeys {
+			oldFunction, exists := oldFunctions[key]
+			if !exists || !functionSignatureReferencesRelation(oldFunction, recreatedViewLookup) {
+				continue
+			}
+			pinning[oldFunction] = true
+			diff.functionsPinningRecreatedViews = append(diff.functionsPinningRecreatedViews, oldFunction)
+			diff.functionsAwaitingRecreatedViews = append(diff.functionsAwaitingRecreatedViews, newFunctions[key])
+		}
+		if len(pinning) > 0 {
+			var kept []*functionDiff
+			for _, fd := range diff.modifiedFunctions {
+				if !pinning[fd.Old] {
+					kept = append(kept, fd)
+				}
+			}
+			diff.modifiedFunctions = kept
+		}
+	}
+
 	// Compare sequences across all schemas
 	oldSequences := make(map[string]*ir.Sequence)
 	newSequences := make(map[string]*ir.Sequence)
@@ -1773,6 +1804,11 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// may come before it: a later failure could then no longer roll that back.
 	// ADD VALUE only depends on the enum itself, which already exists.
 	generateModifyEnumsSQL(d.modifiedTypes, targetSchema, collector)
+
+	// Drop the functions typed on a view being recreated before any view is
+	// dropped, so the view's RESTRICT drop succeeds; they are created again
+	// after the view in the modify phase (issue #687).
+	generateDropFunctionsSQL(d.functionsPinningRecreatedViews, targetSchema, collector)
 
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors

@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "97e52b742bec9d241e1a7d39dd45c80ba1d5777a9a9b179d1c4c2e530936fe84"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_view_all();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_view_all"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS item_view RESTRICT;",
+          "type": "view",
+          "operation": "alter",
+          "path": "public.item_view"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW item_view AS\n SELECT id,\n    due\n   FROM items;",
+          "type": "view",
+          "operation": "alter",
+          "path": "public.item_view"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_view_all()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT * FROM item_view;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_view_all"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION items_due_between(\n    p_start date,\n    p_end date\n)\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT id, due FROM items WHERE due BETWEEN p_start AND p_end;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.items_due_between"
+        }
+      ]
+    }
+  ]
+}

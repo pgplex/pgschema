@@ -383,6 +383,13 @@ func normalizeView(view *View) {
 	// This uses the same logic as function/procedure body normalization.
 	view.Definition = StripSchemaPrefixFromBody(view.Definition, view.Schema)
 
+	// Likewise for the column types: format_type() qualifies a same-schema
+	// type whenever the schema is not on the search_path, and the types are
+	// compared to decide whether CREATE OR REPLACE VIEW can apply (#687).
+	for i, columnType := range view.ColumnTypes {
+		view.ColumnTypes[i] = StripSchemaPrefixFromBody(columnType, view.Schema)
+	}
+
 	// Normalize triggers on the view (e.g., INSTEAD OF triggers)
 	for _, trigger := range view.Triggers {
 		normalizeTrigger(trigger)

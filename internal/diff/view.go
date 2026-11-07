@@ -777,7 +777,8 @@ func viewsEqual(old, new *ir.View) bool {
 // viewColumnsRequireRecreate checks whether the view's column set has changed
 // in a way that requires DROP + CREATE instead of CREATE OR REPLACE.
 // PostgreSQL's CREATE OR REPLACE VIEW only allows adding new columns at the end;
-// it rejects any changes to existing column names or positions.
+// it rejects any change to an existing column's name, position (issue #308)
+// or type (issue #687).
 func viewColumnsRequireRecreate(old, new *ir.View) bool {
 	oldCols := old.Columns
 	newCols := new.Columns
@@ -788,23 +789,28 @@ func viewColumnsRequireRecreate(old, new *ir.View) bool {
 		return false
 	}
 
-	// If old columns are a prefix of new columns, CREATE OR REPLACE VIEW is safe
-	// (only new columns added at end)
-	if len(newCols) >= len(oldCols) {
-		prefixMatch := true
-		for i, col := range oldCols {
-			if newCols[i] != col {
-				prefixMatch = false
-				break
-			}
-		}
-		if prefixMatch {
-			return false
+	// Existing columns were reordered, renamed, or removed — requires DROP + CREATE
+	if len(newCols) < len(oldCols) {
+		return true
+	}
+	for i, col := range oldCols {
+		if newCols[i] != col {
+			return true
 		}
 	}
 
-	// Columns were reordered, renamed, or removed — requires DROP + CREATE
-	return true
+	// Same names in the same order: an existing column whose type changed still
+	// requires DROP + CREATE. Types are compared only when both sides carry them.
+	if len(old.ColumnTypes) == len(oldCols) && len(new.ColumnTypes) == len(newCols) {
+		for i := range oldCols {
+			if old.ColumnTypes[i] != new.ColumnTypes[i] {
+				return true
+			}
+		}
+	}
+
+	// Only new columns added at the end (or nothing changed): CREATE OR REPLACE is safe
+	return false
 }
 
 // viewDependsOnView checks if viewA depends on viewB
