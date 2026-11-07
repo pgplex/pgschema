@@ -1,7 +1,8 @@
-Plan: 3 to add, 7 to modify, 1 to drop.
+Plan: 5 to add, 8 to modify, 1 to drop.
 
 Summary by type:
-  types: 1 to add, 7 to modify, 1 to drop
+  types: 1 to add, 8 to modify, 1 to drop
+  functions: 1 to add
   tables: 1 to add
 
 Types:
@@ -12,8 +13,12 @@ Types:
   ~ example_input
   ~ example_input
   ~ example_input
+  ~ example_input
   - legacy_flag
   + priority
+
+Functions:
+  + is_positive
 
 Tables:
   + region
@@ -44,6 +49,20 @@ CREATE TABLE IF NOT EXISTS region (
     code text,
     CONSTRAINT region_pkey PRIMARY KEY (code)
 );
+
+CREATE OR REPLACE FUNCTION is_positive(
+    n integer
+)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT n > 0
+$$;
+
+CREATE DOMAIN positive_int AS integer
+  CONSTRAINT positive_int_check CHECK (is_positive(VALUE));
+
+ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;
 
 CREATE DOMAIN region_row AS region;
 

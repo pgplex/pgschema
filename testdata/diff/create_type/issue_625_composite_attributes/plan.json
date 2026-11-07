@@ -63,6 +63,24 @@
           "path": "public.region"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION is_positive(\n    n integer\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT n > 0\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.is_positive"
+        },
+        {
+          "sql": "CREATE DOMAIN positive_int AS integer\n  CONSTRAINT positive_int_check CHECK (is_positive(VALUE));",
+          "type": "domain",
+          "operation": "create",
+          "path": "public.positive_int"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
           "sql": "CREATE DOMAIN region_row AS region;",
           "type": "domain",
           "operation": "create",

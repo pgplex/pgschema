@@ -22,6 +22,20 @@ CREATE TABLE IF NOT EXISTS region (
     CONSTRAINT region_pkey PRIMARY KEY (code)
 );
 
+CREATE OR REPLACE FUNCTION is_positive(
+    n integer
+)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT n > 0
+$$;
+
+CREATE DOMAIN positive_int AS integer
+  CONSTRAINT positive_int_check CHECK (is_positive(VALUE));
+
+ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;
+
 CREATE DOMAIN region_row AS region;
 
 ALTER TYPE example_input ADD ATTRIBUTE region region_row;

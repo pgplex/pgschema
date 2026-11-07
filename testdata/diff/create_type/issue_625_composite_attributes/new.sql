@@ -9,11 +9,18 @@ CREATE TABLE region (
 
 CREATE DOMAIN region_row AS region;
 
+CREATE FUNCTION is_positive(n integer) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT n > 0 $$;
+
+CREATE DOMAIN positive_int AS integer CHECK (is_positive(VALUE));
+
 CREATE TYPE example_input AS (
     id bigint,
     label text,
     prio priority,
-    region region_row
+    region region_row,
+    quantity positive_int
 );
 
 CREATE TYPE address AS (
