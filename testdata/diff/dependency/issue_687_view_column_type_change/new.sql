@@ -83,3 +83,20 @@ $$;
 
 CREATE VIEW item_id_max_view AS
 SELECT item_id_max(v) AS max_id FROM item_view v;
+
+CREATE FUNCTION item_count_all()
+RETURNS SETOF item_count
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count;
+$$;
+
+CREATE VIEW item_count_echo AS
+SELECT n FROM item_count_all();
+
+-- New and built on item_count, which only comes back after the routines it
+-- calls, so this view must be created after it rather than in the create
+-- phase.
+CREATE VIEW item_count_copy AS
+SELECT * FROM item_count;

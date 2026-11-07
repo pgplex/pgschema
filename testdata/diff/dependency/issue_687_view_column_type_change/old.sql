@@ -96,3 +96,17 @@ CREATE AGGREGATE item_id_min(item_view) (
 -- recreated view that must also wait for the aggregate to be created again.
 CREATE VIEW item_id_max_view AS
 SELECT item_id_max(v) AS max_id FROM item_view v;
+
+-- item_count is recreated too, so a function typed on it pins it the same
+-- way, and a view calling that function binds to it: a second level of the
+-- same chain, dropped before item_count and created again after it.
+CREATE FUNCTION item_count_all()
+RETURNS SETOF item_count
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count;
+$$;
+
+CREATE VIEW item_count_echo AS
+SELECT n FROM item_count_all();

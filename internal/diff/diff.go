@@ -400,6 +400,10 @@ type ddlDiff struct {
 	// modify-views phase must leave them to the awaiting batch, even when they
 	// also read a view being recreated.
 	viewsAwaitingPinnedRoutines map[string]bool
+	// The three lists above in drop order: every object before the objects it
+	// depends on (a calling view before its function, a function typed on a
+	// calling view before that view). See orderPinnedDrops.
+	pinnedDrops []pinnedDrop
 	// Case-insensitive lookup (see buildSchemaNameLookup) of every view this
 	// migration drops and creates again: those marked RequiresRecreate, the
 	// unchanged views rebuilt as their dependents, and the kept callers of a
@@ -1352,6 +1356,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			}
 			diff.modifiedViews = kept
 		}
+		diff.pinnedDrops = orderPinnedDrops(diff.viewsCallingPinnedRoutines, diff.functionsPinningRecreatedViews, diff.aggregatesPinningRecreatedViews)
 	}
 
 	// Compare sequences across all schemas
@@ -1939,12 +1944,23 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	// Drop the functions typed on a view being recreated before any view is
 	// dropped, so the view's RESTRICT drop succeeds; they are created again
 	// after the view in the modify phase. Their own dependents go first: the
-	// views calling them or an aggregate built on them, deepest first, then
-	// those aggregates (issue #687).
+	// views calling them or an aggregate built on them, and the functions
+	// typed on those views in turn, each before what it depends on (issue #687).
 	preDroppedViews := make(map[string]bool)
-	d.preDropViewsWithDependents(d.viewsCallingPinnedRoutines, targetSchema, collector, preDroppedViews)
-	generateDropAggregatesSQL(d.aggregatesPinningRecreatedViews, targetSchema, collector)
-	generateDropFunctionsSQL(d.functionsPinningRecreatedViews, targetSchema, collector)
+	droppedViewKeys := make(map[string]bool, len(d.droppedViews))
+	for _, view := range d.droppedViews {
+		droppedViewKeys[view.Schema+"."+view.Name] = true
+	}
+	for _, drop := range d.pinnedDrops {
+		switch {
+		case drop.view != nil:
+			d.dropViewAhead(drop.view, droppedViewKeys, targetSchema, collector, preDroppedViews)
+		case drop.aggregate != nil:
+			generateDropAggregatesSQL([]*ir.Aggregate{drop.aggregate}, targetSchema, collector)
+		case drop.function != nil:
+			generateDropFunctionsSQL([]*ir.Function{drop.function}, targetSchema, collector)
+		}
+	}
 
 	// Pre-drop materialized views that depend on tables being modified/dropped
 	// This must happen BEFORE table operations to avoid dependency errors
@@ -2162,35 +2178,128 @@ func (d *ddlDiff) preDropViewsWithDependents(viewsToPreDrop []*ir.View, targetSc
 	views = reverseSlice(topologicallySortViews(views))
 
 	for _, view := range views {
-		viewKey := view.Schema + "." + view.Name
-		if preDropped[viewKey] {
-			continue
-		}
-
-		viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
-		diffType := DiffTypeView
-		sql := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
-		if view.Materialized {
-			diffType = DiffTypeMaterializedView
-			sql = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", viewName)
-		}
-		// A view the migration drops for good is a plain drop; the rest are
-		// created again later.
-		operation := DiffOperationRecreate
-		if droppedViews[viewKey] {
-			operation = DiffOperationDrop
-		}
-
-		context := &diffContext{
-			Type:                diffType,
-			Operation:           operation,
-			Path:                fmt.Sprintf("%s.%s", view.Schema, view.Name),
-			Source:              view,
-			CanRunInTransaction: true,
-		}
-		collector.collect(context, sql)
-		preDropped[viewKey] = true
+		d.dropViewAhead(view, droppedViews, targetSchema, collector, preDropped)
 	}
+}
+
+// dropViewAhead drops an old view ahead of the phase that would otherwise
+// drop it, unless preDropped already records it, and records it there. A view
+// in droppedViews (schema.name keys of the views the migration drops for good)
+// is a plain drop; any other is created again later.
+func (d *ddlDiff) dropViewAhead(view *ir.View, droppedViews map[string]bool, targetSchema string, collector *diffCollector, preDropped map[string]bool) {
+	viewKey := view.Schema + "." + view.Name
+	if preDropped[viewKey] {
+		return
+	}
+
+	viewName := qualifyEntityName(view.Schema, view.Name, targetSchema)
+	diffType := DiffTypeView
+	sql := fmt.Sprintf("DROP VIEW IF EXISTS %s RESTRICT;", viewName)
+	if view.Materialized {
+		diffType = DiffTypeMaterializedView
+		sql = fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s RESTRICT;", viewName)
+	}
+	operation := DiffOperationRecreate
+	if droppedViews[viewKey] {
+		operation = DiffOperationDrop
+	}
+
+	context := &diffContext{
+		Type:                diffType,
+		Operation:           operation,
+		Path:                fmt.Sprintf("%s.%s", view.Schema, view.Name),
+		Source:              view,
+		CanRunInTransaction: true,
+	}
+	collector.collect(context, sql)
+	preDropped[viewKey] = true
+}
+
+// pinnedDrop is one object dropped ahead of a view recreation: exactly one
+// field is set (issue #687).
+type pinnedDrop struct {
+	view      *ir.View
+	function  *ir.Function
+	aggregate *ir.Aggregate
+}
+
+// orderPinnedDrops orders the views, functions and aggregates dropped ahead of
+// a view recreation so that each comes before the objects it depends on: a
+// view before the routines it calls and the views it reads, a function before
+// the view its signature is typed on, an aggregate before its support
+// functions and the views in its signature. Among objects that are ready at
+// the same time, views go first, then aggregates, then functions, each by
+// name. A dependency cycle, which PostgreSQL would not allow, falls back to
+// that order.
+func orderPinnedDrops(views []*ir.View, functions []*ir.Function, aggregates []*ir.Aggregate) []pinnedDrop {
+	type node struct {
+		drop pinnedDrop
+		rank string // sort key: kind, then name
+		deps []int  // nodes this one depends on
+	}
+	var nodes []*node
+	for _, view := range views {
+		nodes = append(nodes, &node{drop: pinnedDrop{view: view}, rank: "0." + view.Schema + "." + view.Name})
+	}
+	for _, agg := range aggregates {
+		nodes = append(nodes, &node{drop: pinnedDrop{aggregate: agg}, rank: "1." + aggregateSortKey(agg)})
+	}
+	for _, fn := range functions {
+		nodes = append(nodes, &node{drop: pinnedDrop{function: fn}, rank: "2." + fn.Schema + "." + fn.Name + "(" + fn.GetArguments() + ")"})
+	}
+
+	dependsOn := func(a, b *node) bool {
+		switch {
+		case a.drop.view != nil && b.drop.view != nil:
+			return viewDependsOnView(a.drop.view, b.drop.view.Name) || viewDependsOnView(a.drop.view, b.drop.view.Schema+"."+b.drop.view.Name)
+		case a.drop.view != nil && b.drop.function != nil:
+			return referencesNewFunction(a.drop.view.Definition, a.drop.view.Schema, buildFunctionLookup([]*ir.Function{b.drop.function}))
+		case a.drop.view != nil && b.drop.aggregate != nil:
+			return referencesNewFunction(a.drop.view.Definition, a.drop.view.Schema, buildRoutineLookup(nil, []*ir.Aggregate{b.drop.aggregate}))
+		case a.drop.function != nil && b.drop.view != nil:
+			return functionSignatureReferencesRelation(a.drop.function, buildViewLookup([]*ir.View{b.drop.view}))
+		case a.drop.aggregate != nil && b.drop.view != nil:
+			return aggregateReferencesNewView(a.drop.aggregate, buildViewLookup([]*ir.View{b.drop.view}))
+		case a.drop.aggregate != nil && b.drop.function != nil:
+			return aggregateUsesFunction(a.drop.aggregate, buildFunctionLookup([]*ir.Function{b.drop.function}))
+		}
+		return false
+	}
+	// dependents[i] counts the nodes still to drop that depend on node i.
+	dependents := make([]int, len(nodes))
+	for i, a := range nodes {
+		for j, b := range nodes {
+			if i != j && dependsOn(a, b) {
+				a.deps = append(a.deps, j)
+				dependents[j]++
+			}
+		}
+	}
+
+	ordered := make([]pinnedDrop, 0, len(nodes))
+	done := make([]bool, len(nodes))
+	for len(ordered) < len(nodes) {
+		next := -1
+		for i, n := range nodes {
+			if !done[i] && dependents[i] == 0 && (next < 0 || n.rank < nodes[next].rank) {
+				next = i
+			}
+		}
+		if next < 0 {
+			// Cycle: take the first remaining node by rank.
+			for i, n := range nodes {
+				if !done[i] && (next < 0 || n.rank < nodes[next].rank) {
+					next = i
+				}
+			}
+		}
+		done[next] = true
+		ordered = append(ordered, nodes[next].drop)
+		for _, dep := range nodes[next].deps {
+			dependents[dep]--
+		}
+	}
+	return ordered
 }
 
 // generateCreateSQL generates CREATE statements in dependency order
@@ -2639,9 +2748,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// migration, wait there too; the batch is sorted again to interleave them
 	// with the new views built on them, or that they are built on (#687).
 	heldRoutines := append(recreatedFunctions(d.modifiedFunctions), d.functionsAwaitingRecreatedViews...)
-	viewsToCreateNow, viewsAwaitingRecreatedViews := splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, d.aggregatesAwaitingRecreatedViews))
+	viewsToCreateNow, viewsAwaitingRecreatedViews := splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, d.aggregatesAwaitingRecreatedViews), d.viewsAwaitingRecreatedViews)
 	if len(d.viewsAwaitingPinnedRoutines) > 0 {
-		viewsAwaitingRecreatedViews = topologicallySortViews(append(d.viewsAwaitingRecreatedViews, viewsAwaitingRecreatedViews...))
+		viewsAwaitingRecreatedViews = topologicallySortViews(viewsAwaitingRecreatedViews)
 	}
 	d.viewsAwaitingRecreatedViews = viewsAwaitingRecreatedViews
 
@@ -3661,17 +3770,26 @@ func splitAggregatesByViewDeps(aggregates []*ir.Aggregate, views, functions map[
 // generateViewsAndDependentRoutinesSQL creates views together with the functions
 // and aggregates that depend on them. A view that calls one of those routines is
 // created after it, and a routine that depends on such a view follows that view
-// in turn (#580). Every argument may be empty.
+// in turn (#580), for as many levels as the chain has (#687). Each round emits
+// the views that call none of the remaining routines, then the routines that
+// depend on none of the remaining views. Anything that never becomes ready (a
+// cycle PostgreSQL would reject as well) is emitted as is so it still surfaces
+// in the plan. Every argument may be empty.
 func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Function, aggregates []*ir.Aggregate, targetSchema string, collector *diffCollector) {
-	viewsNow, viewsLater := splitViewsReferencingRoutines(views, buildRoutineLookup(functions, aggregates))
-	lateViewLookup := buildViewLookup(viewsLater)
-	functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
-	aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
-
-	generateCreateViewsSQL(viewsNow, targetSchema, collector)
-	generateFunctionsAndAggregatesSQL(functionsNow, aggregatesNow, targetSchema, collector)
-	generateCreateViewsSQL(viewsLater, targetSchema, collector)
-	generateFunctionsAndAggregatesSQL(functionsLater, aggregatesLater, targetSchema, collector)
+	for len(views) > 0 || len(functions) > 0 || len(aggregates) > 0 {
+		viewsNow, viewsLater := splitViewsReferencingRoutines(views, buildRoutineLookup(functions, aggregates), nil)
+		lateViewLookup := buildViewLookup(viewsLater)
+		functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
+		aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
+		if len(viewsNow) == 0 && len(functionsNow) == 0 && len(aggregatesNow) == 0 {
+			generateCreateViewsSQL(views, targetSchema, collector)
+			generateFunctionsAndAggregatesSQL(functions, aggregates, targetSchema, collector)
+			return
+		}
+		generateCreateViewsSQL(viewsNow, targetSchema, collector)
+		generateFunctionsAndAggregatesSQL(functionsNow, aggregatesNow, targetSchema, collector)
+		views, functions, aggregates = viewsLater, functionsLater, aggregatesLater
+	}
 }
 
 // generateFunctionsAndAggregatesSQL creates functions and aggregates that may
@@ -3700,10 +3818,13 @@ func generateFunctionsAndAggregatesSQL(functions []*ir.Function, aggregates []*i
 // now and those that call a routine in the lookup, directly or through another
 // held-back view. The input is topologically sorted, so a single pass suffices:
 // a view built on a held-back view appears after it and sees it in `later`.
-func splitViewsReferencingRoutines(views []*ir.View, routines map[string]struct{}) (now, later []*ir.View) {
-	if len(routines) == 0 {
+// Views in held are held back already (they are created with the routines) and
+// start `later`, so views built on them are held back too (#687).
+func splitViewsReferencingRoutines(views []*ir.View, routines map[string]struct{}, held []*ir.View) (now, later []*ir.View) {
+	if len(routines) == 0 && len(held) == 0 {
 		return views, nil
 	}
+	later = append(later, held...)
 	for _, v := range views {
 		if referencesNewFunction(v.Definition, v.Schema, routines) || viewReferencesAnyDeferredView(v, later) {
 			later = append(later, v)

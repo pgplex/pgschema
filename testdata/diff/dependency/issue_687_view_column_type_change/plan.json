@@ -3,22 +3,16 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "e74a921779940a986ea15e8e75df7ba9a8f5eab7e5a94b1bf1109776023f5479"
+    "hash": "48d9b5c470fd9b0a314e25853b1852f6af65f16aeda6f1674da3aae806525abf"
   },
   "groups": [
     {
       "steps": [
         {
-          "sql": "DROP VIEW IF EXISTS item_id_max_view RESTRICT;",
+          "sql": "DROP VIEW IF EXISTS item_count_echo RESTRICT;",
           "type": "view",
           "operation": "recreate",
-          "path": "public.item_id_max_view"
-        },
-        {
-          "sql": "DROP VIEW IF EXISTS item_count_stale RESTRICT;",
-          "type": "view",
-          "operation": "drop",
-          "path": "public.item_count_stale"
+          "path": "public.item_count_echo"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_count_pairs RESTRICT;",
@@ -27,10 +21,16 @@
           "path": "public.item_count_pairs"
         },
         {
-          "sql": "DROP VIEW IF EXISTS item_count RESTRICT;",
+          "sql": "DROP VIEW IF EXISTS item_count_stale RESTRICT;",
+          "type": "view",
+          "operation": "drop",
+          "path": "public.item_count_stale"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS item_id_max_view RESTRICT;",
           "type": "view",
           "operation": "recreate",
-          "path": "public.item_count"
+          "path": "public.item_id_max_view"
         },
         {
           "sql": "DROP AGGREGATE IF EXISTS item_id_max(item_view);",
@@ -45,16 +45,22 @@
           "path": "public.item_id_min"
         },
         {
-          "sql": "DROP FUNCTION IF EXISTS item_view_all(timestamptz);",
+          "sql": "DROP FUNCTION IF EXISTS item_count_all();",
           "type": "function",
           "operation": "drop",
-          "path": "public.item_view_all"
+          "path": "public.item_count_all"
         },
         {
-          "sql": "DROP FUNCTION IF EXISTS item_ids_all();",
+          "sql": "DROP VIEW IF EXISTS item_count RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.item_count"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);",
           "type": "function",
           "operation": "drop",
-          "path": "public.item_ids_all"
+          "path": "public.item_id_max_sfunc"
         },
         {
           "sql": "DROP FUNCTION IF EXISTS item_id_min_sfunc(bigint, item_view);",
@@ -63,10 +69,16 @@
           "path": "public.item_id_min_sfunc"
         },
         {
-          "sql": "DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);",
+          "sql": "DROP FUNCTION IF EXISTS item_ids_all();",
           "type": "function",
           "operation": "drop",
-          "path": "public.item_id_max_sfunc"
+          "path": "public.item_ids_all"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_view_all(timestamptz);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_view_all"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_ids RESTRICT;",
@@ -141,6 +153,12 @@
           "path": "public.item_count"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW item_count_copy AS\n SELECT n\n   FROM item_count;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.item_count_copy"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW item_count_pairs AS\n SELECT n * 2 AS pairs\n   FROM item_count;",
           "type": "view",
           "operation": "create",
@@ -151,6 +169,18 @@
           "type": "view",
           "operation": "create",
           "path": "public.item_id_max_view"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_count_all()\nRETURNS SETOF item_count\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT * FROM item_count;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_count_all"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW item_count_echo AS\n SELECT n\n   FROM item_count_all() item_count_all(n);",
+          "type": "view",
+          "operation": "create",
+          "path": "public.item_count_echo"
         },
         {
           "sql": "REVOKE EXECUTE ON FUNCTION item_view_all(p_since timestamp with time zone) FROM PUBLIC;",

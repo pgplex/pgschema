@@ -1,22 +1,26 @@
-DROP VIEW IF EXISTS item_id_max_view RESTRICT;
-
-DROP VIEW IF EXISTS item_count_stale RESTRICT;
+DROP VIEW IF EXISTS item_count_echo RESTRICT;
 
 DROP VIEW IF EXISTS item_count_pairs RESTRICT;
 
-DROP VIEW IF EXISTS item_count RESTRICT;
+DROP VIEW IF EXISTS item_count_stale RESTRICT;
+
+DROP VIEW IF EXISTS item_id_max_view RESTRICT;
 
 DROP AGGREGATE IF EXISTS item_id_max(item_view);
 
 DROP AGGREGATE IF EXISTS item_id_min(item_view);
 
-DROP FUNCTION IF EXISTS item_view_all(timestamptz);
+DROP FUNCTION IF EXISTS item_count_all();
 
-DROP FUNCTION IF EXISTS item_ids_all();
+DROP VIEW IF EXISTS item_count RESTRICT;
+
+DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
 
 DROP FUNCTION IF EXISTS item_id_min_sfunc(bigint, item_view);
 
-DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
+DROP FUNCTION IF EXISTS item_ids_all();
+
+DROP FUNCTION IF EXISTS item_view_all(timestamptz);
 
 DROP VIEW IF EXISTS item_ids RESTRICT;
 
@@ -94,6 +98,10 @@ CREATE OR REPLACE VIEW item_count AS
 
 COMMENT ON VIEW item_count IS 'Number of items';
 
+CREATE OR REPLACE VIEW item_count_copy AS
+ SELECT n
+   FROM item_count;
+
 CREATE OR REPLACE VIEW item_count_pairs AS
  SELECT n * 2 AS pairs
    FROM item_count;
@@ -101,6 +109,18 @@ CREATE OR REPLACE VIEW item_count_pairs AS
 CREATE OR REPLACE VIEW item_id_max_view AS
  SELECT item_id_max(v.*) AS max_id
    FROM item_view v;
+
+CREATE OR REPLACE FUNCTION item_count_all()
+RETURNS SETOF item_count
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count;
+$$;
+
+CREATE OR REPLACE VIEW item_count_echo AS
+ SELECT n
+   FROM item_count_all() item_count_all(n);
 
 REVOKE EXECUTE ON FUNCTION item_view_all(p_since timestamp with time zone) FROM PUBLIC;
 
