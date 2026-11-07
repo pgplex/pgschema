@@ -44,3 +44,55 @@ STABLE
 AS $$
 SELECT * FROM item_ids;
 $$;
+
+-- Views that call item_view_all() bind to the function, so they block its
+-- forced drop (SQLSTATE 2BP01). They are dropped first, deepest dependent
+-- first, and created again once the function is back: item_count is
+-- unchanged, item_count_pairs is built on it, and item_count_stale is dropped
+-- by the migration. The grant and comment on item_count are re-issued.
+CREATE VIEW item_count AS
+SELECT count(*) AS n FROM item_view_all(now());
+
+COMMENT ON VIEW item_count IS 'Number of items';
+GRANT SELECT ON item_count TO api_role;
+
+CREATE VIEW item_count_pairs AS
+SELECT n * 2 AS pairs FROM item_count;
+
+CREATE VIEW item_count_stale AS
+SELECT count(*) AS n FROM item_view_all(now() - interval '1 day');
+
+-- Aggregates over item_view rows: their transition functions take the view's
+-- row type, so function and aggregate both pin the view. item_id_max is kept
+-- and item_id_min is dropped; both transition functions stay.
+CREATE FUNCTION item_id_max_sfunc(state bigint, item item_view)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT greatest(state, item.id);
+$$;
+
+CREATE AGGREGATE item_id_max(item_view) (
+    SFUNC = item_id_max_sfunc,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+
+CREATE FUNCTION item_id_min_sfunc(state bigint, item item_view)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT least(state, item.id);
+$$;
+
+CREATE AGGREGATE item_id_min(item_view) (
+    SFUNC = item_id_min_sfunc,
+    STYPE = bigint
+);
+
+-- Reads item_view and calls the kept aggregate, so it is a dependent of the
+-- recreated view that must also wait for the aggregate to be created again.
+CREATE VIEW item_id_max_view AS
+SELECT item_id_max(v) AS max_id FROM item_view v;
