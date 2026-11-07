@@ -72,6 +72,16 @@ CREATE OR REPLACE VIEW open_summary AS
 CREATE OR REPLACE VIEW total_summary AS
  SELECT sum_total(id::bigint) AS t
    FROM entry;
+CREATE OR REPLACE FUNCTION add_summary(
+    state bigint,
+    s open_summary
+)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT state + s.n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL);
+$$;
 CREATE OR REPLACE FUNCTION summary_plus()
 RETURNS bigint
 LANGUAGE sql
@@ -79,3 +89,37 @@ STABLE
 AS $$
     SELECT n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL) FROM open_summary;
 $$;
+CREATE AGGREGATE sum_summary(open_summary) (
+    SFUNC = add_summary,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+CREATE OR REPLACE FUNCTION summary_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT sum_summary(s) FROM open_summary s;
+$$;
+CREATE OR REPLACE FUNCTION add_summary_total(
+    state bigint,
+    x bigint
+)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT state + x + summary_total();
+$$;
+CREATE AGGREGATE sum_summary_total(bigint) (
+    SFUNC = add_summary_total,
+    STYPE = bigint,
+    INITCOND = '0'
+);
+CREATE OR REPLACE VIEW request_summary AS
+ SELECT summary_plus() AS n,
+    request_id
+   FROM entry;
+CREATE OR REPLACE VIEW request_summary_twice AS
+ SELECT n * 2 AS n
+   FROM request_summary;

@@ -2822,9 +2822,15 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// An aggregate built on a function held for an added column (#624) waits
 	// with it in the modify phase, as does a SQL function calling that
 	// aggregate, an aggregate built on that caller, and so on down the chain.
-	if len(d.functionsAwaitingDeferredViews) > 0 {
+	// A chain may cross between the two pools, so both are revisited until
+	// neither held partition grows.
+	for len(d.functionsAwaitingDeferredViews) > 0 {
+		functionsBefore, aggregatesBefore := len(d.functionsAwaitingDeferredViews), len(d.aggregatesAwaitingDeferredViews)
 		functionsCallingAggregates, aggregatesToCreateNow, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews = holdBackRoutineDependents(functionsCallingAggregates, aggregatesToCreateNow, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews)
 		functionsWithViewDeps, aggregatesWithViewDeps, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews = holdBackRoutineDependents(functionsWithViewDeps, aggregatesWithViewDeps, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews)
+		if len(d.functionsAwaitingDeferredViews) == functionsBefore && len(d.aggregatesAwaitingDeferredViews) == aggregatesBefore {
+			break
+		}
 	}
 
 	// Aggregates and their callers may chain (aggregate a -> SQL support
@@ -2905,13 +2911,33 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// A new view calling a routine held for an added column (#624) waits the
 	// same way; the recreated-view batch is emitted after that routine. A held
 	// routine that in turn depends on such a view moves to that batch as well.
+	// A view held for an added column (#414) that calls such a routine, or
+	// reads a view that moves, moves there with it.
 	heldRoutines := append(recreatedFunctions(d.modifiedFunctions), d.functionsAwaitingRecreatedViews...)
 	heldRoutines = append(heldRoutines, d.functionsAwaitingDeferredViews...)
 	rounds := 0
+	movedDeferredViews := false
 	for {
 		rounds++
 		heldAggregates := append(append([]*ir.Aggregate{}, d.aggregatesAwaitingRecreatedViews...), d.aggregatesAwaitingDeferredViews...)
-		viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, heldAggregates), d.viewsAwaitingRecreatedViews)
+		heldRoutineLookup := buildRoutineLookup(heldRoutines, heldAggregates)
+		viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, heldRoutineLookup, d.viewsAwaitingRecreatedViews)
+		awaitingBefore := len(d.viewsAwaitingRecreatedViews)
+		d.deferredAddedViews, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(d.deferredAddedViews, heldRoutineLookup, d.viewsAwaitingRecreatedViews)
+		for moved := true; moved; {
+			moved = false
+			var still []*ir.View
+			for _, v := range d.deferredAddedViews {
+				if viewReferencesAnyDeferredView(v, d.viewsAwaitingRecreatedViews) {
+					d.viewsAwaitingRecreatedViews = append(d.viewsAwaitingRecreatedViews, v)
+					moved = true
+				} else {
+					still = append(still, v)
+				}
+			}
+			d.deferredAddedViews = still
+		}
+		movedDeferredViews = movedDeferredViews || len(d.viewsAwaitingRecreatedViews) > awaitingBefore
 		awaitingViewLookup := buildViewLookup(d.viewsAwaitingRecreatedViews)
 		var movedFunctions []*ir.Function
 		functionsWithViewDeps, movedFunctions = splitFunctionsByViewDeps(functionsWithViewDeps, awaitingViewLookup)
@@ -2934,7 +2960,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 	// Views held back in a later round may be read by views held back
 	// earlier, and kept callers come unsorted, so order the batch again.
-	if rounds > 1 || len(d.viewsAwaitingPinnedRoutines) > 0 {
+	if rounds > 1 || movedDeferredViews || len(d.viewsAwaitingPinnedRoutines) > 0 {
 		d.viewsAwaitingRecreatedViews = topologicallySortViews(d.viewsAwaitingRecreatedViews)
 	}
 
@@ -4987,7 +5013,7 @@ func functionReadsAddedColumn(fn *ir.Function, addedCols map[string]map[string]s
 			continue
 		}
 		for col := range cols {
-			if containsIdentifier(fn.Definition, col) || containsIdentifier(fn.ReturnType, col) {
+			if containsIdentifier(fn.Definition, col) || (strings.HasPrefix(fn.ReturnType, "TABLE(") && containsIdentifier(fn.ReturnType, col)) {
 				return true
 			}
 		}

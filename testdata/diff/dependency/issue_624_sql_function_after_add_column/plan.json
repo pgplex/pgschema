@@ -87,10 +87,52 @@
           "path": "public.total_summary"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION add_summary(\n    state bigint,\n    s open_summary\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + s.n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_summary"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION summary_plus()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL) FROM open_summary;\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.summary_plus"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_summary(open_summary) (\n    SFUNC = add_summary,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION summary_total()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT sum_summary(s) FROM open_summary s;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.summary_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_summary_total(\n    state bigint,\n    x bigint\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + x + summary_total();\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_summary_total"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_summary_total(bigint) (\n    SFUNC = add_summary_total,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_summary_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW request_summary AS\n SELECT summary_plus() AS n,\n    request_id\n   FROM entry;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.request_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW request_summary_twice AS\n SELECT n * 2 AS n\n   FROM request_summary;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.request_summary_twice"
         }
       ]
     }
