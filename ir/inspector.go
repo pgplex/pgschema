@@ -1238,6 +1238,11 @@ func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema
 			continue
 		}
 
+		// Identity arguments qualified exactly as the privilege inspector names
+		// a function (see buildPrivileges), so the two can be matched by name.
+		identityArguments := StripSchemaQualifiers(fn.FunctionIdentityArguments.String, targetSchema)
+		identityArguments = i.stripExtensionMemberTypeQualifiers(identityArguments)
+
 		// Get function definition from pg_get_functiondef
 		definition := i.safeInterfaceToString(fn.RoutineDefinition)
 
@@ -1285,6 +1290,7 @@ func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema
 			Language:          i.safeInterfaceToString(fn.ExternalLanguage),
 			Comment:           comment,
 			Parameters:        parameters,
+			IdentityArguments: identityArguments,
 			Volatility:        volatility,
 			IsStrict:          isStrict,
 			IsSecurityDefiner: isSecurityDefiner,

@@ -2020,6 +2020,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -2059,18 +2061,19 @@ ORDER BY r.routine_schema, r.routine_name
 `
 
 type GetFunctionsRow struct {
-	RoutineSchema     interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName       interface{}    `db:"routine_name" json:"routine_name"`
-	RoutineDefinition string         `db:"routine_definition" json:"routine_definition"`
-	RoutineType       interface{}    `db:"routine_type" json:"routine_type"`
-	DataType          sql.NullString `db:"data_type" json:"data_type"`
-	ExternalLanguage  interface{}    `db:"external_language" json:"external_language"`
-	FunctionComment   sql.NullString `db:"function_comment" json:"function_comment"`
-	FunctionArguments sql.NullString `db:"function_arguments" json:"function_arguments"`
-	FunctionSignature sql.NullString `db:"function_signature" json:"function_signature"`
-	Volatility        sql.NullString `db:"volatility" json:"volatility"`
-	IsStrict          bool           `db:"is_strict" json:"is_strict"`
-	IsSecurityDefiner bool           `db:"is_security_definer" json:"is_security_definer"`
+	RoutineSchema             interface{}    `db:"routine_schema" json:"routine_schema"`
+	RoutineName               interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineDefinition         string         `db:"routine_definition" json:"routine_definition"`
+	RoutineType               interface{}    `db:"routine_type" json:"routine_type"`
+	DataType                  sql.NullString `db:"data_type" json:"data_type"`
+	ExternalLanguage          interface{}    `db:"external_language" json:"external_language"`
+	FunctionComment           sql.NullString `db:"function_comment" json:"function_comment"`
+	FunctionArguments         sql.NullString `db:"function_arguments" json:"function_arguments"`
+	FunctionSignature         sql.NullString `db:"function_signature" json:"function_signature"`
+	FunctionIdentityArguments sql.NullString `db:"function_identity_arguments" json:"function_identity_arguments"`
+	Volatility                sql.NullString `db:"volatility" json:"volatility"`
+	IsStrict                  bool           `db:"is_strict" json:"is_strict"`
+	IsSecurityDefiner         bool           `db:"is_security_definer" json:"is_security_definer"`
 }
 
 // GetFunctions retrieves all user-defined functions (excluding extension members)
@@ -2093,6 +2096,7 @@ func (q *Queries) GetFunctions(ctx context.Context) ([]GetFunctionsRow, error) {
 			&i.FunctionComment,
 			&i.FunctionArguments,
 			&i.FunctionSignature,
+			&i.FunctionIdentityArguments,
 			&i.Volatility,
 			&i.IsStrict,
 			&i.IsSecurityDefiner,
@@ -2126,6 +2130,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -2165,21 +2171,22 @@ ORDER BY r.routine_schema, r.routine_name
 `
 
 type GetFunctionsForSchemaRow struct {
-	RoutineSchema     interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName       interface{}    `db:"routine_name" json:"routine_name"`
-	RoutineDefinition sql.NullString `db:"routine_definition" json:"routine_definition"`
-	RoutineType       interface{}    `db:"routine_type" json:"routine_type"`
-	DataType          sql.NullString `db:"data_type" json:"data_type"`
-	ExternalLanguage  interface{}    `db:"external_language" json:"external_language"`
-	FunctionComment   sql.NullString `db:"function_comment" json:"function_comment"`
-	FunctionArguments sql.NullString `db:"function_arguments" json:"function_arguments"`
-	FunctionSignature sql.NullString `db:"function_signature" json:"function_signature"`
-	Volatility        sql.NullString `db:"volatility" json:"volatility"`
-	IsStrict          bool           `db:"is_strict" json:"is_strict"`
-	IsSecurityDefiner bool           `db:"is_security_definer" json:"is_security_definer"`
-	IsLeakproof       bool           `db:"is_leakproof" json:"is_leakproof"`
-	ParallelMode      interface{}    `db:"parallel_mode" json:"parallel_mode"`
-	SetConfig         []string       `db:"set_config" json:"set_config"`
+	RoutineSchema             interface{}    `db:"routine_schema" json:"routine_schema"`
+	RoutineName               interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineDefinition         sql.NullString `db:"routine_definition" json:"routine_definition"`
+	RoutineType               interface{}    `db:"routine_type" json:"routine_type"`
+	DataType                  sql.NullString `db:"data_type" json:"data_type"`
+	ExternalLanguage          interface{}    `db:"external_language" json:"external_language"`
+	FunctionComment           sql.NullString `db:"function_comment" json:"function_comment"`
+	FunctionArguments         sql.NullString `db:"function_arguments" json:"function_arguments"`
+	FunctionSignature         sql.NullString `db:"function_signature" json:"function_signature"`
+	FunctionIdentityArguments sql.NullString `db:"function_identity_arguments" json:"function_identity_arguments"`
+	Volatility                sql.NullString `db:"volatility" json:"volatility"`
+	IsStrict                  bool           `db:"is_strict" json:"is_strict"`
+	IsSecurityDefiner         bool           `db:"is_security_definer" json:"is_security_definer"`
+	IsLeakproof               bool           `db:"is_leakproof" json:"is_leakproof"`
+	ParallelMode              interface{}    `db:"parallel_mode" json:"parallel_mode"`
+	SetConfig                 []string       `db:"set_config" json:"set_config"`
 }
 
 // GetFunctionsForSchema retrieves all user-defined functions for a specific schema
@@ -2202,6 +2209,7 @@ func (q *Queries) GetFunctionsForSchema(ctx context.Context, dollar_1 sql.NullSt
 			&i.FunctionComment,
 			&i.FunctionArguments,
 			&i.FunctionSignature,
+			&i.FunctionIdentityArguments,
 			&i.Volatility,
 			&i.IsStrict,
 			&i.IsSecurityDefiner,

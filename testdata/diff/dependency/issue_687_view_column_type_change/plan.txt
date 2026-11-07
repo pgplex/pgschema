@@ -1,10 +1,10 @@
-Plan: 5 to add, 2 to modify, 2 to drop.
+Plan: 6 to add, 2 to modify, 2 to drop.
 
 Summary by type:
   functions: 3 to add, 2 to drop
   views: 2 to modify
   privileges: 1 to add
-  revoked default privileges: 1 to add
+  revoked default privileges: 2 to add
 
 Functions:
   - item_ids_all
@@ -21,12 +21,13 @@ Privileges:
   + api_role
 
 Revoked default privileges:
-  + item_view_all()
+  + item_view_all(p_since timestamp with time zone)
+  + items_due_between(p_start date, p_end date)
 
 DDL to be executed:
 --------------------------------------------------
 
-DROP FUNCTION IF EXISTS item_view_all();
+DROP FUNCTION IF EXISTS item_view_all(timestamptz);
 
 DROP FUNCTION IF EXISTS item_ids_all();
 
@@ -51,7 +52,9 @@ AS $$
 SELECT * FROM item_ids;
 $$;
 
-CREATE OR REPLACE FUNCTION item_view_all()
+CREATE OR REPLACE FUNCTION item_view_all(
+    p_since timestamptz
+)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -70,6 +73,8 @@ AS $$
 SELECT id, due FROM items WHERE due BETWEEN p_start AND p_end;
 $$;
 
-REVOKE EXECUTE ON FUNCTION item_view_all() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION item_view_all(p_since timestamp with time zone) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION item_view_all() TO api_role;
+REVOKE EXECUTE ON FUNCTION items_due_between(p_start date, p_end date) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION item_view_all(p_since timestamp with time zone) TO api_role;

@@ -19,8 +19,9 @@ FROM items;
 
 -- Unchanged in new.sql. Typed on the view's row type, it would block the
 -- view's RESTRICT drop, so it is dropped first and created again after the
--- view, and its privileges are re-issued (issue #687).
-CREATE FUNCTION item_view_all()
+-- view, and its privileges are re-issued (issue #687). The parameter type is
+-- spelled differently by the privilege catalog and the normalized IR.
+CREATE FUNCTION item_view_all(p_since timestamp with time zone)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -28,8 +29,8 @@ AS $$
 SELECT * FROM item_view;
 $$;
 
-REVOKE EXECUTE ON FUNCTION item_view_all() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION item_view_all() TO api_role;
+REVOKE EXECUTE ON FUNCTION item_view_all(timestamp with time zone) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION item_view_all(timestamp with time zone) TO api_role;
 
 -- Unchanged dependent view, rebuilt together with item_view, and an unchanged
 -- function typed on it, which gets the same treatment (issue #687).

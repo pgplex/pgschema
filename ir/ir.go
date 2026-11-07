@@ -229,6 +229,7 @@ type Function struct {
 	ReturnType        string       `json:"return_type"`
 	Language          string       `json:"language"`
 	Parameters        []*Parameter `json:"parameters,omitempty"`
+	IdentityArguments string       `json:"-"` // pg_get_function_identity_arguments form, qualified as privileges name functions; derived from Parameters, so kept out of JSON
 	Comment           string       `json:"comment,omitempty"`
 	Volatility        string       `json:"volatility,omitempty"`          // IMMUTABLE, STABLE, VOLATILE
 	IsStrict          bool         `json:"is_strict,omitempty"`           // STRICT or null behavior

@@ -14,7 +14,7 @@ CREATE VIEW item_view AS
 SELECT id, due
 FROM items;
 
-CREATE FUNCTION item_view_all()
+CREATE FUNCTION item_view_all(p_since timestamp with time zone)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -22,8 +22,8 @@ AS $$
 SELECT * FROM item_view;
 $$;
 
-REVOKE EXECUTE ON FUNCTION item_view_all() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION item_view_all() TO api_role;
+REVOKE EXECUTE ON FUNCTION item_view_all(timestamp with time zone) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION item_view_all(timestamp with time zone) TO api_role;
 
 CREATE VIEW item_ids AS
 SELECT id FROM item_view;
@@ -45,3 +45,7 @@ STABLE
 AS $$
 SELECT id, due FROM items WHERE due BETWEEN p_start AND p_end;
 $$;
+
+-- Revoked on a function that is only created after the view recreation, so
+-- the revoke must follow that creation (issue #687).
+REVOKE EXECUTE ON FUNCTION items_due_between(date, date) FROM PUBLIC;

@@ -773,6 +773,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -1728,6 +1730,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'

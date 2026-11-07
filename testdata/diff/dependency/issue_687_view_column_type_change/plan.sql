@@ -1,4 +1,4 @@
-DROP FUNCTION IF EXISTS item_view_all();
+DROP FUNCTION IF EXISTS item_view_all(timestamptz);
 
 DROP FUNCTION IF EXISTS item_ids_all();
 
@@ -23,7 +23,9 @@ AS $$
 SELECT * FROM item_ids;
 $$;
 
-CREATE OR REPLACE FUNCTION item_view_all()
+CREATE OR REPLACE FUNCTION item_view_all(
+    p_since timestamptz
+)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -42,6 +44,8 @@ AS $$
 SELECT id, due FROM items WHERE due BETWEEN p_start AND p_end;
 $$;
 
-REVOKE EXECUTE ON FUNCTION item_view_all() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION item_view_all(p_since timestamp with time zone) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION item_view_all() TO api_role;
+REVOKE EXECUTE ON FUNCTION items_due_between(p_start date, p_end date) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION item_view_all(p_since timestamp with time zone) TO api_role;
