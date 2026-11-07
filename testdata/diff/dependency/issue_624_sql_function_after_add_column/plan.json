@@ -1,0 +1,152 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "dd92aaae1adb34083222981b72777f4427583f0fde3aa88aedd626b135d2000d"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION latest_request()\nRETURNS integer\nLANGUAGE plpgsql\nSTABLE\nAS $$\nBEGIN\n    RETURN (SELECT max(entry.request_id) FROM entry);\nEND;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.latest_request"
+        },
+        {
+          "sql": "ALTER TABLE entry ADD COLUMN request_id integer;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.entry.request_id"
+        },
+        {
+          "sql": "ALTER TABLE entry ADD COLUMN \"Priority\" integer;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.entry.Priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_open(\n    state bigint,\n    x bigint\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + x + (SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_open"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION child_open_requests()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry_child WHERE entry_child.request_id IS NOT NULL;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.child_open_requests"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION entry_rows()\nRETURNS TABLE(id integer, request_id integer, \"Priority\" integer)\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT * FROM entry;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.entry_rows"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION entry_triples()\nRETURNS TABLE(a integer, b integer, c integer)\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT e.* FROM entry e;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.entry_triples"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION high_priority()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry WHERE entry.\"Priority\" > 1;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.high_priority"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION open_requests()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.open_requests"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION has_open_requests()\nRETURNS boolean\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT open_requests() > 0;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.has_open_requests"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_open(bigint) (\n    SFUNC = add_open,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_open"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_total(\n    state bigint,\n    x bigint\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + (SELECT sum_open(x));\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_total"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_total(bigint) (\n    SFUNC = add_total,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW open_summary AS\n SELECT open_requests() AS n;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.open_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW total_summary AS\n SELECT sum_total(id::bigint) AS t\n   FROM entry;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.total_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_summary(\n    state bigint,\n    s open_summary\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + s.n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION summary_plus()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT n + (SELECT count(*) FROM entry WHERE entry.request_id IS NULL) FROM open_summary;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.summary_plus"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_summary(open_summary) (\n    SFUNC = add_summary,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION summary_total()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT sum_summary(s) FROM open_summary s;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.summary_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION add_summary_total(\n    state bigint,\n    x bigint\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT state + x + summary_total();\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.add_summary_total"
+        },
+        {
+          "sql": "CREATE AGGREGATE sum_summary_total(bigint) (\n    SFUNC = add_summary_total,\n    STYPE = bigint,\n    INITCOND = '0'\n);",
+          "type": "aggregate",
+          "operation": "create",
+          "path": "public.sum_summary_total"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW request_summary AS\n SELECT summary_plus() AS n,\n    request_id\n   FROM entry;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.request_summary"
+        },
+        {
+          "sql": "CREATE OR REPLACE VIEW request_summary_twice AS\n SELECT n * 2 AS n\n   FROM request_summary;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.request_summary_twice"
+        }
+      ]
+    }
+  ]
+}

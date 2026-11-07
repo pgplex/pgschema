@@ -366,7 +366,10 @@ type ddlDiff struct {
 	modifiedColumnPrivileges []*columnPrivilegeDiff
 	// Newly-added views that reference newly-added columns on modified tables.
 	// Created in the modify phase, AFTER generateModifyTablesSQL, so the columns
-	// exist when the view body is parsed (issue #414).
+	// exist when the view body is parsed (issue #414). New functions whose view
+	// dependency is on those views, or whose SQL-language body reads such a
+	// column itself (issue #624), wait there with them, with the aggregates
+	// built on those functions and the SQL functions calling them.
 	deferredAddedViews              []*ir.View
 	functionsAwaitingDeferredViews  []*ir.Function
 	aggregatesAwaitingDeferredViews []*ir.Aggregate
@@ -2664,6 +2667,29 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithViewDeps, d.functionsAwaitingRecreatedViews = holdBackCallers(functionsWithViewDeps, d.functionsAwaitingRecreatedViews)
 	}
 
+	// A SQL-language function whose body reads a column that ALTER TABLE adds
+	// to an existing table is validated against that column at creation, so it
+	// is created in the modify phase, after the column, with the views held
+	// back for the same reason (#624). A SQL function calling it waits with it.
+	addedColLookup := buildModifiedTableAddedColumnLookup(d.modifiedTables, d.allNewTables)
+	if len(addedColLookup) > 0 {
+		deferAddedColumnReaders := func(fns []*ir.Function) []*ir.Function {
+			var keep []*ir.Function
+			for _, fn := range fns {
+				if functionReadsAddedColumn(fn, addedColLookup) {
+					d.functionsAwaitingDeferredViews = append(d.functionsAwaitingDeferredViews, fn)
+				} else {
+					keep = append(keep, fn)
+				}
+			}
+			return keep
+		}
+		functionsWithoutViewDeps = deferAddedColumnReaders(functionsWithoutViewDeps)
+		functionsWithViewDeps = deferAddedColumnReaders(functionsWithViewDeps)
+		functionsWithoutViewDeps, d.functionsAwaitingDeferredViews = holdBackCallers(functionsWithoutViewDeps, d.functionsAwaitingDeferredViews)
+		functionsWithViewDeps, d.functionsAwaitingDeferredViews = holdBackCallers(functionsWithViewDeps, d.functionsAwaitingDeferredViews)
+	}
+
 	// SQL-language functions whose body calls a new aggregate are validated
 	// against it at creation, so they are created after the aggregates instead
 	// of in the table-relative batches below (#580).
@@ -2793,6 +2819,24 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	functionsWithViewDeps = append(functionsWithViewDeps, callersOfLateAggregates...)
 	d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, callersOfRecreatedAggregates...)
 
+	// An aggregate built on a function held for an added column (#624) waits
+	// with it in the modify phase, as does a SQL function calling that
+	// aggregate, an aggregate built on that caller, and so on down the chain.
+	// A chain may cross between the two pools, so both are revisited until
+	// neither held partition grows.
+	for len(d.functionsAwaitingDeferredViews) > 0 {
+		functionsBefore, aggregatesBefore := len(d.functionsAwaitingDeferredViews), len(d.aggregatesAwaitingDeferredViews)
+		functionsCallingAggregates, aggregatesToCreateNow, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews = holdBackRoutineDependents(functionsCallingAggregates, aggregatesToCreateNow, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews)
+		functionsWithViewDeps, aggregatesWithViewDeps, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews = holdBackRoutineDependents(functionsWithViewDeps, aggregatesWithViewDeps, d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews)
+		if len(d.functionsAwaitingDeferredViews) == functionsBefore && len(d.aggregatesAwaitingDeferredViews) == aggregatesBefore {
+			break
+		}
+	}
+	// A routine held for an added column that calls one held for a view
+	// recreation (an aggregate typed on that view, say) must follow it, so it
+	// moves to that later batch with its own dependents.
+	d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews = holdBackRoutineDependents(d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews)
+
 	// Aggregates and their callers may chain (aggregate a -> SQL support
 	// function calling a -> aggregate b), so they are scheduled together.
 	generateFunctionsAndAggregatesSQL(functionsCallingAggregates, aggregatesToCreateNow, targetSchema, collector)
@@ -2810,7 +2854,6 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create views, deferring any whose body references a newly-added column on a
 	// modified table. Those columns are emitted by generateModifyTablesSQL during
 	// the modify phase, so deferred views are created there (issue #414)
-	addedColLookup := buildModifiedTableAddedColumnLookup(d.modifiedTables)
 	viewsToCreateNow := d.addedViews
 	if len(addedColLookup) > 0 {
 		viewsToCreateNow = nil
@@ -2851,8 +2894,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// functions — they must be created after the views exist.
 	if len(d.deferredAddedViews) > 0 {
 		deferredViewLookup := buildViewLookup(d.deferredAddedViews)
-		functionsWithViewDeps, d.functionsAwaitingDeferredViews = splitFunctionsByViewDeps(functionsWithViewDeps, deferredViewLookup)
-		aggregatesWithViewDeps, d.aggregatesAwaitingDeferredViews = splitAggregatesByViewDeps(aggregatesWithViewDeps, deferredViewLookup, buildFunctionLookup(d.functionsAwaitingDeferredViews))
+		var movedFunctions []*ir.Function
+		functionsWithViewDeps, movedFunctions = splitFunctionsByViewDeps(functionsWithViewDeps, deferredViewLookup)
+		d.functionsAwaitingDeferredViews = append(d.functionsAwaitingDeferredViews, movedFunctions...)
+		var movedAggregates []*ir.Aggregate
+		aggregatesWithViewDeps, movedAggregates = splitAggregatesByViewDeps(aggregatesWithViewDeps, deferredViewLookup, buildFunctionLookup(d.functionsAwaitingDeferredViews))
+		d.aggregatesAwaitingDeferredViews = append(d.aggregatesAwaitingDeferredViews, movedAggregates...)
 	}
 
 	// A new view that calls a routine held for a view recreation must wait for
@@ -2865,17 +2912,49 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// A routine typed on, or (SQL body) reading, a view held back this way
 	// waits with it, as does a SQL function calling such a routine, and a new
 	// view calling any of them waits in turn: repeat until nothing moves (#687).
+	// A new view calling a routine held for an added column (#624) waits the
+	// same way; the recreated-view batch is emitted after that routine. A held
+	// routine that in turn depends on such a view moves to that batch as well.
+	// A view held for an added column (#414) that calls such a routine, or
+	// reads a view that moves, moves there with it.
 	heldRoutines := append(recreatedFunctions(d.modifiedFunctions), d.functionsAwaitingRecreatedViews...)
+	heldRoutines = append(heldRoutines, d.functionsAwaitingDeferredViews...)
 	rounds := 0
+	movedDeferredViews := false
 	for {
 		rounds++
-		viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, d.aggregatesAwaitingRecreatedViews), d.viewsAwaitingRecreatedViews)
+		heldAggregates := append(append([]*ir.Aggregate{}, d.aggregatesAwaitingRecreatedViews...), d.aggregatesAwaitingDeferredViews...)
+		heldRoutineLookup := buildRoutineLookup(heldRoutines, heldAggregates)
+		viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, heldRoutineLookup, d.viewsAwaitingRecreatedViews)
+		awaitingBefore := len(d.viewsAwaitingRecreatedViews)
+		d.deferredAddedViews, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(d.deferredAddedViews, heldRoutineLookup, d.viewsAwaitingRecreatedViews)
+		for moved := true; moved; {
+			moved = false
+			var still []*ir.View
+			for _, v := range d.deferredAddedViews {
+				if viewReferencesAnyDeferredView(v, d.viewsAwaitingRecreatedViews) {
+					d.viewsAwaitingRecreatedViews = append(d.viewsAwaitingRecreatedViews, v)
+					moved = true
+				} else {
+					still = append(still, v)
+				}
+			}
+			d.deferredAddedViews = still
+		}
+		movedDeferredViews = movedDeferredViews || len(d.viewsAwaitingRecreatedViews) > awaitingBefore
 		awaitingViewLookup := buildViewLookup(d.viewsAwaitingRecreatedViews)
 		var movedFunctions []*ir.Function
 		functionsWithViewDeps, movedFunctions = splitFunctionsByViewDeps(functionsWithViewDeps, awaitingViewLookup)
 		functionsWithViewDeps, movedFunctions = holdBackCallers(functionsWithViewDeps, movedFunctions)
 		var movedAggregates []*ir.Aggregate
 		aggregatesWithViewDeps, movedAggregates = splitAggregatesByViewDeps(aggregatesWithViewDeps, awaitingViewLookup, buildFunctionLookup(movedFunctions))
+		var movedHeldFunctions []*ir.Function
+		d.functionsAwaitingDeferredViews, movedHeldFunctions = splitFunctionsByViewDeps(d.functionsAwaitingDeferredViews, awaitingViewLookup)
+		var movedHeldAggregates []*ir.Aggregate
+		d.aggregatesAwaitingDeferredViews, movedHeldAggregates = splitAggregatesByViewDeps(d.aggregatesAwaitingDeferredViews, awaitingViewLookup, nil)
+		d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, movedHeldFunctions, movedHeldAggregates = holdBackRoutineDependents(d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, movedHeldFunctions, movedHeldAggregates)
+		movedFunctions = append(movedFunctions, movedHeldFunctions...)
+		movedAggregates = append(movedAggregates, movedHeldAggregates...)
 		if len(movedFunctions) == 0 && len(movedAggregates) == 0 {
 			break
 		}
@@ -2885,7 +2964,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	}
 	// Views held back in a later round may be read by views held back
 	// earlier, and kept callers come unsorted, so order the batch again.
-	if rounds > 1 || len(d.viewsAwaitingPinnedRoutines) > 0 {
+	if rounds > 1 || movedDeferredViews || len(d.viewsAwaitingPinnedRoutines) > 0 {
 		d.viewsAwaitingRecreatedViews = topologicallySortViews(d.viewsAwaitingRecreatedViews)
 	}
 
@@ -3912,6 +3991,28 @@ func holdBackCallers(now, later []*ir.Function) ([]*ir.Function, []*ir.Function)
 	return now, later
 }
 
+// holdBackRoutineDependents moves every routine in the now partitions that
+// depends on one in the later partitions over to later, transitively: a SQL
+// function calling a later function or aggregate, and an aggregate built on a
+// later function, for as many levels as the chain has. Order within each
+// partition is preserved.
+func holdBackRoutineDependents(nowFunctions []*ir.Function, nowAggregates []*ir.Aggregate, laterFunctions []*ir.Function, laterAggregates []*ir.Aggregate) ([]*ir.Function, []*ir.Aggregate, []*ir.Function, []*ir.Aggregate) {
+	for {
+		functionsBefore, aggregatesBefore := len(laterFunctions), len(laterAggregates)
+		nowFunctions, laterFunctions = holdBackCallers(nowFunctions, laterFunctions)
+		var movedAggregates []*ir.Aggregate
+		nowAggregates, movedAggregates = splitAggregatesByViewDeps(nowAggregates, nil, buildFunctionLookup(laterFunctions))
+		laterAggregates = append(laterAggregates, movedAggregates...)
+		var callers []*ir.Function
+		nowFunctions, callers = splitFunctionsCallingAggregates(nowFunctions, laterAggregates)
+		laterFunctions = append(laterFunctions, callers...)
+		// Routines only ever move to later, so unchanged sizes mean a fixpoint.
+		if len(laterFunctions) == functionsBefore && len(laterAggregates) == aggregatesBefore {
+			return nowFunctions, nowAggregates, laterFunctions, laterAggregates
+		}
+	}
+}
+
 // splitAggregatesByViewDeps partitions aggregates into those that can be
 // created now and those that depend on a view in the lookup, either through
 // their own argument, state, or return type or through a support function in
@@ -4896,6 +4997,43 @@ func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) 
 	// The lookup contains both qualified (schema.table) and unqualified
 	// (table) keys for each table, so a single check covers both forms.
 	return bodyReferencesRelation(fn.Definition, newTables)
+}
+
+// wildcardSelectRegex matches a whole-row select list: SELECT *, SELECT
+// DISTINCT * or alias.*; count(*) has a parenthesis before the star and does
+// not match.
+var wildcardSelectRegex = regexp.MustCompile(`(?i)(?:\bselect\s+(?:(?:all|distinct)\s+)?|[\w"]\.)\*`)
+
+// functionReadsAddedColumn reports whether a SQL-language function body reads
+// a modified table in relation position and depends on one of the columns
+// being added to it by this migration: it names the column in the body or in
+// a RETURNS TABLE list, or it returns a TABLE list from a whole-row select,
+// which PostgreSQL checks against the table's columns positionally at
+// creation. The relation check is required, as for views (see
+// viewReferencesAddedColumn), so a function is not held back for a
+// same-named column added to an unrelated table. Only SQL-language bodies
+// are resolved at creation; other languages resolve columns at run time
+// (#624).
+func functionReadsAddedColumn(fn *ir.Function, addedCols map[string]map[string]struct{}) bool {
+	if fn == nil || !strings.EqualFold(fn.Language, "sql") || fn.Definition == "" || len(addedCols) == 0 {
+		return false
+	}
+	returnsTable := strings.HasPrefix(fn.ReturnType, "TABLE(")
+	for tableKey, cols := range addedCols {
+		_, table, ok := strings.Cut(tableKey, ".")
+		if !ok || !bodyReferencesRelation(fn.Definition, map[string]struct{}{tableKey: {}, table: {}}) {
+			continue
+		}
+		if returnsTable && wildcardSelectRegex.MatchString(stripStringLiterals(fn.Definition)) {
+			return true
+		}
+		for col := range cols {
+			if containsIdentifier(fn.Definition, col) || (returnsTable && containsIdentifier(fn.ReturnType, col)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetObjectName implementations for DiffSource interface
