@@ -50,8 +50,16 @@ $$;
 -- the revoke must follow that creation (issue #687).
 REVOKE EXECUTE ON FUNCTION items_due_between(date, date) FROM PUBLIC;
 
+CREATE FUNCTION item_scale(f integer)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT f::bigint;
+$$;
+
 CREATE VIEW item_count AS
-SELECT count(*) AS n FROM item_view_all(now());
+SELECT count(*) * item_scale(1) AS n FROM item_view_all(now());
 
 COMMENT ON VIEW item_count IS 'Number of items';
 GRANT SELECT ON item_count TO api_role;
@@ -100,3 +108,30 @@ SELECT n FROM item_count_all();
 -- phase.
 CREATE VIEW item_count_copy AS
 SELECT * FROM item_count;
+
+CREATE VIEW item_count_report AS
+SELECT n FROM item_count;
+
+CREATE FUNCTION item_view_joined()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+AS $$
+SELECT v.* FROM item_view v CROSS JOIN item_count_all();
+$$;
+
+CREATE FUNCTION item_view_a()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT * FROM item_view;
+END;
+
+CREATE FUNCTION item_view_z()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT * FROM item_view_a();
+END;

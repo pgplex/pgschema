@@ -3,7 +3,7 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "48d9b5c470fd9b0a314e25853b1852f6af65f16aeda6f1674da3aae806525abf"
+    "hash": "e74b8c58c2a3a63a4d4f464dab4361c2bfcbce0d0f6efc5dddf88571f9f2b57d"
   },
   "groups": [
     {
@@ -19,6 +19,12 @@
           "type": "view",
           "operation": "recreate",
           "path": "public.item_count_pairs"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS item_count_report RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.item_count_report"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_count_stale RESTRICT;",
@@ -51,6 +57,12 @@
           "path": "public.item_count_all"
         },
         {
+          "sql": "DROP FUNCTION IF EXISTS item_count_legacy();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_count_legacy"
+        },
+        {
           "sql": "DROP VIEW IF EXISTS item_count RESTRICT;",
           "type": "view",
           "operation": "recreate",
@@ -79,6 +91,36 @@
           "type": "function",
           "operation": "drop",
           "path": "public.item_view_all"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_view_joined();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_view_joined"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_view_z();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_view_z"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_view_a();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_view_a"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_scale(integer);",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.item_scale"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_scale(\n    f integer\n)\nRETURNS bigint\nLANGUAGE sql\nIMMUTABLE\nAS $$\nSELECT f::bigint;\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.item_scale"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_ids RESTRICT;",
@@ -123,10 +165,22 @@
           "path": "public.item_ids_all"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION item_view_a()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view.id,\n     item_view.due\n    FROM public.item_view;\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_view_a"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION item_view_all(\n    p_since timestamptz\n)\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT * FROM item_view;\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.item_view_all"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_view_z()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view_a.id,\n     item_view_a.due\n    FROM public.item_view_a() item_view_a(id, due);\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_view_z"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION items_due_between(\n    p_start date,\n    p_end date\n)\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT id, due FROM items WHERE due BETWEEN p_start AND p_end;\n$$;",
@@ -141,7 +195,7 @@
           "path": "public.item_id_max"
         },
         {
-          "sql": "CREATE OR REPLACE VIEW item_count AS\n SELECT count(*) AS n\n   FROM item_view_all(now()) item_view_all(id, due);",
+          "sql": "CREATE OR REPLACE VIEW item_count AS\n SELECT count(*) * item_scale(1) AS n\n   FROM item_view_all(now()) item_view_all(id, due);",
           "type": "view",
           "operation": "create",
           "path": "public.item_count"
@@ -165,6 +219,12 @@
           "path": "public.item_count_pairs"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW item_count_report AS\n SELECT n\n   FROM item_count;",
+          "type": "view",
+          "operation": "create",
+          "path": "public.item_count_report"
+        },
+        {
           "sql": "CREATE OR REPLACE VIEW item_id_max_view AS\n SELECT item_id_max(v.*) AS max_id\n   FROM item_view v;",
           "type": "view",
           "operation": "create",
@@ -175,6 +235,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.item_count_all"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_view_joined()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT v.* FROM item_view v CROSS JOIN item_count_all();\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_view_joined"
         },
         {
           "sql": "CREATE OR REPLACE VIEW item_count_echo AS\n SELECT n\n   FROM item_count_all() item_count_all(n);",

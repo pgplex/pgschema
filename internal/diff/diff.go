@@ -1256,18 +1256,21 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 		callingViews := make(map[string]bool)
 		for changed := true; changed; {
 			changed = false
-			for _, key := range functionKeys {
-				oldFunction, exists := oldFunctions[key]
-				if !exists || pinning[oldFunction] || !functionSignatureReferencesRelation(oldFunction, diff.recreatedViewLookup) {
+			// A function the migration drops counts as well: the drop phase
+			// runs after these views are dropped, so it is dropped here.
+			for _, key := range sortedKeys(oldFunctions) {
+				oldFunction := oldFunctions[key]
+				if pinning[oldFunction] || !functionSignatureReferencesRelation(oldFunction, diff.recreatedViewLookup) {
 					continue
 				}
 				changed = true
 				pinning[oldFunction] = true
-				newFunction := newFunctions[key]
 				pinnedFunctionPrivileges[oldFunction.Schema+"."+functionPrivilegeObjectName(oldFunction)] = true
-				pinnedFunctionPrivileges[newFunction.Schema+"."+functionPrivilegeObjectName(newFunction)] = true
 				diff.functionsPinningRecreatedViews = append(diff.functionsPinningRecreatedViews, oldFunction)
-				diff.functionsAwaitingRecreatedViews = append(diff.functionsAwaitingRecreatedViews, newFunction)
+				if newFunction, kept := newFunctions[key]; kept {
+					pinnedFunctionPrivileges[newFunction.Schema+"."+functionPrivilegeObjectName(newFunction)] = true
+					diff.functionsAwaitingRecreatedViews = append(diff.functionsAwaitingRecreatedViews, newFunction)
+				}
 			}
 
 			pinnedFunctionLookup := buildFunctionLookup(diff.functionsPinningRecreatedViews)
@@ -1287,7 +1290,8 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 
 			// A view binds to the routines it calls in the database, so the
 			// old definition decides; a modified view whose desired definition
-			// starts calling one must wait for its creation as well.
+			// starts calling one, or reading a view held back here, must wait
+			// for that creation as well.
 			pinnedRoutineLookup := buildRoutineLookup(diff.functionsPinningRecreatedViews, diff.aggregatesPinningRecreatedViews)
 			for _, key := range oldViewKeys {
 				if callingViews[key] {
@@ -1297,6 +1301,13 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				calls := referencesNewFunction(oldView.Definition, oldView.Schema, pinnedRoutineLookup)
 				if newView, kept := newViews[key]; kept && !calls {
 					calls = referencesNewFunction(newView.Definition, newView.Schema, pinnedRoutineLookup)
+					for callingKey := range callingViews {
+						if calls {
+							break
+						}
+						calling := oldViews[callingKey]
+						calls = viewDependsOnView(newView, calling.Name) || viewDependsOnView(newView, calling.Schema+"."+calling.Name)
+					}
 				}
 				if !calls {
 					continue
@@ -1330,6 +1341,13 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				}
 			}
 			diff.modifiedFunctions = kept
+			var dropped []*ir.Function
+			for _, fn := range diff.droppedFunctions {
+				if !pinning[fn] {
+					dropped = append(dropped, fn)
+				}
+			}
+			diff.droppedFunctions = dropped
 		}
 		if len(pinnedAggregates) > 0 {
 			var kept []*aggregateDiff
@@ -2226,7 +2244,8 @@ type pinnedDrop struct {
 // orderPinnedDrops orders the views, functions and aggregates dropped ahead of
 // a view recreation so that each comes before the objects it depends on: a
 // view before the routines it calls and the views it reads, a function before
-// the view its signature is typed on, an aggregate before its support
+// the view its signature is typed on and the functions it depends on per
+// pg_depend (a SQL-standard body's callees), an aggregate before its support
 // functions and the views in its signature. Among objects that are ready at
 // the same time, views go first, then aggregates, then functions, each by
 // name. A dependency cycle, which PostgreSQL would not allow, falls back to
@@ -2258,6 +2277,8 @@ func orderPinnedDrops(views []*ir.View, functions []*ir.Function, aggregates []*
 			return referencesNewFunction(a.drop.view.Definition, a.drop.view.Schema, buildRoutineLookup(nil, []*ir.Aggregate{b.drop.aggregate}))
 		case a.drop.function != nil && b.drop.view != nil:
 			return functionSignatureReferencesRelation(a.drop.function, buildViewLookup([]*ir.View{b.drop.view}))
+		case a.drop.function != nil && b.drop.function != nil:
+			return slices.Contains(a.drop.function.Dependencies, b.drop.function.Schema+"."+b.drop.function.Name+"("+b.drop.function.GetArguments()+")")
 		case a.drop.aggregate != nil && b.drop.view != nil:
 			return aggregateReferencesNewView(a.drop.aggregate, buildViewLookup([]*ir.View{b.drop.view}))
 		case a.drop.aggregate != nil && b.drop.function != nil:
@@ -3072,9 +3093,10 @@ func (d *ddlDiff) splitFunctionsRecreatedUnderViews() (underViews, others []*fun
 	return underViews, others
 }
 
-// viewCallsFunction reports whether a recreated, modified or added view calls
-// fn. A modified view that only calls fn in its desired definition counts: if
-// it were modified first, it would bind to the old function and block its drop.
+// viewCallsFunction reports whether a recreated, modified, added or awaiting
+// view calls fn. A modified view that only calls fn in its desired definition
+// counts: if it were modified first, it would bind to the old function and
+// block its drop.
 func (d *ddlDiff) viewCallsFunction(fn *ir.Function) bool {
 	lookup := buildRoutineLookup([]*ir.Function{fn}, nil)
 	for _, viewDiff := range d.modifiedViews {
@@ -3086,6 +3108,13 @@ func (d *ddlDiff) viewCallsFunction(fn *ir.Function) bool {
 		}
 	}
 	for _, view := range d.addedViews {
+		if referencesNewFunction(view.Definition, view.Schema, lookup) {
+			return true
+		}
+	}
+	// A kept caller of a pinned routine is created again from its desired
+	// definition after this function's recreation (#687).
+	for _, view := range d.viewsAwaitingRecreatedViews {
 		if referencesNewFunction(view.Definition, view.Schema, lookup) {
 			return true
 		}
@@ -3780,6 +3809,8 @@ func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Func
 		viewsNow, viewsLater := splitViewsReferencingRoutines(views, buildRoutineLookup(functions, aggregates), nil)
 		lateViewLookup := buildViewLookup(viewsLater)
 		functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
+		// A SQL-language function calling a later function waits with it.
+		functionsNow, functionsLater = holdBackCallers(functionsNow, functionsLater)
 		aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
 		if len(viewsNow) == 0 && len(functionsNow) == 0 && len(aggregatesNow) == 0 {
 			generateCreateViewsSQL(views, targetSchema, collector)

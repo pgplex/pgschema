@@ -50,8 +50,18 @@ $$;
 -- first, and created again once the function is back: item_count is
 -- unchanged, item_count_pairs is built on it, and item_count_stale is dropped
 -- by the migration. The grant and comment on item_count are re-issued.
+-- Called by item_count, with a parameter renamed in new.sql: dropped and
+-- created again, which must happen before item_count comes back.
+CREATE FUNCTION item_scale(factor integer)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT factor::bigint;
+$$;
+
 CREATE VIEW item_count AS
-SELECT count(*) AS n FROM item_view_all(now());
+SELECT count(*) * item_scale(1) AS n FROM item_view_all(now());
 
 COMMENT ON VIEW item_count IS 'Number of items';
 GRANT SELECT ON item_count TO api_role;
@@ -110,3 +120,46 @@ $$;
 
 CREATE VIEW item_count_echo AS
 SELECT n FROM item_count_all();
+
+-- Dropped by the migration but typed on item_count, so it still has to go
+-- before item_count's drop rather than in the drop phase.
+CREATE FUNCTION item_count_legacy()
+RETURNS SETOF item_count
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count;
+$$;
+
+-- Starts reading item_count in new.sql, so its desired definition must wait
+-- for item_count to be back.
+CREATE VIEW item_count_report AS
+SELECT 0::bigint AS n;
+
+-- Its SQL body calls item_count_all(), which only comes back after item_count,
+-- so it follows that function although its signature needs item_view alone.
+CREATE FUNCTION item_view_joined()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+AS $$
+SELECT v.* FROM item_view v CROSS JOIN item_count_all();
+$$;
+
+-- SQL-standard bodies record the call in pg_depend, so item_view_z must be
+-- dropped before item_view_a although both are only typed on item_view.
+CREATE FUNCTION item_view_a()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT * FROM item_view;
+END;
+
+CREATE FUNCTION item_view_z()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT * FROM item_view_a();
+END;
