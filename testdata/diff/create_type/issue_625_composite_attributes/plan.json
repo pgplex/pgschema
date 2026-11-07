@@ -105,7 +105,13 @@
           "path": "public.has_region"
         },
         {
-          "sql": "CREATE TABLE IF NOT EXISTS quantities (\n    n integer DEFAULT get_quantity(NULL),\n    present boolean DEFAULT has_region(NULL)\n);",
+          "sql": "CREATE OR REPLACE FUNCTION region_present()\nRETURNS boolean\nLANGUAGE sql\nVOLATILE\nAS $$ SELECT has_region(NULL::example_input)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.region_present"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS quantities (\n    n integer DEFAULT get_quantity(NULL),\n    present boolean DEFAULT region_present()\n);",
           "type": "table",
           "operation": "create",
           "path": "public.quantities"

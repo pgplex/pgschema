@@ -2593,20 +2593,24 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 	// The attributes of modified composite types whose ALTER TYPE waits for
 	// the function-dependent or the table-dependent domain batch, and the new
-	// SQL functions reading one of the latter: a table whose default or CHECK
-	// calls such a function goes in the last batch too (issue #625).
+	// SQL functions reading one of the latter, with the SQL functions calling
+	// those: a table whose default or CHECK calls such a function goes in the
+	// last batch too (issue #625).
 	afterFunctionBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
 		return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
 	})
 	afterTableBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
 		return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
 	})
-	var tableBatchReaders []*ir.Function
+	var tableBatchReaders, otherFunctions []*ir.Function
 	for _, fn := range d.addedFunctions {
 		if functionReadsCompositeAttribute(fn, afterTableBatch) {
 			tableBatchReaders = append(tableBatchReaders, fn)
+		} else {
+			otherFunctions = append(otherFunctions, fn)
 		}
 	}
+	_, tableBatchReaders = holdBackCallers(otherFunctions, tableBatchReaders)
 	tableBatchReaderLookup := buildFunctionLookup(tableBatchReaders)
 
 	tableBatch := func(table *ir.Table) int {

@@ -1,8 +1,8 @@
-Plan: 8 to add, 8 to modify, 1 to drop.
+Plan: 9 to add, 8 to modify, 1 to drop.
 
 Summary by type:
   types: 1 to add, 8 to modify, 1 to drop
-  functions: 3 to add
+  functions: 4 to add
   tables: 2 to add
 
 Types:
@@ -21,6 +21,7 @@ Functions:
   + get_quantity
   + has_region
   + is_positive
+  + region_present
 
 Tables:
   + quantities
@@ -87,7 +88,14 @@ LANGUAGE sql
 VOLATILE
 RETURN ((p).region IS NOT NULL);
 
+CREATE OR REPLACE FUNCTION region_present()
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT has_region(NULL::example_input)
+$$;
+
 CREATE TABLE IF NOT EXISTS quantities (
     n integer DEFAULT get_quantity(NULL),
-    present boolean DEFAULT has_region(NULL)
+    present boolean DEFAULT region_present()
 );

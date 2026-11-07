@@ -56,7 +56,14 @@ LANGUAGE sql
 VOLATILE
 RETURN ((p).region IS NOT NULL);
 
+CREATE OR REPLACE FUNCTION region_present()
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+AS $$ SELECT has_region(NULL::example_input)
+$$;
+
 CREATE TABLE IF NOT EXISTS quantities (
     n integer DEFAULT get_quantity(NULL),
-    present boolean DEFAULT has_region(NULL)
+    present boolean DEFAULT region_present()
 );

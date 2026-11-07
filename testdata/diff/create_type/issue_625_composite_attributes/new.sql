@@ -38,11 +38,16 @@ CREATE FUNCTION has_region(p example_input) RETURNS boolean
     LANGUAGE sql
     RETURN (p).region IS NOT NULL;
 
--- A new table whose default calls a reader: the reader must follow its
--- attribute and precede the table.
+-- A SQL wrapper around a reader is created with the reader.
+CREATE FUNCTION region_present() RETURNS boolean
+    LANGUAGE sql
+    AS $$ SELECT has_region(NULL::example_input) $$;
+
+-- A new table whose defaults call a reader and its wrapper: both must
+-- follow the attribute and precede the table.
 CREATE TABLE quantities (
     n integer DEFAULT get_quantity(NULL::example_input),
-    present boolean DEFAULT has_region(NULL::example_input)
+    present boolean DEFAULT region_present()
 );
 
 CREATE TYPE address AS (
