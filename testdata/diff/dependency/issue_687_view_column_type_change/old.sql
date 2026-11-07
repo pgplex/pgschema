@@ -1,3 +1,10 @@
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api_role') THEN
+        CREATE ROLE api_role;
+    END IF;
+END $$;
+
 CREATE TABLE items (
     id bigint PRIMARY KEY,
     due date
@@ -12,11 +19,27 @@ FROM items;
 
 -- Unchanged in new.sql. Typed on the view's row type, it would block the
 -- view's RESTRICT drop, so it is dropped first and created again after the
--- view (issue #687).
+-- view, and its privileges are re-issued (issue #687).
 CREATE FUNCTION item_view_all()
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 AS $$
 SELECT * FROM item_view;
+$$;
+
+REVOKE EXECUTE ON FUNCTION item_view_all() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION item_view_all() TO api_role;
+
+-- Unchanged dependent view, rebuilt together with item_view, and an unchanged
+-- function typed on it, which gets the same treatment (issue #687).
+CREATE VIEW item_ids AS
+SELECT id FROM item_view;
+
+CREATE FUNCTION item_ids_all()
+RETURNS SETOF item_ids
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_ids;
 $$;

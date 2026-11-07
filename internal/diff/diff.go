@@ -384,6 +384,15 @@ type ddlDiff struct {
 	// so they are dropped before any view drop; their desired-state definitions
 	// are created again through functionsAwaitingRecreatedViews (issue #687).
 	functionsPinningRecreatedViews []*ir.Function
+	// Case-insensitive lookup (see buildSchemaNameLookup) of every view this
+	// migration drops and creates again: those marked RequiresRecreate and the
+	// unchanged views rebuilt as their dependents.
+	recreatedViewLookup map[string]struct{}
+	// Desired-state REVOKE ... FROM PUBLIC on functions in
+	// functionsPinningRecreatedViews. DROP FUNCTION discards the revoke, so it
+	// is re-issued after the function is created again (issue #687); the
+	// explicit grants on those functions come back through addedPrivileges.
+	revokedDefaultPrivsAfterRecreatedFunctions []*ir.RevokedDefaultPrivilege
 	// Foreign keys that depend on a unique/PK constraint being dropped or
 	// recreated by this migration: existing ones are dropped before the table
 	// modifications (fkPreDrops) and desired-state ones are (re)created
@@ -1211,15 +1220,20 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// Functions already in the database whose signature is typed on a view
 	// being recreated pin its row type and would block the view's RESTRICT
 	// drop. Drop them ahead of the view and create them again from the desired
-	// state after it, whether or not they changed themselves (issue #687).
-	if recreatedViewLookup := buildRecreatedViewLookup(diff.modifiedViews); len(recreatedViewLookup) > 0 {
+	// state after it, whether or not they changed themselves. An unchanged
+	// view rebuilt as a dependent of a recreated view counts too (issue #687).
+	diff.recreatedViewLookup = buildViewKeyLookup(recreatedViewKeys, diff.allNewViews)
+	// Privilege object names (schema.name(identity args)) of those functions
+	pinnedFunctionPrivileges := make(map[string]bool)
+	if len(diff.recreatedViewLookup) > 0 {
 		pinning := make(map[*ir.Function]bool)
 		for _, key := range functionKeys {
 			oldFunction, exists := oldFunctions[key]
-			if !exists || !functionSignatureReferencesRelation(oldFunction, recreatedViewLookup) {
+			if !exists || !functionSignatureReferencesRelation(oldFunction, diff.recreatedViewLookup) {
 				continue
 			}
 			pinning[oldFunction] = true
+			pinnedFunctionPrivileges[oldFunction.Schema+"."+functionPrivilegeObjectName(oldFunction)] = true
 			diff.functionsPinningRecreatedViews = append(diff.functionsPinningRecreatedViews, oldFunction)
 			diff.functionsAwaitingRecreatedViews = append(diff.functionsAwaitingRecreatedViews, newFunctions[key])
 		}
@@ -1444,6 +1458,11 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				recreatedViewKeys[dbSchema.Name+"."+p.ObjectName] {
 				continue
 			}
+			// Likewise for a function dropped and created again around a view
+			// recreation; its grants are re-issued after it (#687).
+			if p.ObjectType == ir.PrivilegeObjectTypeFunction && pinnedFunctionPrivileges[dbSchema.Name+"."+p.ObjectName] {
+				continue
+			}
 			key := p.GetFullKey()
 			oldPrivs[key] = p
 		}
@@ -1597,8 +1616,18 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	oldRevokedPrivs := make(map[string]*ir.RevokedDefaultPrivilege)
 	newRevokedPrivs := make(map[string]*ir.RevokedDefaultPrivilege)
 
+	// A revoke on a function dropped and created again around a view
+	// recreation is lost with the function and re-issued from the desired
+	// state after it is created again, outside this comparison (#687).
+	pinnedRevoke := func(schemaName string, r *ir.RevokedDefaultPrivilege) bool {
+		return r.ObjectType == ir.PrivilegeObjectTypeFunction && pinnedFunctionPrivileges[schemaName+"."+r.ObjectName]
+	}
+
 	for _, dbSchema := range oldIR.Schemas {
 		for _, r := range dbSchema.RevokedDefaultPrivileges {
+			if pinnedRevoke(dbSchema.Name, r) {
+				continue
+			}
 			key := r.GetObjectKey()
 			oldRevokedPrivs[key] = r
 		}
@@ -1606,10 +1635,17 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 
 	for _, dbSchema := range newIR.Schemas {
 		for _, r := range dbSchema.RevokedDefaultPrivileges {
+			if pinnedRevoke(dbSchema.Name, r) {
+				diff.revokedDefaultPrivsAfterRecreatedFunctions = append(diff.revokedDefaultPrivsAfterRecreatedFunctions, r)
+				continue
+			}
 			key := r.GetObjectKey()
 			newRevokedPrivs[key] = r
 		}
 	}
+	sort.Slice(diff.revokedDefaultPrivsAfterRecreatedFunctions, func(i, j int) bool {
+		return diff.revokedDefaultPrivsAfterRecreatedFunctions[i].GetObjectKey() < diff.revokedDefaultPrivsAfterRecreatedFunctions[j].GetObjectKey()
+	})
 
 	// Find added revoked default privileges (new revokes)
 	for key, r := range newRevokedPrivs {
@@ -2288,7 +2324,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// phase; creating the new one now (before the view's DROP) would re-pin the old
 	// view and block its RESTRICT drop (issue #480). Pull them out of both buckets
 	// and defer to the modify phase.
-	recreatedViewLookup := buildRecreatedViewLookup(d.modifiedViews)
+	recreatedViewLookup := d.recreatedViewLookup
 	if len(recreatedViewLookup) > 0 {
 		deferRecreated := func(fns []*ir.Function) []*ir.Function {
 			var keep []*ir.Function
@@ -2610,6 +2646,11 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Aggregates built on those functions, or typed on the recreated view, and
 	// new views that call any of these routines, follow in dependency order.
 	generateViewsAndDependentRoutinesSQL(d.viewsAwaitingRecreatedViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews, targetSchema, collector)
+
+	// Functions dropped and created again around a view recreation lost their
+	// REVOKE ... FROM PUBLIC with the drop; re-issue it now that they exist
+	// again. Their explicit grants follow with the added privileges below (#687).
+	generateRevokeDefaultPrivilegesSQL(d.revokedDefaultPrivsAfterRecreatedFunctions, targetSchema, collector)
 
 	// Modify functions
 	generateModifyFunctionsSQL(otherModifiedFunctions, targetSchema, collector)
@@ -3210,14 +3251,14 @@ func buildViewLookup(views []*ir.View) map[string]struct{} {
 	return buildSchemaNameLookup(names)
 }
 
-// buildRecreatedViewLookup returns case-insensitive lookup keys for views being
-// recreated (DROP + CREATE) by this migration, i.e. modified views with
-// RequiresRecreate set.
-func buildRecreatedViewLookup(modifiedViews []*viewDiff) map[string]struct{} {
+// buildViewKeyLookup returns case-insensitive lookup keys (see
+// buildSchemaNameLookup) for the views whose schema.name keys are given,
+// resolved through the view map.
+func buildViewKeyLookup(keys map[string]bool, views map[string]*ir.View) map[string]struct{} {
 	var names []struct{ schema, name string }
-	for _, vd := range modifiedViews {
-		if vd.RequiresRecreate {
-			names = append(names, struct{ schema, name string }{vd.New.Schema, vd.New.Name})
+	for key := range keys {
+		if view := views[key]; view != nil {
+			names = append(names, struct{ schema, name string }{view.Schema, view.Name})
 		}
 	}
 	return buildSchemaNameLookup(names)

@@ -3,7 +3,7 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "97e52b742bec9d241e1a7d39dd45c80ba1d5777a9a9b179d1c4c2e530936fe84"
+    "hash": "2db930fcabe7392101bfc7374aadaccdf411c5fb03cf91254b9d306a8d65149f"
   },
   "groups": [
     {
@@ -13,6 +13,18 @@
           "type": "function",
           "operation": "drop",
           "path": "public.item_view_all"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_ids_all();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_ids_all"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS item_ids RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.item_ids"
         },
         {
           "sql": "DROP VIEW IF EXISTS item_view RESTRICT;",
@@ -27,6 +39,18 @@
           "path": "public.item_view"
         },
         {
+          "sql": "CREATE OR REPLACE VIEW item_ids AS\n SELECT id\n   FROM item_view;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.item_ids"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_ids_all()\nRETURNS SETOF item_ids\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT * FROM item_ids;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_ids_all"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION item_view_all()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT * FROM item_view;\n$$;",
           "type": "function",
           "operation": "create",
@@ -37,6 +61,18 @@
           "type": "function",
           "operation": "create",
           "path": "public.items_due_between"
+        },
+        {
+          "sql": "REVOKE EXECUTE ON FUNCTION item_view_all() FROM PUBLIC;",
+          "type": "revoked_default_privilege",
+          "operation": "create",
+          "path": "revoked_default.FUNCTION.item_view_all()"
+        },
+        {
+          "sql": "GRANT EXECUTE ON FUNCTION item_view_all() TO api_role;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.FUNCTION.item_view_all().api_role"
         }
       ]
     }

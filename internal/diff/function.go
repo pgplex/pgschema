@@ -171,6 +171,21 @@ func generateDropFunctionsSQL(functions []*ir.Function, targetSchema string, col
 	}
 }
 
+// functionPrivilegeObjectName renders fn the way the privilege inspector
+// names a function: name(identity arguments), as pg_get_function_identity_arguments
+// prints them (input parameters only, with names and INOUT/VARIADIC modes, no
+// defaults) and with the function's own schema stripped from the types.
+func functionPrivilegeObjectName(fn *ir.Function) string {
+	var args []string
+	for _, param := range fn.Parameters {
+		switch param.Mode {
+		case "", "IN", "INOUT", "VARIADIC":
+			args = append(args, formatFunctionParameter(param, false, fn.Schema, false))
+		}
+	}
+	return fn.Name + "(" + strings.Join(args, ", ") + ")"
+}
+
 // generateDropFunctionSQL generates a DROP FUNCTION IF EXISTS statement
 func generateDropFunctionSQL(function *ir.Function, targetSchema string) string {
 	functionName := qualifyEntityName(function.Schema, function.Name, targetSchema)
