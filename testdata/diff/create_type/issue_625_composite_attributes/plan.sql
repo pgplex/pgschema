@@ -36,6 +36,22 @@ CREATE DOMAIN positive_int AS integer
 
 ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;
 
+CREATE OR REPLACE FUNCTION get_quantity(
+    p example_input
+)
+RETURNS integer
+LANGUAGE sql
+VOLATILE
+RETURN (p).quantity;
+
 CREATE DOMAIN region_row AS region;
 
 ALTER TYPE example_input ADD ATTRIBUTE region region_row;
+
+CREATE OR REPLACE FUNCTION has_region(
+    p example_input
+)
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+RETURN ((p).region IS NOT NULL);

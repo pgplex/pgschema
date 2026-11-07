@@ -81,6 +81,12 @@
           "path": "public.example_input"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION get_quantity(\n    p example_input\n)\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nRETURN (p).quantity;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.get_quantity"
+        },
+        {
           "sql": "CREATE DOMAIN region_row AS region;",
           "type": "domain",
           "operation": "create",
@@ -91,6 +97,12 @@
           "type": "type",
           "operation": "alter",
           "path": "public.example_input"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION has_region(\n    p example_input\n)\nRETURNS boolean\nLANGUAGE sql\nVOLATILE\nRETURN ((p).region IS NOT NULL);",
+          "type": "function",
+          "operation": "create",
+          "path": "public.has_region"
         }
       ]
     }

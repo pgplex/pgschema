@@ -2748,6 +2748,19 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		// in a later batch moves after that batch, unless an earlier table or
 		// domain needs it first.
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, typesWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
+		// A SQL-language function whose body reads a composite attribute that
+		// is added or altered only after a deferred domain batch is validated
+		// against it at creation, so it moves to the batch after that
+		// alteration (issue #625).
+		if len(d.modifiedTypes) > 0 {
+			afterFunctionBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+				return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+			})
+			afterTableBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+				return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+			})
+			functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackDeferredAttributeReaders(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables, afterFunctionBatch, afterTableBatch)
+		}
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
@@ -5028,6 +5041,93 @@ func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) 
 // DISTINCT * or alias.*; count(*) has a parenthesis before the star and does
 // not match.
 var wildcardSelectRegex = regexp.MustCompile(`(?i)(?:\bselect\s+(?:(?:all|distinct)\s+)?|[\w"]\.)\*`)
+
+// deferredCompositeAttributes returns, per modified composite type, the names
+// of the attributes that generateAlterCompositeStatements adds or alters for
+// it and that include accepts: the attributes whose ALTER TYPE waits for a
+// deferred domain batch (issue #625).
+func deferredCompositeAttributes(diffs []*typeDiff, include func(*ir.Type, *ir.TypeColumn) bool) map[*ir.Type][]string {
+	attrs := make(map[*ir.Type][]string)
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindComposite || diff.New.Kind != ir.TypeKindComposite {
+			continue
+		}
+		oldTypes := make(map[string]string, len(diff.Old.Columns))
+		for _, attr := range diff.Old.Columns {
+			oldTypes[attr.Name] = attr.DataType
+		}
+		for _, attr := range diff.New.Columns {
+			if oldType, exists := oldTypes[attr.Name]; exists && oldType == attr.DataType {
+				continue
+			}
+			if include(diff.New, attr) {
+				attrs[diff.New] = append(attrs[diff.New], attr.Name)
+			}
+		}
+	}
+	return attrs
+}
+
+// holdBackDeferredAttributeReaders moves a function that reads an attribute
+// of afterFunctionBatch from the first batch to the second, and one that
+// reads an attribute of afterTableBatch to the third: the batches created
+// after the composite alterations that follow the function-dependent and
+// table-dependent domains (issue #625).
+func holdBackDeferredAttributeReaders(first, second, third []*ir.Function, afterFunctionBatch, afterTableBatch map[*ir.Type][]string) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	if len(afterFunctionBatch) == 0 && len(afterTableBatch) == 0 {
+		return first, second, third
+	}
+	var keepFirst, keepSecond []*ir.Function
+	for _, fn := range first {
+		switch {
+		case functionReadsCompositeAttribute(fn, afterTableBatch):
+			third = append(third, fn)
+		case functionReadsCompositeAttribute(fn, afterFunctionBatch):
+			second = append(second, fn)
+		default:
+			keepFirst = append(keepFirst, fn)
+		}
+	}
+	for _, fn := range second {
+		if functionReadsCompositeAttribute(fn, afterTableBatch) {
+			third = append(third, fn)
+		} else {
+			keepSecond = append(keepSecond, fn)
+		}
+	}
+	return keepFirst, keepSecond, third
+}
+
+// functionReadsCompositeAttribute reports whether a SQL-language function
+// uses one of the composite types in attrs (in its signature, its body or
+// its pg_depend type dependencies) and names one of that type's listed
+// attributes in its body. Only SQL-language bodies are resolved at creation;
+// other languages resolve attributes at run time (issue #625).
+func functionReadsCompositeAttribute(fn *ir.Function, attrs map[*ir.Type][]string) bool {
+	if fn == nil || !strings.EqualFold(fn.Language, "sql") || fn.Definition == "" || len(attrs) == 0 {
+		return false
+	}
+	for typeObj, names := range attrs {
+		qualified := typeObj.Schema + "." + typeObj.Name
+		lookup := map[string]struct{}{strings.ToLower(qualified): {}, strings.ToLower(typeObj.Name): {}}
+		usesType := functionSignatureReferencesRelation(fn, lookup) || containsIdentifier(fn.Definition, qualified) || containsIdentifier(fn.Definition, typeObj.Name)
+		for _, dep := range fn.TypeDependencies {
+			if usesType {
+				break
+			}
+			usesType = strings.EqualFold(dep, qualified)
+		}
+		if !usesType {
+			continue
+		}
+		for _, name := range names {
+			if containsIdentifier(fn.Definition, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // functionReadsAddedColumn reports whether a SQL-language function body reads
 // a modified table in relation position and depends on one of the columns

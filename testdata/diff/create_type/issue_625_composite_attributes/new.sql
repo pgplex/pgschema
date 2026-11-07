@@ -23,6 +23,14 @@ CREATE TYPE example_input AS (
     quantity positive_int
 );
 
+CREATE FUNCTION get_quantity(p example_input) RETURNS integer
+    LANGUAGE sql
+    RETURN (p).quantity;
+
+CREATE FUNCTION has_region(p example_input) RETURNS boolean
+    LANGUAGE sql
+    RETURN (p).region IS NOT NULL;
+
 CREATE TYPE address AS (
     street text,
     zip integer,

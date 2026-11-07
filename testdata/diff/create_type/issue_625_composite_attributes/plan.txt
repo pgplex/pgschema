@@ -1,8 +1,8 @@
-Plan: 5 to add, 8 to modify, 1 to drop.
+Plan: 7 to add, 8 to modify, 1 to drop.
 
 Summary by type:
   types: 1 to add, 8 to modify, 1 to drop
-  functions: 1 to add
+  functions: 3 to add
   tables: 1 to add
 
 Types:
@@ -18,6 +18,8 @@ Types:
   + priority
 
 Functions:
+  + get_quantity
+  + has_region
   + is_positive
 
 Tables:
@@ -64,6 +66,22 @@ CREATE DOMAIN positive_int AS integer
 
 ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;
 
+CREATE OR REPLACE FUNCTION get_quantity(
+    p example_input
+)
+RETURNS integer
+LANGUAGE sql
+VOLATILE
+RETURN (p).quantity;
+
 CREATE DOMAIN region_row AS region;
 
 ALTER TYPE example_input ADD ATTRIBUTE region region_row;
+
+CREATE OR REPLACE FUNCTION has_region(
+    p example_input
+)
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+RETURN ((p).region IS NOT NULL);
