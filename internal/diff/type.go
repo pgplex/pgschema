@@ -68,6 +68,55 @@ func generateModifyEnumsSQL(diffs []*typeDiff, targetSchema string, collector *d
 	}
 }
 
+// generateDropCompositeAttributesSQL generates the ALTER TYPE ... DROP
+// ATTRIBUTE statements of the modified composite types (issue #625). It runs
+// in the drop phase, after the dropped views (one that reads the attribute
+// blocks the drop) and before the dropped types (the attribute may be the
+// last use of one). PostgreSQL refuses the drop while a kept view still reads
+// the attribute; as for a replaced range, its error is the honest outcome,
+// and the user changes that view in the same file to proceed.
+func generateDropCompositeAttributesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindComposite || diff.New.Kind != ir.TypeKindComposite {
+			continue
+		}
+		for _, stmt := range generateDropCompositeAttributeStatements(diff.Old, diff.New, targetSchema, collector.qualifySchema) {
+			collectCompositeAlter(diff, stmt, collector)
+		}
+	}
+}
+
+// generateModifyCompositesSQL generates the ALTER TYPE ... ADD ATTRIBUTE and
+// ALTER ATTRIBUTE ... TYPE statements of the modified composite types for the
+// attributes include accepts (issue #625). The create phase calls it once per
+// batch of new types: right after the first batch for every attribute whose
+// type exists by then, so the tables, views and functions created later in
+// the phase can use the attribute, and again after each deferred batch for
+// the attributes typed on a domain it creates. PostgreSQL refuses ALTER
+// ATTRIBUTE ... TYPE while a table column uses the composite; as for a
+// replaced range, its error is the honest outcome, and the user changes that
+// column in the same file to proceed.
+func generateModifyCompositesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector, include func(*ir.Type, *ir.TypeColumn) bool) {
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindComposite || diff.New.Kind != ir.TypeKindComposite {
+			continue
+		}
+		for _, stmt := range generateAlterCompositeStatements(diff.Old, diff.New, targetSchema, collector.qualifySchema, include) {
+			collectCompositeAlter(diff, stmt, collector)
+		}
+	}
+}
+
+func collectCompositeAlter(diff *typeDiff, stmt string, collector *diffCollector) {
+	collector.collect(&diffContext{
+		Type:                DiffTypeType,
+		Operation:           DiffOperationAlter,
+		Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+		Source:              diff,
+		CanRunInTransaction: true,
+	}, stmt)
+}
+
 // generateModifyDomainsSQL generates ALTER DOMAIN statements
 func generateModifyDomainsSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
 	for _, diff := range diffs {
@@ -160,6 +209,58 @@ func generateAlterTypeEnumStatements(oldType, newType *ir.Type, targetSchema str
 				stmt = fmt.Sprintf("ALTER TYPE %s ADD VALUE '%s' AFTER '%s';", typeName, newValue, newType.EnumValues[i-1])
 			}
 			statements = append(statements, stmt)
+		}
+	}
+
+	return statements
+}
+
+// generateDropCompositeAttributeStatements generates a DROP ATTRIBUTE for
+// each attribute of oldType that newType no longer has. Attributes are
+// matched by name, like table columns.
+func generateDropCompositeAttributeStatements(oldType, newType *ir.Type, targetSchema string, qualifySchema bool) []string {
+	var statements []string
+	typeName := qualifyEntityNameMode(newType.Schema, newType.Name, targetSchema, qualifySchema)
+
+	kept := make(map[string]bool, len(newType.Columns))
+	for _, attr := range newType.Columns {
+		kept[attr.Name] = true
+	}
+	for _, attr := range oldType.Columns {
+		if !kept[attr.Name] {
+			statements = append(statements, fmt.Sprintf("ALTER TYPE %s DROP ATTRIBUTE %s;", typeName, ir.QuoteIdentifier(attr.Name)))
+		}
+	}
+	return statements
+}
+
+// generateAlterCompositeStatements generates, for the attributes of newType
+// that include accepts (every one when include is nil), an ADD ATTRIBUTE for
+// a new one and an ALTER ATTRIBUTE ... TYPE for one whose data type changed,
+// in the order the new definition lists them. Attributes are matched by
+// name, like table columns; ADD ATTRIBUTE always appends, so, as with table
+// columns, the position of an attribute inserted in the middle of the
+// definition is not reproduced.
+func generateAlterCompositeStatements(oldType, newType *ir.Type, targetSchema string, qualifySchema bool, include func(*ir.Type, *ir.TypeColumn) bool) []string {
+	var statements []string
+	typeName := qualifyEntityNameMode(newType.Schema, newType.Name, targetSchema, qualifySchema)
+
+	oldAttrs := make(map[string]*ir.TypeColumn, len(oldType.Columns))
+	for _, attr := range oldType.Columns {
+		oldAttrs[attr.Name] = attr
+	}
+
+	for _, attr := range newType.Columns {
+		if include != nil && !include(newType, attr) {
+			continue
+		}
+		dataType := stripSchemaPrefixMode(attr.DataType, targetSchema, qualifySchema)
+		oldAttr, exists := oldAttrs[attr.Name]
+		switch {
+		case !exists:
+			statements = append(statements, fmt.Sprintf("ALTER TYPE %s ADD ATTRIBUTE %s %s;", typeName, ir.QuoteIdentifier(attr.Name), dataType))
+		case oldAttr.DataType != attr.DataType:
+			statements = append(statements, fmt.Sprintf("ALTER TYPE %s ALTER ATTRIBUTE %s TYPE %s;", typeName, ir.QuoteIdentifier(attr.Name), dataType))
 		}
 	}
 
@@ -415,13 +516,19 @@ func typesEqual(old, new *ir.Type) bool {
 		}
 
 	case ir.TypeKindComposite:
-		// For composite types, compare columns
+		// Attributes are matched by name, like table columns: ADD ATTRIBUTE
+		// can only append, so a different order alone is not a change the
+		// migration could reproduce (see generateAlterCompositeStatements).
 		if len(old.Columns) != len(new.Columns) {
 			return false
 		}
-		for i, col := range old.Columns {
-			newCol := new.Columns[i]
-			if col.Name != newCol.Name || col.DataType != newCol.DataType {
+		oldCols := make(map[string]string, len(old.Columns))
+		for _, col := range old.Columns {
+			oldCols[col.Name] = col.DataType
+		}
+		for _, col := range new.Columns {
+			dataType, exists := oldCols[col.Name]
+			if !exists || dataType != col.DataType {
 				return false
 			}
 		}

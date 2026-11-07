@@ -2542,6 +2542,17 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
 	generateCreateTypesSQL(typesWithoutDeps, replaced, targetSchema, collector)
 
+	// Add and alter the attributes of modified composite types now that the
+	// types they may use exist, and before the tables, views and functions
+	// created below can refer to them (issue #625). An attribute typed on a
+	// deferred domain waits for that domain's batch below.
+	attributeUsesDeferredType := func(typeObj *ir.Type, attr *ir.TypeColumn, lookup map[string]struct{}) bool {
+		return len(lookup) > 0 && typeMatchesLookup(extractBaseTypeName(attr.DataType), typeObj.Schema, lookup)
+	}
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return !attributeUsesDeferredType(typeObj, attr, deferredDomainLookup)
+	})
+
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, d.deferredSequenceOwners, targetSchema, collector)
 
@@ -2580,8 +2591,30 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	tablesWithDeps := []*ir.Table{}
 	tablesAfterTableDomains := []*ir.Table{}
 
+	// The attributes of modified composite types whose ALTER TYPE waits for
+	// the function-dependent or the table-dependent domain batch, and the new
+	// SQL functions reading one of the latter, with the SQL functions calling
+	// those: a table whose default or CHECK calls such a function goes in the
+	// last batch too (issue #625).
+	afterFunctionBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+	afterTableBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+	var tableBatchReaders, otherFunctions []*ir.Function
+	for _, fn := range d.addedFunctions {
+		if functionReadsCompositeAttribute(fn, afterTableBatch) {
+			tableBatchReaders = append(tableBatchReaders, fn)
+		} else {
+			otherFunctions = append(otherFunctions, fn)
+		}
+	}
+	_, tableBatchReaders = holdBackCallers(otherFunctions, tableBatchReaders)
+	tableBatchReaderLookup := buildFunctionLookup(tableBatchReaders)
+
 	tableBatch := func(table *ir.Table) int {
-		if tableUsesDeferredDomain(table, tableDomainLookup) {
+		if tableUsesDeferredDomain(table, tableDomainLookup) || tableReferencesNewFunction(table, tableBatchReaderLookup) {
 			return 2
 		}
 		if tableReferencesNewFunction(table, newFunctionLookup) || tableUsesDeferredDomain(table, functionDomainLookup) {
@@ -2715,6 +2748,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
 	var functionsAfterAllTables []*ir.Function
+	// Readers of a composite attribute altered after a deferred domain batch,
+	// created right after that alteration (issue #625)
+	var readersAfterFunctionBatch, readersAfterTableBatch []*ir.Function
 	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 || len(deferredDomainLookup) > 0 {
 		tablesWithDepsLookup := buildTableLookup(tablesWithDeps)
 		lastBatchLookup := buildTableLookup(tablesAfterTableDomains)
@@ -2737,9 +2773,19 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		// in a later batch moves after that batch, unless an earlier table or
 		// domain needs it first.
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, typesWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
+		// A SQL-language function whose body reads a composite attribute that
+		// is added or altered only after a deferred domain batch is validated
+		// against it at creation, so it is created right after that
+		// alteration, before the tables of that batch that may need it
+		// (issue #625).
+		if len(afterFunctionBatch) > 0 || len(afterTableBatch) > 0 {
+			deferredDomains := append(append([]*ir.Type{}, typesWithFunctionDepsOnly...), domainsWithTableDeps...)
+			functionsWithoutTableDeps, readersAfterFunctionBatch, functionsWithTableDeps, readersAfterTableBatch = holdBackDeferredAttributeReaders(functionsWithoutTableDeps, functionsWithTableDeps, afterFunctionBatch, afterTableBatch, deferredDomains)
+		}
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
-		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
+		ordered := holdBackCallersAcrossOrderedBatches(functionsWithoutTableDeps, readersAfterFunctionBatch, functionsWithTableDeps, readersAfterTableBatch, functionsAfterAllTables)
+		functionsWithoutTableDeps, readersAfterFunctionBatch, functionsWithTableDeps, readersAfterTableBatch, functionsAfterAllTables = ordered[0], ordered[1], ordered[2], ordered[3], ordered[4]
 	}
 
 	// Create functions WITHOUT view dependencies AND WITHOUT table dependencies
@@ -2750,6 +2796,13 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// after functions but before tables, because tables may use these domains as
 	// column types.
 	generateCreateTypesSQL(typesWithFunctionDepsOnly, replaced, targetSchema, collector)
+
+	// Composite attributes typed on a domain of that batch, then the SQL
+	// functions reading them (issue #625)
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+	generateCreateFunctionsSQL(readersAfterFunctionBatch, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	// A procedure whose body may depend on a postponed key (issue #653) waits
@@ -2769,6 +2822,13 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Emitted after ALL other tables so the row type exists, even if the domain also
 	// depends on a function (which was already created above).
 	generateCreateTypesSQL(domainsWithTableDeps, replaced, targetSchema, collector)
+
+	// Composite attributes typed on a domain of that batch, then the SQL
+	// functions reading them (issue #625)
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+	generateCreateFunctionsSQL(readersAfterTableBatch, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
@@ -3213,6 +3273,10 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 
 	// Drop sequences
 	generateDropSequencesSQL(d.droppedSequences, targetSchema, collector)
+
+	// Drop the attributes removed from composite types, before a dropped type
+	// one of them was the last use of (issue #625)
+	generateDropCompositeAttributesSQL(d.modifiedTypes, targetSchema, collector)
 
 	// Drop types, interleaved with the held-back functions in dependency
 	// order: a range before its subtype_diff function, that function before
@@ -3844,21 +3908,12 @@ func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.
 // holdBackCallersAcrossBatches applies holdBackCallers to three consecutive function
 // batches until none changes. A single round is not enough: a function that joins a
 // later batch in one step can strand a caller that an earlier step already examined.
-// holdBackKeyDependentFunctions moves a function that references a table of a
-// hierarchy with postponed keys (issue #653) to the function batch after the
-// table batch in which that hierarchy completes. Whether the body depends on
-// the key (ON CONFLICT ON CONSTRAINT, GROUP BY functional dependency) is not
-// known, so every such function moves unless a table default or CHECK, or a
-// domain created earlier, needs it: then the parent -> function -> partition
-// chain keeps its order. batches maps table keys to their creation batch;
-// first, second and third are the function batches created after table
-// batches 0, 1 and 2.
-func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table, domains []*ir.Type, first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
-	if plan == nil || len(plan.roots) == 0 {
-		return first, second, third
-	}
-	completion, lookups := hierarchyCompletion(plan, batches, addedTables)
-	pool := append(append(append([]*ir.Function{}, first...), second...), third...)
+// functionsNeededEarly returns the functions of pool that a new table's
+// default or CHECK, or a deferred domain, needs before it is created, along
+// with the functions those call (a SQL function is validated against its
+// callees at creation). A hold-back that would move one of them to a later
+// batch must leave it where it is.
+func functionsNeededEarly(pool []*ir.Function, addedTables []*ir.Table, domains []*ir.Type) map[*ir.Function]bool {
 	needed := make(map[*ir.Function]bool)
 	for _, fn := range pool {
 		lookup := buildFunctionLookup([]*ir.Function{fn})
@@ -3874,8 +3929,6 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 			}
 		}
 	}
-	// A SQL function needed earlier is validated against the functions it
-	// calls when it is created, so those are needed earlier as well.
 	for changed := true; changed; {
 		changed = false
 		for fn := range needed {
@@ -3890,6 +3943,25 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 			}
 		}
 	}
+	return needed
+}
+
+// holdBackKeyDependentFunctions moves a function that references a table of a
+// hierarchy with postponed keys (issue #653) to the function batch after the
+// table batch in which that hierarchy completes. Whether the body depends on
+// the key (ON CONFLICT ON CONSTRAINT, GROUP BY functional dependency) is not
+// known, so every such function moves unless a table default or CHECK, or a
+// domain created earlier, needs it: then the parent -> function -> partition
+// chain keeps its order. batches maps table keys to their creation batch;
+// first, second and third are the function batches created after table
+// batches 0, 1 and 2.
+func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table, domains []*ir.Type, first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	if plan == nil || len(plan.roots) == 0 {
+		return first, second, third
+	}
+	completion, lookups := hierarchyCompletion(plan, batches, addedTables)
+	pool := append(append(append([]*ir.Function{}, first...), second...), third...)
+	needed := functionsNeededEarly(pool, addedTables, domains)
 	var result [3][]*ir.Function
 	for batch, fns := range [][]*ir.Function{first, second, third} {
 		for _, fn := range fns {
@@ -3956,14 +4028,28 @@ func holdBackKeyDependentProcedures(plan *partitionIndexCreationPlan, batches ma
 }
 
 func holdBackCallersAcrossBatches(first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	ordered := holdBackCallersAcrossOrderedBatches(first, second, third)
+	return ordered[0], ordered[1], ordered[2]
+}
+
+// holdBackCallersAcrossOrderedBatches moves a SQL function calling one of a
+// later batch to that batch, for batches created in the given order, until
+// no batch changes.
+func holdBackCallersAcrossOrderedBatches(batches ...[]*ir.Function) [][]*ir.Function {
 	for {
-		secondLen, thirdLen := len(second), len(third)
-		second, third = holdBackCallers(second, third)
-		first, third = holdBackCallers(first, third)
-		first, second = holdBackCallers(first, second)
+		changed := false
+		for later := len(batches) - 1; later > 0; later-- {
+			for earlier := 0; earlier < later; earlier++ {
+				before := len(batches[later])
+				batches[earlier], batches[later] = holdBackCallers(batches[earlier], batches[later])
+				if len(batches[later]) != before {
+					changed = true
+				}
+			}
+		}
 		// Functions only ever move to a later batch, so unchanged sizes mean a fixpoint.
-		if len(second) == secondLen && len(third) == thirdLen {
-			return first, second, third
+		if !changed {
+			return batches
 		}
 	}
 }
@@ -5003,6 +5089,99 @@ func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) 
 // DISTINCT * or alias.*; count(*) has a parenthesis before the star and does
 // not match.
 var wildcardSelectRegex = regexp.MustCompile(`(?i)(?:\bselect\s+(?:(?:all|distinct)\s+)?|[\w"]\.)\*`)
+
+// deferredCompositeAttributes returns, per modified composite type, the names
+// of the attributes that generateAlterCompositeStatements adds or alters for
+// it and that include accepts: the attributes whose ALTER TYPE waits for a
+// deferred domain batch (issue #625).
+func deferredCompositeAttributes(diffs []*typeDiff, include func(*ir.Type, *ir.TypeColumn) bool) map[*ir.Type][]string {
+	attrs := make(map[*ir.Type][]string)
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindComposite || diff.New.Kind != ir.TypeKindComposite {
+			continue
+		}
+		oldTypes := make(map[string]string, len(diff.Old.Columns))
+		for _, attr := range diff.Old.Columns {
+			oldTypes[attr.Name] = attr.DataType
+		}
+		for _, attr := range diff.New.Columns {
+			if oldType, exists := oldTypes[attr.Name]; exists && oldType == attr.DataType {
+				continue
+			}
+			if include(diff.New, attr) {
+				attrs[diff.New] = append(attrs[diff.New], attr.Name)
+			}
+		}
+	}
+	return attrs
+}
+
+// holdBackDeferredAttributeReaders takes the functions that read an attribute
+// of afterFunctionBatch or afterTableBatch out of the first and second
+// function batches, into the slot created right after that attribute's ALTER
+// TYPE: after the function-dependent domains and before the second table
+// batch, or after the table-dependent domains and before the third
+// (issue #625). A function that one of the deferred domains needs stays:
+// the attribute match is a name match on the body, so it may be a parameter
+// of the same name rather than the attribute, and the domain needs the
+// function before the attribute can exist in any case.
+func holdBackDeferredAttributeReaders(first, second []*ir.Function, afterFunctionBatch, afterTableBatch map[*ir.Type][]string, domains []*ir.Type) (keepFirst, readersAfterFunctionBatch, keepSecond, readersAfterTableBatch []*ir.Function) {
+	if len(afterFunctionBatch) == 0 && len(afterTableBatch) == 0 {
+		return first, nil, second, nil
+	}
+	needed := functionsNeededEarly(append(append([]*ir.Function{}, first...), second...), nil, domains)
+	for _, fn := range first {
+		switch {
+		case needed[fn]:
+			keepFirst = append(keepFirst, fn)
+		case functionReadsCompositeAttribute(fn, afterTableBatch):
+			readersAfterTableBatch = append(readersAfterTableBatch, fn)
+		case functionReadsCompositeAttribute(fn, afterFunctionBatch):
+			readersAfterFunctionBatch = append(readersAfterFunctionBatch, fn)
+		default:
+			keepFirst = append(keepFirst, fn)
+		}
+	}
+	for _, fn := range second {
+		if !needed[fn] && functionReadsCompositeAttribute(fn, afterTableBatch) {
+			readersAfterTableBatch = append(readersAfterTableBatch, fn)
+		} else {
+			keepSecond = append(keepSecond, fn)
+		}
+	}
+	return keepFirst, readersAfterFunctionBatch, keepSecond, readersAfterTableBatch
+}
+
+// functionReadsCompositeAttribute reports whether a SQL-language function
+// uses one of the composite types in attrs (in its signature, its body or
+// its pg_depend type dependencies) and names one of that type's listed
+// attributes in its body. Only SQL-language bodies are resolved at creation;
+// other languages resolve attributes at run time (issue #625).
+func functionReadsCompositeAttribute(fn *ir.Function, attrs map[*ir.Type][]string) bool {
+	if fn == nil || !strings.EqualFold(fn.Language, "sql") || fn.Definition == "" || len(attrs) == 0 {
+		return false
+	}
+	for typeObj, names := range attrs {
+		qualified := typeObj.Schema + "." + typeObj.Name
+		lookup := map[string]struct{}{strings.ToLower(qualified): {}, strings.ToLower(typeObj.Name): {}}
+		usesType := functionSignatureReferencesRelation(fn, lookup) || containsIdentifier(fn.Definition, qualified) || containsIdentifier(fn.Definition, typeObj.Name)
+		for _, dep := range fn.TypeDependencies {
+			if usesType {
+				break
+			}
+			usesType = strings.EqualFold(dep, qualified)
+		}
+		if !usesType {
+			continue
+		}
+		for _, name := range names {
+			if containsIdentifier(fn.Definition, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // functionReadsAddedColumn reports whether a SQL-language function body reads
 // a modified table in relation position and depends on one of the columns

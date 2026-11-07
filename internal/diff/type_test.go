@@ -271,3 +271,67 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 		t.Fatalf("got %v", names)
 	}
 }
+
+func TestGenerateAlterCompositeStatements(t *testing.T) {
+	oldType := &ir.Type{
+		Schema: "public", Name: "address", Kind: ir.TypeKindComposite,
+		Columns: []*ir.TypeColumn{
+			{Name: "street", DataType: "text"},
+			{Name: "zip", DataType: "integer"},
+			{Name: "country", DataType: "text"},
+		},
+	}
+	newType := &ir.Type{
+		Schema: "public", Name: "address", Kind: ir.TypeKindComposite,
+		Columns: []*ir.TypeColumn{
+			{Name: "zip", DataType: "bigint"},
+			{Name: "street", DataType: "text"},
+			{Name: "city", DataType: "text"},
+			{Name: "region", DataType: "public.region_kind"},
+		},
+	}
+	got := generateDropCompositeAttributeStatements(oldType, newType, "public", false)
+	got = append(got, generateAlterCompositeStatements(oldType, newType, "public", false, nil)...)
+	// A filter picks the attributes of a batch
+	got = append(got, generateAlterCompositeStatements(oldType, newType, "public", false, func(_ *ir.Type, attr *ir.TypeColumn) bool {
+		return attr.Name == "region"
+	})...)
+	want := []string{
+		"ALTER TYPE address DROP ATTRIBUTE country;",
+		"ALTER TYPE address ALTER ATTRIBUTE zip TYPE bigint;",
+		"ALTER TYPE address ADD ATTRIBUTE city text;",
+		"ALTER TYPE address ADD ATTRIBUTE region region_kind;",
+		"ALTER TYPE address ADD ATTRIBUTE region region_kind;",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d statements, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("statement %d:\n got: %q\nwant: %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestTypesEqualComposite(t *testing.T) {
+	composite := func(cols ...*ir.TypeColumn) *ir.Type {
+		return &ir.Type{Schema: "public", Name: "c", Kind: ir.TypeKindComposite, Columns: cols}
+	}
+	a, b := &ir.TypeColumn{Name: "a", DataType: "integer"}, &ir.TypeColumn{Name: "b", DataType: "text"}
+	if !typesEqual(composite(a, b), composite(a, b)) {
+		t.Error("identical composites compare unequal")
+	}
+	// ADD ATTRIBUTE can only append, so attribute order alone is not a change.
+	if !typesEqual(composite(a, b), composite(b, a)) {
+		t.Error("reordered attributes reported as a change")
+	}
+	if typesEqual(composite(a), composite(a, b)) {
+		t.Error("added attribute not detected")
+	}
+	if typesEqual(composite(a, b), composite(a, &ir.TypeColumn{Name: "b", DataType: "varchar(10)"})) {
+		t.Error("changed attribute type not detected")
+	}
+	if typesEqual(composite(a, b), composite(a, &ir.TypeColumn{Name: "c", DataType: "text"})) {
+		t.Error("renamed attribute not detected")
+	}
+}
