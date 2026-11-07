@@ -925,6 +925,23 @@ func (ctx *dependentViewsContext) GetDependents(viewKey string) []*ir.View {
 	return ctx.dependents[viewKey]
 }
 
+// exclude removes the views with the given schema.name keys from every
+// dependents list, for views another phase recreates.
+func (ctx *dependentViewsContext) exclude(keys map[string]bool) {
+	if ctx == nil || len(keys) == 0 {
+		return
+	}
+	for recreated, dependents := range ctx.dependents {
+		var kept []*ir.View
+		for _, view := range dependents {
+			if !keys[view.Schema+"."+view.Name] {
+				kept = append(kept, view)
+			}
+		}
+		ctx.dependents[recreated] = kept
+	}
+}
+
 // IsDependent reports whether the given view depends on a view being recreated
 func (ctx *dependentViewsContext) IsDependent(viewKey string) bool {
 	if ctx == nil {
