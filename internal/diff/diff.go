@@ -1257,14 +1257,21 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 		for changed := true; changed; {
 			changed = false
 			// A function the migration drops counts as well: the drop phase
-			// runs after these views are dropped, so it is dropped here.
+			// runs after these views are dropped, so it is dropped here. So
+			// does a function typed on a dropped calling view, and one whose
+			// SQL-standard body calls a pinned function: pg_depend records
+			// that call, so it blocks the callee's drop in turn.
+			pinnedViewLookup := buildPinnedViewLookup(recreatedViewKeys, diff.allNewViews, callingViews, oldViews)
+			pinnedFunctionKeys := functionKeySet(diff.functionsPinningRecreatedViews)
 			for _, key := range sortedKeys(oldFunctions) {
 				oldFunction := oldFunctions[key]
-				if pinning[oldFunction] || !functionSignatureReferencesRelation(oldFunction, diff.recreatedViewLookup) {
+				if pinning[oldFunction] ||
+					(!functionSignatureReferencesRelation(oldFunction, pinnedViewLookup) && !functionDependsOnAny(oldFunction, pinnedFunctionKeys)) {
 					continue
 				}
 				changed = true
 				pinning[oldFunction] = true
+				pinnedFunctionKeys[functionKey(oldFunction)] = true
 				pinnedFunctionPrivileges[oldFunction.Schema+"."+functionPrivilegeObjectName(oldFunction)] = true
 				diff.functionsPinningRecreatedViews = append(diff.functionsPinningRecreatedViews, oldFunction)
 				if newFunction, kept := newFunctions[key]; kept {
@@ -1277,7 +1284,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			for _, key := range sortedKeys(oldAggregates) {
 				oldAggregate := oldAggregates[key]
 				if pinnedAggregates[oldAggregate] ||
-					(!aggregateUsesFunction(oldAggregate, pinnedFunctionLookup) && !aggregateReferencesNewView(oldAggregate, diff.recreatedViewLookup)) {
+					(!aggregateUsesFunction(oldAggregate, pinnedFunctionLookup) && !aggregateReferencesNewView(oldAggregate, pinnedViewLookup)) {
 					continue
 				}
 				changed = true
@@ -2233,6 +2240,51 @@ func (d *ddlDiff) dropViewAhead(view *ir.View, droppedViews map[string]bool, tar
 	preDropped[viewKey] = true
 }
 
+// functionKey returns fn's schema.name(args) key, the form Function.Dependencies
+// uses to name the functions fn depends on.
+func functionKey(fn *ir.Function) string {
+	return fn.Schema + "." + fn.Name + "(" + fn.GetArguments() + ")"
+}
+
+// functionKeySet returns the functionKey of each function as a set.
+func functionKeySet(functions []*ir.Function) map[string]bool {
+	keys := make(map[string]bool, len(functions))
+	for _, fn := range functions {
+		keys[functionKey(fn)] = true
+	}
+	return keys
+}
+
+// functionDependsOnAny reports whether fn depends, per pg_depend, on a function
+// whose functionKey is in keys.
+func functionDependsOnAny(fn *ir.Function, keys map[string]bool) bool {
+	for _, dep := range fn.Dependencies {
+		if keys[dep] {
+			return true
+		}
+	}
+	return false
+}
+
+// buildPinnedViewLookup returns a case-insensitive lookup (see
+// buildSchemaNameLookup) of every view whose drop the migration forces ahead of
+// the drop phase: the recreated views, resolved through newViews, and the
+// callers of a pinned routine, kept or dropped, resolved through oldViews.
+func buildPinnedViewLookup(recreatedKeys map[string]bool, newViews map[string]*ir.View, callingKeys map[string]bool, oldViews map[string]*ir.View) map[string]struct{} {
+	var names []struct{ schema, name string }
+	for key := range recreatedKeys {
+		if view := newViews[key]; view != nil {
+			names = append(names, struct{ schema, name string }{view.Schema, view.Name})
+		}
+	}
+	for key := range callingKeys {
+		if view := oldViews[key]; view != nil {
+			names = append(names, struct{ schema, name string }{view.Schema, view.Name})
+		}
+	}
+	return buildSchemaNameLookup(names)
+}
+
 // pinnedDrop is one object dropped ahead of a view recreation: exactly one
 // field is set (issue #687).
 type pinnedDrop struct {
@@ -2278,7 +2330,7 @@ func orderPinnedDrops(views []*ir.View, functions []*ir.Function, aggregates []*
 		case a.drop.function != nil && b.drop.view != nil:
 			return functionSignatureReferencesRelation(a.drop.function, buildViewLookup([]*ir.View{b.drop.view}))
 		case a.drop.function != nil && b.drop.function != nil:
-			return slices.Contains(a.drop.function.Dependencies, b.drop.function.Schema+"."+b.drop.function.Name+"("+b.drop.function.GetArguments()+")")
+			return slices.Contains(a.drop.function.Dependencies, functionKey(b.drop.function))
 		case a.drop.aggregate != nil && b.drop.view != nil:
 			return aggregateReferencesNewView(a.drop.aggregate, buildViewLookup([]*ir.View{b.drop.view}))
 		case a.drop.aggregate != nil && b.drop.function != nil:
@@ -2570,6 +2622,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		}
 		functionsWithoutViewDeps = deferRecreated(functionsWithoutViewDeps)
 		functionsWithViewDeps = deferRecreated(functionsWithViewDeps)
+		// A SQL-language function calling a deferred function is validated
+		// against it at creation, so it waits with it (#687).
+		functionsWithoutViewDeps, d.functionsAwaitingRecreatedViews = holdBackCallers(functionsWithoutViewDeps, d.functionsAwaitingRecreatedViews)
+		functionsWithViewDeps, d.functionsAwaitingRecreatedViews = holdBackCallers(functionsWithViewDeps, d.functionsAwaitingRecreatedViews)
 	}
 
 	// SQL-language functions whose body calls a new aggregate are validated
@@ -2768,12 +2824,32 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// The kept callers of a pinned routine, dropped at the start of the
 	// migration, wait there too; the batch is sorted again to interleave them
 	// with the new views built on them, or that they are built on (#687).
+	// A routine typed on, or (SQL body) reading, a view held back this way
+	// waits with it, as does a SQL function calling such a routine, and a new
+	// view calling any of them waits in turn: repeat until nothing moves (#687).
 	heldRoutines := append(recreatedFunctions(d.modifiedFunctions), d.functionsAwaitingRecreatedViews...)
-	viewsToCreateNow, viewsAwaitingRecreatedViews := splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, d.aggregatesAwaitingRecreatedViews), d.viewsAwaitingRecreatedViews)
-	if len(d.viewsAwaitingPinnedRoutines) > 0 {
-		viewsAwaitingRecreatedViews = topologicallySortViews(viewsAwaitingRecreatedViews)
+	rounds := 0
+	for {
+		rounds++
+		viewsToCreateNow, d.viewsAwaitingRecreatedViews = splitViewsReferencingRoutines(viewsToCreateNow, buildRoutineLookup(heldRoutines, d.aggregatesAwaitingRecreatedViews), d.viewsAwaitingRecreatedViews)
+		awaitingViewLookup := buildViewLookup(d.viewsAwaitingRecreatedViews)
+		var movedFunctions []*ir.Function
+		functionsWithViewDeps, movedFunctions = splitFunctionsByViewDeps(functionsWithViewDeps, awaitingViewLookup)
+		functionsWithViewDeps, movedFunctions = holdBackCallers(functionsWithViewDeps, movedFunctions)
+		var movedAggregates []*ir.Aggregate
+		aggregatesWithViewDeps, movedAggregates = splitAggregatesByViewDeps(aggregatesWithViewDeps, awaitingViewLookup, buildFunctionLookup(movedFunctions))
+		if len(movedFunctions) == 0 && len(movedAggregates) == 0 {
+			break
+		}
+		d.functionsAwaitingRecreatedViews = append(d.functionsAwaitingRecreatedViews, movedFunctions...)
+		d.aggregatesAwaitingRecreatedViews = append(d.aggregatesAwaitingRecreatedViews, movedAggregates...)
+		heldRoutines = append(heldRoutines, movedFunctions...)
 	}
-	d.viewsAwaitingRecreatedViews = viewsAwaitingRecreatedViews
+	// Views held back in a later round may be read by views held back
+	// earlier, and kept callers come unsorted, so order the batch again.
+	if rounds > 1 || len(d.viewsAwaitingPinnedRoutines) > 0 {
+		d.viewsAwaitingRecreatedViews = topologicallySortViews(d.viewsAwaitingRecreatedViews)
+	}
 
 	// Create views, then the functions and aggregates that reference views in
 	// their signature or SQL body (issue #300, #580).

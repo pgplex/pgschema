@@ -147,8 +147,9 @@ SELECT v.* FROM item_view v CROSS JOIN item_count_all();
 $$;
 
 -- SQL-standard bodies record the call in pg_depend, so item_view_z must be
--- dropped before item_view_a although both are only typed on item_view.
-CREATE FUNCTION item_view_a()
+-- dropped before item_view_a although both are only typed on item_view. The
+-- catalog spells item_view_a's argument differently from the normalized IR.
+CREATE FUNCTION item_view_a(p_since timestamp with time zone)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -161,5 +162,26 @@ RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 BEGIN ATOMIC
-    SELECT * FROM item_view_a();
+    SELECT * FROM item_view_a(now());
 END;
+
+-- Not typed on any view, but its SQL-standard body records a dependency on
+-- item_view_all(), so it blocks that function's drop and must go first and
+-- come back after it; a plain function body ($$) would record none.
+CREATE FUNCTION count_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view_all(now());
+END;
+
+-- Dropped by the migration and typed on item_count_stale, a dropped caller:
+-- it must still go before that view's drop rather than in the drop phase.
+CREATE FUNCTION item_count_stale_all()
+RETURNS SETOF item_count_stale
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count_stale;
+$$;

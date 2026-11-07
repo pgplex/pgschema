@@ -4,19 +4,23 @@ DROP VIEW IF EXISTS item_count_pairs RESTRICT;
 
 DROP VIEW IF EXISTS item_count_report RESTRICT;
 
-DROP VIEW IF EXISTS item_count_stale RESTRICT;
-
 DROP VIEW IF EXISTS item_id_max_view RESTRICT;
 
 DROP AGGREGATE IF EXISTS item_id_max(item_view);
 
 DROP AGGREGATE IF EXISTS item_id_min(item_view);
 
+DROP FUNCTION IF EXISTS count_items();
+
 DROP FUNCTION IF EXISTS item_count_all();
 
 DROP FUNCTION IF EXISTS item_count_legacy();
 
 DROP VIEW IF EXISTS item_count RESTRICT;
+
+DROP FUNCTION IF EXISTS item_count_stale_all();
+
+DROP VIEW IF EXISTS item_count_stale RESTRICT;
 
 DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
 
@@ -30,7 +34,7 @@ DROP FUNCTION IF EXISTS item_view_joined();
 
 DROP FUNCTION IF EXISTS item_view_z();
 
-DROP FUNCTION IF EXISTS item_view_a();
+DROP FUNCTION IF EXISTS item_view_a(timestamptz);
 
 DROP FUNCTION IF EXISTS item_scale(integer);
 
@@ -87,7 +91,9 @@ AS $$
 SELECT * FROM item_ids;
 $$;
 
-CREATE OR REPLACE FUNCTION item_view_a()
+CREATE OR REPLACE FUNCTION item_view_a(
+    p_since timestamptz
+)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -107,6 +113,23 @@ AS $$
 SELECT * FROM item_view;
 $$;
 
+CREATE OR REPLACE FUNCTION count_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+ SELECT count(*) AS count
+    FROM item_view_all(now()) item_view_all(id, due);
+END;
+
+CREATE OR REPLACE FUNCTION count_new_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now());
+$$;
+
 CREATE OR REPLACE FUNCTION item_view_z()
 RETURNS SETOF item_view
 LANGUAGE sql
@@ -114,7 +137,7 @@ STABLE
 BEGIN ATOMIC
  SELECT item_view_a.id,
      item_view_a.due
-    FROM item_view_a() item_view_a(id, due);
+    FROM item_view_a(now()) item_view_a(id, due);
 END;
 
 CREATE OR REPLACE FUNCTION items_due_between(
@@ -162,6 +185,14 @@ LANGUAGE sql
 STABLE
 AS $$
 SELECT * FROM item_count;
+$$;
+
+CREATE OR REPLACE FUNCTION item_count_copy_all()
+RETURNS SETOF item_count_copy
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count_copy;
 $$;
 
 CREATE OR REPLACE FUNCTION item_view_joined()

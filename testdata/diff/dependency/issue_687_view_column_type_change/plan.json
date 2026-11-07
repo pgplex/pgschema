@@ -3,7 +3,7 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "e74b8c58c2a3a63a4d4f464dab4361c2bfcbce0d0f6efc5dddf88571f9f2b57d"
+    "hash": "a2249a11158450fd5f7588e7f51d954a4b4efce2786aca93323fbc3e7a985328"
   },
   "groups": [
     {
@@ -27,12 +27,6 @@
           "path": "public.item_count_report"
         },
         {
-          "sql": "DROP VIEW IF EXISTS item_count_stale RESTRICT;",
-          "type": "view",
-          "operation": "drop",
-          "path": "public.item_count_stale"
-        },
-        {
           "sql": "DROP VIEW IF EXISTS item_id_max_view RESTRICT;",
           "type": "view",
           "operation": "recreate",
@@ -51,6 +45,12 @@
           "path": "public.item_id_min"
         },
         {
+          "sql": "DROP FUNCTION IF EXISTS count_items();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.count_items"
+        },
+        {
           "sql": "DROP FUNCTION IF EXISTS item_count_all();",
           "type": "function",
           "operation": "drop",
@@ -67,6 +67,18 @@
           "type": "view",
           "operation": "recreate",
           "path": "public.item_count"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_count_stale_all();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_count_stale_all"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS item_count_stale RESTRICT;",
+          "type": "view",
+          "operation": "drop",
+          "path": "public.item_count_stale"
         },
         {
           "sql": "DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);",
@@ -105,7 +117,7 @@
           "path": "public.item_view_z"
         },
         {
-          "sql": "DROP FUNCTION IF EXISTS item_view_a();",
+          "sql": "DROP FUNCTION IF EXISTS item_view_a(timestamptz);",
           "type": "function",
           "operation": "drop",
           "path": "public.item_view_a"
@@ -165,7 +177,7 @@
           "path": "public.item_ids_all"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION item_view_a()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view.id,\n     item_view.due\n    FROM public.item_view;\nEND;",
+          "sql": "CREATE OR REPLACE FUNCTION item_view_a(\n    p_since timestamptz\n)\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view.id,\n     item_view.due\n    FROM public.item_view;\nEND;",
           "type": "function",
           "operation": "create",
           "path": "public.item_view_a"
@@ -177,7 +189,19 @@
           "path": "public.item_view_all"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION item_view_z()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view_a.id,\n     item_view_a.due\n    FROM public.item_view_a() item_view_a(id, due);\nEND;",
+          "sql": "CREATE OR REPLACE FUNCTION count_items()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT count(*) AS count\n    FROM public.item_view_all(now()) item_view_all(id, due);\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_items"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION count_new_items()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT count(*) FROM item_view_all(now());\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.count_new_items"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_view_z()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view_a.id,\n     item_view_a.due\n    FROM public.item_view_a(now()) item_view_a(id, due);\nEND;",
           "type": "function",
           "operation": "create",
           "path": "public.item_view_z"
@@ -235,6 +259,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.item_count_all"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_count_copy_all()\nRETURNS SETOF item_count_copy\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT * FROM item_count_copy;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_count_copy_all"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION item_view_joined()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT v.* FROM item_view v CROSS JOIN item_count_all();\n$$;",

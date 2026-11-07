@@ -120,7 +120,7 @@ AS $$
 SELECT v.* FROM item_view v CROSS JOIN item_count_all();
 $$;
 
-CREATE FUNCTION item_view_a()
+CREATE FUNCTION item_view_a(p_since timestamp with time zone)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -133,5 +133,33 @@ RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 BEGIN ATOMIC
-    SELECT * FROM item_view_a();
+    SELECT * FROM item_view_a(now());
 END;
+
+CREATE FUNCTION count_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view_all(now());
+END;
+
+-- New, and its body calls item_view_all(), which only comes back after
+-- item_view, so it is created after that rather than in the create phase.
+CREATE FUNCTION count_new_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now());
+$$;
+
+-- New and typed on item_count_copy, a new view that itself waits for
+-- item_count, so it waits for that view too.
+CREATE FUNCTION item_count_copy_all()
+RETURNS SETOF item_count_copy
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count_copy;
+$$;
