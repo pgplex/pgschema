@@ -147,8 +147,9 @@ SELECT v.* FROM item_view v CROSS JOIN item_count_all();
 $$;
 
 -- SQL-standard bodies record the call in pg_depend, so item_view_z must be
--- dropped before item_view_a although both are only typed on item_view.
-CREATE FUNCTION item_view_a()
+-- dropped before item_view_a although both are only typed on item_view. The
+-- catalog spells item_view_a's argument differently from the normalized IR.
+CREATE FUNCTION item_view_a(p_since timestamp with time zone)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -161,5 +162,66 @@ RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 BEGIN ATOMIC
-    SELECT * FROM item_view_a();
+    SELECT * FROM item_view_a(now());
+END;
+
+-- Not typed on any view, but its SQL-standard body records a dependency on
+-- item_view_all(), so it blocks that function's drop and must go first and
+-- come back after it; a plain function body ($$) would record none.
+CREATE FUNCTION count_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view_all(now());
+END;
+
+-- Dropped by the migration and typed on item_count_stale, a dropped caller:
+-- it must still go before that view's drop rather than in the drop phase.
+CREATE FUNCTION item_count_stale_all()
+RETURNS SETOF item_count_stale
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count_stale;
+$$;
+
+-- A SQL-standard body records what it reads in pg_depend, so this function
+-- pins item_view through its body alone, and item_max_id_atomic() depends on
+-- the item_id_max aggregate as well, so it is dropped before the aggregate.
+CREATE FUNCTION count_items_direct()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view;
+END;
+
+CREATE FUNCTION item_max_id_atomic()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT item_id_max(v) FROM item_view v;
+END;
+
+-- Its parameter is renamed in new.sql, so it is dropped and created again,
+-- and its desired body calls item_view_all(): the creation has to wait for
+-- that function, so it joins the pinned batch rather than the #601 path.
+CREATE FUNCTION item_recent(days integer)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now() - days * interval '1 day');
+$$;
+
+-- Typed on item_view, and its SQL-standard body also reads item_count, a
+-- calling view held back here: it must be dropped before that view.
+CREATE FUNCTION joined_atomic()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT v.* FROM item_view v, item_count;
 END;

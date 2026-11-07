@@ -120,7 +120,7 @@ AS $$
 SELECT v.* FROM item_view v CROSS JOIN item_count_all();
 $$;
 
-CREATE FUNCTION item_view_a()
+CREATE FUNCTION item_view_a(p_since timestamp with time zone)
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
@@ -133,5 +133,112 @@ RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 BEGIN ATOMIC
-    SELECT * FROM item_view_a();
+    SELECT * FROM item_view_a(now());
 END;
+
+CREATE FUNCTION count_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view_all(now());
+END;
+
+-- New, and its body calls item_view_all(), which only comes back after
+-- item_view, so it is created after that rather than in the create phase.
+CREATE FUNCTION count_new_items()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now());
+$$;
+
+-- New and typed on item_count_copy, a new view that itself waits for
+-- item_count, so it waits for that view too.
+CREATE FUNCTION item_count_copy_all()
+RETURNS SETOF item_count_copy
+LANGUAGE sql
+STABLE
+AS $$
+SELECT * FROM item_count_copy;
+$$;
+
+CREATE FUNCTION count_items_direct()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view;
+END;
+
+CREATE FUNCTION item_max_id_atomic()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT item_id_max(v) FROM item_view v;
+END;
+
+-- New, created in the create phase with nothing to wait for: its PUBLIC
+-- revoke must follow its creation at once, not wait for the modify phase.
+CREATE FUNCTION item_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+SELECT count(*) FROM items;
+$$;
+
+REVOKE EXECUTE ON FUNCTION item_total() FROM PUBLIC;
+
+-- New aggregate whose state type is item_count, a view that waits for the
+-- routines it calls, and a new function calling that aggregate without
+-- reading the view itself: it must wait for the aggregate all the same.
+CREATE FUNCTION item_count_sfunc(state item_count, x bigint)
+RETURNS item_count
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT ROW(coalesce(state.n, 0) + x)::item_count;
+$$;
+
+CREATE AGGREGATE item_count_agg(bigint) (
+    SFUNC = item_count_sfunc,
+    STYPE = item_count
+);
+
+CREATE FUNCTION item_count_agg_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT (item_count_agg(x)).n FROM generate_series(1, 3) AS x;
+$$;
+
+CREATE FUNCTION item_recent(d integer)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now() - d * interval '1 day');
+$$;
+
+CREATE FUNCTION joined_atomic()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT v.* FROM item_view v, item_count;
+END;
+
+-- New, calling the kept aggregate item_id_max, which is only created again
+-- after item_view: it waits for the aggregate.
+CREATE FUNCTION item_max_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT item_id_max(NULL::item_view);
+$$;
