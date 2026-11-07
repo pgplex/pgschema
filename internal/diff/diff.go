@@ -2671,7 +2671,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// to an existing table is validated against that column at creation, so it
 	// is created in the modify phase, after the column, with the views held
 	// back for the same reason (#624). A SQL function calling it waits with it.
-	addedColLookup := buildModifiedTableAddedColumnLookup(d.modifiedTables)
+	addedColLookup := buildModifiedTableAddedColumnLookup(d.modifiedTables, d.allNewTables)
 	if len(addedColLookup) > 0 {
 		deferAddedColumnReaders := func(fns []*ir.Function) []*ir.Function {
 			var keep []*ir.Function
@@ -2832,6 +2832,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 			break
 		}
 	}
+	// A routine held for an added column that calls one held for a view
+	// recreation (an aggregate typed on that view, say) must follow it, so it
+	// moves to that later batch with its own dependents.
+	d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews = holdBackRoutineDependents(d.functionsAwaitingDeferredViews, d.aggregatesAwaitingDeferredViews, d.functionsAwaitingRecreatedViews, d.aggregatesAwaitingRecreatedViews)
 
 	// Aggregates and their callers may chain (aggregate a -> SQL support
 	// function calling a -> aggregate b), so they are scheduled together.
@@ -4995,25 +4999,36 @@ func functionReferencesNewTable(fn *ir.Function, newTables map[string]struct{}) 
 	return bodyReferencesRelation(fn.Definition, newTables)
 }
 
+// wildcardSelectRegex matches a whole-row select list: SELECT *, SELECT
+// DISTINCT * or alias.*; count(*) has a parenthesis before the star and does
+// not match.
+var wildcardSelectRegex = regexp.MustCompile(`(?i)(?:\bselect\s+(?:(?:all|distinct)\s+)?|[\w"]\.)\*`)
+
 // functionReadsAddedColumn reports whether a SQL-language function body reads
-// a modified table in relation position and names one of the columns being
-// added to it by this migration, in the body or in a RETURNS TABLE list (a
-// SELECT * body is checked against that list at creation). Both checks are
-// required, as for views (see viewReferencesAddedColumn), so a function is
-// not held back for a same-named column added to an unrelated table. Only
-// SQL-language bodies are resolved at creation; other languages resolve
-// columns at run time (#624).
+// a modified table in relation position and depends on one of the columns
+// being added to it by this migration: it names the column in the body or in
+// a RETURNS TABLE list, or it returns a TABLE list from a whole-row select,
+// which PostgreSQL checks against the table's columns positionally at
+// creation. The relation check is required, as for views (see
+// viewReferencesAddedColumn), so a function is not held back for a
+// same-named column added to an unrelated table. Only SQL-language bodies
+// are resolved at creation; other languages resolve columns at run time
+// (#624).
 func functionReadsAddedColumn(fn *ir.Function, addedCols map[string]map[string]struct{}) bool {
 	if fn == nil || !strings.EqualFold(fn.Language, "sql") || fn.Definition == "" || len(addedCols) == 0 {
 		return false
 	}
+	returnsTable := strings.HasPrefix(fn.ReturnType, "TABLE(")
 	for tableKey, cols := range addedCols {
 		_, table, ok := strings.Cut(tableKey, ".")
 		if !ok || !bodyReferencesRelation(fn.Definition, map[string]struct{}{tableKey: {}, table: {}}) {
 			continue
 		}
+		if returnsTable && wildcardSelectRegex.MatchString(stripStringLiterals(fn.Definition)) {
+			return true
+		}
 		for col := range cols {
-			if containsIdentifier(fn.Definition, col) || (strings.HasPrefix(fn.ReturnType, "TABLE(") && containsIdentifier(fn.ReturnType, col)) {
+			if containsIdentifier(fn.Definition, col) || (returnsTable && containsIdentifier(fn.ReturnType, col)) {
 				return true
 			}
 		}

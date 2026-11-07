@@ -1,7 +1,7 @@
-Plan: 19 to add, 1 to modify.
+Plan: 21 to add, 1 to modify.
 
 Summary by type:
-  functions: 11 to add
+  functions: 13 to add
   aggregates: 4 to add
   tables: 1 to modify
   views: 4 to add
@@ -11,7 +11,9 @@ Functions:
   + add_summary
   + add_summary_total
   + add_total
+  + child_open_requests
   + entry_rows
+  + entry_triples
   + has_open_requests
   + high_priority
   + latest_request
@@ -64,12 +66,28 @@ AS $$
     SELECT state + x + (SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL);
 $$;
 
+CREATE OR REPLACE FUNCTION child_open_requests()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT count(*) FROM entry_child WHERE entry_child.request_id IS NOT NULL;
+$$;
+
 CREATE OR REPLACE FUNCTION entry_rows()
 RETURNS TABLE(id integer, request_id integer, "Priority" integer)
 LANGUAGE sql
 STABLE
 AS $$
     SELECT * FROM entry;
+$$;
+
+CREATE OR REPLACE FUNCTION entry_triples()
+RETURNS TABLE(a integer, b integer, c integer)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT e.* FROM entry e;
 $$;
 
 CREATE OR REPLACE FUNCTION high_priority()

@@ -847,8 +847,10 @@ func viewDependsOnTable(view *ir.View, tableSchema, tableName string) bool {
 // to a set of column names being added by ALTER TABLE on that table. Column
 // names keep their spelling: containsIdentifier matches a name that needs
 // quoting only in its exact quoted form, so "RequestId" must not become
-// requestid.
-func buildModifiedTableAddedColumnLookup(modifiedTables []*tableDiff) map[string]map[string]struct{} {
+// requestid. A column added to a parent reaches its inheritance children and
+// partitions through the parent's ALTER TABLE, so each descendant in tables
+// is listed with the parent's columns as well.
+func buildModifiedTableAddedColumnLookup(modifiedTables []*tableDiff, tables map[string]*ir.Table) map[string]map[string]struct{} {
 	lookup := make(map[string]map[string]struct{})
 	for _, td := range modifiedTables {
 		if len(td.AddedColumns) == 0 {
@@ -860,6 +862,38 @@ func buildModifiedTableAddedColumnLookup(modifiedTables []*tableDiff) map[string
 			cols[c.Name] = struct{}{}
 		}
 		lookup[key] = cols
+	}
+	// Descendants may be several levels deep, so repeat until nothing changes.
+	for changed := len(lookup) > 0; changed; {
+		changed = false
+		for _, table := range tables {
+			parents := table.Inherits
+			if table.PartitionOf != "" {
+				parents = append(parents, ir.TableRef{Schema: table.PartitionOfSchema, Name: table.PartitionOf})
+			}
+			for _, parent := range parents {
+				schema := parent.Schema
+				if schema == "" {
+					schema = table.Schema
+				}
+				parentCols, ok := lookup[strings.ToLower(schema+"."+parent.Name)]
+				if !ok {
+					continue
+				}
+				key := strings.ToLower(table.Schema + "." + table.Name)
+				cols := lookup[key]
+				if cols == nil {
+					cols = make(map[string]struct{}, len(parentCols))
+					lookup[key] = cols
+				}
+				for col := range parentCols {
+					if _, seen := cols[col]; !seen {
+						cols[col] = struct{}{}
+						changed = true
+					}
+				}
+			}
+		}
 	}
 	return lookup
 }

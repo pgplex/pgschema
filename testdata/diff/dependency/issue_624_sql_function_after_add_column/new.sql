@@ -3,6 +3,7 @@ CREATE TABLE entry (
     request_id int,
     "Priority" int
 );
+CREATE TABLE entry_child () INHERITS (entry);
 
 -- Issue #624: a SQL-language body is validated at creation, so this function
 -- must be created after ALTER TABLE entry ADD COLUMN request_id.
@@ -28,9 +29,19 @@ CREATE FUNCTION high_priority() RETURNS bigint LANGUAGE sql STABLE AS $$
     SELECT count(*) FROM entry WHERE entry."Priority" > 1;
 $$;
 
--- A SELECT * body is checked against the RETURNS TABLE list at creation.
+-- A SELECT * body is checked against the RETURNS TABLE list at creation,
+-- positionally, whatever the output columns are called.
 CREATE FUNCTION entry_rows() RETURNS TABLE(id int, request_id int, "Priority" int) LANGUAGE sql STABLE AS $$
     SELECT * FROM entry;
+$$;
+CREATE FUNCTION entry_triples() RETURNS TABLE(a int, b int, c int) LANGUAGE sql STABLE AS $$
+    SELECT e.* FROM entry e;
+$$;
+
+-- The column reaches the inheritance child through the parent's ALTER TABLE,
+-- so a reader of the child waits for it too.
+CREATE FUNCTION child_open_requests() RETURNS bigint LANGUAGE sql STABLE AS $$
+    SELECT count(*) FROM entry_child WHERE entry_child.request_id IS NOT NULL;
 $$;
 
 -- Aggregate chain: add_open reads the column, sum_open is built on it,

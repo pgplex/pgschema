@@ -3,7 +3,7 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "8bcb3308cfce5b98e6a142ca80fceb50a42d795c748a30d38c12ab945c3cd0d4"
+    "hash": "dd92aaae1adb34083222981b72777f4427583f0fde3aa88aedd626b135d2000d"
   },
   "groups": [
     {
@@ -33,10 +33,22 @@
           "path": "public.add_open"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION child_open_requests()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry_child WHERE entry_child.request_id IS NOT NULL;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.child_open_requests"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION entry_rows()\nRETURNS TABLE(id integer, request_id integer, \"Priority\" integer)\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT * FROM entry;\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.entry_rows"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION entry_triples()\nRETURNS TABLE(a integer, b integer, c integer)\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT e.* FROM entry e;\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.entry_triples"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION high_priority()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\n    SELECT count(*) FROM entry WHERE entry.\"Priority\" > 1;\n$$;",

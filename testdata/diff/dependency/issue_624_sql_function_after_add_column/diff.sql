@@ -19,12 +19,26 @@ STABLE
 AS $$
     SELECT state + x + (SELECT count(*) FROM entry WHERE entry.request_id IS NOT NULL);
 $$;
+CREATE OR REPLACE FUNCTION child_open_requests()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT count(*) FROM entry_child WHERE entry_child.request_id IS NOT NULL;
+$$;
 CREATE OR REPLACE FUNCTION entry_rows()
 RETURNS TABLE(id integer, request_id integer, "Priority" integer)
 LANGUAGE sql
 STABLE
 AS $$
     SELECT * FROM entry;
+$$;
+CREATE OR REPLACE FUNCTION entry_triples()
+RETURNS TABLE(a integer, b integer, c integer)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT e.* FROM entry e;
 $$;
 CREATE OR REPLACE FUNCTION high_priority()
 RETURNS bigint
