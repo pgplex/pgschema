@@ -3,10 +3,17 @@ CREATE TYPE priority AS ENUM (
     'high'
 );
 
+CREATE TABLE region (
+    code text PRIMARY KEY
+);
+
+CREATE DOMAIN region_row AS region;
+
 CREATE TYPE example_input AS (
     id bigint,
     label text,
-    prio priority
+    prio priority,
+    region region_row
 );
 
 CREATE TYPE address AS (

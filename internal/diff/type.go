@@ -68,31 +68,53 @@ func generateModifyEnumsSQL(diffs []*typeDiff, targetSchema string, collector *d
 	}
 }
 
-// generateModifyCompositesSQL generates the ALTER TYPE ... ATTRIBUTE statements
-// for a composite type whose attributes changed (issue #625). It runs in the
-// create phase right after the first batch of new types, so an attribute of a
-// new enum, composite or simple domain finds its type, and the tables, views
-// and functions created later in that phase can already use the new
-// attributes. PostgreSQL refuses ALTER ATTRIBUTE ... TYPE while a table column
-// uses the composite, and DROP ATTRIBUTE while a view reads the attribute; as
-// for a replaced range, its error is the honest outcome, and the user changes
-// that column or view in the same file to proceed.
-func generateModifyCompositesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
+// generateDropCompositeAttributesSQL generates the ALTER TYPE ... DROP
+// ATTRIBUTE statements of the modified composite types (issue #625). It runs
+// in the drop phase, after the dropped views (one that reads the attribute
+// blocks the drop) and before the dropped types (the attribute may be the
+// last use of one). PostgreSQL refuses the drop while a kept view still reads
+// the attribute; as for a replaced range, its error is the honest outcome,
+// and the user changes that view in the same file to proceed.
+func generateDropCompositeAttributesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector) {
 	for _, diff := range diffs {
 		if diff.Old.Kind != ir.TypeKindComposite || diff.New.Kind != ir.TypeKindComposite {
 			continue
 		}
-		for _, stmt := range generateAlterCompositeStatements(diff.Old, diff.New, targetSchema, collector.qualifySchema) {
-			context := &diffContext{
-				Type:                DiffTypeType,
-				Operation:           DiffOperationAlter,
-				Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
-				Source:              diff,
-				CanRunInTransaction: true,
-			}
-			collector.collect(context, stmt)
+		for _, stmt := range generateDropCompositeAttributeStatements(diff.Old, diff.New, targetSchema, collector.qualifySchema) {
+			collectCompositeAlter(diff, stmt, collector)
 		}
 	}
+}
+
+// generateModifyCompositesSQL generates the ALTER TYPE ... ADD ATTRIBUTE and
+// ALTER ATTRIBUTE ... TYPE statements of the modified composite types for the
+// attributes include accepts (issue #625). The create phase calls it once per
+// batch of new types: right after the first batch for every attribute whose
+// type exists by then, so the tables, views and functions created later in
+// the phase can use the attribute, and again after each deferred batch for
+// the attributes typed on a domain it creates. PostgreSQL refuses ALTER
+// ATTRIBUTE ... TYPE while a table column uses the composite; as for a
+// replaced range, its error is the honest outcome, and the user changes that
+// column in the same file to proceed.
+func generateModifyCompositesSQL(diffs []*typeDiff, targetSchema string, collector *diffCollector, include func(*ir.Type, *ir.TypeColumn) bool) {
+	for _, diff := range diffs {
+		if diff.Old.Kind != ir.TypeKindComposite || diff.New.Kind != ir.TypeKindComposite {
+			continue
+		}
+		for _, stmt := range generateAlterCompositeStatements(diff.Old, diff.New, targetSchema, collector.qualifySchema, include) {
+			collectCompositeAlter(diff, stmt, collector)
+		}
+	}
+}
+
+func collectCompositeAlter(diff *typeDiff, stmt string, collector *diffCollector) {
+	collector.collect(&diffContext{
+		Type:                DiffTypeType,
+		Operation:           DiffOperationAlter,
+		Path:                fmt.Sprintf("%s.%s", diff.New.Schema, diff.New.Name),
+		Source:              diff,
+		CanRunInTransaction: true,
+	}, stmt)
 }
 
 // generateModifyDomainsSQL generates ALTER DOMAIN statements
@@ -193,33 +215,45 @@ func generateAlterTypeEnumStatements(oldType, newType *ir.Type, targetSchema str
 	return statements
 }
 
-// generateAlterCompositeStatements generates the ALTER TYPE statements that
-// turn oldType's attributes into newType's. Attributes are matched by name,
-// like table columns: a removed one is dropped, a changed data type is
-// altered, and a new one is added in the order the new definition lists it.
-// ADD ATTRIBUTE always appends, so, as with table columns, the position of an
-// attribute inserted in the middle of the definition is not reproduced.
-func generateAlterCompositeStatements(oldType, newType *ir.Type, targetSchema string, qualifySchema bool) []string {
+// generateDropCompositeAttributeStatements generates a DROP ATTRIBUTE for
+// each attribute of oldType that newType no longer has. Attributes are
+// matched by name, like table columns.
+func generateDropCompositeAttributeStatements(oldType, newType *ir.Type, targetSchema string, qualifySchema bool) []string {
 	var statements []string
 	typeName := qualifyEntityNameMode(newType.Schema, newType.Name, targetSchema, qualifySchema)
 
-	newAttrs := make(map[string]*ir.TypeColumn, len(newType.Columns))
+	kept := make(map[string]bool, len(newType.Columns))
 	for _, attr := range newType.Columns {
-		newAttrs[attr.Name] = attr
+		kept[attr.Name] = true
 	}
+	for _, attr := range oldType.Columns {
+		if !kept[attr.Name] {
+			statements = append(statements, fmt.Sprintf("ALTER TYPE %s DROP ATTRIBUTE %s;", typeName, ir.QuoteIdentifier(attr.Name)))
+		}
+	}
+	return statements
+}
+
+// generateAlterCompositeStatements generates, for the attributes of newType
+// that include accepts (every one when include is nil), an ADD ATTRIBUTE for
+// a new one and an ALTER ATTRIBUTE ... TYPE for one whose data type changed,
+// in the order the new definition lists them. Attributes are matched by
+// name, like table columns; ADD ATTRIBUTE always appends, so, as with table
+// columns, the position of an attribute inserted in the middle of the
+// definition is not reproduced.
+func generateAlterCompositeStatements(oldType, newType *ir.Type, targetSchema string, qualifySchema bool, include func(*ir.Type, *ir.TypeColumn) bool) []string {
+	var statements []string
+	typeName := qualifyEntityNameMode(newType.Schema, newType.Name, targetSchema, qualifySchema)
+
 	oldAttrs := make(map[string]*ir.TypeColumn, len(oldType.Columns))
 	for _, attr := range oldType.Columns {
 		oldAttrs[attr.Name] = attr
 	}
 
-	// Drops first, so a dropped attribute's name can be reused by a new one
-	for _, attr := range oldType.Columns {
-		if _, kept := newAttrs[attr.Name]; !kept {
-			statements = append(statements, fmt.Sprintf("ALTER TYPE %s DROP ATTRIBUTE %s;", typeName, ir.QuoteIdentifier(attr.Name)))
-		}
-	}
-
 	for _, attr := range newType.Columns {
+		if include != nil && !include(newType, attr) {
+			continue
+		}
 		dataType := stripSchemaPrefixMode(attr.DataType, targetSchema, qualifySchema)
 		oldAttr, exists := oldAttrs[attr.Name]
 		switch {

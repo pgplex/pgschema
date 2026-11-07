@@ -2542,10 +2542,16 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Create types WITHOUT function or table dependencies (enum, composite, and simple domains)
 	generateCreateTypesSQL(typesWithoutDeps, replaced, targetSchema, collector)
 
-	// Alter the attributes of modified composite types now that the types a
-	// new attribute may use exist, and before the tables, views and functions
-	// created below can refer to the new attributes (issue #625).
-	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector)
+	// Add and alter the attributes of modified composite types now that the
+	// types they may use exist, and before the tables, views and functions
+	// created below can refer to them (issue #625). An attribute typed on a
+	// deferred domain waits for that domain's batch below.
+	attributeUsesDeferredType := func(typeObj *ir.Type, attr *ir.TypeColumn, lookup map[string]struct{}) bool {
+		return len(lookup) > 0 && typeMatchesLookup(extractBaseTypeName(attr.DataType), typeObj.Schema, lookup)
+	}
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return !attributeUsesDeferredType(typeObj, attr, deferredDomainLookup)
+	})
 
 	// Create sequences
 	generateCreateSequencesSQL(d.addedSequences, d.deferredSequenceOwners, targetSchema, collector)
@@ -2756,6 +2762,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// column types.
 	generateCreateTypesSQL(typesWithFunctionDepsOnly, replaced, targetSchema, collector)
 
+	// Composite attributes typed on a domain of that batch (issue #625)
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+
 	// Create procedures (procedures may depend on tables and domains)
 	// A procedure whose body may depend on a postponed key (issue #653) waits
 	// for the batch in which that hierarchy completes, like a function.
@@ -2774,6 +2785,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// Emitted after ALL other tables so the row type exists, even if the domain also
 	// depends on a function (which was already created above).
 	generateCreateTypesSQL(domainsWithTableDeps, replaced, targetSchema, collector)
+
+	// Composite attributes typed on a domain of that batch (issue #625)
+	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
@@ -3218,6 +3234,10 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 
 	// Drop sequences
 	generateDropSequencesSQL(d.droppedSequences, targetSchema, collector)
+
+	// Drop the attributes removed from composite types, before a dropped type
+	// one of them was the last use of (issue #625)
+	generateDropCompositeAttributesSQL(d.modifiedTypes, targetSchema, collector)
 
 	// Drop types, interleaved with the held-back functions in dependency
 	// order: a range before its subtype_diff function, that function before

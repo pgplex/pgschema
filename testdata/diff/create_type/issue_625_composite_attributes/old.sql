@@ -1,3 +1,7 @@
+CREATE TYPE legacy_flag AS ENUM (
+    'x'
+);
+
 CREATE TYPE example_input AS (
     id integer
 );
@@ -5,7 +9,8 @@ CREATE TYPE example_input AS (
 CREATE TYPE address AS (
     street text,
     zip integer,
-    country text
+    country text,
+    flag legacy_flag
 );
 
 CREATE TABLE customer (

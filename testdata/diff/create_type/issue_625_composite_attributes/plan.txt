@@ -1,25 +1,36 @@
-Plan: 1 to add, 5 to modify.
+Plan: 3 to add, 7 to modify, 1 to drop.
 
 Summary by type:
-  types: 1 to add, 5 to modify
+  types: 1 to add, 7 to modify, 1 to drop
+  tables: 1 to add
 
 Types:
   ~ address
   ~ address
+  ~ address
   ~ example_input
   ~ example_input
   ~ example_input
+  ~ example_input
+  - legacy_flag
   + priority
+
+Tables:
+  + region
 
 DDL to be executed:
 --------------------------------------------------
+
+ALTER TYPE address DROP ATTRIBUTE country;
+
+ALTER TYPE address DROP ATTRIBUTE flag;
+
+DROP TYPE IF EXISTS legacy_flag RESTRICT;
 
 CREATE TYPE priority AS ENUM (
     'low',
     'high'
 );
-
-ALTER TYPE address DROP ATTRIBUTE country;
 
 ALTER TYPE address ADD ATTRIBUTE city text;
 
@@ -28,3 +39,12 @@ ALTER TYPE example_input ALTER ATTRIBUTE id TYPE bigint;
 ALTER TYPE example_input ADD ATTRIBUTE label text;
 
 ALTER TYPE example_input ADD ATTRIBUTE prio priority;
+
+CREATE TABLE IF NOT EXISTS region (
+    code text,
+    CONSTRAINT region_pkey PRIMARY KEY (code)
+);
+
+CREATE DOMAIN region_row AS region;
+
+ALTER TYPE example_input ADD ATTRIBUTE region region_row;

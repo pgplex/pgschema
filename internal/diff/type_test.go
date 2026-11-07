@@ -290,11 +290,17 @@ func TestGenerateAlterCompositeStatements(t *testing.T) {
 			{Name: "region", DataType: "public.region_kind"},
 		},
 	}
-	got := generateAlterCompositeStatements(oldType, newType, "public", false)
+	got := generateDropCompositeAttributeStatements(oldType, newType, "public", false)
+	got = append(got, generateAlterCompositeStatements(oldType, newType, "public", false, nil)...)
+	// A filter picks the attributes of a batch
+	got = append(got, generateAlterCompositeStatements(oldType, newType, "public", false, func(_ *ir.Type, attr *ir.TypeColumn) bool {
+		return attr.Name == "region"
+	})...)
 	want := []string{
 		"ALTER TYPE address DROP ATTRIBUTE country;",
 		"ALTER TYPE address ALTER ATTRIBUTE zip TYPE bigint;",
 		"ALTER TYPE address ADD ATTRIBUTE city text;",
+		"ALTER TYPE address ADD ATTRIBUTE region region_kind;",
 		"ALTER TYPE address ADD ATTRIBUTE region region_kind;",
 	}
 	if len(got) != len(want) {
