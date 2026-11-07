@@ -53,12 +53,12 @@ CREATE TABLE IF NOT EXISTS region (
 );
 
 CREATE OR REPLACE FUNCTION is_positive(
-    n integer
+    quantity integer
 )
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
-AS $$ SELECT n > 0
+AS $$ SELECT quantity > 0 AND NULL::example_input IS NULL
 $$;
 
 CREATE DOMAIN positive_int AS integer

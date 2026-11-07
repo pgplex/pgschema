@@ -2759,7 +2759,8 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 			afterTableBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
 				return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
 			})
-			functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackDeferredAttributeReaders(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables, afterFunctionBatch, afterTableBatch)
+			deferredDomains := append(append([]*ir.Type{}, typesWithFunctionDepsOnly...), domainsWithTableDeps...)
+			functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackDeferredAttributeReaders(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables, afterFunctionBatch, afterTableBatch, d.addedTables, deferredDomains)
 		}
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
@@ -3882,21 +3883,12 @@ func splitFunctionsCallingAggregates(functions []*ir.Function, aggregates []*ir.
 // holdBackCallersAcrossBatches applies holdBackCallers to three consecutive function
 // batches until none changes. A single round is not enough: a function that joins a
 // later batch in one step can strand a caller that an earlier step already examined.
-// holdBackKeyDependentFunctions moves a function that references a table of a
-// hierarchy with postponed keys (issue #653) to the function batch after the
-// table batch in which that hierarchy completes. Whether the body depends on
-// the key (ON CONFLICT ON CONSTRAINT, GROUP BY functional dependency) is not
-// known, so every such function moves unless a table default or CHECK, or a
-// domain created earlier, needs it: then the parent -> function -> partition
-// chain keeps its order. batches maps table keys to their creation batch;
-// first, second and third are the function batches created after table
-// batches 0, 1 and 2.
-func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table, domains []*ir.Type, first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
-	if plan == nil || len(plan.roots) == 0 {
-		return first, second, third
-	}
-	completion, lookups := hierarchyCompletion(plan, batches, addedTables)
-	pool := append(append(append([]*ir.Function{}, first...), second...), third...)
+// functionsNeededEarly returns the functions of pool that a new table's
+// default or CHECK, or a deferred domain, needs before it is created, along
+// with the functions those call (a SQL function is validated against its
+// callees at creation). A hold-back that would move one of them to a later
+// batch must leave it where it is.
+func functionsNeededEarly(pool []*ir.Function, addedTables []*ir.Table, domains []*ir.Type) map[*ir.Function]bool {
 	needed := make(map[*ir.Function]bool)
 	for _, fn := range pool {
 		lookup := buildFunctionLookup([]*ir.Function{fn})
@@ -3912,8 +3904,6 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 			}
 		}
 	}
-	// A SQL function needed earlier is validated against the functions it
-	// calls when it is created, so those are needed earlier as well.
 	for changed := true; changed; {
 		changed = false
 		for fn := range needed {
@@ -3928,6 +3918,25 @@ func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map
 			}
 		}
 	}
+	return needed
+}
+
+// holdBackKeyDependentFunctions moves a function that references a table of a
+// hierarchy with postponed keys (issue #653) to the function batch after the
+// table batch in which that hierarchy completes. Whether the body depends on
+// the key (ON CONFLICT ON CONSTRAINT, GROUP BY functional dependency) is not
+// known, so every such function moves unless a table default or CHECK, or a
+// domain created earlier, needs it: then the parent -> function -> partition
+// chain keeps its order. batches maps table keys to their creation batch;
+// first, second and third are the function batches created after table
+// batches 0, 1 and 2.
+func holdBackKeyDependentFunctions(plan *partitionIndexCreationPlan, batches map[string]int, addedTables []*ir.Table, domains []*ir.Type, first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	if plan == nil || len(plan.roots) == 0 {
+		return first, second, third
+	}
+	completion, lookups := hierarchyCompletion(plan, batches, addedTables)
+	pool := append(append(append([]*ir.Function{}, first...), second...), third...)
+	needed := functionsNeededEarly(pool, addedTables, domains)
 	var result [3][]*ir.Function
 	for batch, fns := range [][]*ir.Function{first, second, third} {
 		for _, fn := range fns {
@@ -5072,14 +5081,20 @@ func deferredCompositeAttributes(diffs []*typeDiff, include func(*ir.Type, *ir.T
 // of afterFunctionBatch from the first batch to the second, and one that
 // reads an attribute of afterTableBatch to the third: the batches created
 // after the composite alterations that follow the function-dependent and
-// table-dependent domains (issue #625).
-func holdBackDeferredAttributeReaders(first, second, third []*ir.Function, afterFunctionBatch, afterTableBatch map[*ir.Type][]string) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+// table-dependent domains (issue #625). A function that a new table or one
+// of the deferred domains needs stays: the attribute match is a name match
+// on the body, so it may be a parameter of the same name rather than the
+// attribute, and moving a prerequisite would break what needs it.
+func holdBackDeferredAttributeReaders(first, second, third []*ir.Function, afterFunctionBatch, afterTableBatch map[*ir.Type][]string, addedTables []*ir.Table, domains []*ir.Type) ([]*ir.Function, []*ir.Function, []*ir.Function) {
 	if len(afterFunctionBatch) == 0 && len(afterTableBatch) == 0 {
 		return first, second, third
 	}
+	needed := functionsNeededEarly(append(append(append([]*ir.Function{}, first...), second...), third...), addedTables, domains)
 	var keepFirst, keepSecond []*ir.Function
 	for _, fn := range first {
 		switch {
+		case needed[fn]:
+			keepFirst = append(keepFirst, fn)
 		case functionReadsCompositeAttribute(fn, afterTableBatch):
 			third = append(third, fn)
 		case functionReadsCompositeAttribute(fn, afterFunctionBatch):
@@ -5089,7 +5104,7 @@ func holdBackDeferredAttributeReaders(first, second, third []*ir.Function, after
 		}
 	}
 	for _, fn := range second {
-		if functionReadsCompositeAttribute(fn, afterTableBatch) {
+		if !needed[fn] && functionReadsCompositeAttribute(fn, afterTableBatch) {
 			third = append(third, fn)
 		} else {
 			keepSecond = append(keepSecond, fn)

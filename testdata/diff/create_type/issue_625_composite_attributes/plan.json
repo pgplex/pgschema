@@ -63,7 +63,7 @@
           "path": "public.region"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION is_positive(\n    n integer\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT n > 0\n$$;",
+          "sql": "CREATE OR REPLACE FUNCTION is_positive(\n    quantity integer\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT quantity > 0 AND NULL::example_input IS NULL\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.is_positive"

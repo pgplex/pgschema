@@ -9,19 +9,26 @@ CREATE TABLE region (
 
 CREATE DOMAIN region_row AS region;
 
-CREATE FUNCTION is_positive(n integer) RETURNS boolean
-    LANGUAGE sql IMMUTABLE
-    AS $$ SELECT n > 0 $$;
-
-CREATE DOMAIN positive_int AS integer CHECK (is_positive(VALUE));
-
+-- The composite, the function and the domain form a cycle (the function's
+-- body names the composite, the domain's CHECK calls the function, and an
+-- attribute of the composite is typed on the domain), so the attribute can
+-- only be added once the domain exists.
 CREATE TYPE example_input AS (
     id bigint,
     label text,
-    prio priority,
-    region region_row,
-    quantity positive_int
+    prio priority
 );
+
+-- The parameter shares the name of the attribute added below; the domain
+-- needs the function, so it must not be held back for that attribute.
+CREATE FUNCTION is_positive(quantity integer) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT quantity > 0 AND NULL::example_input IS NULL $$;
+
+CREATE DOMAIN positive_int AS integer CHECK (is_positive(VALUE));
+
+ALTER TYPE example_input ADD ATTRIBUTE region region_row;
+ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;
 
 CREATE FUNCTION get_quantity(p example_input) RETURNS integer
     LANGUAGE sql
