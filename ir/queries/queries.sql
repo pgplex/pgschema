@@ -773,6 +773,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -1728,6 +1730,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -1972,9 +1976,12 @@ SELECT
     vd.view_comment,
     vd.is_materialized,
     vd.reloptions,
-    -- Column names in attnum order, folded in here rather than fetched with
-    -- one pg_attribute query per view (issue #644).
-    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names
+    -- Column names and types in attnum order, folded in here rather than
+    -- fetched with one pg_attribute query per view (issue #644). The types
+    -- tell a column type change apart from a same-named column, which CREATE
+    -- OR REPLACE VIEW rejects (issue #687).
+    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names,
+    COALESCE(cols.column_types, '{}'::text[])::text[] AS column_types
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
@@ -1982,7 +1989,9 @@ CROSS JOIN LATERAL (
         pg_get_viewdef(vd.view_oid, true) as view_def
 ) sp
 LEFT JOIN LATERAL (
-    SELECT array_agg(a.attname::text ORDER BY a.attnum) AS column_names
+    SELECT
+        array_agg(a.attname::text ORDER BY a.attnum) AS column_names,
+        array_agg(format_type(a.atttypid, a.atttypmod) ORDER BY a.attnum) AS column_types
     FROM pg_attribute a
     WHERE a.attrelid = vd.view_oid
       AND a.attnum > 0

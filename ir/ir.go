@@ -213,6 +213,7 @@ type View struct {
 	Name         string              `json:"name"`
 	Definition   string              `json:"definition"`
 	Columns      []string            `json:"columns,omitempty"` // Ordered list of output column names
+	ColumnTypes  []string            `json:"-"`                 // Formatted type per column, parallel to Columns; derived from Definition, so kept out of JSON and the fingerprint
 	Options      []string            `json:"options,omitempty"` // View options (e.g., "security_invoker=true", "security_barrier=true")
 	Comment      string              `json:"comment,omitempty"`
 	Materialized bool                `json:"materialized,omitempty"`
@@ -228,6 +229,7 @@ type Function struct {
 	ReturnType        string       `json:"return_type"`
 	Language          string       `json:"language"`
 	Parameters        []*Parameter `json:"parameters,omitempty"`
+	IdentityArguments string       `json:"-"` // pg_get_function_identity_arguments form, qualified as privileges name functions; derived from Parameters, so kept out of JSON
 	Comment           string       `json:"comment,omitempty"`
 	Volatility        string       `json:"volatility,omitempty"`          // IMMUTABLE, STABLE, VOLATILE
 	IsStrict          bool         `json:"is_strict,omitempty"`           // STRICT or null behavior

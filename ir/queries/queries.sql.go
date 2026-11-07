@@ -2020,6 +2020,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -2059,18 +2061,19 @@ ORDER BY r.routine_schema, r.routine_name
 `
 
 type GetFunctionsRow struct {
-	RoutineSchema     interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName       interface{}    `db:"routine_name" json:"routine_name"`
-	RoutineDefinition string         `db:"routine_definition" json:"routine_definition"`
-	RoutineType       interface{}    `db:"routine_type" json:"routine_type"`
-	DataType          sql.NullString `db:"data_type" json:"data_type"`
-	ExternalLanguage  interface{}    `db:"external_language" json:"external_language"`
-	FunctionComment   sql.NullString `db:"function_comment" json:"function_comment"`
-	FunctionArguments sql.NullString `db:"function_arguments" json:"function_arguments"`
-	FunctionSignature sql.NullString `db:"function_signature" json:"function_signature"`
-	Volatility        sql.NullString `db:"volatility" json:"volatility"`
-	IsStrict          bool           `db:"is_strict" json:"is_strict"`
-	IsSecurityDefiner bool           `db:"is_security_definer" json:"is_security_definer"`
+	RoutineSchema             interface{}    `db:"routine_schema" json:"routine_schema"`
+	RoutineName               interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineDefinition         string         `db:"routine_definition" json:"routine_definition"`
+	RoutineType               interface{}    `db:"routine_type" json:"routine_type"`
+	DataType                  sql.NullString `db:"data_type" json:"data_type"`
+	ExternalLanguage          interface{}    `db:"external_language" json:"external_language"`
+	FunctionComment           sql.NullString `db:"function_comment" json:"function_comment"`
+	FunctionArguments         sql.NullString `db:"function_arguments" json:"function_arguments"`
+	FunctionSignature         sql.NullString `db:"function_signature" json:"function_signature"`
+	FunctionIdentityArguments sql.NullString `db:"function_identity_arguments" json:"function_identity_arguments"`
+	Volatility                sql.NullString `db:"volatility" json:"volatility"`
+	IsStrict                  bool           `db:"is_strict" json:"is_strict"`
+	IsSecurityDefiner         bool           `db:"is_security_definer" json:"is_security_definer"`
 }
 
 // GetFunctions retrieves all user-defined functions (excluding extension members)
@@ -2093,6 +2096,7 @@ func (q *Queries) GetFunctions(ctx context.Context) ([]GetFunctionsRow, error) {
 			&i.FunctionComment,
 			&i.FunctionArguments,
 			&i.FunctionSignature,
+			&i.FunctionIdentityArguments,
 			&i.Volatility,
 			&i.IsStrict,
 			&i.IsSecurityDefiner,
@@ -2126,6 +2130,8 @@ SELECT
     COALESCE(desc_func.description, '') AS function_comment,
     oidvectortypes(p.proargtypes) AS function_arguments,
     pg_get_function_arguments(p.oid) AS function_signature,
+    -- Identity form of the arguments, as the privilege queries name a function
+    pg_get_function_identity_arguments(p.oid) AS function_identity_arguments,
     CASE p.provolatile
         WHEN 'i' THEN 'IMMUTABLE'
         WHEN 's' THEN 'STABLE'
@@ -2165,21 +2171,22 @@ ORDER BY r.routine_schema, r.routine_name
 `
 
 type GetFunctionsForSchemaRow struct {
-	RoutineSchema     interface{}    `db:"routine_schema" json:"routine_schema"`
-	RoutineName       interface{}    `db:"routine_name" json:"routine_name"`
-	RoutineDefinition sql.NullString `db:"routine_definition" json:"routine_definition"`
-	RoutineType       interface{}    `db:"routine_type" json:"routine_type"`
-	DataType          sql.NullString `db:"data_type" json:"data_type"`
-	ExternalLanguage  interface{}    `db:"external_language" json:"external_language"`
-	FunctionComment   sql.NullString `db:"function_comment" json:"function_comment"`
-	FunctionArguments sql.NullString `db:"function_arguments" json:"function_arguments"`
-	FunctionSignature sql.NullString `db:"function_signature" json:"function_signature"`
-	Volatility        sql.NullString `db:"volatility" json:"volatility"`
-	IsStrict          bool           `db:"is_strict" json:"is_strict"`
-	IsSecurityDefiner bool           `db:"is_security_definer" json:"is_security_definer"`
-	IsLeakproof       bool           `db:"is_leakproof" json:"is_leakproof"`
-	ParallelMode      interface{}    `db:"parallel_mode" json:"parallel_mode"`
-	SetConfig         []string       `db:"set_config" json:"set_config"`
+	RoutineSchema             interface{}    `db:"routine_schema" json:"routine_schema"`
+	RoutineName               interface{}    `db:"routine_name" json:"routine_name"`
+	RoutineDefinition         sql.NullString `db:"routine_definition" json:"routine_definition"`
+	RoutineType               interface{}    `db:"routine_type" json:"routine_type"`
+	DataType                  sql.NullString `db:"data_type" json:"data_type"`
+	ExternalLanguage          interface{}    `db:"external_language" json:"external_language"`
+	FunctionComment           sql.NullString `db:"function_comment" json:"function_comment"`
+	FunctionArguments         sql.NullString `db:"function_arguments" json:"function_arguments"`
+	FunctionSignature         sql.NullString `db:"function_signature" json:"function_signature"`
+	FunctionIdentityArguments sql.NullString `db:"function_identity_arguments" json:"function_identity_arguments"`
+	Volatility                sql.NullString `db:"volatility" json:"volatility"`
+	IsStrict                  bool           `db:"is_strict" json:"is_strict"`
+	IsSecurityDefiner         bool           `db:"is_security_definer" json:"is_security_definer"`
+	IsLeakproof               bool           `db:"is_leakproof" json:"is_leakproof"`
+	ParallelMode              interface{}    `db:"parallel_mode" json:"parallel_mode"`
+	SetConfig                 []string       `db:"set_config" json:"set_config"`
 }
 
 // GetFunctionsForSchema retrieves all user-defined functions for a specific schema
@@ -2202,6 +2209,7 @@ func (q *Queries) GetFunctionsForSchema(ctx context.Context, dollar_1 sql.NullSt
 			&i.FunctionComment,
 			&i.FunctionArguments,
 			&i.FunctionSignature,
+			&i.FunctionIdentityArguments,
 			&i.Volatility,
 			&i.IsStrict,
 			&i.IsSecurityDefiner,
@@ -4899,9 +4907,12 @@ SELECT
     vd.view_comment,
     vd.is_materialized,
     vd.reloptions,
-    -- Column names in attnum order, folded in here rather than fetched with
-    -- one pg_attribute query per view (issue #644).
-    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names
+    -- Column names and types in attnum order, folded in here rather than
+    -- fetched with one pg_attribute query per view (issue #644). The types
+    -- tell a column type change apart from a same-named column, which CREATE
+    -- OR REPLACE VIEW rejects (issue #687).
+    COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names,
+    COALESCE(cols.column_types, '{}'::text[])::text[] AS column_types
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
@@ -4909,7 +4920,9 @@ CROSS JOIN LATERAL (
         pg_get_viewdef(vd.view_oid, true) as view_def
 ) sp
 LEFT JOIN LATERAL (
-    SELECT array_agg(a.attname::text ORDER BY a.attnum) AS column_names
+    SELECT
+        array_agg(a.attname::text ORDER BY a.attnum) AS column_names,
+        array_agg(format_type(a.atttypid, a.atttypmod) ORDER BY a.attnum) AS column_types
     FROM pg_attribute a
     WHERE a.attrelid = vd.view_oid
       AND a.attnum > 0
@@ -4926,6 +4939,7 @@ type GetViewsForSchemaRow struct {
 	IsMaterialized sql.NullBool   `db:"is_materialized" json:"is_materialized"`
 	Reloptions     []string       `db:"reloptions" json:"reloptions"`
 	ColumnNames    []string       `db:"column_names" json:"column_names"`
+	ColumnTypes    []string       `db:"column_types" json:"column_types"`
 }
 
 // GetViewsForSchema retrieves all views and materialized views for a specific schema
@@ -4949,6 +4963,7 @@ func (q *Queries) GetViewsForSchema(ctx context.Context, dollar_1 sql.NullString
 			&i.IsMaterialized,
 			pq.Array(&i.Reloptions),
 			pq.Array(&i.ColumnNames),
+			pq.Array(&i.ColumnTypes),
 		); err != nil {
 			return nil, err
 		}

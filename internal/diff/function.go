@@ -171,6 +171,25 @@ func generateDropFunctionsSQL(functions []*ir.Function, targetSchema string, col
 	}
 }
 
+// hasSQLStandardBody reports whether a function definition is a SQL-standard
+// body (PG14+): "RETURN expression" or "BEGIN ATOMIC ... END", as
+// pg_get_function_sqlbody returns it. Unlike a quoted body, such a body is
+// parsed at creation and its references to relations and routines are
+// recorded in pg_depend.
+func hasSQLStandardBody(definition string) bool {
+	trimmed := strings.TrimSpace(definition)
+	return (len(trimmed) >= 7 && strings.EqualFold(trimmed[:7], "RETURN ")) ||
+		(len(trimmed) >= 12 && strings.EqualFold(trimmed[:12], "BEGIN ATOMIC"))
+}
+
+// functionPrivilegeObjectName names fn the way the privilege inspector does:
+// name(identity arguments), straight from the catalog rather than rendered
+// from the normalized parameters, whose type spellings differ (timestamptz vs
+// timestamp with time zone).
+func functionPrivilegeObjectName(fn *ir.Function) string {
+	return fn.Name + "(" + fn.IdentityArguments + ")"
+}
+
 // generateDropFunctionSQL generates a DROP FUNCTION IF EXISTS statement
 func generateDropFunctionSQL(function *ir.Function, targetSchema string) string {
 	functionName := qualifyEntityName(function.Schema, function.Name, targetSchema)
@@ -286,9 +305,7 @@ func generateFunctionSQL(function *ir.Function, targetSchema string, qualifySche
 		// - "BEGIN ATOMIC ... END" for multi-statement SQL-standard bodies
 		// These should not be wrapped with AS $$ ... $$
 		trimmedDef := strings.TrimSpace(function.Definition)
-		isSQLStandardBody := (len(trimmedDef) >= 7 && strings.EqualFold(trimmedDef[:7], "RETURN ")) ||
-			(len(trimmedDef) >= 12 && strings.EqualFold(trimmedDef[:12], "BEGIN ATOMIC"))
-		if isSQLStandardBody {
+		if hasSQLStandardBody(function.Definition) {
 			stmt.WriteString(fmt.Sprintf("\n%s;", trimmedDef))
 		} else {
 			// Traditional AS $$ ... $$ syntax

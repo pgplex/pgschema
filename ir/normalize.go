@@ -383,6 +383,13 @@ func normalizeView(view *View) {
 	// This uses the same logic as function/procedure body normalization.
 	view.Definition = StripSchemaPrefixFromBody(view.Definition, view.Schema)
 
+	// Likewise for the column types: format_type() qualifies a same-schema
+	// type whenever the schema is not on the search_path, and the types are
+	// compared to decide whether CREATE OR REPLACE VIEW can apply (#687).
+	for i, columnType := range view.ColumnTypes {
+		view.ColumnTypes[i] = StripSchemaPrefixFromBody(columnType, view.Schema)
+	}
+
 	// Normalize triggers on the view (e.g., INSTEAD OF triggers)
 	for _, trigger := range view.Triggers {
 		normalizeTrigger(trigger)
@@ -408,6 +415,12 @@ func normalizeFunction(function *Function) {
 	// pg_get_function_result may or may not qualify types in the current schema
 	// depending on search_path (e.g., "SETOF public.actor" vs "SETOF actor").
 	function.ReturnType = stripSchemaFromReturnType(function.ReturnType, function.Schema)
+	// Dependency keys spell their argument types as the catalog does
+	// (oidvectortypes); normalize them like the parameters so they match the
+	// schema.name(args) keys built from the normalized parameters.
+	for i, dep := range function.Dependencies {
+		function.Dependencies[i] = normalizeFunctionKeyArguments(dep)
+	}
 	// Normalize parameter types, modes, and default values
 	for _, param := range function.Parameters {
 		if param != nil {
@@ -727,6 +740,24 @@ func splitColumnNameAndType(colDef string) (name, typePart string) {
 }
 
 // normalizeFunctionReturnType normalizes function return types, especially TABLE types
+// normalizeFunctionKeyArguments normalizes the argument types inside a
+// schema.name(args) function key (see normalizeFunction).
+func normalizeFunctionKeyArguments(key string) string {
+	open := strings.Index(key, "(")
+	if open < 0 || !strings.HasSuffix(key, ")") {
+		return key
+	}
+	args := strings.TrimSpace(key[open+1 : len(key)-1])
+	if args == "" {
+		return key
+	}
+	types := splitParameterString(args)
+	for i, t := range types {
+		types[i] = normalizePostgreSQLType(strings.TrimSpace(t))
+	}
+	return key[:open+1] + strings.Join(types, ", ") + ")"
+}
+
 func normalizeFunctionReturnType(returnType string) string {
 	if returnType == "" {
 		return returnType
