@@ -1,0 +1,110 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "09c749beeb8a1e20601b878f1af935400b827e4a3990359f2c701b6d9ae1e07d"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TYPE address DROP ATTRIBUTE country;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.address"
+        },
+        {
+          "sql": "ALTER TYPE address DROP ATTRIBUTE flag;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.address"
+        },
+        {
+          "sql": "DROP TYPE IF EXISTS legacy_flag RESTRICT;",
+          "type": "type",
+          "operation": "drop",
+          "path": "public.legacy_flag"
+        },
+        {
+          "sql": "CREATE TYPE priority AS ENUM (\n    'low',\n    'high'\n);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.priority"
+        },
+        {
+          "sql": "ALTER TYPE address ADD ATTRIBUTE city text;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.address"
+        },
+        {
+          "sql": "ALTER TYPE example_input ALTER ATTRIBUTE id TYPE bigint;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE label text;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE prio priority;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS region (\n    code text,\n    CONSTRAINT region_pkey PRIMARY KEY (code)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.region"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION is_positive(\n    quantity integer\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT quantity > 0 AND NULL::example_input IS NULL\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.is_positive"
+        },
+        {
+          "sql": "CREATE DOMAIN positive_int AS integer\n  CONSTRAINT positive_int_check CHECK (is_positive(VALUE));",
+          "type": "domain",
+          "operation": "create",
+          "path": "public.positive_int"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE quantity positive_int;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION get_quantity(\n    p example_input\n)\nRETURNS integer\nLANGUAGE sql\nVOLATILE\nRETURN (p).quantity;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.get_quantity"
+        },
+        {
+          "sql": "CREATE DOMAIN region_row AS region;",
+          "type": "domain",
+          "operation": "create",
+          "path": "public.region_row"
+        },
+        {
+          "sql": "ALTER TYPE example_input ADD ATTRIBUTE region region_row;",
+          "type": "type",
+          "operation": "alter",
+          "path": "public.example_input"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION has_region(\n    p example_input\n)\nRETURNS boolean\nLANGUAGE sql\nVOLATILE\nRETURN ((p).region IS NOT NULL);",
+          "type": "function",
+          "operation": "create",
+          "path": "public.has_region"
+        }
+      ]
+    }
+  ]
+}
