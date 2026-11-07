@@ -6,11 +6,11 @@ DROP VIEW IF EXISTS item_count_report RESTRICT;
 
 DROP VIEW IF EXISTS item_id_max_view RESTRICT;
 
-DROP AGGREGATE IF EXISTS item_id_max(item_view);
-
 DROP AGGREGATE IF EXISTS item_id_min(item_view);
 
 DROP FUNCTION IF EXISTS count_items();
+
+DROP FUNCTION IF EXISTS count_items_direct();
 
 DROP FUNCTION IF EXISTS item_count_all();
 
@@ -22,11 +22,15 @@ DROP FUNCTION IF EXISTS item_count_stale_all();
 
 DROP VIEW IF EXISTS item_count_stale RESTRICT;
 
-DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
-
 DROP FUNCTION IF EXISTS item_id_min_sfunc(bigint, item_view);
 
 DROP FUNCTION IF EXISTS item_ids_all();
+
+DROP FUNCTION IF EXISTS item_max_id_atomic();
+
+DROP AGGREGATE IF EXISTS item_id_max(item_view);
+
+DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
 
 DROP FUNCTION IF EXISTS item_view_all(timestamptz);
 
@@ -35,6 +39,17 @@ DROP FUNCTION IF EXISTS item_view_joined();
 DROP FUNCTION IF EXISTS item_view_z();
 
 DROP FUNCTION IF EXISTS item_view_a(timestamptz);
+
+CREATE OR REPLACE FUNCTION item_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+SELECT count(*) FROM items;
+$$;
+
+REVOKE EXECUTE ON FUNCTION item_total() FROM PUBLIC;
 
 DROP FUNCTION IF EXISTS item_scale(integer);
 
@@ -60,6 +75,15 @@ CREATE OR REPLACE VIEW item_view AS
 CREATE OR REPLACE VIEW item_ids AS
  SELECT id
    FROM item_view;
+
+CREATE OR REPLACE FUNCTION count_items_direct()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+ SELECT count(*) AS count
+    FROM item_view;
+END;
 
 CREATE OR REPLACE FUNCTION item_id_max_sfunc(
     state bigint,
@@ -157,6 +181,15 @@ CREATE AGGREGATE item_id_max(item_view) (
     INITCOND = '0'
 );
 
+CREATE OR REPLACE FUNCTION item_max_id_atomic()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+ SELECT item_id_max(v.*) AS item_id_max
+    FROM item_view v;
+END;
+
 CREATE OR REPLACE VIEW item_count AS
  SELECT count(*) * item_scale(1) AS n
    FROM item_view_all(now()) item_view_all(id, due);
@@ -195,12 +228,36 @@ AS $$
 SELECT * FROM item_count_copy;
 $$;
 
+CREATE OR REPLACE FUNCTION item_count_sfunc(
+    state item_count,
+    x bigint
+)
+RETURNS item_count
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT ROW(coalesce(state.n, 0) + x)::item_count;
+$$;
+
 CREATE OR REPLACE FUNCTION item_view_joined()
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 AS $$
 SELECT v.* FROM item_view v CROSS JOIN item_count_all();
+$$;
+
+CREATE AGGREGATE item_count_agg(bigint) (
+    SFUNC = item_count_sfunc,
+    STYPE = item_count
+);
+
+CREATE OR REPLACE FUNCTION item_count_agg_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT (item_count_agg(x)).n FROM generate_series(1, 3) AS x;
 $$;
 
 CREATE OR REPLACE VIEW item_count_echo AS

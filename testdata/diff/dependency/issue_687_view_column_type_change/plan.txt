@@ -1,39 +1,47 @@
-Plan: 18 to add, 8 to modify, 14 to drop.
+Plan: 25 to add, 8 to modify, 16 to drop.
 
 Summary by type:
-  functions: 12 to add, 1 to modify, 11 to drop
-  aggregates: 1 to add, 2 to drop
+  functions: 17 to add, 1 to modify, 13 to drop
+  aggregates: 2 to add, 2 to drop
   views: 1 to add, 7 to modify, 1 to drop
   privileges: 2 to add
-  revoked default privileges: 2 to add
+  revoked default privileges: 3 to add
 
 Functions:
-  - count_items
   + count_items
+  - count_items
+  - count_items_direct
+  + count_items_direct
   + count_new_items
+  + item_count_agg_total
   - item_count_all
   + item_count_all
   + item_count_copy_all
   - item_count_legacy
+  + item_count_sfunc
   - item_count_stale_all
-  + item_id_max_sfunc
   - item_id_max_sfunc
+  + item_id_max_sfunc
   - item_id_min_sfunc
   + item_id_min_sfunc
   - item_ids_all
   + item_ids_all
+  - item_max_id_atomic
+  + item_max_id_atomic
   ~ item_scale
+  + item_total
   + item_view_a
   - item_view_a
   + item_view_all
   - item_view_all
   - item_view_joined
   + item_view_joined
-  - item_view_z
   + item_view_z
+  - item_view_z
   + items_due_between
 
 Aggregates:
+  + item_count_agg
   - item_id_max
   + item_id_max
   - item_id_min
@@ -55,6 +63,7 @@ Privileges:
   + api_role
 
 Revoked default privileges:
+  + item_total()
   + item_view_all(p_since timestamp with time zone)
   + items_due_between(p_start date, p_end date)
 
@@ -69,11 +78,11 @@ DROP VIEW IF EXISTS item_count_report RESTRICT;
 
 DROP VIEW IF EXISTS item_id_max_view RESTRICT;
 
-DROP AGGREGATE IF EXISTS item_id_max(item_view);
-
 DROP AGGREGATE IF EXISTS item_id_min(item_view);
 
 DROP FUNCTION IF EXISTS count_items();
+
+DROP FUNCTION IF EXISTS count_items_direct();
 
 DROP FUNCTION IF EXISTS item_count_all();
 
@@ -85,11 +94,15 @@ DROP FUNCTION IF EXISTS item_count_stale_all();
 
 DROP VIEW IF EXISTS item_count_stale RESTRICT;
 
-DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
-
 DROP FUNCTION IF EXISTS item_id_min_sfunc(bigint, item_view);
 
 DROP FUNCTION IF EXISTS item_ids_all();
+
+DROP FUNCTION IF EXISTS item_max_id_atomic();
+
+DROP AGGREGATE IF EXISTS item_id_max(item_view);
+
+DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
 
 DROP FUNCTION IF EXISTS item_view_all(timestamptz);
 
@@ -98,6 +111,17 @@ DROP FUNCTION IF EXISTS item_view_joined();
 DROP FUNCTION IF EXISTS item_view_z();
 
 DROP FUNCTION IF EXISTS item_view_a(timestamptz);
+
+CREATE OR REPLACE FUNCTION item_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+SELECT count(*) FROM items;
+$$;
+
+REVOKE EXECUTE ON FUNCTION item_total() FROM PUBLIC;
 
 DROP FUNCTION IF EXISTS item_scale(integer);
 
@@ -123,6 +147,15 @@ CREATE OR REPLACE VIEW item_view AS
 CREATE OR REPLACE VIEW item_ids AS
  SELECT id
    FROM item_view;
+
+CREATE OR REPLACE FUNCTION count_items_direct()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+ SELECT count(*) AS count
+    FROM public.item_view;
+END;
 
 CREATE OR REPLACE FUNCTION item_id_max_sfunc(
     state bigint,
@@ -220,6 +253,15 @@ CREATE AGGREGATE item_id_max(item_view) (
     INITCOND = '0'
 );
 
+CREATE OR REPLACE FUNCTION item_max_id_atomic()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+ SELECT public.item_id_max(v.*) AS item_id_max
+    FROM public.item_view v;
+END;
+
 CREATE OR REPLACE VIEW item_count AS
  SELECT count(*) * item_scale(1) AS n
    FROM item_view_all(now()) item_view_all(id, due);
@@ -258,12 +300,36 @@ AS $$
 SELECT * FROM item_count_copy;
 $$;
 
+CREATE OR REPLACE FUNCTION item_count_sfunc(
+    state item_count,
+    x bigint
+)
+RETURNS item_count
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT ROW(coalesce(state.n, 0) + x)::item_count;
+$$;
+
 CREATE OR REPLACE FUNCTION item_view_joined()
 RETURNS SETOF item_view
 LANGUAGE sql
 STABLE
 AS $$
 SELECT v.* FROM item_view v CROSS JOIN item_count_all();
+$$;
+
+CREATE AGGREGATE item_count_agg(bigint) (
+    SFUNC = item_count_sfunc,
+    STYPE = item_count
+);
+
+CREATE OR REPLACE FUNCTION item_count_agg_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT (item_count_agg(x)).n FROM generate_series(1, 3) AS x;
 $$;
 
 CREATE OR REPLACE VIEW item_count_echo AS

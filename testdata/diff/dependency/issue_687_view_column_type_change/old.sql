@@ -185,3 +185,22 @@ STABLE
 AS $$
 SELECT * FROM item_count_stale;
 $$;
+
+-- A SQL-standard body records what it reads in pg_depend, so this function
+-- pins item_view through its body alone, and item_max_id_atomic() depends on
+-- the item_id_max aggregate as well, so it is dropped before the aggregate.
+CREATE FUNCTION count_items_direct()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view;
+END;
+
+CREATE FUNCTION item_max_id_atomic()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT item_id_max(v) FROM item_view v;
+END;

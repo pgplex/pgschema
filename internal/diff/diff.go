@@ -404,6 +404,10 @@ type ddlDiff struct {
 	// depends on (a calling view before its function, a function typed on a
 	// calling view before that view). See orderPinnedDrops.
 	pinnedDrops []pinnedDrop
+	// New REVOKE ... FROM PUBLIC on functions that are only created in the
+	// modify phase; they follow that creation. The rest are emitted in the
+	// create phase, right after the routines and types they cover.
+	revokedDefaultPrivsAwaitingRoutines []*ir.RevokedDefaultPrivilege
 	// Case-insensitive lookup (see buildSchemaNameLookup) of every view this
 	// migration drops and creates again: those marked RequiresRecreate, the
 	// unchanged views rebuilt as their dependents, and the kept callers of a
@@ -1259,19 +1263,23 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			// A function the migration drops counts as well: the drop phase
 			// runs after these views are dropped, so it is dropped here. So
 			// does a function typed on a dropped calling view, and one whose
-			// SQL-standard body calls a pinned function: pg_depend records
-			// that call, so it blocks the callee's drop in turn.
+			// SQL-standard body reads a pinned view or calls a pinned
+			// function or aggregate: pg_depend records those, so it blocks
+			// the drop in turn.
 			pinnedViewLookup := buildPinnedViewLookup(recreatedViewKeys, diff.allNewViews, callingViews, oldViews)
-			pinnedFunctionKeys := functionKeySet(diff.functionsPinningRecreatedViews)
+			pinnedRoutineKeys := functionKeySet(diff.functionsPinningRecreatedViews)
+			for _, agg := range diff.aggregatesPinningRecreatedViews {
+				pinnedRoutineKeys[aggregateDependencyKey(agg)] = true
+			}
 			for _, key := range sortedKeys(oldFunctions) {
 				oldFunction := oldFunctions[key]
 				if pinning[oldFunction] ||
-					(!functionSignatureReferencesRelation(oldFunction, pinnedViewLookup) && !functionDependsOnAny(oldFunction, pinnedFunctionKeys)) {
+					(!functionPinsRelation(oldFunction, pinnedViewLookup) && !functionDependsOnAny(oldFunction, pinnedRoutineKeys)) {
 					continue
 				}
 				changed = true
 				pinning[oldFunction] = true
-				pinnedFunctionKeys[functionKey(oldFunction)] = true
+				pinnedRoutineKeys[functionKey(oldFunction)] = true
 				pinnedFunctionPrivileges[oldFunction.Schema+"."+functionPrivilegeObjectName(oldFunction)] = true
 				diff.functionsPinningRecreatedViews = append(diff.functionsPinningRecreatedViews, oldFunction)
 				if newFunction, kept := newFunctions[key]; kept {
@@ -2246,6 +2254,24 @@ func functionKey(fn *ir.Function) string {
 	return fn.Schema + "." + fn.Name + "(" + fn.GetArguments() + ")"
 }
 
+// aggregateDependencyKey returns agg's schema.name(args) key, the form
+// Function.Dependencies uses when a SQL-standard body calls the aggregate.
+// The argument types keep the catalog's spelling here, so an aggregate over
+// a type the normalizer respells (timestamp with time zone) is not matched.
+func aggregateDependencyKey(agg *ir.Aggregate) string {
+	return agg.Schema + "." + agg.Name + "(" + agg.Arguments + ")"
+}
+
+// functionPinsRelation reports whether fn holds a catalog dependency on a
+// relation in the lookup: through its signature, or through a SQL-standard
+// body that reads it. A quoted body records no such dependency.
+func functionPinsRelation(fn *ir.Function, relations map[string]struct{}) bool {
+	if functionSignatureReferencesRelation(fn, relations) {
+		return true
+	}
+	return fn != nil && hasSQLStandardBody(fn.Definition) && bodyReferencesRelation(fn.Definition, relations)
+}
+
 // functionKeySet returns the functionKey of each function as a set.
 func functionKeySet(functions []*ir.Function) map[string]bool {
 	keys := make(map[string]bool, len(functions))
@@ -2296,9 +2322,9 @@ type pinnedDrop struct {
 // orderPinnedDrops orders the views, functions and aggregates dropped ahead of
 // a view recreation so that each comes before the objects it depends on: a
 // view before the routines it calls and the views it reads, a function before
-// the view its signature is typed on and the functions it depends on per
-// pg_depend (a SQL-standard body's callees), an aggregate before its support
-// functions and the views in its signature. Among objects that are ready at
+// the views it pins (see functionPinsRelation) and the routines it depends on
+// per pg_depend (a SQL-standard body's callees), an aggregate before its
+// support functions and the views in its signature. Among objects ready at
 // the same time, views go first, then aggregates, then functions, each by
 // name. A dependency cycle, which PostgreSQL would not allow, falls back to
 // that order.
@@ -2328,9 +2354,11 @@ func orderPinnedDrops(views []*ir.View, functions []*ir.Function, aggregates []*
 		case a.drop.view != nil && b.drop.aggregate != nil:
 			return referencesNewFunction(a.drop.view.Definition, a.drop.view.Schema, buildRoutineLookup(nil, []*ir.Aggregate{b.drop.aggregate}))
 		case a.drop.function != nil && b.drop.view != nil:
-			return functionSignatureReferencesRelation(a.drop.function, buildViewLookup([]*ir.View{b.drop.view}))
+			return functionPinsRelation(a.drop.function, buildViewLookup([]*ir.View{b.drop.view}))
 		case a.drop.function != nil && b.drop.function != nil:
 			return slices.Contains(a.drop.function.Dependencies, functionKey(b.drop.function))
+		case a.drop.function != nil && b.drop.aggregate != nil:
+			return slices.Contains(a.drop.function.Dependencies, aggregateDependencyKey(b.drop.aggregate))
 		case a.drop.aggregate != nil && b.drop.view != nil:
 			return aggregateReferencesNewView(a.drop.aggregate, buildViewLookup([]*ir.View{b.drop.view}))
 		case a.drop.aggregate != nil && b.drop.function != nil:
@@ -2860,9 +2888,31 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// See https://github.com/pgplex/pgschema/issues/253
 	generateDropPrivilegesSQL(d.revokedDefaultGrantsOnNewTables, targetSchema, collector)
 
-	// Note: Explicit privilege creates and modifications, and new REVOKE ... FROM
-	// PUBLIC on routines and types, are handled in generateModifySQL
-	// (after object modifications/recreations) to ensure:
+	// Revoke default PUBLIC privileges on the routines and types created in
+	// this phase, right after their creation: a new SECURITY DEFINER function
+	// must not stay callable by PUBLIC across a non-transactional step (a
+	// concurrent index build) that may split the migration here. A revoke
+	// on a function that is only created in the modify phase, after a view
+	// it depends on is recreated (#480, #687) or dropped and created again
+	// there, follows that creation instead.
+	lateFunctions := make(map[string]bool)
+	for _, functions := range [][]*ir.Function{d.functionsAwaitingRecreatedViews, d.functionsAwaitingDeferredViews, recreatedFunctions(d.modifiedFunctions)} {
+		for _, fn := range functions {
+			lateFunctions[functionPrivilegeObjectName(fn)] = true
+		}
+	}
+	var revokesNow []*ir.RevokedDefaultPrivilege
+	for _, r := range d.addedRevokedDefaultPrivs {
+		if r.ObjectType == ir.PrivilegeObjectTypeFunction && lateFunctions[r.ObjectName] {
+			d.revokedDefaultPrivsAwaitingRoutines = append(d.revokedDefaultPrivsAwaitingRoutines, r)
+		} else {
+			revokesNow = append(revokesNow, r)
+		}
+	}
+	generateRevokeDefaultPrivilegesSQL(revokesNow, targetSchema, collector)
+
+	// Note: Explicit privilege creates and modifications are handled in
+	// generateModifySQL (after object modifications/recreations) to ensure:
 	// 1. DROP+CREATE'd objects (e.g., materialized views) don't wipe out privilege changes
 	// 2. REVOKEs from modifications execute before new GRANTs
 	// See https://github.com/pgplex/pgschema/issues/324
@@ -2981,10 +3031,9 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 	// Modifications (which contain REVOKEs) run before creates (which contain GRANTs)
 	// to prevent table-level REVOKEs from undoing column-level GRANTs.
 	// See https://github.com/pgplex/pgschema/issues/324
-	// New REVOKE ... FROM PUBLIC come first, here rather than in the create
-	// phase: a routine may only be created in this phase, after a view it is
-	// typed on is recreated (#480, #687), or dropped and created again above.
-	generateRevokeDefaultPrivilegesSQL(d.addedRevokedDefaultPrivs, targetSchema, collector)
+	// New REVOKE ... FROM PUBLIC on the functions created only in this phase
+	// come first (see generateCreateSQL for the rest).
+	generateRevokeDefaultPrivilegesSQL(d.revokedDefaultPrivsAwaitingRoutines, targetSchema, collector)
 	generateModifyPrivilegesSQL(d.modifiedPrivileges, targetSchema, collector)
 	generateModifyColumnPrivilegesSQL(d.modifiedColumnPrivileges, targetSchema, collector)
 	generateCreatePrivilegesSQL(d.addedPrivileges, targetSchema, collector)
@@ -3885,9 +3934,21 @@ func generateViewsAndDependentRoutinesSQL(views []*ir.View, functions []*ir.Func
 		viewsNow, viewsLater := splitViewsReferencingRoutines(views, buildRoutineLookup(functions, aggregates), nil)
 		lateViewLookup := buildViewLookup(viewsLater)
 		functionsNow, functionsLater := splitFunctionsByViewDeps(functions, lateViewLookup)
-		// A SQL-language function calling a later function waits with it.
-		functionsNow, functionsLater = holdBackCallers(functionsNow, functionsLater)
-		aggregatesNow, aggregatesLater := splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
+		// A SQL-language function calling a later function waits with it, an
+		// aggregate built on a later function is later itself, and a SQL
+		// function calling a later aggregate waits for it: repeat until the
+		// partitions settle.
+		var aggregatesNow, aggregatesLater []*ir.Aggregate
+		for {
+			functionsNow, functionsLater = holdBackCallers(functionsNow, functionsLater)
+			aggregatesNow, aggregatesLater = splitAggregatesByViewDeps(aggregates, lateViewLookup, buildFunctionLookup(functionsLater))
+			var callers []*ir.Function
+			functionsNow, callers = splitFunctionsCallingAggregates(functionsNow, aggregatesLater)
+			if len(callers) == 0 {
+				break
+			}
+			functionsLater = append(functionsLater, callers...)
+		}
 		if len(viewsNow) == 0 && len(functionsNow) == 0 && len(aggregatesNow) == 0 {
 			generateCreateViewsSQL(views, targetSchema, collector)
 			generateFunctionsAndAggregatesSQL(functions, aggregates, targetSchema, collector)

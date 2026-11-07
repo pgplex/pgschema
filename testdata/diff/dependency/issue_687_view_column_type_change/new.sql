@@ -163,3 +163,56 @@ STABLE
 AS $$
 SELECT * FROM item_count_copy;
 $$;
+
+CREATE FUNCTION count_items_direct()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT count(*) FROM item_view;
+END;
+
+CREATE FUNCTION item_max_id_atomic()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT item_id_max(v) FROM item_view v;
+END;
+
+-- New, created in the create phase with nothing to wait for: its PUBLIC
+-- revoke must follow its creation at once, not wait for the modify phase.
+CREATE FUNCTION item_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+SELECT count(*) FROM items;
+$$;
+
+REVOKE EXECUTE ON FUNCTION item_total() FROM PUBLIC;
+
+-- New aggregate whose state type is item_count, a view that waits for the
+-- routines it calls, and a new function calling that aggregate without
+-- reading the view itself: it must wait for the aggregate all the same.
+CREATE FUNCTION item_count_sfunc(state item_count, x bigint)
+RETURNS item_count
+LANGUAGE sql
+IMMUTABLE
+AS $$
+SELECT ROW(coalesce(state.n, 0) + x)::item_count;
+$$;
+
+CREATE AGGREGATE item_count_agg(bigint) (
+    SFUNC = item_count_sfunc,
+    STYPE = item_count
+);
+
+CREATE FUNCTION item_count_agg_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT (item_count_agg(x)).n FROM generate_series(1, 3) AS x;
+$$;
