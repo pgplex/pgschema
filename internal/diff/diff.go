@@ -1271,10 +1271,18 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			for _, agg := range diff.aggregatesPinningRecreatedViews {
 				pinnedRoutineKeys[aggregateDependencyKey(agg)] = true
 			}
+			pinnedCallLookup := buildRoutineLookup(diff.functionsPinningRecreatedViews, diff.aggregatesPinningRecreatedViews)
 			for _, key := range sortedKeys(oldFunctions) {
 				oldFunction := oldFunctions[key]
+				newFunction, kept := newFunctions[key]
+				// A function dropped and created again for a signature change
+				// whose desired definition needs a pinned view or routine is
+				// created with them, so it joins this batch instead of being
+				// recreated on its own before they are back.
+				recreatedCaller := kept && functionRequiresRecreate(oldFunction, newFunction) &&
+					(functionPinsRelation(newFunction, pinnedViewLookup) || SQLFunctionCallsFunction(newFunction, pinnedCallLookup))
 				if pinning[oldFunction] ||
-					(!functionPinsRelation(oldFunction, pinnedViewLookup) && !functionDependsOnAny(oldFunction, pinnedRoutineKeys)) {
+					(!functionPinsRelation(oldFunction, pinnedViewLookup) && !functionDependsOnAny(oldFunction, pinnedRoutineKeys) && !recreatedCaller) {
 					continue
 				}
 				changed = true
@@ -1282,7 +1290,7 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 				pinnedRoutineKeys[functionKey(oldFunction)] = true
 				pinnedFunctionPrivileges[oldFunction.Schema+"."+functionPrivilegeObjectName(oldFunction)] = true
 				diff.functionsPinningRecreatedViews = append(diff.functionsPinningRecreatedViews, oldFunction)
-				if newFunction, kept := newFunctions[key]; kept {
+				if kept {
 					pinnedFunctionPrivileges[newFunction.Schema+"."+functionPrivilegeObjectName(newFunction)] = true
 					diff.functionsAwaitingRecreatedViews = append(diff.functionsAwaitingRecreatedViews, newFunction)
 				}
@@ -2659,8 +2667,10 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// SQL-language functions whose body calls a new aggregate are validated
 	// against it at creation, so they are created after the aggregates instead
 	// of in the table-relative batches below (#580).
+	// A kept aggregate dropped ahead of a pinned function counts too: its
+	// callers wait for its recreation (#687).
 	var functionsCallingAggregates []*ir.Function
-	functionsWithoutViewDeps, functionsCallingAggregates = splitFunctionsCallingAggregates(functionsWithoutViewDeps, d.addedAggregates)
+	functionsWithoutViewDeps, functionsCallingAggregates = splitFunctionsCallingAggregates(functionsWithoutViewDeps, append(append([]*ir.Aggregate{}, d.addedAggregates...), d.aggregatesAwaitingRecreatedViews...))
 
 	// Separate functions WITHOUT view deps into those that reference deferred
 	// tables and those that don't. Functions that query new tables must be

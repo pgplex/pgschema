@@ -3,7 +3,7 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "353b88124fa9d74f8315bc3d8fb8ad642bbe990bce6da10cf9d0d5617fd41ed3"
+    "hash": "0eaeaa6b2a98f80733bd3163caba4d20c8daa583de77643ac6ae94f40a078821"
   },
   "groups": [
     {
@@ -63,12 +63,6 @@
           "path": "public.item_count_legacy"
         },
         {
-          "sql": "DROP VIEW IF EXISTS item_count RESTRICT;",
-          "type": "view",
-          "operation": "recreate",
-          "path": "public.item_count"
-        },
-        {
           "sql": "DROP FUNCTION IF EXISTS item_count_stale_all();",
           "type": "function",
           "operation": "drop",
@@ -111,10 +105,10 @@
           "path": "public.item_id_max_sfunc"
         },
         {
-          "sql": "DROP FUNCTION IF EXISTS item_view_all(timestamptz);",
+          "sql": "DROP FUNCTION IF EXISTS item_recent(integer);",
           "type": "function",
           "operation": "drop",
-          "path": "public.item_view_all"
+          "path": "public.item_recent"
         },
         {
           "sql": "DROP FUNCTION IF EXISTS item_view_joined();",
@@ -133,6 +127,24 @@
           "type": "function",
           "operation": "drop",
           "path": "public.item_view_a"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS joined_atomic();",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.joined_atomic"
+        },
+        {
+          "sql": "DROP VIEW IF EXISTS item_count RESTRICT;",
+          "type": "view",
+          "operation": "recreate",
+          "path": "public.item_count"
+        },
+        {
+          "sql": "DROP FUNCTION IF EXISTS item_view_all(timestamptz);",
+          "type": "function",
+          "operation": "drop",
+          "path": "public.item_view_all"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION item_total()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nSECURITY DEFINER\nAS $$\nSELECT count(*) FROM items;\n$$;",
@@ -231,6 +243,12 @@
           "path": "public.count_new_items"
         },
         {
+          "sql": "CREATE OR REPLACE FUNCTION item_recent(\n    d integer\n)\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT count(*) FROM item_view_all(now() - d * interval '1 day');\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_recent"
+        },
+        {
           "sql": "CREATE OR REPLACE FUNCTION item_view_z()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT item_view_a.id,\n     item_view_a.due\n    FROM public.item_view_a(now()) item_view_a(id, due);\nEND;",
           "type": "function",
           "operation": "create",
@@ -253,6 +271,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.item_max_id_atomic"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION item_max_total()\nRETURNS bigint\nLANGUAGE sql\nSTABLE\nAS $$\nSELECT item_id_max(NULL::item_view);\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.item_max_total"
         },
         {
           "sql": "CREATE OR REPLACE VIEW item_count AS\n SELECT count(*) * item_scale(1) AS n\n   FROM item_view_all(now()) item_view_all(id, due);",
@@ -313,6 +337,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.item_view_joined"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION joined_atomic()\nRETURNS SETOF item_view\nLANGUAGE sql\nSTABLE\nBEGIN ATOMIC\n SELECT v.id,\n     v.due\n    FROM public.item_view v,\n     public.item_count;\nEND;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.joined_atomic"
         },
         {
           "sql": "CREATE AGGREGATE item_count_agg(bigint) (\n    SFUNC = item_count_sfunc,\n    STYPE = item_count\n);",

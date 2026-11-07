@@ -16,8 +16,6 @@ DROP FUNCTION IF EXISTS item_count_all();
 
 DROP FUNCTION IF EXISTS item_count_legacy();
 
-DROP VIEW IF EXISTS item_count RESTRICT;
-
 DROP FUNCTION IF EXISTS item_count_stale_all();
 
 DROP VIEW IF EXISTS item_count_stale RESTRICT;
@@ -32,13 +30,19 @@ DROP AGGREGATE IF EXISTS item_id_max(item_view);
 
 DROP FUNCTION IF EXISTS item_id_max_sfunc(bigint, item_view);
 
-DROP FUNCTION IF EXISTS item_view_all(timestamptz);
+DROP FUNCTION IF EXISTS item_recent(integer);
 
 DROP FUNCTION IF EXISTS item_view_joined();
 
 DROP FUNCTION IF EXISTS item_view_z();
 
 DROP FUNCTION IF EXISTS item_view_a(timestamptz);
+
+DROP FUNCTION IF EXISTS joined_atomic();
+
+DROP VIEW IF EXISTS item_count RESTRICT;
+
+DROP FUNCTION IF EXISTS item_view_all(timestamptz);
 
 CREATE OR REPLACE FUNCTION item_total()
 RETURNS bigint
@@ -154,6 +158,16 @@ AS $$
 SELECT count(*) FROM item_view_all(now());
 $$;
 
+CREATE OR REPLACE FUNCTION item_recent(
+    d integer
+)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now() - d * interval '1 day');
+$$;
+
 CREATE OR REPLACE FUNCTION item_view_z()
 RETURNS SETOF item_view
 LANGUAGE sql
@@ -189,6 +203,14 @@ BEGIN ATOMIC
  SELECT public.item_id_max(v.*) AS item_id_max
     FROM public.item_view v;
 END;
+
+CREATE OR REPLACE FUNCTION item_max_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT item_id_max(NULL::item_view);
+$$;
 
 CREATE OR REPLACE VIEW item_count AS
  SELECT count(*) * item_scale(1) AS n
@@ -246,6 +268,17 @@ STABLE
 AS $$
 SELECT v.* FROM item_view v CROSS JOIN item_count_all();
 $$;
+
+CREATE OR REPLACE FUNCTION joined_atomic()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+ SELECT v.id,
+     v.due
+    FROM public.item_view v,
+     public.item_count;
+END;
 
 CREATE AGGREGATE item_count_agg(bigint) (
     SFUNC = item_count_sfunc,

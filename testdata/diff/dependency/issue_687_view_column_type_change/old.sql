@@ -204,3 +204,24 @@ STABLE
 BEGIN ATOMIC
     SELECT item_id_max(v) FROM item_view v;
 END;
+
+-- Its parameter is renamed in new.sql, so it is dropped and created again,
+-- and its desired body calls item_view_all(): the creation has to wait for
+-- that function, so it joins the pinned batch rather than the #601 path.
+CREATE FUNCTION item_recent(days integer)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now() - days * interval '1 day');
+$$;
+
+-- Typed on item_view, and its SQL-standard body also reads item_count, a
+-- calling view held back here: it must be dropped before that view.
+CREATE FUNCTION joined_atomic()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT v.* FROM item_view v, item_count;
+END;

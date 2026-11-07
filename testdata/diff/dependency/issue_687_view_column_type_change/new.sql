@@ -216,3 +216,29 @@ STABLE
 AS $$
 SELECT (item_count_agg(x)).n FROM generate_series(1, 3) AS x;
 $$;
+
+CREATE FUNCTION item_recent(d integer)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT count(*) FROM item_view_all(now() - d * interval '1 day');
+$$;
+
+CREATE FUNCTION joined_atomic()
+RETURNS SETOF item_view
+LANGUAGE sql
+STABLE
+BEGIN ATOMIC
+    SELECT v.* FROM item_view v, item_count;
+END;
+
+-- New, calling the kept aggregate item_id_max, which is only created again
+-- after item_view: it waits for the aggregate.
+CREATE FUNCTION item_max_total()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+SELECT item_id_max(NULL::item_view);
+$$;
