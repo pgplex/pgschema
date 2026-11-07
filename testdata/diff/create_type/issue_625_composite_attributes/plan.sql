@@ -55,3 +55,8 @@ RETURNS boolean
 LANGUAGE sql
 VOLATILE
 RETURN ((p).region IS NOT NULL);
+
+CREATE TABLE IF NOT EXISTS quantities (
+    n integer DEFAULT get_quantity(NULL),
+    present boolean DEFAULT has_region(NULL)
+);

@@ -1,9 +1,9 @@
-Plan: 7 to add, 8 to modify, 1 to drop.
+Plan: 8 to add, 8 to modify, 1 to drop.
 
 Summary by type:
   types: 1 to add, 8 to modify, 1 to drop
   functions: 3 to add
-  tables: 1 to add
+  tables: 2 to add
 
 Types:
   ~ address
@@ -23,6 +23,7 @@ Functions:
   + is_positive
 
 Tables:
+  + quantities
   + region
 
 DDL to be executed:
@@ -85,3 +86,8 @@ RETURNS boolean
 LANGUAGE sql
 VOLATILE
 RETURN ((p).region IS NOT NULL);
+
+CREATE TABLE IF NOT EXISTS quantities (
+    n integer DEFAULT get_quantity(NULL),
+    present boolean DEFAULT has_region(NULL)
+);

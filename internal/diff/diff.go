@@ -2591,8 +2591,26 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	tablesWithDeps := []*ir.Table{}
 	tablesAfterTableDomains := []*ir.Table{}
 
+	// The attributes of modified composite types whose ALTER TYPE waits for
+	// the function-dependent or the table-dependent domain batch, and the new
+	// SQL functions reading one of the latter: a table whose default or CHECK
+	// calls such a function goes in the last batch too (issue #625).
+	afterFunctionBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+	afterTableBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
+		return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
+	})
+	var tableBatchReaders []*ir.Function
+	for _, fn := range d.addedFunctions {
+		if functionReadsCompositeAttribute(fn, afterTableBatch) {
+			tableBatchReaders = append(tableBatchReaders, fn)
+		}
+	}
+	tableBatchReaderLookup := buildFunctionLookup(tableBatchReaders)
+
 	tableBatch := func(table *ir.Table) int {
-		if tableUsesDeferredDomain(table, tableDomainLookup) {
+		if tableUsesDeferredDomain(table, tableDomainLookup) || tableReferencesNewFunction(table, tableBatchReaderLookup) {
 			return 2
 		}
 		if tableReferencesNewFunction(table, newFunctionLookup) || tableUsesDeferredDomain(table, functionDomainLookup) {
@@ -2726,6 +2744,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	functionsWithoutTableDeps := functionsWithoutViewDeps
 	var functionsWithTableDeps []*ir.Function
 	var functionsAfterAllTables []*ir.Function
+	// Readers of a composite attribute altered after a deferred domain batch,
+	// created right after that alteration (issue #625)
+	var readersAfterFunctionBatch, readersAfterTableBatch []*ir.Function
 	if len(tablesWithDeps) > 0 || len(tablesAfterTableDomains) > 0 || len(deferredDomainLookup) > 0 {
 		tablesWithDepsLookup := buildTableLookup(tablesWithDeps)
 		lastBatchLookup := buildTableLookup(tablesAfterTableDomains)
@@ -2750,21 +2771,17 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackKeyDependentFunctions(d.partitionIndexes, batches, d.addedTables, typesWithFunctionDepsOnly, functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
 		// A SQL-language function whose body reads a composite attribute that
 		// is added or altered only after a deferred domain batch is validated
-		// against it at creation, so it moves to the batch after that
-		// alteration (issue #625).
-		if len(d.modifiedTypes) > 0 {
-			afterFunctionBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
-				return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
-			})
-			afterTableBatch := deferredCompositeAttributes(d.modifiedTypes, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
-				return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
-			})
+		// against it at creation, so it is created right after that
+		// alteration, before the tables of that batch that may need it
+		// (issue #625).
+		if len(afterFunctionBatch) > 0 || len(afterTableBatch) > 0 {
 			deferredDomains := append(append([]*ir.Type{}, typesWithFunctionDepsOnly...), domainsWithTableDeps...)
-			functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackDeferredAttributeReaders(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables, afterFunctionBatch, afterTableBatch, d.addedTables, deferredDomains)
+			functionsWithoutTableDeps, readersAfterFunctionBatch, functionsWithTableDeps, readersAfterTableBatch = holdBackDeferredAttributeReaders(functionsWithoutTableDeps, functionsWithTableDeps, afterFunctionBatch, afterTableBatch, deferredDomains)
 		}
 		// A SQL function calling a function from a later batch is validated against
 		// it at creation, so it moves to that batch even if it touches no new table.
-		functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables = holdBackCallersAcrossBatches(functionsWithoutTableDeps, functionsWithTableDeps, functionsAfterAllTables)
+		ordered := holdBackCallersAcrossOrderedBatches(functionsWithoutTableDeps, readersAfterFunctionBatch, functionsWithTableDeps, readersAfterTableBatch, functionsAfterAllTables)
+		functionsWithoutTableDeps, readersAfterFunctionBatch, functionsWithTableDeps, readersAfterTableBatch, functionsAfterAllTables = ordered[0], ordered[1], ordered[2], ordered[3], ordered[4]
 	}
 
 	// Create functions WITHOUT view dependencies AND WITHOUT table dependencies
@@ -2776,10 +2793,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// column types.
 	generateCreateTypesSQL(typesWithFunctionDepsOnly, replaced, targetSchema, collector)
 
-	// Composite attributes typed on a domain of that batch (issue #625)
+	// Composite attributes typed on a domain of that batch, then the SQL
+	// functions reading them (issue #625)
 	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
 		return attributeUsesDeferredType(typeObj, attr, functionDomainLookup) && !attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
 	})
+	generateCreateFunctionsSQL(readersAfterFunctionBatch, targetSchema, collector)
 
 	// Create procedures (procedures may depend on tables and domains)
 	// A procedure whose body may depend on a postponed key (issue #653) waits
@@ -2800,10 +2819,12 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// depends on a function (which was already created above).
 	generateCreateTypesSQL(domainsWithTableDeps, replaced, targetSchema, collector)
 
-	// Composite attributes typed on a domain of that batch (issue #625)
+	// Composite attributes typed on a domain of that batch, then the SQL
+	// functions reading them (issue #625)
 	generateModifyCompositesSQL(d.modifiedTypes, targetSchema, collector, func(typeObj *ir.Type, attr *ir.TypeColumn) bool {
 		return attributeUsesDeferredType(typeObj, attr, tableDomainLookup)
 	})
+	generateCreateFunctionsSQL(readersAfterTableBatch, targetSchema, collector)
 
 	// Create tables that use table-dep domains as column types (now that those domains exist).
 	deferredPolicies3, deferredConstraints3 := generateCreateTablesSQL(tablesAfterTableDomains, targetSchema, collector, existingTables, shouldDeferPolicy, d.suppressedInlineFKs, d.allNewTables, d.partitionIndexes, parentAddedColumns)
@@ -4003,14 +4024,28 @@ func holdBackKeyDependentProcedures(plan *partitionIndexCreationPlan, batches ma
 }
 
 func holdBackCallersAcrossBatches(first, second, third []*ir.Function) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+	ordered := holdBackCallersAcrossOrderedBatches(first, second, third)
+	return ordered[0], ordered[1], ordered[2]
+}
+
+// holdBackCallersAcrossOrderedBatches moves a SQL function calling one of a
+// later batch to that batch, for batches created in the given order, until
+// no batch changes.
+func holdBackCallersAcrossOrderedBatches(batches ...[]*ir.Function) [][]*ir.Function {
 	for {
-		secondLen, thirdLen := len(second), len(third)
-		second, third = holdBackCallers(second, third)
-		first, third = holdBackCallers(first, third)
-		first, second = holdBackCallers(first, second)
+		changed := false
+		for later := len(batches) - 1; later > 0; later-- {
+			for earlier := 0; earlier < later; earlier++ {
+				before := len(batches[later])
+				batches[earlier], batches[later] = holdBackCallers(batches[earlier], batches[later])
+				if len(batches[later]) != before {
+					changed = true
+				}
+			}
+		}
 		// Functions only ever move to a later batch, so unchanged sizes mean a fixpoint.
-		if len(second) == secondLen && len(third) == thirdLen {
-			return first, second, third
+		if !changed {
+			return batches
 		}
 	}
 }
@@ -5077,40 +5112,40 @@ func deferredCompositeAttributes(diffs []*typeDiff, include func(*ir.Type, *ir.T
 	return attrs
 }
 
-// holdBackDeferredAttributeReaders moves a function that reads an attribute
-// of afterFunctionBatch from the first batch to the second, and one that
-// reads an attribute of afterTableBatch to the third: the batches created
-// after the composite alterations that follow the function-dependent and
-// table-dependent domains (issue #625). A function that a new table or one
-// of the deferred domains needs stays: the attribute match is a name match
-// on the body, so it may be a parameter of the same name rather than the
-// attribute, and moving a prerequisite would break what needs it.
-func holdBackDeferredAttributeReaders(first, second, third []*ir.Function, afterFunctionBatch, afterTableBatch map[*ir.Type][]string, addedTables []*ir.Table, domains []*ir.Type) ([]*ir.Function, []*ir.Function, []*ir.Function) {
+// holdBackDeferredAttributeReaders takes the functions that read an attribute
+// of afterFunctionBatch or afterTableBatch out of the first and second
+// function batches, into the slot created right after that attribute's ALTER
+// TYPE: after the function-dependent domains and before the second table
+// batch, or after the table-dependent domains and before the third
+// (issue #625). A function that one of the deferred domains needs stays:
+// the attribute match is a name match on the body, so it may be a parameter
+// of the same name rather than the attribute, and the domain needs the
+// function before the attribute can exist in any case.
+func holdBackDeferredAttributeReaders(first, second []*ir.Function, afterFunctionBatch, afterTableBatch map[*ir.Type][]string, domains []*ir.Type) (keepFirst, readersAfterFunctionBatch, keepSecond, readersAfterTableBatch []*ir.Function) {
 	if len(afterFunctionBatch) == 0 && len(afterTableBatch) == 0 {
-		return first, second, third
+		return first, nil, second, nil
 	}
-	needed := functionsNeededEarly(append(append(append([]*ir.Function{}, first...), second...), third...), addedTables, domains)
-	var keepFirst, keepSecond []*ir.Function
+	needed := functionsNeededEarly(append(append([]*ir.Function{}, first...), second...), nil, domains)
 	for _, fn := range first {
 		switch {
 		case needed[fn]:
 			keepFirst = append(keepFirst, fn)
 		case functionReadsCompositeAttribute(fn, afterTableBatch):
-			third = append(third, fn)
+			readersAfterTableBatch = append(readersAfterTableBatch, fn)
 		case functionReadsCompositeAttribute(fn, afterFunctionBatch):
-			second = append(second, fn)
+			readersAfterFunctionBatch = append(readersAfterFunctionBatch, fn)
 		default:
 			keepFirst = append(keepFirst, fn)
 		}
 	}
 	for _, fn := range second {
 		if !needed[fn] && functionReadsCompositeAttribute(fn, afterTableBatch) {
-			third = append(third, fn)
+			readersAfterTableBatch = append(readersAfterTableBatch, fn)
 		} else {
 			keepSecond = append(keepSecond, fn)
 		}
 	}
-	return keepFirst, keepSecond, third
+	return keepFirst, readersAfterFunctionBatch, keepSecond, readersAfterTableBatch
 }
 
 // functionReadsCompositeAttribute reports whether a SQL-language function

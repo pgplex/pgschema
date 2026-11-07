@@ -103,6 +103,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.has_region"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS quantities (\n    n integer DEFAULT get_quantity(NULL),\n    present boolean DEFAULT has_region(NULL)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.quantities"
         }
       ]
     }
