@@ -84,66 +84,6 @@ func TestConstraintIncludeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestConstraintIncludeMigration(t *testing.T) {
-	for _, topology := range []string{"ordinary", "partitioned"} {
-		for _, kind := range []string{"PRIMARY KEY", "UNIQUE"} {
-			for _, transition := range []struct{ name, old, new string }{
-				{"add", "", ` INCLUDE (payload, "select")`},
-				{"reorder", ` INCLUDE (payload, "select")`, ` INCLUDE ("select", payload)`},
-				{"change", ` INCLUDE (payload)`, ` INCLUDE ("select")`},
-				{"remove", ` INCLUDE (payload)`, ""},
-			} {
-				t.Run(topology+"/"+kind+"/"+transition.name, func(t *testing.T) {
-					schema := func(include string) string {
-						partition := ""
-						if topology == "partitioned" {
-							partition = ` PARTITION BY RANGE (id); CREATE TABLE leaf PARTITION OF parent FOR VALUES FROM (0) TO (10)`
-						}
-						return `CREATE TABLE parent (id int NOT NULL, payload text, "select" text, CONSTRAINT parent_key ` + kind + ` (id)` + include + `)` + partition + `; CREATE TABLE child (id int REFERENCES parent(id));`
-					}
-					desired := testutil.ParseSQLToIR(t, sharedTestPostgres, schema(transition.new), "public")
-					db, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedTestPostgres)
-					defer db.Close()
-					expected := constraintIncludeCatalog(t, db)
-					old := testutil.ParseSQLToIR(t, sharedTestPostgres, schema(transition.old), "public")
-					steps := GenerateMigration(old, desired, "public")
-					require.NotEmpty(t, steps)
-					_, err := db.Exec(buildSQLFromSteps(steps))
-					require.NoError(t, err)
-					require.Equal(t, expected, constraintIncludeCatalog(t, db))
-					actual, err := ir.NewInspector(db, nil).BuildIR(context.Background(), "public")
-					require.NoError(t, err)
-					require.Empty(t, GenerateMigration(actual, desired, "public"))
-				})
-			}
-		}
-	}
-}
-
-func TestConstraintIncludeColumnChanges(t *testing.T) {
-	for _, kind := range []string{"PRIMARY KEY", "UNIQUE"} {
-		for _, change := range []struct{ name, old, new string }{
-			{"add constraint", `CREATE TABLE parent (id int NOT NULL, payload text);`, `CREATE TABLE parent (id int NOT NULL, payload text, CONSTRAINT parent_key ` + kind + ` (id) INCLUDE (payload));`},
-			{"add columns", `CREATE TABLE parent (existing int);`, `CREATE TABLE parent (existing int, id int, payload text, CONSTRAINT parent_key ` + kind + ` (id) INCLUDE (payload));`},
-			{"drop included column", `CREATE TABLE parent (id int NOT NULL, payload text, CONSTRAINT parent_key ` + kind + ` (id) INCLUDE (payload));`, `CREATE TABLE parent (id int NOT NULL, CONSTRAINT parent_key ` + kind + ` (id));`},
-		} {
-			t.Run(kind+"/"+change.name, func(t *testing.T) {
-				desired := testutil.ParseSQLToIR(t, sharedTestPostgres, change.new, "public")
-				db, _, _, _, _, _ := testutil.ConnectToPostgres(t, sharedTestPostgres)
-				defer db.Close()
-				expected := constraintIncludeCatalog(t, db)
-				old := testutil.ParseSQLToIR(t, sharedTestPostgres, change.old, "public")
-				_, err := db.Exec(buildSQLFromSteps(GenerateMigration(old, desired, "public")))
-				require.NoError(t, err)
-				require.Equal(t, expected, constraintIncludeCatalog(t, db))
-				actual, err := ir.NewInspector(db, nil).BuildIR(context.Background(), "public")
-				require.NoError(t, err)
-				require.Empty(t, GenerateMigration(actual, desired, "public"))
-			})
-		}
-	}
-}
-
 func TestConstraintIncludeAttachDetach(t *testing.T) {
 	const attached = `CREATE TABLE parent (id int, payload text, "select" text,
  CONSTRAINT parent_pk PRIMARY KEY (id) INCLUDE ("select", payload),

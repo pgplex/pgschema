@@ -3,7 +3,7 @@
   "pgschema_version": "1.14.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "5b513ad051c2e884819a03145d0f5a984ca1281ec58ece999f290169aabbdba0"
+    "hash": "b61913d7f819b7183e246f92a599d736cbbd32597e413f7142a1d2493f8b9ea6"
   },
   "groups": [
     {
@@ -27,6 +27,18 @@
           "path": "public.accounts.accounts_pkey"
         },
         {
+          "sql": "ALTER TABLE accounts DROP CONSTRAINT accounts_email_key;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.accounts.accounts_email_key"
+        },
+        {
+          "sql": "ALTER TABLE accounts\nADD CONSTRAINT accounts_email_key UNIQUE (email) INCLUDE (\"select\", display_name);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.accounts.accounts_email_key"
+        },
+        {
           "sql": "ALTER TABLE accounts DROP CONSTRAINT accounts_tenant_email_key;",
           "type": "table.constraint",
           "operation": "drop",
@@ -37,6 +49,18 @@
           "type": "table.constraint",
           "operation": "create",
           "path": "public.accounts.accounts_tenant_email_key"
+        },
+        {
+          "sql": "ALTER TABLE audit DROP COLUMN note;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.audit.note"
+        },
+        {
+          "sql": "ALTER TABLE audit\nADD CONSTRAINT audit_id_key UNIQUE (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.audit.audit_id_key"
         },
         {
           "sql": "ALTER TABLE events DROP CONSTRAINT events_pkey;",
@@ -50,6 +74,44 @@
           "operation": "create",
           "path": "public.events.events_pkey"
         },
+        {
+          "sql": "ALTER TABLE node ADD COLUMN id integer;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.node.id"
+        },
+        {
+          "sql": "ALTER TABLE node ADD COLUMN parent_id integer;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.node.parent_id"
+        },
+        {
+          "sql": "ALTER TABLE node\nADD CONSTRAINT node_pkey PRIMARY KEY (id) INCLUDE (payload);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.node.node_pkey"
+        },
+        {
+          "sql": "ALTER TABLE node\nADD CONSTRAINT node_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES node (id) NOT VALID;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.node.node_parent_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE node VALIDATE CONSTRAINT node_parent_id_fkey;",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.node.node_parent_id_fkey"
+        }
+      ]
+    },
+    {
+      "steps": [
         {
           "sql": "ALTER TABLE sessions\nADD CONSTRAINT sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts (id);",
           "type": "table.constraint",

@@ -1,23 +1,34 @@
-Plan: 1 to add, 2 to modify.
+Plan: 1 to add, 4 to modify.
 
 Summary by type:
-  tables: 1 to add, 2 to modify
+  tables: 1 to add, 4 to modify
 
 Tables:
   ~ accounts
+    - accounts_email_key (constraint)
+    + accounts_email_key (constraint)
     - accounts_pkey (constraint)
     + accounts_pkey (constraint)
     - accounts_tenant_email_key (constraint)
     + accounts_tenant_email_key (constraint)
+  ~ audit
+    - note (column)
+    + audit_id_key (constraint)
   ~ events
     - events_pkey (constraint)
     + events_pkey (constraint)
+  ~ node
+    + id (column)
+    + parent_id (column)
+    + node_parent_id_fkey (constraint)
+    + node_pkey (constraint)
   + sessions
     + sessions_account_id_fkey (constraint)
 
 DDL to be executed:
 --------------------------------------------------
 
+-- Transaction Group #1
 CREATE TABLE IF NOT EXISTS sessions (
     id integer,
     account_id integer NOT NULL,
@@ -32,15 +43,39 @@ ALTER TABLE accounts DROP CONSTRAINT accounts_pkey;
 ALTER TABLE accounts
 ADD CONSTRAINT accounts_pkey PRIMARY KEY (id) INCLUDE (email, display_name);
 
+ALTER TABLE accounts DROP CONSTRAINT accounts_email_key;
+
+ALTER TABLE accounts
+ADD CONSTRAINT accounts_email_key UNIQUE (email) INCLUDE ("select", display_name);
+
 ALTER TABLE accounts DROP CONSTRAINT accounts_tenant_email_key;
 
 ALTER TABLE accounts
 ADD CONSTRAINT accounts_tenant_email_key UNIQUE (tenant_id, email);
+
+ALTER TABLE audit DROP COLUMN note;
+
+ALTER TABLE audit
+ADD CONSTRAINT audit_id_key UNIQUE (id);
 
 ALTER TABLE events DROP CONSTRAINT events_pkey;
 
 ALTER TABLE events
 ADD CONSTRAINT events_pkey PRIMARY KEY (id, occurred_at) INCLUDE (payload);
 
+ALTER TABLE node ADD COLUMN id integer;
+
+ALTER TABLE node ADD COLUMN parent_id integer;
+
+ALTER TABLE node
+ADD CONSTRAINT node_pkey PRIMARY KEY (id) INCLUDE (payload);
+
+ALTER TABLE node
+ADD CONSTRAINT node_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES node (id) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE node VALIDATE CONSTRAINT node_parent_id_fkey;
+
+-- Transaction Group #3
 ALTER TABLE sessions
 ADD CONSTRAINT sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts (id);

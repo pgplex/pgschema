@@ -12,15 +12,35 @@ ALTER TABLE accounts DROP CONSTRAINT accounts_pkey;
 ALTER TABLE accounts
 ADD CONSTRAINT accounts_pkey PRIMARY KEY (id) INCLUDE (email, display_name);
 
+ALTER TABLE accounts DROP CONSTRAINT accounts_email_key;
+
+ALTER TABLE accounts
+ADD CONSTRAINT accounts_email_key UNIQUE (email) INCLUDE ("select", display_name);
+
 ALTER TABLE accounts DROP CONSTRAINT accounts_tenant_email_key;
 
 ALTER TABLE accounts
 ADD CONSTRAINT accounts_tenant_email_key UNIQUE (tenant_id, email);
 
+ALTER TABLE audit DROP COLUMN note;
+
+ALTER TABLE audit
+ADD CONSTRAINT audit_id_key UNIQUE (id);
+
 ALTER TABLE events DROP CONSTRAINT events_pkey;
 
 ALTER TABLE events
 ADD CONSTRAINT events_pkey PRIMARY KEY (id, occurred_at) INCLUDE (payload);
+
+ALTER TABLE node ADD COLUMN id integer;
+
+ALTER TABLE node ADD COLUMN parent_id integer;
+
+ALTER TABLE node
+ADD CONSTRAINT node_pkey PRIMARY KEY (id) INCLUDE (payload);
+
+ALTER TABLE node
+ADD CONSTRAINT node_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES node (id);
 
 ALTER TABLE sessions
 ADD CONSTRAINT sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts (id);
