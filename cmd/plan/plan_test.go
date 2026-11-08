@@ -345,6 +345,8 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 							"    h OPERATOR(public.?) 'k'::text AS hk,\n" +
 							"    t OPERATOR(public.@>) 'x'::public.ltree AS anc,\n" +
 							"    'OPERATOR(public.->)'::text AS literal,\n" +
+							"    1 AS \"OPERATOR(public.->)\",\n" +
+							"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
 							"    j -> 'a'::text AS ja\n" +
 							"   FROM t",
 					},
@@ -360,6 +362,8 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 		"    h ? 'k'::text AS hk,\n" +
 		"    t @> 'x'::ltree AS anc,\n" +
 		"    'OPERATOR(public.->)'::text AS literal,\n" +
+		"    1 AS \"OPERATOR(public.->)\",\n" +
+		"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
 		"    j -> 'a'::text AS ja\n" +
 		"   FROM t"
 	if got := irData.Schemas["public"].Views["v"].Definition; got != expected {

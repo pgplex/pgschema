@@ -244,6 +244,11 @@ func normalizeDefaultValue(value string, tableSchema string) string {
 		value = pattern.ReplaceAllString(value, `${1}(`)
 	}
 
+	// Defaults are deparsed with search_path = pg_catalog, so a same-schema
+	// operator appears as OPERATOR(schema.op); reduce it to the bare operator
+	// like every other expression context (see normalizeOperatorSyntax).
+	value = normalizeOperatorSyntax(value, tableSchema)
+
 	// Handle type casting - remove explicit type casts that are semantically equivalent
 	if strings.Contains(value, "::") {
 		// Strip temporary embedded postgres schema prefixes (pgschema_tmp_*)
@@ -478,7 +483,46 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 	if quoted := QuoteIdentifier(schema); quoted != schema {
 		body = stripSchemaPrefixOccurrences(body, quoted+".")
 	}
-	return stripSchemaPrefixOccurrences(body, schema+".")
+	return normalizeOperatorSyntax(stripSchemaPrefixOccurrences(body, schema+"."), schema)
+}
+
+// operatorSyntaxRe matches PostgreSQL's explicit operator syntax, OPERATOR(op)
+// or OPERATOR(schema.op), capturing the optional schema and the operator name.
+// Operator names consist only of the characters the lexer allows in them.
+var operatorSyntaxRe = regexp.MustCompile(`OPERATOR\((?:([A-Za-z_][A-Za-z0-9_$]*)\.)?([-+*/<>=~!@#%^&|` + "`" + `?]+)\)`)
+
+// normalizeOperatorSyntax rewrites OPERATOR(schema.op) to the bare op when
+// schema is the object's own schema, and OPERATOR(op) to op unconditionally.
+//
+// ruleutils emits OPERATOR(schema.op) whenever the operator's schema is not on
+// the deparsing session's search_path. Column defaults, generated expressions
+// and index expressions are deparsed with search_path = pg_catalog, so an
+// extension operator installed in the managed schema (hstore's -> in public)
+// comes out qualified there, while a view or CHECK constraint on the same
+// database is deparsed with the schema on the path and prints the bare
+// operator. Stripping the schema prefix alone leaves OPERATOR(->), which
+// PostgreSQL never emits itself and which the desired state never contains.
+// Reducing both forms to the bare operator makes every context compare the
+// same way on the current and desired side (issue #697). Operators in other
+// schemas keep their qualifier, and quoted text is left untouched.
+func normalizeOperatorSyntax(expr, schema string) string {
+	if !strings.Contains(expr, "OPERATOR(") {
+		return expr
+	}
+	segments := splitQuotedSegments(expr)
+	for i, segment := range segments {
+		if segment == "" || segment[0] == '\'' || segment[0] == '"' {
+			continue
+		}
+		segments[i] = operatorSyntaxRe.ReplaceAllStringFunc(segment, func(match string) string {
+			parts := operatorSyntaxRe.FindStringSubmatch(match)
+			if parts[1] == "" || parts[1] == schema {
+				return parts[2]
+			}
+			return match
+		})
+	}
+	return strings.Join(segments, "")
 }
 
 // stripSchemaPrefixOccurrences removes every occurrence of prefix ("schema."

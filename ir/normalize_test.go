@@ -782,3 +782,54 @@ func TestStripInheritedIdentityNested(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeOperatorSyntax(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		schema string
+		want   string
+	}{
+		{
+			name:   "same-schema operator becomes bare",
+			input:  "(h OPERATOR(public.->) 'a'::text)",
+			schema: "public",
+			want:   "(h -> 'a'::text)",
+		},
+		{
+			name:   "unqualified OPERATOR() collapses",
+			input:  "(h OPERATOR(->) 'b'::text) AND (h OPERATOR(?) 'k'::text)",
+			schema: "public",
+			want:   "(h -> 'b'::text) AND (h ? 'k'::text)",
+		},
+		{
+			name:   "operator in another schema keeps its qualifier",
+			input:  "(h OPERATOR(ext.->) 'a'::text)",
+			schema: "public",
+			want:   "(h OPERATOR(ext.->) 'a'::text)",
+		},
+		{
+			name:   "quoted text is untouched",
+			input:  "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(->)'",
+			schema: "public",
+			want:   "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(->)'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeOperatorSyntax(tt.input, tt.schema); got != tt.want {
+				t.Errorf("normalizeOperatorSyntax(%q, %q) = %q, want %q", tt.input, tt.schema, got, tt.want)
+			}
+		})
+	}
+
+	// The two entry points that see deparsed expressions apply it: generated
+	// expressions and index expressions go through StripSchemaPrefixFromBody,
+	// column defaults through normalizeDefaultValue (issue #697).
+	if got := StripSchemaPrefixFromBody("(h OPERATOR(public.->) 'a'::text)", "public"); got != "(h -> 'a'::text)" {
+		t.Errorf("StripSchemaPrefixFromBody left operator syntax: %q", got)
+	}
+	if got := normalizeDefaultValue(`('"a"=>"1"'::hstore OPERATOR(public.->) 'a')`, "public"); got != `('"a"=>"1"'::hstore -> 'a')` {
+		t.Errorf("normalizeDefaultValue left operator syntax: %q", got)
+	}
+}

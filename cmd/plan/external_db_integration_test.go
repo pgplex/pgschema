@@ -300,9 +300,20 @@ func TestExternalDatabase_ExtensionOperatorInPublicPlansClean(t *testing.T) {
 
 	targetConn, targetHost, targetPort, targetDatabase, targetUser, targetPassword := testutil.ConnectToPostgres(t, targetDB)
 	defer targetConn.Close()
+	// Every expression context that can carry an operator: column default and
+	// generated expression (deparsed under search_path = pg_catalog), CHECK
+	// constraint, index expression and predicate, view and materialized view.
+	// The quoted alias must survive untouched.
 	schemaSQL := `
-CREATE TABLE t (id integer PRIMARY KEY, h hstore);
-CREATE VIEW v AS SELECT id, h -> 'a' AS ha, h ? 'k' AS hk FROM t;
+CREATE TABLE t (
+    id integer PRIMARY KEY,
+    h hstore,
+    d text DEFAULT ('a=>1'::hstore -> 'a'),
+    g text GENERATED ALWAYS AS (h -> 'a') STORED,
+    CONSTRAINT c CHECK ((h ? 'k') OR h IS NULL)
+);
+CREATE INDEX i ON t ((h -> 'b')) WHERE (h ? 'b');
+CREATE VIEW v AS SELECT id, h -> 'a' AS ha, h ? 'k' AS hk, 1 AS "OPERATOR(public.->)" FROM t;
 CREATE MATERIALIZED VIEW mv AS SELECT id, h -> 'a' AS ha FROM t;
 `
 	_, err := targetConn.Exec("CREATE EXTENSION hstore;" + schemaSQL)

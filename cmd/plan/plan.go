@@ -865,21 +865,24 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 			return s
 		}
 
+		// Replace only outside single-quoted literals and double-quoted
+		// identifiers; a doubled quote inside either is an escape.
 		var result strings.Builder
 		result.Grow(len(s))
 		segmentStart := 0
 		for i := 0; i < len(s); i++ {
-			if s[i] != '\'' {
+			quote := s[i]
+			if quote != '\'' && quote != '"' {
 				continue
 			}
 
 			result.WriteString(replaceQualifiers(s[segmentStart:i]))
 			literalStart := i
 			for i++; i < len(s); i++ {
-				if s[i] != '\'' {
+				if s[i] != quote {
 					continue
 				}
-				if i+1 < len(s) && s[i+1] == '\'' {
+				if i+1 < len(s) && s[i+1] == quote {
 					i++
 					continue
 				}
