@@ -1277,6 +1277,41 @@ func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
 	return true
 }
 
+// referencesIncludeKeyAddedHere reports whether constraint is a foreign key on
+// this table that references a PRIMARY KEY or UNIQUE constraint with INCLUDE
+// columns this migration adds to the same table.
+func (td *tableDiff) referencesIncludeKeyAddedHere(constraint *ir.Constraint) bool {
+	if constraint.Type != ir.ConstraintTypeForeignKey || constraint.ReferencedTable != td.Table.Name {
+		return false
+	}
+	if constraint.ReferencedSchema != "" && constraint.ReferencedSchema != td.Table.Schema {
+		return false
+	}
+	referenced := make(map[string]bool, len(constraint.ReferencedColumns))
+	for _, column := range constraint.ReferencedColumns {
+		referenced[column.Name] = true
+	}
+	for _, key := range td.AddedConstraints {
+		if key.Type != ir.ConstraintTypePrimaryKey && key.Type != ir.ConstraintTypeUnique {
+			continue
+		}
+		if len(key.IncludeColumns) == 0 || len(key.Columns) != len(referenced) {
+			continue
+		}
+		matched := true
+		for _, column := range key.Columns {
+			if !referenced[column.Name] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 // constraintDroppedWithColumns reports whether dropping any column in droppedColumnSet
 // will implicitly remove the constraint. PostgreSQL drops dependent constraints as part
 // of ALTER TABLE ... DROP COLUMN, so emitting an explicit DROP CONSTRAINT would be redundant.
@@ -1287,6 +1322,11 @@ func constraintDroppedWithColumns(constraint *ir.Constraint, droppedColumnSet ma
 
 	for _, column := range constraint.Columns {
 		if droppedColumnSet[column.Name] {
+			return true
+		}
+	}
+	for _, column := range constraint.IncludeColumns {
+		if droppedColumnSet[column] {
 			return true
 		}
 	}
@@ -1516,6 +1556,16 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if deferredFKSet[constraintPathKey(constraint)] {
 				continue
 			}
+			// INCLUDE needs table-level syntax after all new columns exist.
+			if len(constraint.IncludeColumns) > 0 {
+				continue
+			}
+			// A self-referencing FK can only be inlined once its key exists; a
+			// key with INCLUDE columns is created at table level below, so emit
+			// the FK there too, after it.
+			if td.referencesIncludeKeyAddedHere(constraint) {
+				continue
+			}
 			// Only add inline for single-column constraints
 			if len(constraint.Columns) == 1 && constraint.Columns[0].Name == column.Name {
 				switch constraint.Type {
@@ -1650,8 +1700,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.NullsNotDistinct {
 				modifier = " NULLS NOT DISTINCT"
 			}
-			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s)%s;",
-				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "), deferrableClause(constraint))
+			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s)%s%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "), constraintIncludeClause(constraint), deferrableClause(constraint))
 
 			context := &diffContext{
 				Type:                DiffTypeTableConstraint,
@@ -1719,8 +1769,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
 			tableName := getTableNameWithSchema(td.Table.Schema, td.Table.Name, targetSchema)
-			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s)%s;",
-				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "), deferrableClause(constraint))
+			sql := fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s)%s%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "), constraintIncludeClause(constraint), deferrableClause(constraint))
 
 			context := &diffContext{
 				Type:                DiffTypeTableConstraint,
@@ -1797,8 +1847,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.NullsNotDistinct {
 				modifier = " NULLS NOT DISTINCT"
 			}
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s)%s;",
-				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "), deferrableClause(constraint))
+			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s UNIQUE%s (%s)%s%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), modifier, strings.Join(columnNames, ", "), constraintIncludeClause(constraint), deferrableClause(constraint))
 
 		case ir.ConstraintTypeCheck:
 			// Add CHECK constraint with ensured outer parentheses
@@ -1835,8 +1885,8 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			if constraint.IsTemporal && len(columnNames) > 0 {
 				columnNames[len(columnNames)-1] = columnNames[len(columnNames)-1] + " WITHOUT OVERLAPS"
 			}
-			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s)%s;",
-				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "), deferrableClause(constraint))
+			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s PRIMARY KEY (%s)%s%s;",
+				tableName, ir.QuoteIdentifier(constraint.Name), strings.Join(columnNames, ", "), constraintIncludeClause(constraint), deferrableClause(constraint))
 
 		case ir.ConstraintTypeExclusion:
 			addSQL = fmt.Sprintf("ALTER TABLE %s\nADD CONSTRAINT %s %s;",
