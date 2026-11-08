@@ -1,0 +1,67 @@
+Plan: 8 to add.
+
+Summary by type:
+  types: 2 to add
+  functions: 2 to add
+  procedures: 1 to add
+  tables: 3 to add
+
+Types:
+  + example_result
+  + payload
+
+Functions:
+  + check_payload
+  + collect_examples
+
+Procedures:
+  + consume_examples
+
+Tables:
+  + example
+  + holder
+  + text
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TYPE payload AS (value text);
+
+CREATE TABLE IF NOT EXISTS example (
+    id integer,
+    CONSTRAINT example_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS text (
+    id integer
+);
+
+CREATE OR REPLACE FUNCTION check_payload(
+    p payload
+)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT p.value IS NOT NULL
+$$;
+
+CREATE TABLE IF NOT EXISTS holder (
+    p payload,
+    CONSTRAINT holder_p_check CHECK (check_payload(p))
+);
+
+CREATE TYPE example_result AS (rows example[]);
+
+CREATE OR REPLACE FUNCTION collect_examples()
+RETURNS example_result
+LANGUAGE sql
+STABLE
+AS $$ SELECT ARRAY(SELECT e FROM example e)
+$$;
+
+CREATE OR REPLACE PROCEDURE consume_examples(
+    IN r example_result
+)
+LANGUAGE plpgsql
+AS $$ BEGIN NULL; END 
+$$;

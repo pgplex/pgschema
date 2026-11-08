@@ -2438,8 +2438,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// 2. Domains with function deps ONLY (no table dep), and range types whose
 	//    subtype_diff is a new function — created after functions but before
 	//    tables, so tables that use the type as a column type work.
-	// 3. Domains with table deps (with or without function deps) — created after
-	//    ALL tables, because the domain's base type is a table's implicit row type.
+	// 3. Domains and composites with table deps (with or without function deps)
+	//    — created after ALL tables, because the domain's base type or a
+	//    composite attribute is a table's implicit row type.
 	typesWithoutDeps := []*ir.Type{}
 	typesWithFunctionDepsOnly := []*ir.Type{}
 	domainsWithTableDeps := []*ir.Type{}
@@ -2476,11 +2477,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	})
 
 	for _, typeObj := range candidateTypes {
-		if typeObj.Kind != ir.TypeKindDomain && typeObj.Kind != ir.TypeKindRange {
+		if typeObj.Kind == ir.TypeKindEnum {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 			continue
 		}
-		hasTableDep := domainReferencesNewTable(typeObj, newTableNameLookup)
+		hasTableDep := typeReferencesNewTable(typeObj, newTableNameLookup)
 		hasFunctionDep := typeReferencesNewFunction(typeObj, newFunctionLookup)
 		if hasTableDep {
 			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
@@ -2808,6 +2809,27 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// A procedure whose body may depend on a postponed key (issue #653) waits
 	// for the batch in which that hierarchy completes, like a function.
 	proceduresNow, proceduresAfterSecondBatch, proceduresAfterThirdBatch := holdBackKeyDependentProcedures(d.partitionIndexes, batches, d.addedTables, d.addedProcedures)
+	// A procedure whose parameter is a type created after all tables (a
+	// domain or composite over a table's row type, issue #626) waits for the
+	// last batch as well.
+	if len(tableDomainLookup) > 0 {
+		var now, second []*ir.Procedure
+		for _, proc := range proceduresNow {
+			if procedureSignatureReferencesRelation(proc, tableDomainLookup) {
+				proceduresAfterThirdBatch = append(proceduresAfterThirdBatch, proc)
+			} else {
+				now = append(now, proc)
+			}
+		}
+		for _, proc := range proceduresAfterSecondBatch {
+			if procedureSignatureReferencesRelation(proc, tableDomainLookup) {
+				proceduresAfterThirdBatch = append(proceduresAfterThirdBatch, proc)
+			} else {
+				second = append(second, proc)
+			}
+		}
+		proceduresNow, proceduresAfterSecondBatch = now, second
+	}
 	generateCreateProceduresSQL(proceduresNow, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
@@ -4615,15 +4637,48 @@ func tableUsesDeferredDomain(table *ir.Table, deferredDomains map[string]struct{
 	return false
 }
 
-// domainReferencesNewTable determines if a domain's base type is a composite row type
-// implicitly created by a new table. Tables create an implicit composite type with the
-// same name, so CREATE DOMAIN y AS x requires CREATE TABLE x to exist first.
-func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) bool {
-	if len(newTables) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
+// typeReferencesNewTable determines if a type is built on the composite row
+// type implicitly created by a new table. Tables create an implicit composite
+// type with the same name, so CREATE DOMAIN y AS x and CREATE TYPE r AS (xs x[])
+// both require CREATE TABLE x to exist first (issues #535 and #626).
+func typeReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) bool {
+	if len(newTables) == 0 || typeObj == nil {
 		return false
 	}
-	baseName := extractBaseTypeName(typeObj.BaseType)
-	return typeMatchesLookup(baseName, typeObj.Schema, newTables)
+	// The inspector renders a pg_catalog type unqualified and any other type
+	// schema-qualified, so an unqualified name is a built-in, never a table's
+	// row type, even when a new table shares its name (e.g. a table "text").
+	isNewTableRowType := func(dataType string) bool {
+		name := extractBaseTypeName(dataType)
+		return strings.Contains(name, ".") && typeMatchesLookup(name, typeObj.Schema, newTables)
+	}
+	switch typeObj.Kind {
+	case ir.TypeKindDomain:
+		return isNewTableRowType(typeObj.BaseType)
+	case ir.TypeKindComposite:
+		for _, attr := range typeObj.Columns {
+			if isNewTableRowType(attr.DataType) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// procedureSignatureReferencesRelation reports whether a parameter of the
+// procedure is typed on one of the given relations (or types deferred with
+// them). A procedure's parameter types are resolved at creation, so one
+// taking a type created in a later batch must wait for that batch.
+func procedureSignatureReferencesRelation(proc *ir.Procedure, relations map[string]struct{}) bool {
+	if len(relations) == 0 || proc == nil {
+		return false
+	}
+	for _, param := range proc.Parameters {
+		if param.DataType != "" && typeMatchesLookup(extractBaseTypeName(param.DataType), proc.Schema, relations) {
+			return true
+		}
+	}
+	return false
 }
 
 // holdBackFunctionsOfDroppedTypes splits the dropped functions into those that

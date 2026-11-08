@@ -1,0 +1,62 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "965b1131737c955e24c7f827c55bd78e4cb49a75adfd04229e0ba297376f5085"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TYPE payload AS (value text);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.payload"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS example (\n    id integer,\n    CONSTRAINT example_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.example"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS text (\n    id integer\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.text"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION check_payload(\n    p payload\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT p.value IS NOT NULL\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.check_payload"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS holder (\n    p payload,\n    CONSTRAINT holder_p_check CHECK (check_payload(p))\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.holder"
+        },
+        {
+          "sql": "CREATE TYPE example_result AS (rows example[]);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.example_result"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION collect_examples()\nRETURNS example_result\nLANGUAGE sql\nSTABLE\nAS $$ SELECT ARRAY(SELECT e FROM example e)\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.collect_examples"
+        },
+        {
+          "sql": "CREATE OR REPLACE PROCEDURE consume_examples(\n    IN r example_result\n)\nLANGUAGE plpgsql\nAS $$ BEGIN NULL; END \n$$;",
+          "type": "procedure",
+          "operation": "create",
+          "path": "public.consume_examples"
+        }
+      ]
+    }
+  ]
+}
