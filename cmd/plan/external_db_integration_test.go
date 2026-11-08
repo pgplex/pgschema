@@ -282,3 +282,50 @@ func TestExternalDatabase_SchemaIsolation(t *testing.T) {
 	schema2 := extDB2.GetSchemaName()
 	assert.NotEqual(t, schema1, schema2, "temporary schemas should have unique names")
 }
+
+// TestExternalDatabase_ExtensionOperatorInPublicPlansClean reproduces issue #697:
+// a view in the public schema that uses an operator owned by an extension
+// installed in public (hstore's ->) must plan as a no-op against the database
+// it was dumped from when the desired state is built on an external plan
+// database.
+func TestExternalDatabase_ExtensionOperatorInPublicPlansClean(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	targetDB := testutil.SetupPostgres(t)
+	defer targetDB.Stop()
+	planDB := testutil.SetupPostgres(t)
+	defer planDB.Stop()
+
+	targetConn, targetHost, targetPort, targetDatabase, targetUser, targetPassword := testutil.ConnectToPostgres(t, targetDB)
+	defer targetConn.Close()
+	schemaSQL := `
+CREATE TABLE t (id integer PRIMARY KEY, h hstore);
+CREATE VIEW v AS SELECT id, h -> 'a' AS ha, h ? 'k' AS hk FROM t;
+CREATE MATERIALIZED VIEW mv AS SELECT id, h -> 'a' AS ha FROM t;
+`
+	_, err := targetConn.Exec("CREATE EXTENSION hstore;" + schemaSQL)
+	require.NoError(t, err)
+
+	planConn, planHost, planPort, planDatabase, planUser, planPassword := testutil.ConnectToPostgres(t, planDB)
+	defer planConn.Close()
+	_, err = planConn.Exec("CREATE EXTENSION hstore")
+	require.NoError(t, err)
+
+	file := filepath.Join(t.TempDir(), "schema.sql")
+	require.NoError(t, os.WriteFile(file, []byte(schemaSQL), 0644))
+
+	config := &PlanConfig{
+		Host: targetHost, Port: targetPort, DB: targetDatabase, User: targetUser, Password: targetPassword,
+		Schema: "public", File: file, ApplicationName: "pgschema-test",
+		PlanDBHost: planHost, PlanDBPort: planPort, PlanDBDatabase: planDatabase, PlanDBUser: planUser, PlanDBPassword: planPassword,
+	}
+	provider, err := CreateDesiredStateProvider(config)
+	require.NoError(t, err)
+	defer provider.Stop()
+
+	p, err := GeneratePlan(config, provider)
+	require.NoError(t, err)
+	require.False(t, p.HasAnyChanges(), "view using an extension operator must not be re-planned, got:\n%s", p.HumanColored(false))
+}

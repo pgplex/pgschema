@@ -324,3 +324,45 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 		t.Fatalf("Incorrect partition-table metadata normalization: %+v", children)
 	}
 }
+
+func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
+	// With an external plan database and target schema public, the plan side
+	// deparses extension operators living in public as OPERATOR(public.->),
+	// while the target side (inspected with public on its search_path) prints
+	// the bare operator. The same-schema qualifier must be stripped so the two
+	// definitions agree (issue #697).
+	const tempSchema = "pgschema_tmp_20260326_123456_abcd1234"
+	irData := &ir.IR{
+		Schemas: map[string]*ir.Schema{
+			tempSchema: {
+				Name: tempSchema,
+				Views: map[string]*ir.View{
+					"v": {
+						Schema: tempSchema,
+						Name:   "v",
+						Definition: " SELECT id,\n" +
+							"    h OPERATOR(public.->) 'a'::text AS ha,\n" +
+							"    h OPERATOR(public.?) 'k'::text AS hk,\n" +
+							"    t OPERATOR(public.@>) 'x'::public.ltree AS anc,\n" +
+							"    'OPERATOR(public.->)'::text AS literal,\n" +
+							"    j -> 'a'::text AS ja\n" +
+							"   FROM t",
+					},
+				},
+			},
+		},
+	}
+
+	normalizeSchemaNames(irData, tempSchema, "public")
+
+	expected := " SELECT id,\n" +
+		"    h -> 'a'::text AS ha,\n" +
+		"    h ? 'k'::text AS hk,\n" +
+		"    t @> 'x'::ltree AS anc,\n" +
+		"    'OPERATOR(public.->)'::text AS literal,\n" +
+		"    j -> 'a'::text AS ja\n" +
+		"   FROM t"
+	if got := irData.Schemas["public"].Views["v"].Definition; got != expected {
+		t.Fatalf("expected operator qualifiers stripped:\n%s\ngot:\n%s", expected, got)
+	}
+}

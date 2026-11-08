@@ -848,8 +848,16 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 	prefix := schema + "."
 	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
 	typePattern := regexp.MustCompile(`::` + regexp.QuoteMeta(prefix))
+	// OPERATOR(schema.op): ruleutils qualifies an operator whenever its schema
+	// is not on the deparsing session's search_path. The plan database is
+	// inspected with only the temporary schema on the path, so an operator in
+	// the target schema (e.g. hstore's -> installed in public) comes out as
+	// OPERATOR(public.->) while the target side prints the bare operator.
+	// Operator names use only the characters PostgreSQL allows (issue #697).
+	operatorPattern := regexp.MustCompile(`OPERATOR\(` + regexp.QuoteMeta(prefix) + `([-+*/<>=~!@#%^&|` + "`" + `?]+)\)`)
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
+		s = operatorPattern.ReplaceAllString(s, `${1}`)
 		return typePattern.ReplaceAllString(s, "::")
 	}
 	return func(s string) string {
