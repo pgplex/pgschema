@@ -247,13 +247,35 @@ func normalizeDefaultValue(value string, tableSchema string, shadowed map[string
 	// Normalize function calls - remove schema qualifiers for functions in the same schema
 	// This matches PostgreSQL's pg_get_expr() behavior which strips same-schema qualifiers
 	// Example: public.get_status() -> get_status() (when tableSchema is "public")
+	//          public."MyFunc"()   -> "MyFunc"()    (quoted names too, like every other
+	//                                                expression context, issue #697)
 	//          other_schema.get_status() -> other_schema.get_status() (preserved)
 	if tableSchema != "" && strings.Contains(value, tableSchema+".") {
-		// Pattern: schema.function_name(
-		// Replace "tableSchema." with "" when followed by identifier and (
+		// Pattern: schema.function_name( or schema."Function Name"(
+		// Replace "tableSchema." with "" when followed by an identifier and (
 		prefix := tableSchema + "."
-		pattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)\(`)
-		value = pattern.ReplaceAllString(value, `${1}(`)
+		pattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*|"(?:[^"]|"")+")\(`)
+		segments := splitQuotedSegments(value)
+		for i, segment := range segments {
+			// A quoted function name is a segment of its own; join it with the
+			// preceding unquoted text so the pattern sees schema."Name"(.
+			if segment == "" || segment[0] == '\'' {
+				continue
+			}
+			if segment[0] == '"' {
+				if i == 0 || !strings.HasSuffix(segments[i-1], prefix) {
+					continue
+				}
+				segments[i-1] = strings.TrimSuffix(segments[i-1], prefix)
+				if i+1 < len(segments) && strings.HasPrefix(segments[i+1], "(") {
+					continue
+				}
+				segments[i-1] += prefix
+				continue
+			}
+			segments[i] = pattern.ReplaceAllString(segment, `${1}(`)
+		}
+		value = strings.Join(segments, "")
 	}
 
 	// Handle type casting - remove explicit type casts that are semantically equivalent

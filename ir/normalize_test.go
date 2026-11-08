@@ -866,3 +866,19 @@ func TestNormalizeOperatorSyntax(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeDefaultValueStripsQuotedFunctionQualifier(t *testing.T) {
+	// Defaults strip the same-schema qualifier from quoted function names the
+	// way view, index and generated expressions already do (issue #697).
+	for input, want := range map[string]string{
+		`public."MyFunc"()`:         `"MyFunc"()`,
+		`public."My ""Func"""(1)`:   `"My ""Func"""(1)`,
+		`other."MyFunc"()`:          `other."MyFunc"()`,
+		`public.get_status()`:       `get_status()`,
+		`'public."MyFunc"()'::text`: `'public."MyFunc"()'`,
+	} {
+		if got := normalizeDefaultValue(input, "public", nil); got != want {
+			t.Errorf("normalizeDefaultValue(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
