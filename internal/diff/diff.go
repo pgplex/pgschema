@@ -1699,17 +1699,6 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// NOT included: Modified defaults - the modification runs AFTER table creation, so the OLD
 	// version is what's active when the table is created. The old defaults are already included.
 	// See https://github.com/pgplex/pgschema/pull/257#pullrequestreview-3706696119
-	//
-	// A default privilege only fires for objects created by its FOR ROLE owner. apply creates
-	// objects as the role it connects with (oldIR.Metadata.CurrentRole), so defaults declared
-	// FOR ROLE some_other_role never auto-grant on the tables this migration creates: their
-	// explicit GRANTs must be emitted and nothing must be revoked for them. When the base IR
-	// did not come from a database (dump), no default is treated as active, matching pg_dump,
-	// which always emits the explicit grants alongside the defaults (issue #696).
-	applyRole := oldIR.Metadata.CurrentRole
-	firesForApplyRole := func(dp *ir.DefaultPrivilege) bool {
-		return applyRole != "" && dp.OwnerRole == applyRole
-	}
 
 	// Build a set of dropped default privilege keys for exclusion
 	droppedDefaultPrivKeys := make(map[string]bool)
@@ -1722,33 +1711,21 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	for _, dbSchema := range oldIR.Schemas {
 		for _, dp := range dbSchema.DefaultPrivileges {
 			key := dp.OwnerRole + ":" + string(dp.ObjectType) + ":" + dp.Grantee
-			if !droppedDefaultPrivKeys[key] && firesForApplyRole(dp) {
+			if !droppedDefaultPrivKeys[key] {
 				activeDefaultPrivileges = append(activeDefaultPrivileges, dp)
 			}
 		}
 	}
-	for _, dp := range diff.addedDefaultPrivileges {
-		if firesForApplyRole(dp) {
-			activeDefaultPrivileges = append(activeDefaultPrivileges, dp)
-		}
-	}
+	activeDefaultPrivileges = append(activeDefaultPrivileges, diff.addedDefaultPrivileges...)
 
-	// Build a set of new table names for quick lookup
-	newTableNames := make(map[string]bool)
-	for _, t := range diff.addedTables {
-		newTableNames[t.Name] = true
-	}
-
-	// Find added privileges (in new but not matched)
-	// Skip privileges on new tables that are covered by ACTIVE default privileges
-	// (defaults that will be in effect when the table is created)
+	// Find added privileges (in new but not matched). Every one of them is emitted, including
+	// those on new tables that an active default privilege would also grant: a default fires
+	// only for objects created by its FOR ROLE owner, and the role that will run this plan is
+	// not known here (apply may run as a different role than plan, and a dump has no apply role
+	// at all). Relying on the default to grant them silently lost the privilege whenever the
+	// roles differed, while the explicit GRANT is a no-op when the default did fire (issue #696).
 	for fullKey, p := range newPrivs {
 		if !matchedNew[fullKey] {
-			// If this privilege is on a new table and covered by active default privileges, skip it
-			// The default privileges will auto-grant when the table is created
-			if newTableNames[p.ObjectName] && isPrivilegeCoveredByDefaultPrivileges(p, activeDefaultPrivileges) {
-				continue
-			}
 			diff.addedPrivileges = append(diff.addedPrivileges, p)
 		}
 	}
@@ -1768,7 +1745,9 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// but should be explicitly revoked because the user didn't include them in the new state.
 	// These must be processed AFTER the tables are created, not in the drop phase.
 	// Use activeDefaultPrivileges because that's what will be granted when the table is created.
-	// See https://github.com/pgplex/pgschema/issues/253
+	// Computed for every active default regardless of its FOR ROLE owner: the REVOKE is a no-op
+	// when the default did not fire for the applying role, and withholds the access when it did,
+	// so a plan or dump stays correct under whichever role runs it (issues #253, #696).
 	diff.revokedDefaultGrantsOnNewTables = computeRevokedDefaultGrants(diff.addedTables, newPrivs, activeDefaultPrivileges)
 
 	// Sort privileges for deterministic output

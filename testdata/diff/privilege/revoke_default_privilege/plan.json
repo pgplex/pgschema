@@ -31,6 +31,24 @@
           "type": "privilege",
           "operation": "drop",
           "path": "privileges.TABLE.secrets.reader"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE readonly_data TO app_user;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TABLE.readonly_data.app_user"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE readonly_data TO reader;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TABLE.readonly_data.reader"
+        },
+        {
+          "sql": "GRANT DELETE, INSERT, SELECT, UPDATE ON TABLE secrets TO app_user;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TABLE.secrets.app_user"
         }
       ]
     }

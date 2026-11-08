@@ -21,6 +21,12 @@
           "path": "public.audit_log"
         },
         {
+          "sql": "REVOKE SELECT ON TABLE audit_log FROM app_reader;",
+          "type": "privilege",
+          "operation": "drop",
+          "path": "privileges.TABLE.audit_log.app_reader"
+        },
+        {
           "sql": "GRANT SELECT ON TABLE accounts TO app_reader;",
           "type": "privilege",
           "operation": "create",

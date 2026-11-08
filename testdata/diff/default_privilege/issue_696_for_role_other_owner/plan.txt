@@ -1,8 +1,8 @@
-Plan: 3 to add.
+Plan: 3 to add, 1 to drop.
 
 Summary by type:
   tables: 2 to add
-  privileges: 1 to add
+  privileges: 1 to add, 1 to drop
 
 Tables:
   + accounts
@@ -10,6 +10,7 @@ Tables:
 
 Privileges:
   + app_reader
+  - app_reader
 
 DDL to be executed:
 --------------------------------------------------
@@ -25,5 +26,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     message text,
     CONSTRAINT audit_log_pkey PRIMARY KEY (id)
 );
+
+REVOKE SELECT ON TABLE audit_log FROM app_reader;
 
 GRANT SELECT ON TABLE accounts TO app_reader;

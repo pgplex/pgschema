@@ -1,10 +1,12 @@
 -- https://github.com/pgplex/pgschema/issues/696
 --
--- Same default privileges FOR ROLE app_owner, plus two new tables created by
--- the connecting role (not app_owner):
---   - accounts carries an explicit GRANT that must be emitted, because the
---     FOR ROLE app_owner default will not auto-grant it.
---   - audit_log has no grant, and no REVOKE must be emitted for it either.
+-- Same default privileges FOR ROLE app_owner, plus two new tables:
+--   - accounts carries an explicit GRANT that must be emitted: the plan cannot
+--     know whether apply will run as app_owner, and for any other role the
+--     default never auto-grants it.
+--   - audit_log has no grant. The conservative REVOKE for it is still emitted:
+--     a no-op when apply runs as another role, and the only thing that
+--     withholds app_reader's access when apply runs as app_owner.
 
 DO $$
 BEGIN

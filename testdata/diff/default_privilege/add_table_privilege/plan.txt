@@ -1,8 +1,9 @@
-Plan: 3 to add.
+Plan: 5 to add.
 
 Summary by type:
   default privileges: 2 to add
   tables: 1 to add
+  privileges: 2 to add
 
 Default privileges:
   + PUBLIC
@@ -10,6 +11,10 @@ Default privileges:
 
 Tables:
   + users
+
+Privileges:
+  + PUBLIC
+  + app_user
 
 DDL to be executed:
 --------------------------------------------------
@@ -23,3 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
     name text NOT NULL,
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );
+
+GRANT SELECT ON TABLE users TO PUBLIC;
+
+GRANT INSERT, UPDATE ON TABLE users TO app_user;
