@@ -17,10 +17,12 @@ type IR struct {
 type Metadata struct {
 	DatabaseVersion string `json:"database_version"`
 	// ShadowedOperators lists the operator names in the inspected and managed
-	// schemas that duplicate a pg_catalog operator's name and operand types.
-	// pg_catalog is searched first, so an unqualified reference to such a name
-	// resolves to the catalog operator; ruleutils always deparses these as
-	// OPERATOR(schema.op) and normalization keeps that form (issue #697).
+	// schemas whose every overload duplicates a pg_catalog operator's name and
+	// operand types. pg_catalog is searched first, so an unqualified reference
+	// to such a name resolves to the catalog operator; ruleutils always
+	// deparses these as OPERATOR(schema.op) and normalization keeps that form
+	// (issue #697). See Inspector.buildShadowedOperators for why this is
+	// decided per name rather than per overload.
 	ShadowedOperators []string `json:"shadowed_operators,omitempty"`
 }
 

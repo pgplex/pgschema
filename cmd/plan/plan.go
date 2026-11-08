@@ -680,6 +680,11 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			}
 			for _, param := range fn.Parameters {
 				param.DataType = replaceString(param.DataType)
+				// Parameter defaults are deparsed like column defaults and
+				// compared verbatim; normalize them the same way (#697).
+				if param.DefaultValue != nil {
+					*param.DefaultValue = stripQualifiers(replaceString(*param.DefaultValue))
+				}
 			}
 			// Normalize function dependencies for topological sorting
 			for i := range fn.Dependencies {
@@ -696,6 +701,9 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			proc.Definition = replaceString(proc.Definition)
 			for _, param := range proc.Parameters {
 				param.DataType = replaceString(param.DataType)
+				if param.DefaultValue != nil {
+					*param.DefaultValue = stripQualifiers(replaceString(*param.DefaultValue))
+				}
 			}
 		}
 

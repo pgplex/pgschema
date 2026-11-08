@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/postgres"
 	"github.com/pgplex/pgschema/testutil"
 	"github.com/stretchr/testify/assert"
@@ -300,10 +301,26 @@ func TestExternalDatabase_ExtensionOperatorInPublicPlansClean(t *testing.T) {
 
 	targetConn, targetHost, targetPort, targetDatabase, targetUser, targetPassword := testutil.ConnectToPostgres(t, targetDB)
 	defer targetConn.Close()
+	// Operators pgschema does not manage, present on both databases:
+	//   - public.+(integer, integer) duplicates pg_catalog's and is reachable
+	//     only qualified: a fully shadowed name, kept as OPERATOR(public.+).
+	//   - public.->(jsonb, text) duplicates pg_catalog's too, but hstore's
+	//     ->(hstore, text) shares the name and is not shadowed, so the name
+	//     is not exempted and the hstore views below must still plan clean.
+	// The operator functions live outside the managed schema so the plan
+	// does not see them as unmanaged objects to drop.
+	setupSQL := `
+CREATE EXTENSION hstore;
+CREATE SCHEMA ops;
+CREATE FUNCTION ops.int_add(integer, integer) RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT $1 + $2';
+CREATE OPERATOR public.+ (LEFTARG = integer, RIGHTARG = integer, FUNCTION = ops.int_add);
+CREATE FUNCTION ops.jsonb_arrow(jsonb, text) RETURNS jsonb LANGUAGE sql IMMUTABLE AS 'SELECT $1 -> $2';
+CREATE OPERATOR public.-> (LEFTARG = jsonb, RIGHTARG = text, FUNCTION = ops.jsonb_arrow);
+`
 	// Every expression context that can carry an operator: column default and
 	// generated expression (deparsed under search_path = pg_catalog), CHECK
-	// constraint, index expression and predicate, view and materialized view.
-	// The quoted alias must survive untouched.
+	// constraint, index expression and predicate, routine parameter default,
+	// view and materialized view. The quoted alias must survive untouched.
 	schemaSQL := `
 CREATE TABLE t (
     id integer PRIMARY KEY,
@@ -313,16 +330,21 @@ CREATE TABLE t (
     CONSTRAINT c CHECK ((h ? 'k') OR h IS NULL)
 );
 CREATE INDEX i ON t ((h -> 'b')) WHERE (h ? 'b');
+CREATE FUNCTION pick(x text DEFAULT ('a=>1'::hstore -> 'a')) RETURNS text LANGUAGE sql AS 'SELECT x';
 CREATE VIEW v AS SELECT id, h -> 'a' AS ha, h ? 'k' AS hk, 1 AS "OPERATOR(public.->)" FROM t;
 CREATE MATERIALIZED VIEW mv AS SELECT id, h -> 'a' AS ha FROM t;
 `
-	_, err := targetConn.Exec("CREATE EXTENSION hstore;" + schemaSQL)
+	_, err := targetConn.Exec(setupSQL + schemaSQL)
 	require.NoError(t, err)
 
 	planConn, planHost, planPort, planDatabase, planUser, planPassword := testutil.ConnectToPostgres(t, planDB)
 	defer planConn.Close()
-	_, err = planConn.Exec("CREATE EXTENSION hstore")
+	_, err = planConn.Exec(setupSQL)
 	require.NoError(t, err)
+
+	targetIR, err := util.GetIRFromDatabase(targetHost, targetPort, targetDatabase, targetUser, targetPassword, "disable", "public", "pgschema-test", nil, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{"+"}, targetIR.Metadata.ShadowedOperators, "only a name whose every overload is shadowed is exempted")
 
 	file := filepath.Join(t.TempDir(), "schema.sql")
 	require.NoError(t, os.WriteFile(file, []byte(schemaSQL), 0644))
