@@ -806,6 +806,11 @@ func TestNormalizeOperatorSyntax(t *testing.T) {
 			want:  "(h OPERATOR(ext.->) 'a'::text)",
 		},
 		{
+			name:  "unterminated or non-operator OPERATOR( text is copied through",
+			input: "OPERATOR(public.foo) OPERATOR(public.->",
+			want:  "OPERATOR(public.foo) OPERATOR(public.->",
+		},
+		{
 			name:  "quoted text is untouched",
 			input: "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(public.->)'",
 			want:  "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(public.->)'",
@@ -817,6 +822,13 @@ func TestNormalizeOperatorSyntax(t *testing.T) {
 				t.Errorf("normalizeOperatorSyntax(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+
+	// The schema is also recognized in quote_ident form, as the deparsers
+	// render a schema that needs quoting, while a quoted identifier that merely
+	// looks like the construct is copied through.
+	if got := normalizeOperatorSyntax(`(h OPERATOR("My Schema".->) 'a'::text) AS "OPERATOR(""My Schema"".->)"`, "My Schema", nil); got != `(h -> 'a'::text) AS "OPERATOR(""My Schema"".->)"` {
+		t.Errorf("normalizeOperatorSyntax with quoted schema = %q", got)
 	}
 
 	// Deparsed expressions (generated expressions, index expressions, views)

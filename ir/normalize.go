@@ -503,8 +503,8 @@ func normalizeDeparsedExpression(expr, schema string, shadowed map[string]bool) 
 	return normalizeOperatorSyntax(StripSchemaPrefixFromBody(expr, schema), schema, shadowed)
 }
 
-// operatorNameChars are the characters PostgreSQL allows in an operator name.
-const operatorNameChars = "-+*/<>=~!@#%^&|`?"
+// OperatorNameChars are the characters PostgreSQL allows in an operator name.
+const OperatorNameChars = "-+*/<>=~!@#%^&|`?"
 
 // normalizeOperatorSyntax rewrites OPERATOR(schema.op) to the bare op when
 // schema is the object's own schema, unless op is a shadowed name.
@@ -521,26 +521,77 @@ const operatorNameChars = "-+*/<>=~!@#%^&|`?"
 // A shadowed operator (same name and operand types as a pg_catalog operator,
 // see Metadata.ShadowedOperators) is the one case where the bare name would
 // resolve differently, so its qualifier is kept. Operators in other schemas
-// keep their qualifier, and quoted text is left untouched.
+// keep their qualifier. The schema is recognized in bare and quote_ident form
+// ("My Schema".op); single-quoted literals and double-quoted identifiers are
+// copied through untouched.
 func normalizeOperatorSyntax(expr, schema string, shadowed map[string]bool) string {
-	if schema == "" || !strings.Contains(expr, "OPERATOR("+schema+".") {
+	const keyword = "OPERATOR("
+	if schema == "" || !strings.Contains(expr, keyword) {
 		return expr
 	}
-	pattern := regexp.MustCompile(`OPERATOR\(` + regexp.QuoteMeta(schema) + `\.([` + regexp.QuoteMeta(operatorNameChars) + `]+)\)`)
-	segments := splitQuotedSegments(expr)
-	for i, segment := range segments {
-		if segment == "" || segment[0] == '\'' || segment[0] == '"' {
+	bare := schema + "."
+	quoted := QuoteIdentifier(schema) + "."
+
+	var out strings.Builder
+	out.Grow(len(expr))
+	for i := 0; i < len(expr); {
+		c := expr[i]
+		if c == '\'' || c == '"' {
+			end := closingQuote(expr, i)
+			out.WriteString(expr[i:end])
+			i = end
 			continue
 		}
-		segments[i] = pattern.ReplaceAllStringFunc(segment, func(match string) string {
-			name := pattern.FindStringSubmatch(match)[1]
-			if shadowed[name] {
-				return match
+		if c == 'O' && strings.HasPrefix(expr[i:], keyword) && (i == 0 || !isIdentChar(expr[i-1])) {
+			rest := expr[i+len(keyword):]
+			prefixLen := 0
+			if strings.HasPrefix(rest, bare) {
+				prefixLen = len(bare)
+			} else if strings.HasPrefix(rest, quoted) {
+				prefixLen = len(quoted)
 			}
-			return name
-		})
+			if prefixLen > 0 {
+				nameEnd := prefixLen
+				for nameEnd < len(rest) && strings.IndexByte(OperatorNameChars, rest[nameEnd]) >= 0 {
+					nameEnd++
+				}
+				if nameEnd > prefixLen && nameEnd < len(rest) && rest[nameEnd] == ')' {
+					name := rest[prefixLen:nameEnd]
+					if shadowed[name] {
+						out.WriteString(expr[i : i+len(keyword)+nameEnd+1])
+					} else {
+						out.WriteString(name)
+					}
+					i += len(keyword) + nameEnd + 1
+					continue
+				}
+			}
+			out.WriteString(keyword)
+			i += len(keyword)
+			continue
+		}
+		out.WriteByte(c)
+		i++
 	}
-	return strings.Join(segments, "")
+	return out.String()
+}
+
+// closingQuote returns the index just past the quoted literal or identifier
+// that starts at expr[start], treating a doubled quote as an escape. An
+// unterminated quote runs to the end of expr.
+func closingQuote(expr string, start int) int {
+	q := expr[start]
+	for j := start + 1; j < len(expr); j++ {
+		if expr[j] != q {
+			continue
+		}
+		if j+1 < len(expr) && expr[j+1] == q {
+			j++
+			continue
+		}
+		return j + 1
+	}
+	return len(expr)
 }
 
 // stripSchemaPrefixOccurrences removes every occurrence of prefix ("schema."
@@ -606,7 +657,7 @@ func stripSchemaPrefixOccurrences(body, prefix string) string {
 		// dropping just the schema there would leave OPERATOR(op), which
 		// PostgreSQL never emits and which resolves differently for a
 		// shadowed operator.
-		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix && !strings.HasSuffix(body[:i], "OPERATOR(") {
+		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix && !(i >= len("OPERATOR(") && body[i-len("OPERATOR("):i] == "OPERATOR(") {
 			// Ensure this is a schema qualifier, not part of a longer identifier
 			// (e.g., "not_public.users" should not match)
 			if i == 0 || !isIdentChar(body[i-1]) {

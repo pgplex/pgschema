@@ -870,11 +870,13 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 	// the target schema (e.g. hstore's -> installed in public) comes out as
 	// OPERATOR(public.->) while the target side prints the bare operator.
 	// Operator names use only the characters PostgreSQL allows (issue #697).
-	operatorPattern := regexp.MustCompile(`OPERATOR\(` + regexp.QuoteMeta(prefix) + `([-+*/<>=~!@#%^&|` + "`" + `?]+)\)`)
+	operatorPrefix := "OPERATOR(" + prefix
+	operatorPattern := regexp.MustCompile(regexp.QuoteMeta(operatorPrefix) + `[` + regexp.QuoteMeta(ir.OperatorNameChars) + `]+\)`)
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
 		s = operatorPattern.ReplaceAllStringFunc(s, func(match string) string {
-			name := operatorPattern.FindStringSubmatch(match)[1]
+			// match is operatorPrefix + name + ")"
+			name := match[len(operatorPrefix) : len(match)-1]
 			if shadowedOperators[name] {
 				return match
 			}
