@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.1",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "f7c87f07347e04a0f7efa5950a8e207727b7fdf7c481fe22328c43a8021ec994"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS accounts (\n    id integer,\n    name text NOT NULL,\n    CONSTRAINT accounts_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.accounts"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS audit_log (\n    id integer,\n    message text,\n    CONSTRAINT audit_log_pkey PRIMARY KEY (id)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.audit_log"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE accounts TO app_reader;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TABLE.accounts.app_reader"
+        }
+      ]
+    }
+  ]
+}

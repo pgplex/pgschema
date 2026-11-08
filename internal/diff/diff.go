@@ -1699,6 +1699,17 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	// NOT included: Modified defaults - the modification runs AFTER table creation, so the OLD
 	// version is what's active when the table is created. The old defaults are already included.
 	// See https://github.com/pgplex/pgschema/pull/257#pullrequestreview-3706696119
+	//
+	// A default privilege only fires for objects created by its FOR ROLE owner. apply creates
+	// objects as the role it connects with (oldIR.Metadata.CurrentRole), so defaults declared
+	// FOR ROLE some_other_role never auto-grant on the tables this migration creates: their
+	// explicit GRANTs must be emitted and nothing must be revoked for them. When the base IR
+	// did not come from a database (dump), no default is treated as active, matching pg_dump,
+	// which always emits the explicit grants alongside the defaults (issue #696).
+	applyRole := oldIR.Metadata.CurrentRole
+	firesForApplyRole := func(dp *ir.DefaultPrivilege) bool {
+		return applyRole != "" && dp.OwnerRole == applyRole
+	}
 
 	// Build a set of dropped default privilege keys for exclusion
 	droppedDefaultPrivKeys := make(map[string]bool)
@@ -1711,12 +1722,16 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 	for _, dbSchema := range oldIR.Schemas {
 		for _, dp := range dbSchema.DefaultPrivileges {
 			key := dp.OwnerRole + ":" + string(dp.ObjectType) + ":" + dp.Grantee
-			if !droppedDefaultPrivKeys[key] {
+			if !droppedDefaultPrivKeys[key] && firesForApplyRole(dp) {
 				activeDefaultPrivileges = append(activeDefaultPrivileges, dp)
 			}
 		}
 	}
-	activeDefaultPrivileges = append(activeDefaultPrivileges, diff.addedDefaultPrivileges...)
+	for _, dp := range diff.addedDefaultPrivileges {
+		if firesForApplyRole(dp) {
+			activeDefaultPrivileges = append(activeDefaultPrivileges, dp)
+		}
+	}
 
 	// Build a set of new table names for quick lookup
 	newTableNames := make(map[string]bool)

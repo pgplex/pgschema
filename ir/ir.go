@@ -16,6 +16,11 @@ type IR struct {
 // Metadata contains information about the schema dump
 type Metadata struct {
 	DatabaseVersion string `json:"database_version"`
+	// CurrentRole is the role the inspector connected as. Objects that apply
+	// creates are owned by this role, so only default privileges declared
+	// FOR ROLE CurrentRole auto-grant on them (issue #696). Empty for an IR
+	// that did not come from a database (e.g. the empty base of a dump).
+	CurrentRole string `json:"current_role,omitempty"`
 }
 
 // Schema represents a single database schema (namespace)

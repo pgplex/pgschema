@@ -292,8 +292,14 @@ func (i *Inspector) buildMetadata(ctx context.Context, schema *IR) error {
 		}
 	}
 
+	var currentRole string
+	if err := i.db.QueryRowContext(ctx, "SELECT current_user").Scan(&currentRole); err != nil {
+		return err
+	}
+
 	schema.Metadata = Metadata{
 		DatabaseVersion: dbVersion,
+		CurrentRole:     currentRole,
 	}
 
 	return nil
