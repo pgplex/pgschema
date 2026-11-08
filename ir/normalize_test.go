@@ -166,7 +166,7 @@ func TestNormalizeViewStripsSchemaPrefixFromDefinition(t *testing.T) {
 				Name:       "test_view",
 				Definition: tt.definition,
 			}
-			normalizeView(view)
+			normalizeView(view, nil)
 			if view.Definition != tt.expected {
 				t.Errorf("normalizeView() definition = %q, want %q", view.Definition, tt.expected)
 			}
@@ -784,52 +784,61 @@ func TestStripInheritedIdentityNested(t *testing.T) {
 }
 
 func TestNormalizeOperatorSyntax(t *testing.T) {
+	shadowed := map[string]bool{"+": true}
 	tests := []struct {
-		name   string
-		input  string
-		schema string
-		want   string
+		name  string
+		input string
+		want  string
 	}{
 		{
-			name:   "same-schema operator becomes bare",
-			input:  "(h OPERATOR(public.->) 'a'::text)",
-			schema: "public",
-			want:   "(h -> 'a'::text)",
+			name:  "same-schema operator becomes bare",
+			input: "(h OPERATOR(public.->) 'a'::text) AND (h OPERATOR(public.?) 'k'::text)",
+			want:  "(h -> 'a'::text) AND (h ? 'k'::text)",
 		},
 		{
-			name:   "unqualified OPERATOR() collapses",
-			input:  "(h OPERATOR(->) 'b'::text) AND (h OPERATOR(?) 'k'::text)",
-			schema: "public",
-			want:   "(h -> 'b'::text) AND (h ? 'k'::text)",
+			name:  "shadowed same-schema operator keeps its qualifier",
+			input: "(a OPERATOR(public.+) 1) OR (h OPERATOR(public.->) 'a'::text)",
+			want:  "(a OPERATOR(public.+) 1) OR (h -> 'a'::text)",
 		},
 		{
-			name:   "operator in another schema keeps its qualifier",
-			input:  "(h OPERATOR(ext.->) 'a'::text)",
-			schema: "public",
-			want:   "(h OPERATOR(ext.->) 'a'::text)",
+			name:  "operator in another schema keeps its qualifier",
+			input: "(h OPERATOR(ext.->) 'a'::text)",
+			want:  "(h OPERATOR(ext.->) 'a'::text)",
 		},
 		{
-			name:   "quoted text is untouched",
-			input:  "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(->)'",
-			schema: "public",
-			want:   "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(->)'",
+			name:  "quoted text is untouched",
+			input: "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(public.->)'",
+			want:  "'OPERATOR(public.->)'::text, \"OPERATOR(public.->)\", 'it''s OPERATOR(public.->)'",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeOperatorSyntax(tt.input, tt.schema); got != tt.want {
-				t.Errorf("normalizeOperatorSyntax(%q, %q) = %q, want %q", tt.input, tt.schema, got, tt.want)
+			if got := normalizeOperatorSyntax(tt.input, "public", shadowed); got != tt.want {
+				t.Errorf("normalizeOperatorSyntax(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 
-	// The two entry points that see deparsed expressions apply it: generated
-	// expressions and index expressions go through StripSchemaPrefixFromBody,
-	// column defaults through normalizeDefaultValue (issue #697).
-	if got := StripSchemaPrefixFromBody("(h OPERATOR(public.->) 'a'::text)", "public"); got != "(h -> 'a'::text)" {
-		t.Errorf("StripSchemaPrefixFromBody left operator syntax: %q", got)
+	// Deparsed expressions (generated expressions, index expressions, views)
+	// and column defaults, including nextval-backed ones, reduce the operator;
+	// a shadowed operator keeps its qualifier in both paths (issue #697).
+	if got := normalizeDeparsedExpression("(h OPERATOR(public.->) 'a'::text)", "public", shadowed); got != "(h -> 'a'::text)" {
+		t.Errorf("normalizeDeparsedExpression left operator syntax: %q", got)
 	}
-	if got := normalizeDefaultValue(`('"a"=>"1"'::hstore OPERATOR(public.->) 'a')`, "public"); got != `('"a"=>"1"'::hstore -> 'a')` {
+	if got := normalizeDefaultValue(`('"a"=>"1"'::hstore OPERATOR(public.->) 'a')`, "public", shadowed); got != `('"a"=>"1"'::hstore -> 'a')` {
 		t.Errorf("normalizeDefaultValue left operator syntax: %q", got)
+	}
+	if got := normalizeDefaultValue("ARRAY[nextval('s'::regclass)::integer] OPERATOR(public.->) ARRAY[1]", "public", shadowed); got != "ARRAY[nextval('s'::regclass)::integer] -> ARRAY[1]" {
+		t.Errorf("normalizeDefaultValue skipped the nextval default: %q", got)
+	}
+	if got := normalizeDefaultValue("(1 OPERATOR(public.+) 2)", "public", shadowed); got != "(1 OPERATOR(public.+) 2)" {
+		t.Errorf("normalizeDefaultValue rewrote a shadowed operator: %q", got)
+	}
+
+	// Prefix stripping alone (used to compare raw function bodies) leaves
+	// OPERATOR(schema.op) exactly as written: OPERATOR() has its own
+	// precedence, and dropping only the schema would leave OPERATOR(op).
+	if got := StripSchemaPrefixFromBody("SELECT 2 OPERATOR(public.*) 3 + public.f(4)", "public"); got != "SELECT 2 OPERATOR(public.*) 3 + f(4)" {
+		t.Errorf("StripSchemaPrefixFromBody changed operator syntax: %q", got)
 	}
 }

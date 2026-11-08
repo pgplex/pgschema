@@ -512,7 +512,11 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 	// contain "toSchema.func_name(" or "::toSchema.type" which are redundant same-schema
 	// qualifiers. The initial normalizeIR (run by the inspector) couldn't strip these
 	// because it ran with the temp schema name, not the target schema. See issue #283.
-	stripQualifiers := newSameSchemaQualifierStripper(toSchema)
+	shadowedOperators := make(map[string]bool, len(irData.Metadata.ShadowedOperators))
+	for _, name := range irData.Metadata.ShadowedOperators {
+		shadowedOperators[name] = true
+	}
+	stripQualifiers := newSameSchemaQualifierStripper(toSchema, shadowedOperators)
 
 	// Normalize schema names in Schemas map
 	if schema, exists := irData.Schemas[fromSchema]; exists {
@@ -841,7 +845,11 @@ func newSchemaStringReplacer(fromSchema, toSchema string) func(string) string {
 // with the target schema, expressions may contain "schema.func_name(" or "::schema.type"
 // where the qualifier matches the object's own schema. These are redundant and must be
 // stripped to match how the target database's inspector would produce them. See issue #283.
-func newSameSchemaQualifierStripper(schema string) func(string) string {
+//
+// shadowedOperators names the operators that must keep their qualifier because
+// an unqualified reference would resolve to a pg_catalog operator instead (see
+// ir.Metadata.ShadowedOperators).
+func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]bool) func(string) string {
 	if schema == "" {
 		return func(s string) string { return s }
 	}
@@ -857,7 +865,13 @@ func newSameSchemaQualifierStripper(schema string) func(string) string {
 	operatorPattern := regexp.MustCompile(`OPERATOR\(` + regexp.QuoteMeta(prefix) + `([-+*/<>=~!@#%^&|` + "`" + `?]+)\)`)
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
-		s = operatorPattern.ReplaceAllString(s, `${1}`)
+		s = operatorPattern.ReplaceAllStringFunc(s, func(match string) string {
+			name := operatorPattern.FindStringSubmatch(match)[1]
+			if shadowedOperators[name] {
+				return match
+			}
+			return name
+		})
 		return typePattern.ReplaceAllString(s, "::")
 	}
 	return func(s string) string {

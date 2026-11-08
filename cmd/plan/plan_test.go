@@ -333,6 +333,9 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 	// definitions agree (issue #697).
 	const tempSchema = "pgschema_tmp_20260326_123456_abcd1234"
 	irData := &ir.IR{
+		// A custom public.+(integer, integer) duplicates pg_catalog's; ruleutils
+		// always qualifies it, and so must the stripped definition.
+		Metadata: ir.Metadata{ShadowedOperators: []string{"+"}},
 		Schemas: map[string]*ir.Schema{
 			tempSchema: {
 				Name: tempSchema,
@@ -344,6 +347,7 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 							"    h OPERATOR(public.->) 'a'::text AS ha,\n" +
 							"    h OPERATOR(public.?) 'k'::text AS hk,\n" +
 							"    t OPERATOR(public.@>) 'x'::public.ltree AS anc,\n" +
+							"    id OPERATOR(public.+) 1 AS shadowed,\n" +
 							"    'OPERATOR(public.->)'::text AS literal,\n" +
 							"    1 AS \"OPERATOR(public.->)\",\n" +
 							"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
@@ -361,6 +365,7 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 		"    h -> 'a'::text AS ha,\n" +
 		"    h ? 'k'::text AS hk,\n" +
 		"    t @> 'x'::ltree AS anc,\n" +
+		"    id OPERATOR(public.+) 1 AS shadowed,\n" +
 		"    'OPERATOR(public.->)'::text AS literal,\n" +
 		"    1 AS \"OPERATOR(public.->)\",\n" +
 		"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
