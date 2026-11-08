@@ -239,6 +239,45 @@ func TestNormalizeSchemaNames_StripsSameSchemaQualifiersFromViewDefinitions(t *t
 	}
 }
 
+func TestNormalizeSchemaNames_StripsQuotedSchemaQualifiers(t *testing.T) {
+	// A target schema that needs quoting is rendered as "My Schema". by the
+	// deparsers; function, cast and operator qualifiers in that form are
+	// stripped too, while an identifier that merely contains the token stays.
+	const tempSchema = "pgschema_tmp_20260326_123456_abcd1234"
+	irData := &ir.IR{
+		Metadata: ir.Metadata{ShadowedOperators: []string{"+"}},
+		Schemas: map[string]*ir.Schema{
+			tempSchema: {
+				Name: tempSchema,
+				Views: map[string]*ir.View{
+					"v": {
+						Schema: tempSchema,
+						Name:   "v",
+						Definition: " SELECT \"My Schema\".nlevel(path) AS depth,\n" +
+							"    path::\"My Schema\".ltree AS p,\n" +
+							"    h OPERATOR(\"My Schema\".->) 'a'::text AS ha,\n" +
+							"    id OPERATOR(\"My Schema\".+) 1 AS shadowed,\n" +
+							"    1 AS \"x \"\"My Schema\"\".y(\"\n" +
+							"   FROM t",
+					},
+				},
+			},
+		},
+	}
+
+	normalizeSchemaNames(irData, tempSchema, "My Schema")
+
+	expected := " SELECT nlevel(path) AS depth,\n" +
+		"    path::ltree AS p,\n" +
+		"    h -> 'a'::text AS ha,\n" +
+		"    id OPERATOR(\"My Schema\".+) 1 AS shadowed,\n" +
+		"    1 AS \"x \"\"My Schema\"\".y(\"\n" +
+		"   FROM t"
+	if got := irData.Schemas["My Schema"].Views["v"].Definition; got != expected {
+		t.Fatalf("expected quoted-schema qualifiers stripped:\n%s\ngot:\n%s", expected, got)
+	}
+}
+
 func TestNormalizeSchemaNames_PreservesInheritedPartitionDefault(t *testing.T) {
 	const tempSchema = "pgschema_tmp_partition595"
 	childDefault, parentDefault := "public.member_default()", "public.member_default()"

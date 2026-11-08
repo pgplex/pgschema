@@ -235,8 +235,8 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 }
 
 // buildShadowedOperators records the operator names in the inspected and
-// managed schemas whose every overload a pg_catalog operator with the same
-// name and operand types shadows. pg_catalog is implicitly first on every
+// managed schemas whose every overload is shadowed by a pg_catalog operator
+// with the same name and operand types. pg_catalog is implicitly first on every
 // search_path, so such an operator is reachable only schema-qualified:
 // ruleutils always deparses it as OPERATOR(schema.op), and
 // normalizeOperatorSyntax must leave that form alone instead of reducing it

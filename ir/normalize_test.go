@@ -850,7 +850,14 @@ func TestNormalizeOperatorSyntax(t *testing.T) {
 	// Prefix stripping alone (used to compare raw function bodies) leaves
 	// OPERATOR(schema.op) exactly as written: OPERATOR() has its own
 	// precedence, and dropping only the schema would leave OPERATOR(op).
-	if got := StripSchemaPrefixFromBody("SELECT 2 OPERATOR(public.*) 3 + public.f(4)", "public"); got != "SELECT 2 OPERATOR(public.*) 3 + f(4)" {
-		t.Errorf("StripSchemaPrefixFromBody changed operator syntax: %q", got)
+	for input, want := range map[string]string{
+		"SELECT 2 OPERATOR(public.*) 3 + public.f(4)":   "SELECT 2 OPERATOR(public.*) 3 + f(4)",
+		"SELECT 2 operator (public.*) 3 + public.f(4)":  "SELECT 2 operator (public.*) 3 + f(4)",
+		"SELECT 2 Operator\t(public.*) 3 + public.f(4)": "SELECT 2 Operator\t(public.*) 3 + f(4)",
+		"SELECT xoperator(public.f(4))":                 "SELECT xoperator(f(4))",
+	} {
+		if got := StripSchemaPrefixFromBody(input, "public"); got != want {
+			t.Errorf("StripSchemaPrefixFromBody(%q) = %q, want %q", input, got, want)
+		}
 	}
 }

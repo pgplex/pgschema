@@ -861,22 +861,35 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 	if schema == "" {
 		return func(s string) string { return s }
 	}
-	prefix := schema + "."
-	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
-	typePattern := regexp.MustCompile(`::` + regexp.QuoteMeta(prefix))
+	// The deparsers render the schema bare or in quote_ident form ("My Schema").
+	prefixes := []string{schema + "."}
+	if quoted := ir.QuoteIdentifier(schema); quoted != schema {
+		prefixes = append(prefixes, quoted+".")
+	}
+	quotedPrefixes := make([]string, len(prefixes))
+	for i, p := range prefixes {
+		quotedPrefixes[i] = regexp.QuoteMeta(p)
+	}
+	prefixAlternatives := `(?:` + strings.Join(quotedPrefixes, "|") + `)`
+	funcPattern := regexp.MustCompile(prefixAlternatives + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
+	typePattern := regexp.MustCompile(`::` + prefixAlternatives)
 	// OPERATOR(schema.op): ruleutils qualifies an operator whenever its schema
 	// is not on the deparsing session's search_path. The plan database is
 	// inspected with only the temporary schema on the path, so an operator in
 	// the target schema (e.g. hstore's -> installed in public) comes out as
 	// OPERATOR(public.->) while the target side prints the bare operator.
 	// Operator names use only the characters PostgreSQL allows (issue #697).
-	operatorPrefix := "OPERATOR(" + prefix
-	operatorPattern := regexp.MustCompile(regexp.QuoteMeta(operatorPrefix) + `[` + regexp.QuoteMeta(ir.OperatorNameChars) + `]+\)`)
+	operatorPattern := regexp.MustCompile(`OPERATOR\(` + prefixAlternatives + `([` + regexp.QuoteMeta(ir.OperatorNameChars) + `]+)\)`)
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
 		s = operatorPattern.ReplaceAllStringFunc(s, func(match string) string {
-			// match is operatorPrefix + name + ")"
-			name := match[len(operatorPrefix) : len(match)-1]
+			// match is "OPERATOR(" + prefix + name + ")"; the name is the
+			// trailing run of operator characters.
+			nameStart := len(match) - 1
+			for nameStart > 0 && strings.IndexByte(ir.OperatorNameChars, match[nameStart-1]) >= 0 {
+				nameStart--
+			}
+			name := match[nameStart : len(match)-1]
 			if shadowedOperators[name] {
 				return match
 			}
@@ -884,13 +897,33 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 		})
 		return typePattern.ReplaceAllString(s, "::")
 	}
+	containsPrefix := func(s string) bool {
+		for _, p := range prefixes {
+			if strings.Contains(s, p) {
+				return true
+			}
+		}
+		return false
+	}
+	// quotedPrefixLen returns the length of the quote_ident-form schema prefix
+	// starting at s[i], or 0 when none starts there.
+	quotedPrefixLen := func(s string, i int) int {
+		for _, p := range prefixes[1:] {
+			if strings.HasPrefix(s[i:], p) {
+				return len(p)
+			}
+		}
+		return 0
+	}
 	return func(s string) string {
-		if s == "" || !strings.Contains(s, prefix) {
+		if s == "" || !containsPrefix(s) {
 			return s
 		}
 
 		// Replace only outside single-quoted literals and double-quoted
-		// identifiers; a doubled quote inside either is an escape.
+		// identifiers; a doubled quote inside either is an escape. The quoted
+		// schema token itself ("My Schema".) is not an opaque identifier: it
+		// stays in the replaceable segment so the patterns above can strip it.
 		var result strings.Builder
 		result.Grow(len(s))
 		segmentStart := 0
@@ -898,6 +931,12 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 			quote := s[i]
 			if quote != '\'' && quote != '"' {
 				continue
+			}
+			if quote == '"' {
+				if n := quotedPrefixLen(s, i); n > 0 {
+					i += n - 1
+					continue
+				}
 			}
 
 			result.WriteString(replaceQualifiers(s[segmentStart:i]))

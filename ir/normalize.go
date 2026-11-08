@@ -657,7 +657,7 @@ func stripSchemaPrefixOccurrences(body, prefix string) string {
 		// dropping just the schema there would leave OPERATOR(op), which
 		// PostgreSQL never emits and which resolves differently for a
 		// shadowed operator.
-		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix && !(i >= len("OPERATOR(") && body[i-len("OPERATOR("):i] == "OPERATOR(") {
+		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix && !followsOperatorKeyword(body, i) {
 			// Ensure this is a schema qualifier, not part of a longer identifier
 			// (e.g., "not_public.users" should not match)
 			if i == 0 || !isIdentChar(body[i-1]) {
@@ -685,6 +685,24 @@ func stripSchemaPrefixOccurrences(body, prefix string) string {
 	}
 
 	return result.String()
+}
+
+// followsOperatorKeyword reports whether body[i] is the first character
+// inside an OPERATOR( construct, i.e. preceded by the keyword OPERATOR in any
+// letter case, optional whitespace, and the opening parenthesis.
+func followsOperatorKeyword(body string, i int) bool {
+	const keyword = "operator"
+	j := i - 1
+	if j < 0 || body[j] != '(' {
+		return false
+	}
+	for j--; j >= 0 && (body[j] == ' ' || body[j] == '\t' || body[j] == '\n' || body[j] == '\r'); j-- {
+	}
+	start := j + 1 - len(keyword)
+	if start < 0 || !strings.EqualFold(body[start:j+1], keyword) {
+		return false
+	}
+	return start == 0 || !isIdentChar(body[start-1])
 }
 
 // StripSchemaQualifiers removes "schema." qualifiers from a string containing
