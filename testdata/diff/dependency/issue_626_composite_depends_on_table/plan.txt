@@ -1,0 +1,32 @@
+Plan: 3 to add.
+
+Summary by type:
+  types: 1 to add
+  functions: 1 to add
+  tables: 1 to add
+
+Types:
+  + example_result
+
+Functions:
+  + collect_examples
+
+Tables:
+  + example
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS example (
+    id integer,
+    CONSTRAINT example_pkey PRIMARY KEY (id)
+);
+
+CREATE TYPE example_result AS (rows example[]);
+
+CREATE OR REPLACE FUNCTION collect_examples()
+RETURNS example_result
+LANGUAGE sql
+STABLE
+AS $$ SELECT ARRAY(SELECT e FROM example e)
+$$;

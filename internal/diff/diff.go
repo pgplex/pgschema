@@ -2438,8 +2438,9 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// 2. Domains with function deps ONLY (no table dep), and range types whose
 	//    subtype_diff is a new function — created after functions but before
 	//    tables, so tables that use the type as a column type work.
-	// 3. Domains with table deps (with or without function deps) — created after
-	//    ALL tables, because the domain's base type is a table's implicit row type.
+	// 3. Domains and composites with table deps (with or without function deps)
+	//    — created after ALL tables, because the domain's base type or a
+	//    composite attribute is a table's implicit row type.
 	typesWithoutDeps := []*ir.Type{}
 	typesWithFunctionDepsOnly := []*ir.Type{}
 	domainsWithTableDeps := []*ir.Type{}
@@ -2476,11 +2477,11 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	})
 
 	for _, typeObj := range candidateTypes {
-		if typeObj.Kind != ir.TypeKindDomain && typeObj.Kind != ir.TypeKindRange {
+		if typeObj.Kind == ir.TypeKindEnum {
 			typesWithoutDeps = append(typesWithoutDeps, typeObj)
 			continue
 		}
-		hasTableDep := domainReferencesNewTable(typeObj, newTableNameLookup)
+		hasTableDep := typeReferencesNewTable(typeObj, newTableNameLookup)
 		hasFunctionDep := typeReferencesNewFunction(typeObj, newFunctionLookup)
 		if hasTableDep {
 			domainsWithTableDeps = append(domainsWithTableDeps, typeObj)
@@ -4615,15 +4616,25 @@ func tableUsesDeferredDomain(table *ir.Table, deferredDomains map[string]struct{
 	return false
 }
 
-// domainReferencesNewTable determines if a domain's base type is a composite row type
-// implicitly created by a new table. Tables create an implicit composite type with the
-// same name, so CREATE DOMAIN y AS x requires CREATE TABLE x to exist first.
-func domainReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) bool {
-	if len(newTables) == 0 || typeObj == nil || typeObj.Kind != ir.TypeKindDomain {
+// typeReferencesNewTable determines if a type is built on the composite row
+// type implicitly created by a new table. Tables create an implicit composite
+// type with the same name, so CREATE DOMAIN y AS x and CREATE TYPE r AS (xs x[])
+// both require CREATE TABLE x to exist first (issues #535 and #626).
+func typeReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) bool {
+	if len(newTables) == 0 || typeObj == nil {
 		return false
 	}
-	baseName := extractBaseTypeName(typeObj.BaseType)
-	return typeMatchesLookup(baseName, typeObj.Schema, newTables)
+	switch typeObj.Kind {
+	case ir.TypeKindDomain:
+		return typeMatchesLookup(extractBaseTypeName(typeObj.BaseType), typeObj.Schema, newTables)
+	case ir.TypeKindComposite:
+		for _, attr := range typeObj.Columns {
+			if typeMatchesLookup(extractBaseTypeName(attr.DataType), typeObj.Schema, newTables) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // holdBackFunctionsOfDroppedTypes splits the dropped functions into those that
