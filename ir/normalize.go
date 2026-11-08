@@ -22,20 +22,26 @@ func normalizeIR(ir *IR) {
 		return
 	}
 
+	shadowed := make(map[string]bool, len(ir.Metadata.ShadowedOperators))
+	for _, name := range ir.Metadata.ShadowedOperators {
+		shadowed[name] = true
+	}
 	for _, schema := range ir.Schemas {
-		normalizeSchema(schema)
+		normalizeSchema(schema, shadowed)
 	}
 }
 
-// normalizeSchema normalizes all objects within a schema
-func normalizeSchema(schema *Schema) {
+// normalizeSchema normalizes all objects within a schema. shadowed holds the
+// operator names that must keep their schema qualifier (see
+// Metadata.ShadowedOperators).
+func normalizeSchema(schema *Schema, shadowed map[string]bool) {
 	if schema == nil {
 		return
 	}
 
 	// Normalize tables
 	for _, table := range schema.Tables {
-		normalizeTable(table)
+		normalizeTable(table, shadowed)
 	}
 
 	// Mark SERIAL columns once column defaults and sequences are normalized
@@ -46,17 +52,17 @@ func normalizeSchema(schema *Schema) {
 
 	// Normalize views
 	for _, view := range schema.Views {
-		normalizeView(view)
+		normalizeView(view, shadowed)
 	}
 
 	// Normalize functions
 	for _, function := range schema.Functions {
-		normalizeFunction(function)
+		normalizeFunction(function, shadowed)
 	}
 
 	// Normalize procedures
 	for _, procedure := range schema.Procedures {
-		normalizeProcedure(procedure)
+		normalizeProcedure(procedure, shadowed)
 	}
 
 	// Normalize types (including domains)
@@ -155,19 +161,19 @@ func SerialSequenceName(tableName, columnName string) string {
 }
 
 // normalizeTable normalizes table-related objects
-func normalizeTable(table *Table) {
+func normalizeTable(table *Table, shadowed map[string]bool) {
 	if table == nil {
 		return
 	}
 
 	// Normalize columns (pass table schema for context)
 	for _, column := range table.Columns {
-		normalizeColumn(column, table.Schema)
+		normalizeColumn(column, table.Schema, shadowed)
 	}
 	// Compare parent expressions in the child's schema context, just like its
 	// own defaults. The parent can live in a different (unmanaged) schema.
 	for _, column := range table.PartitionParentColumns {
-		normalizeColumn(column, table.Schema)
+		normalizeColumn(column, table.Schema, shadowed)
 	}
 
 	// Normalize policies
@@ -182,7 +188,7 @@ func normalizeTable(table *Table) {
 
 	// Normalize indexes
 	for _, index := range table.Indexes {
-		normalizeIndex(index)
+		normalizeIndex(index, shadowed)
 	}
 
 	// Normalize constraints
@@ -193,7 +199,7 @@ func normalizeTable(table *Table) {
 
 // normalizeColumn normalizes column default values
 // tableSchema is used to strip same-schema qualifiers from function calls
-func normalizeColumn(column *Column, tableSchema string) {
+func normalizeColumn(column *Column, tableSchema string, shadowed map[string]bool) {
 	if column == nil {
 		return
 	}
@@ -202,7 +208,7 @@ func normalizeColumn(column *Column, tableSchema string) {
 	// expression depending on the inspecting session's search_path; strip the
 	// qualifier so current and desired state compare textually (issue #591).
 	if column.GeneratedExpr != nil && tableSchema != "" {
-		stripped := StripSchemaPrefixFromBody(*column.GeneratedExpr, tableSchema)
+		stripped := normalizeDeparsedExpression(*column.GeneratedExpr, tableSchema, shadowed)
 		column.GeneratedExpr = &stripped
 	}
 
@@ -210,15 +216,21 @@ func normalizeColumn(column *Column, tableSchema string) {
 		return
 	}
 
-	normalized := normalizeDefaultValue(*column.DefaultValue, tableSchema)
+	normalized := normalizeDefaultValue(*column.DefaultValue, tableSchema, shadowed)
 	column.DefaultValue = &normalized
 }
 
 // normalizeDefaultValue normalizes default values for semantic comparison
 // tableSchema is used to strip same-schema qualifiers from function calls
-func normalizeDefaultValue(value string, tableSchema string) string {
+func normalizeDefaultValue(value string, tableSchema string, shadowed map[string]bool) string {
 	// Remove unnecessary whitespace
 	value = strings.TrimSpace(value)
+
+	// Defaults are deparsed with search_path = pg_catalog, so a same-schema
+	// operator appears as OPERATOR(schema.op); reduce it to the bare operator
+	// like every other expression context. Done before the nextval early
+	// return below so sequence-backed defaults are covered too.
+	value = normalizeOperatorSyntax(value, tableSchema, shadowed)
 
 	// Handle nextval sequence references - remove schema qualification
 	if strings.Contains(value, "nextval(") {
@@ -235,13 +247,35 @@ func normalizeDefaultValue(value string, tableSchema string) string {
 	// Normalize function calls - remove schema qualifiers for functions in the same schema
 	// This matches PostgreSQL's pg_get_expr() behavior which strips same-schema qualifiers
 	// Example: public.get_status() -> get_status() (when tableSchema is "public")
+	//          public."MyFunc"()   -> "MyFunc"()    (quoted names too, like every other
+	//                                                expression context, issue #697)
 	//          other_schema.get_status() -> other_schema.get_status() (preserved)
 	if tableSchema != "" && strings.Contains(value, tableSchema+".") {
-		// Pattern: schema.function_name(
-		// Replace "tableSchema." with "" when followed by identifier and (
+		// Pattern: schema.function_name( or schema."Function Name"(
+		// Replace "tableSchema." with "" when followed by an identifier and (
 		prefix := tableSchema + "."
-		pattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*)\(`)
-		value = pattern.ReplaceAllString(value, `${1}(`)
+		pattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_]*|"(?:[^"]|"")+")\(`)
+		segments := splitQuotedSegments(value)
+		for i, segment := range segments {
+			// A quoted function name is a segment of its own; join it with the
+			// preceding unquoted text so the pattern sees schema."Name"(.
+			if segment == "" || segment[0] == '\'' {
+				continue
+			}
+			if segment[0] == '"' {
+				if i == 0 || !strings.HasSuffix(segments[i-1], prefix) {
+					continue
+				}
+				segments[i-1] = strings.TrimSuffix(segments[i-1], prefix)
+				if i+1 < len(segments) && strings.HasPrefix(segments[i+1], "(") {
+					continue
+				}
+				segments[i-1] += prefix
+				continue
+			}
+			segments[i] = pattern.ReplaceAllString(segment, `${1}(`)
+		}
+		value = strings.Join(segments, "")
 	}
 
 	// Handle type casting - remove explicit type casts that are semantically equivalent
@@ -374,14 +408,14 @@ func normalizePolicyExpression(expr string) string {
 // This happens when extension functions (e.g., ltree's nlevel()) or search_path differences
 // cause one side to produce "public.func()" and the other "func()".
 // Stripping same-schema qualifiers ensures the definitions compare as equal. (Issue #314)
-func normalizeView(view *View) {
+func normalizeView(view *View, shadowed map[string]bool) {
 	if view == nil {
 		return
 	}
 
 	// Strip same-schema qualifiers from view definition for consistent comparison.
 	// This uses the same logic as function/procedure body normalization.
-	view.Definition = StripSchemaPrefixFromBody(view.Definition, view.Schema)
+	view.Definition = normalizeDeparsedExpression(view.Definition, view.Schema, shadowed)
 
 	// Likewise for the column types: format_type() qualifies a same-schema
 	// type whenever the schema is not on the search_path, and the types are
@@ -397,12 +431,12 @@ func normalizeView(view *View) {
 
 	// Normalize indexes on materialized views
 	for _, index := range view.Indexes {
-		normalizeIndex(index)
+		normalizeIndex(index, shadowed)
 	}
 }
 
 // normalizeFunction normalizes function signature and definition
-func normalizeFunction(function *Function) {
+func normalizeFunction(function *Function, shadowed map[string]bool) {
 	if function == nil {
 		return
 	}
@@ -433,7 +467,7 @@ func normalizeFunction(function *Function) {
 			}
 			// Normalize default values (pass function schema for context)
 			if param.DefaultValue != nil {
-				normalized := normalizeDefaultValue(*param.DefaultValue, function.Schema)
+				normalized := normalizeDefaultValue(*param.DefaultValue, function.Schema, shadowed)
 				param.DefaultValue = &normalized
 			}
 		}
@@ -479,6 +513,116 @@ func StripSchemaPrefixFromBody(body, schema string) string {
 		body = stripSchemaPrefixOccurrences(body, quoted+".")
 	}
 	return stripSchemaPrefixOccurrences(body, schema+".")
+}
+
+// normalizeDeparsedExpression normalizes an expression that came out of a
+// PostgreSQL deparser (pg_get_viewdef, pg_get_expr, pg_get_indexdef): it strips
+// same-schema qualifiers from identifiers and reduces same-schema operators
+// written as OPERATOR(schema.op) to the bare operator. It is not used on raw
+// function bodies, where OPERATOR() carries its own precedence and must be
+// compared as written.
+func normalizeDeparsedExpression(expr, schema string, shadowed map[string]bool) string {
+	return normalizeOperatorSyntax(StripSchemaPrefixFromBody(expr, schema), schema, shadowed)
+}
+
+// OperatorNameChars are the characters PostgreSQL allows in an operator name.
+const OperatorNameChars = "-+*/<>=~!@#%^&|`?"
+
+// normalizeOperatorSyntax rewrites OPERATOR(schema.op) to the bare op when
+// schema is the object's own schema, unless op is a shadowed name.
+//
+// ruleutils emits OPERATOR(schema.op) whenever the operator's schema is not on
+// the deparsing session's search_path. Column defaults, generated expressions
+// and index expressions are deparsed with search_path = pg_catalog, so an
+// extension operator installed in the managed schema (hstore's -> in public)
+// comes out qualified there, while a view or CHECK constraint on the same
+// database is deparsed with the schema on the path and prints the bare
+// operator. Reducing the qualified form to the bare operator makes every
+// context compare the same way on the current and desired side (issue #697).
+//
+// A shadowed operator (same name and operand types as a pg_catalog operator,
+// see Metadata.ShadowedOperators) is the one case where the bare name would
+// resolve differently, so its qualifier is kept. Operators in other schemas
+// keep their qualifier. The schema is recognized in bare and quote_ident form
+// ("My Schema".op); single-quoted literals and double-quoted identifiers are
+// copied through untouched.
+func normalizeOperatorSyntax(expr, schema string, shadowed map[string]bool) string {
+	const keyword = "operator"
+	if schema == "" || !strings.Contains(strings.ToLower(expr), keyword) {
+		return expr
+	}
+	bare := schema + "."
+	quoted := QuoteIdentifier(schema) + "."
+
+	var out strings.Builder
+	out.Grow(len(expr))
+	for i := 0; i < len(expr); {
+		c := expr[i]
+		if c == '\'' || c == '"' {
+			end := closingQuote(expr, i)
+			out.WriteString(expr[i:end])
+			i = end
+			continue
+		}
+		// The keyword in any letter case, as a whole word, then optional
+		// whitespace and the opening parenthesis (same as followsOperatorKeyword).
+		if (c == 'O' || c == 'o') && i+len(keyword) <= len(expr) && strings.EqualFold(expr[i:i+len(keyword)], keyword) &&
+			(i == 0 || !isIdentChar(expr[i-1])) && (i+len(keyword) == len(expr) || !isIdentChar(expr[i+len(keyword)])) {
+			open := i + len(keyword)
+			for open < len(expr) && (expr[open] == ' ' || expr[open] == '\t' || expr[open] == '\n' || expr[open] == '\r') {
+				open++
+			}
+			if open < len(expr) && expr[open] == '(' {
+				rest := expr[open+1:]
+				prefixLen := 0
+				if strings.HasPrefix(rest, bare) {
+					prefixLen = len(bare)
+				} else if strings.HasPrefix(rest, quoted) {
+					prefixLen = len(quoted)
+				}
+				if prefixLen > 0 {
+					nameEnd := prefixLen
+					for nameEnd < len(rest) && strings.IndexByte(OperatorNameChars, rest[nameEnd]) >= 0 {
+						nameEnd++
+					}
+					if nameEnd > prefixLen && nameEnd < len(rest) && rest[nameEnd] == ')' {
+						end := open + 1 + nameEnd + 1
+						if name := rest[prefixLen:nameEnd]; shadowed[name] {
+							out.WriteString(expr[i:end])
+						} else {
+							out.WriteString(name)
+						}
+						i = end
+						continue
+					}
+				}
+			}
+			out.WriteString(expr[i:open])
+			i = open
+			continue
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
+}
+
+// closingQuote returns the index just past the quoted literal or identifier
+// that starts at expr[start], treating a doubled quote as an escape. An
+// unterminated quote runs to the end of expr.
+func closingQuote(expr string, start int) int {
+	q := expr[start]
+	for j := start + 1; j < len(expr); j++ {
+		if expr[j] != q {
+			continue
+		}
+		if j+1 < len(expr) && expr[j+1] == q {
+			j++
+			continue
+		}
+		return j + 1
+	}
+	return len(expr)
 }
 
 // stripSchemaPrefixOccurrences removes every occurrence of prefix ("schema."
@@ -539,8 +683,12 @@ func stripSchemaPrefixOccurrences(body, prefix string) string {
 			continue
 		}
 
-		// Only attempt replacement outside string literals
-		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix {
+		// Only attempt replacement outside string literals. An operator's
+		// qualifier, OPERATOR(schema.op), is left to normalizeOperatorSyntax:
+		// dropping just the schema there would leave OPERATOR(op), which
+		// PostgreSQL never emits and which resolves differently for a
+		// shadowed operator.
+		if !inString && i+prefixLen <= len(body) && body[i:i+prefixLen] == prefix && !followsOperatorKeyword(body, i) {
 			// Ensure this is a schema qualifier, not part of a longer identifier
 			// (e.g., "not_public.users" should not match)
 			if i == 0 || !isIdentChar(body[i-1]) {
@@ -568,6 +716,24 @@ func stripSchemaPrefixOccurrences(body, prefix string) string {
 	}
 
 	return result.String()
+}
+
+// followsOperatorKeyword reports whether body[i] is the first character
+// inside an OPERATOR( construct, i.e. preceded by the keyword OPERATOR in any
+// letter case, optional whitespace, and the opening parenthesis.
+func followsOperatorKeyword(body string, i int) bool {
+	const keyword = "operator"
+	j := i - 1
+	if j < 0 || body[j] != '(' {
+		return false
+	}
+	for j--; j >= 0 && (body[j] == ' ' || body[j] == '\t' || body[j] == '\n' || body[j] == '\r'); j-- {
+	}
+	start := j + 1 - len(keyword)
+	if start < 0 || !strings.EqualFold(body[start:j+1], keyword) {
+		return false
+	}
+	return start == 0 || !isIdentChar(body[start-1])
 }
 
 // StripSchemaQualifiers removes "schema." qualifiers from a string containing
@@ -631,7 +797,7 @@ func isIdentChar(b byte) bool {
 }
 
 // normalizeProcedure normalizes procedure representation
-func normalizeProcedure(procedure *Procedure) {
+func normalizeProcedure(procedure *Procedure, shadowed map[string]bool) {
 	if procedure == nil {
 		return
 	}
@@ -649,7 +815,7 @@ func normalizeProcedure(procedure *Procedure) {
 			}
 			// Normalize default values (pass procedure schema for context)
 			if param.DefaultValue != nil {
-				normalized := normalizeDefaultValue(*param.DefaultValue, procedure.Schema)
+				normalized := normalizeDefaultValue(*param.DefaultValue, procedure.Schema, shadowed)
 				param.DefaultValue = &normalized
 			}
 		}
@@ -1004,7 +1170,7 @@ func normalizeTriggerCondition(condition string) string {
 }
 
 // normalizeIndex normalizes index WHERE clauses and other properties
-func normalizeIndex(index *Index) {
+func normalizeIndex(index *Index, shadowed map[string]bool) {
 	if index == nil {
 		return
 	}
@@ -1013,14 +1179,14 @@ func normalizeIndex(index *Index) {
 	if index.IsPartial && index.Where != "" {
 		index.Where = normalizeIndexWhereClause(index.Where)
 		if index.Schema != "" {
-			index.Where = StripSchemaPrefixFromBody(index.Where, index.Schema)
+			index.Where = normalizeDeparsedExpression(index.Where, index.Schema, shadowed)
 		}
 	}
 
 	// Strip same-schema qualifiers from expression index column names
 	if index.IsExpression && index.Schema != "" {
 		for _, col := range index.Columns {
-			col.Name = StripSchemaPrefixFromBody(col.Name, index.Schema)
+			col.Name = normalizeDeparsedExpression(col.Name, index.Schema, shadowed)
 		}
 	}
 }

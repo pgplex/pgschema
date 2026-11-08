@@ -125,6 +125,10 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 		return nil, err
 	}
 
+	if err := traced(ctx, "shadowed operators", func(ctx context.Context) error { return i.buildShadowedOperators(ctx, schema, targetSchema) }); err != nil {
+		return nil, fmt.Errorf("failed to query shadowed operators: %w", err)
+	}
+
 	if err := traced(ctx, "schemas", func(ctx context.Context) error { return i.buildSchemas(ctx, schema, targetSchema) }); err != nil {
 		return nil, fmt.Errorf("failed to build schemas: %w", err)
 	}
@@ -228,6 +232,48 @@ func (i *Inspector) BuildIR(ctx context.Context, targetSchema string) (*IR, erro
 	normalizeIR(schema)
 
 	return schema, nil
+}
+
+// buildShadowedOperators records the operator names in the inspected and
+// managed schemas whose every overload is shadowed by a pg_catalog operator
+// with the same name and operand types. pg_catalog is implicitly first on every
+// search_path, so such an operator is reachable only schema-qualified:
+// ruleutils always deparses it as OPERATOR(schema.op), and
+// normalizeOperatorSyntax must leave that form alone instead of reducing it
+// to the bare operator (issue #697).
+//
+// The decision is per name because the normalizer only sees the deparsed
+// text, never the operand types. A name with both shadowed and unshadowed
+// overloads (a custom public.->(jsonb, text) next to hstore's ->(hstore, text))
+// is therefore not exempted: the unshadowed, extension-provided overload is
+// the common case, and exempting the name would make every view using it
+// replan forever, which is the bug this normalization fixes.
+func (i *Inspector) buildShadowedOperators(ctx context.Context, schema *IR, targetSchema string) error {
+	rows, err := i.db.QueryContext(ctx, `
+SELECT o.oprname
+FROM pg_catalog.pg_operator o
+JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace
+WHERE n.nspname IN ($1, $2)
+GROUP BY o.oprname
+HAVING bool_and(EXISTS (
+    SELECT 1 FROM pg_catalog.pg_operator c
+    WHERE c.oprnamespace = 'pg_catalog'::regnamespace
+      AND c.oprname = o.oprname
+      AND c.oprleft = o.oprleft
+      AND c.oprright = o.oprright))
+ORDER BY 1`, targetSchema, i.managedSchema)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		schema.Metadata.ShadowedOperators = append(schema.Metadata.ShadowedOperators, name)
+	}
+	return rows.Err()
 }
 
 // buildStep is one named introspection step of BuildIR. The name labels the

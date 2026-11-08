@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pgplex/pgschema/cmd/util"
 	"github.com/pgplex/pgschema/internal/postgres"
 	"github.com/pgplex/pgschema/testutil"
 	"github.com/stretchr/testify/assert"
@@ -281,4 +282,83 @@ func TestExternalDatabase_SchemaIsolation(t *testing.T) {
 	schema1 := extDB1.GetSchemaName()
 	schema2 := extDB2.GetSchemaName()
 	assert.NotEqual(t, schema1, schema2, "temporary schemas should have unique names")
+}
+
+// TestExternalDatabase_ExtensionOperatorInPublicPlansClean reproduces issue #697:
+// a view in the public schema that uses an operator owned by an extension
+// installed in public (hstore's ->) must plan as a no-op against the database
+// it was dumped from when the desired state is built on an external plan
+// database.
+func TestExternalDatabase_ExtensionOperatorInPublicPlansClean(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	targetDB := testutil.SetupPostgres(t)
+	defer targetDB.Stop()
+	planDB := testutil.SetupPostgres(t)
+	defer planDB.Stop()
+
+	targetConn, targetHost, targetPort, targetDatabase, targetUser, targetPassword := testutil.ConnectToPostgres(t, targetDB)
+	defer targetConn.Close()
+	// Operators pgschema does not manage, present on both databases:
+	//   - public.+(integer, integer) duplicates pg_catalog's and is reachable
+	//     only qualified: a fully shadowed name, kept as OPERATOR(public.+).
+	//   - public.->(jsonb, text) duplicates pg_catalog's too, but hstore's
+	//     ->(hstore, text) shares the name and is not shadowed, so the name
+	//     is not exempted and the hstore views below must still plan clean.
+	// The operator functions live outside the managed schema so the plan
+	// does not see them as unmanaged objects to drop.
+	setupSQL := `
+CREATE EXTENSION hstore;
+CREATE SCHEMA ops;
+CREATE FUNCTION ops.int_add(integer, integer) RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT $1 + $2';
+CREATE OPERATOR public.+ (LEFTARG = integer, RIGHTARG = integer, FUNCTION = ops.int_add);
+CREATE FUNCTION ops.jsonb_arrow(jsonb, text) RETURNS jsonb LANGUAGE sql IMMUTABLE AS 'SELECT $1 -> $2';
+CREATE OPERATOR public.-> (LEFTARG = jsonb, RIGHTARG = text, FUNCTION = ops.jsonb_arrow);
+`
+	// Every expression context that can carry an operator: column default and
+	// generated expression (deparsed under search_path = pg_catalog), CHECK
+	// constraint, index expression and predicate, routine parameter default,
+	// view and materialized view. The quoted alias must survive untouched.
+	schemaSQL := `
+CREATE TABLE t (
+    id integer PRIMARY KEY,
+    h hstore,
+    d text DEFAULT ('a=>1'::hstore -> 'a'),
+    g text GENERATED ALWAYS AS (h -> 'a') STORED,
+    CONSTRAINT c CHECK ((h ? 'k') OR h IS NULL)
+);
+CREATE INDEX i ON t ((h -> 'b')) WHERE (h ? 'b');
+CREATE FUNCTION pick(x text DEFAULT ('a=>1'::hstore -> 'a')) RETURNS text LANGUAGE sql AS 'SELECT x';
+CREATE VIEW v AS SELECT id, h -> 'a' AS ha, h ? 'k' AS hk, 1 AS "OPERATOR(public.->)" FROM t;
+CREATE MATERIALIZED VIEW mv AS SELECT id, h -> 'a' AS ha FROM t;
+`
+	_, err := targetConn.Exec(setupSQL + schemaSQL)
+	require.NoError(t, err)
+
+	planConn, planHost, planPort, planDatabase, planUser, planPassword := testutil.ConnectToPostgres(t, planDB)
+	defer planConn.Close()
+	_, err = planConn.Exec(setupSQL)
+	require.NoError(t, err)
+
+	targetIR, err := util.GetIRFromDatabase(targetHost, targetPort, targetDatabase, targetUser, targetPassword, "disable", "public", "pgschema-test", nil, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{"+"}, targetIR.Metadata.ShadowedOperators, "only a name whose every overload is shadowed is exempted")
+
+	file := filepath.Join(t.TempDir(), "schema.sql")
+	require.NoError(t, os.WriteFile(file, []byte(schemaSQL), 0644))
+
+	config := &PlanConfig{
+		Host: targetHost, Port: targetPort, DB: targetDatabase, User: targetUser, Password: targetPassword,
+		Schema: "public", File: file, ApplicationName: "pgschema-test",
+		PlanDBHost: planHost, PlanDBPort: planPort, PlanDBDatabase: planDatabase, PlanDBUser: planUser, PlanDBPassword: planPassword,
+	}
+	provider, err := CreateDesiredStateProvider(config)
+	require.NoError(t, err)
+	defer provider.Stop()
+
+	p, err := GeneratePlan(config, provider)
+	require.NoError(t, err)
+	require.False(t, p.HasAnyChanges(), "view using an extension operator must not be re-planned, got:\n%s", p.HumanColored(false))
 }

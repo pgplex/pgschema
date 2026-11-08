@@ -512,7 +512,11 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 	// contain "toSchema.func_name(" or "::toSchema.type" which are redundant same-schema
 	// qualifiers. The initial normalizeIR (run by the inspector) couldn't strip these
 	// because it ran with the temp schema name, not the target schema. See issue #283.
-	stripQualifiers := newSameSchemaQualifierStripper(toSchema)
+	shadowedOperators := make(map[string]bool, len(irData.Metadata.ShadowedOperators))
+	for _, name := range irData.Metadata.ShadowedOperators {
+		shadowedOperators[name] = true
+	}
+	stripQualifiers := newSameSchemaQualifierStripper(toSchema, shadowedOperators)
 
 	// Normalize schema names in Schemas map
 	if schema, exists := irData.Schemas[fromSchema]; exists {
@@ -676,6 +680,11 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			}
 			for _, param := range fn.Parameters {
 				param.DataType = replaceString(param.DataType)
+				// Parameter defaults are deparsed like column defaults and
+				// compared verbatim; normalize them the same way (#697).
+				if param.DefaultValue != nil {
+					*param.DefaultValue = stripQualifiers(replaceString(*param.DefaultValue))
+				}
 			}
 			// Normalize function dependencies for topological sorting
 			for i := range fn.Dependencies {
@@ -692,6 +701,9 @@ func normalizeSchemaNames(irData *ir.IR, fromSchema, toSchema string) {
 			proc.Definition = replaceString(proc.Definition)
 			for _, param := range proc.Parameters {
 				param.DataType = replaceString(param.DataType)
+				if param.DefaultValue != nil {
+					*param.DefaultValue = stripQualifiers(replaceString(*param.DefaultValue))
+				}
 			}
 		}
 
@@ -841,44 +853,130 @@ func newSchemaStringReplacer(fromSchema, toSchema string) func(string) string {
 // with the target schema, expressions may contain "schema.func_name(" or "::schema.type"
 // where the qualifier matches the object's own schema. These are redundant and must be
 // stripped to match how the target database's inspector would produce them. See issue #283.
-func newSameSchemaQualifierStripper(schema string) func(string) string {
+//
+// shadowedOperators names the operators that must keep their qualifier because
+// an unqualified reference would resolve to a pg_catalog operator instead (see
+// ir.Metadata.ShadowedOperators).
+func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]bool) func(string) string {
 	if schema == "" {
 		return func(s string) string { return s }
 	}
-	prefix := schema + "."
-	funcPattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
-	typePattern := regexp.MustCompile(`::` + regexp.QuoteMeta(prefix))
+	// The deparsers render the schema bare or in quote_ident form ("My Schema").
+	prefixes := []string{schema + "."}
+	if quoted := ir.QuoteIdentifier(schema); quoted != schema {
+		prefixes = append(prefixes, quoted+".")
+	}
+	quotedPrefixes := make([]string, len(prefixes))
+	for i, p := range prefixes {
+		quotedPrefixes[i] = regexp.QuoteMeta(p)
+	}
+	prefixAlternatives := `(?:` + strings.Join(quotedPrefixes, "|") + `)`
+	// The object name after the qualifier is bare or quote_ident form too.
+	funcPattern := regexp.MustCompile(prefixAlternatives + `([a-zA-Z_][a-zA-Z0-9_$]*|"(?:[^"]|"")+")\(`)
+	typePattern := regexp.MustCompile(`::` + prefixAlternatives)
+	// OPERATOR(schema.op): ruleutils qualifies an operator whenever its schema
+	// is not on the deparsing session's search_path. The plan database is
+	// inspected with only the temporary schema on the path, so an operator in
+	// the target schema (e.g. hstore's -> installed in public) comes out as
+	// OPERATOR(public.->) while the target side prints the bare operator.
+	// Operator names use only the characters PostgreSQL allows (issue #697).
+	operatorPattern := regexp.MustCompile(`OPERATOR\(` + prefixAlternatives + `([` + regexp.QuoteMeta(ir.OperatorNameChars) + `]+)\)`)
 	replaceQualifiers := func(s string) string {
 		s = funcPattern.ReplaceAllString(s, `${1}(`)
+		s = operatorPattern.ReplaceAllStringFunc(s, func(match string) string {
+			// match is "OPERATOR(" + prefix + name + ")"; the name is the
+			// trailing run of operator characters.
+			nameStart := len(match) - 1
+			for nameStart > 0 && strings.IndexByte(ir.OperatorNameChars, match[nameStart-1]) >= 0 {
+				nameStart--
+			}
+			name := match[nameStart : len(match)-1]
+			if shadowedOperators[name] {
+				return match
+			}
+			return name
+		})
 		return typePattern.ReplaceAllString(s, "::")
 	}
+	containsPrefix := func(s string) bool {
+		for _, p := range prefixes {
+			if strings.Contains(s, p) {
+				return true
+			}
+		}
+		return false
+	}
+	// quotedPrefixLen returns the length of the quote_ident-form schema prefix
+	// starting at s[i], or 0 when none starts there.
+	quotedPrefixLen := func(s string, i int) int {
+		for _, p := range prefixes[1:] {
+			if strings.HasPrefix(s[i:], p) {
+				return len(p)
+			}
+		}
+		return 0
+	}
+	// endsWithPrefix reports whether s[:i] ends with a schema qualifier, so a
+	// quoted identifier starting at s[i] is the qualified object's own name.
+	endsWithPrefix := func(s string, i int) bool {
+		for _, p := range prefixes {
+			if strings.HasSuffix(s[:i], p) {
+				return true
+			}
+		}
+		return false
+	}
+	// closingQuote returns the index of the quote that closes the literal or
+	// identifier opened at s[i]; a doubled quote inside is an escape.
+	closingQuote := func(s string, i int) int {
+		quote := s[i]
+		for i++; i < len(s); i++ {
+			if s[i] != quote {
+				continue
+			}
+			if i+1 < len(s) && s[i+1] == quote {
+				i++
+				continue
+			}
+			break
+		}
+		return min(i, len(s)-1)
+	}
 	return func(s string) string {
-		if s == "" || !strings.Contains(s, prefix) {
+		if s == "" || !containsPrefix(s) {
 			return s
 		}
 
+		// Replace only outside single-quoted literals and double-quoted
+		// identifiers; a doubled quote inside either is an escape. Two quoted
+		// tokens are not opaque: the quoted schema itself ("My Schema".) and
+		// a quoted object name right after a qualifier (public."My Func"().
+		// Both stay in the replaceable segment so the patterns can see the
+		// whole qualified reference.
 		var result strings.Builder
 		result.Grow(len(s))
 		segmentStart := 0
 		for i := 0; i < len(s); i++ {
-			if s[i] != '\'' {
+			quote := s[i]
+			if quote != '\'' && quote != '"' {
 				continue
+			}
+			if quote == '"' {
+				if n := quotedPrefixLen(s, i); n > 0 {
+					i += n - 1
+					continue
+				}
+				if endsWithPrefix(s, i) {
+					i = closingQuote(s, i)
+					continue
+				}
 			}
 
 			result.WriteString(replaceQualifiers(s[segmentStart:i]))
 			literalStart := i
-			for i++; i < len(s); i++ {
-				if s[i] != '\'' {
-					continue
-				}
-				if i+1 < len(s) && s[i+1] == '\'' {
-					i++
-					continue
-				}
-				break
-			}
-			result.WriteString(s[literalStart:min(i+1, len(s))])
-			segmentStart = min(i+1, len(s))
+			i = closingQuote(s, i)
+			result.WriteString(s[literalStart : i+1])
+			segmentStart = i + 1
 		}
 		result.WriteString(replaceQualifiers(s[segmentStart:]))
 		return result.String()

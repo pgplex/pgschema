@@ -239,6 +239,49 @@ func TestNormalizeSchemaNames_StripsSameSchemaQualifiersFromViewDefinitions(t *t
 	}
 }
 
+func TestNormalizeSchemaNames_StripsQuotedSchemaQualifiers(t *testing.T) {
+	// A target schema that needs quoting is rendered as "My Schema". by the
+	// deparsers; function, cast and operator qualifiers in that form are
+	// stripped too, while an identifier that merely contains the token stays.
+	const tempSchema = "pgschema_tmp_20260326_123456_abcd1234"
+	irData := &ir.IR{
+		Metadata: ir.Metadata{ShadowedOperators: []string{"+"}},
+		Schemas: map[string]*ir.Schema{
+			tempSchema: {
+				Name: tempSchema,
+				Views: map[string]*ir.View{
+					"v": {
+						Schema: tempSchema,
+						Name:   "v",
+						Definition: " SELECT \"My Schema\".nlevel(path) AS depth,\n" +
+							"    \"My Schema\".\"Fn Name\"(path) AS named,\n" +
+							"    path::\"My Schema\".ltree AS p,\n" +
+							"    path::\"My Schema\".\"Type Name\" AS typed,\n" +
+							"    h OPERATOR(\"My Schema\".->) 'a'::text AS ha,\n" +
+							"    id OPERATOR(\"My Schema\".+) 1 AS shadowed,\n" +
+							"    1 AS \"x \"\"My Schema\"\".y(\"\n" +
+							"   FROM t",
+					},
+				},
+			},
+		},
+	}
+
+	normalizeSchemaNames(irData, tempSchema, "My Schema")
+
+	expected := " SELECT nlevel(path) AS depth,\n" +
+		"    \"Fn Name\"(path) AS named,\n" +
+		"    path::ltree AS p,\n" +
+		"    path::\"Type Name\" AS typed,\n" +
+		"    h -> 'a'::text AS ha,\n" +
+		"    id OPERATOR(\"My Schema\".+) 1 AS shadowed,\n" +
+		"    1 AS \"x \"\"My Schema\"\".y(\"\n" +
+		"   FROM t"
+	if got := irData.Schemas["My Schema"].Views["v"].Definition; got != expected {
+		t.Fatalf("expected quoted-schema qualifiers stripped:\n%s\ngot:\n%s", expected, got)
+	}
+}
+
 func TestNormalizeSchemaNames_PreservesInheritedPartitionDefault(t *testing.T) {
 	const tempSchema = "pgschema_tmp_partition595"
 	childDefault, parentDefault := "public.member_default()", "public.member_default()"
@@ -322,5 +365,58 @@ func TestNormalizeSchemaNames_IndexAttachment(t *testing.T) {
 	children := data.Schemas["public"].Tables["child"].AllPartitionChildren
 	if children[0].Schema != "public" || children[1].Schema != "other" {
 		t.Fatalf("Incorrect partition-table metadata normalization: %+v", children)
+	}
+}
+
+func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
+	// With an external plan database and target schema public, the plan side
+	// deparses extension operators living in public as OPERATOR(public.->),
+	// while the target side (inspected with public on its search_path) prints
+	// the bare operator. The same-schema qualifier must be stripped so the two
+	// definitions agree (issue #697).
+	const tempSchema = "pgschema_tmp_20260326_123456_abcd1234"
+	irData := &ir.IR{
+		// A custom public.+(integer, integer) duplicates pg_catalog's; ruleutils
+		// always qualifies it, and so must the stripped definition.
+		Metadata: ir.Metadata{ShadowedOperators: []string{"+"}},
+		Schemas: map[string]*ir.Schema{
+			tempSchema: {
+				Name: tempSchema,
+				Views: map[string]*ir.View{
+					"v": {
+						Schema: tempSchema,
+						Name:   "v",
+						Definition: " SELECT id,\n" +
+							"    h OPERATOR(public.->) 'a'::text AS ha,\n" +
+							"    h OPERATOR(public.?) 'k'::text AS hk,\n" +
+							"    t OPERATOR(public.@>) 'x'::public.ltree AS anc,\n" +
+							"    id OPERATOR(public.+) 1 AS shadowed,\n" +
+							"    'OPERATOR(public.->)'::text AS literal,\n" +
+							"    1 AS \"OPERATOR(public.->)\",\n" +
+							"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
+							"    public.\"Fn Name\"(id) AS named, id::public.\"Type Name\" AS typed,\n" +
+							"    j -> 'a'::text AS ja\n" +
+							"   FROM t",
+					},
+				},
+			},
+		},
+	}
+
+	normalizeSchemaNames(irData, tempSchema, "public")
+
+	expected := " SELECT id,\n" +
+		"    h -> 'a'::text AS ha,\n" +
+		"    h ? 'k'::text AS hk,\n" +
+		"    t @> 'x'::ltree AS anc,\n" +
+		"    id OPERATOR(public.+) 1 AS shadowed,\n" +
+		"    'OPERATOR(public.->)'::text AS literal,\n" +
+		"    1 AS \"OPERATOR(public.->)\",\n" +
+		"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
+		"    \"Fn Name\"(id) AS named, id::\"Type Name\" AS typed,\n" +
+		"    j -> 'a'::text AS ja\n" +
+		"   FROM t"
+	if got := irData.Schemas["public"].Views["v"].Definition; got != expected {
+		t.Fatalf("expected operator qualifiers stripped:\n%s\ngot:\n%s", expected, got)
 	}
 }
