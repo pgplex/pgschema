@@ -1,0 +1,62 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "1.14.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "5b513ad051c2e884819a03145d0f5a984ca1281ec58ece999f290169aabbdba0"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS sessions (\n    id integer,\n    account_id integer NOT NULL,\n    token text NOT NULL,\n    expires_at timestamp NOT NULL,\n    CONSTRAINT sessions_pkey PRIMARY KEY (id),\n    CONSTRAINT sessions_token_key UNIQUE (token) INCLUDE (account_id, expires_at)\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.sessions"
+        },
+        {
+          "sql": "ALTER TABLE accounts DROP CONSTRAINT accounts_pkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.accounts.accounts_pkey"
+        },
+        {
+          "sql": "ALTER TABLE accounts\nADD CONSTRAINT accounts_pkey PRIMARY KEY (id) INCLUDE (email, display_name);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.accounts.accounts_pkey"
+        },
+        {
+          "sql": "ALTER TABLE accounts DROP CONSTRAINT accounts_tenant_email_key;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.accounts.accounts_tenant_email_key"
+        },
+        {
+          "sql": "ALTER TABLE accounts\nADD CONSTRAINT accounts_tenant_email_key UNIQUE (tenant_id, email);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.accounts.accounts_tenant_email_key"
+        },
+        {
+          "sql": "ALTER TABLE events DROP CONSTRAINT events_pkey;",
+          "type": "table.constraint",
+          "operation": "drop",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "ALTER TABLE events\nADD CONSTRAINT events_pkey PRIMARY KEY (id, occurred_at) INCLUDE (payload);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.events.events_pkey"
+        },
+        {
+          "sql": "ALTER TABLE sessions\nADD CONSTRAINT sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts (id);",
+          "type": "table.constraint",
+          "operation": "create",
+          "path": "public.sessions.sessions_account_id_fkey"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+CREATE TABLE IF NOT EXISTS sessions (
+    id integer,
+    account_id integer NOT NULL,
+    token text NOT NULL,
+    expires_at timestamp NOT NULL,
+    CONSTRAINT sessions_pkey PRIMARY KEY (id),
+    CONSTRAINT sessions_token_key UNIQUE (token) INCLUDE (account_id, expires_at)
+);
+
+ALTER TABLE accounts DROP CONSTRAINT accounts_pkey;
+
+ALTER TABLE accounts
+ADD CONSTRAINT accounts_pkey PRIMARY KEY (id) INCLUDE (email, display_name);
+
+ALTER TABLE accounts DROP CONSTRAINT accounts_tenant_email_key;
+
+ALTER TABLE accounts
+ADD CONSTRAINT accounts_tenant_email_key UNIQUE (tenant_id, email);
+
+ALTER TABLE events DROP CONSTRAINT events_pkey;
+
+ALTER TABLE events
+ADD CONSTRAINT events_pkey PRIMARY KEY (id, occurred_at) INCLUDE (payload);
+
+ALTER TABLE sessions
+ADD CONSTRAINT sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts (id);
