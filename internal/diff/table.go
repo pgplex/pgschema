@@ -1277,10 +1277,10 @@ func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
 	return true
 }
 
-// referencesKeyAddedHere reports whether constraint is a foreign key on this
-// table that references a PRIMARY KEY or UNIQUE constraint this migration adds
-// to the same table.
-func (td *tableDiff) referencesKeyAddedHere(constraint *ir.Constraint) bool {
+// referencesIncludeKeyAddedHere reports whether constraint is a foreign key on
+// this table that references a PRIMARY KEY or UNIQUE constraint with INCLUDE
+// columns this migration adds to the same table.
+func (td *tableDiff) referencesIncludeKeyAddedHere(constraint *ir.Constraint) bool {
 	if constraint.Type != ir.ConstraintTypeForeignKey || constraint.ReferencedTable != td.Table.Name {
 		return false
 	}
@@ -1295,7 +1295,7 @@ func (td *tableDiff) referencesKeyAddedHere(constraint *ir.Constraint) bool {
 		if key.Type != ir.ConstraintTypePrimaryKey && key.Type != ir.ConstraintTypeUnique {
 			continue
 		}
-		if len(key.Columns) != len(referenced) {
+		if len(key.IncludeColumns) == 0 || len(key.Columns) != len(referenced) {
 			continue
 		}
 		matched := true
@@ -1561,9 +1561,9 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 				continue
 			}
 			// A self-referencing FK can only be inlined once its key exists; a
-			// key added by this same migration is created at table level, or by
-			// a later ADD COLUMN, so emit the FK at table level after it.
-			if td.referencesKeyAddedHere(constraint) {
+			// key with INCLUDE columns is created at table level below, so emit
+			// the FK there too, after it.
+			if td.referencesIncludeKeyAddedHere(constraint) {
 				continue
 			}
 			// Only add inline for single-column constraints
