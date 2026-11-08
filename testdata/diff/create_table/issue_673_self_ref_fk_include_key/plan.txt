@@ -1,0 +1,28 @@
+Plan: 1 to modify.
+
+Summary by type:
+  tables: 1 to modify
+
+Tables:
+  ~ node
+    + id (column)
+    + parent_id (column)
+    + node_parent_id_fkey (constraint)
+    + node_pkey (constraint)
+
+DDL to be executed:
+--------------------------------------------------
+
+-- Transaction Group #1
+ALTER TABLE node ADD COLUMN id integer;
+
+ALTER TABLE node ADD COLUMN parent_id integer;
+
+ALTER TABLE node
+ADD CONSTRAINT node_pkey PRIMARY KEY (id) INCLUDE (payload);
+
+ALTER TABLE node
+ADD CONSTRAINT node_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES node (id) NOT VALID;
+
+-- Transaction Group #2
+ALTER TABLE node VALIDATE CONSTRAINT node_parent_id_fkey;

@@ -1277,6 +1277,41 @@ func selfRefFKTargetsPK(table *ir.Table, fk *ir.Constraint) bool {
 	return true
 }
 
+// referencesKeyAddedHere reports whether constraint is a foreign key on this
+// table that references a PRIMARY KEY or UNIQUE constraint this migration adds
+// to the same table.
+func (td *tableDiff) referencesKeyAddedHere(constraint *ir.Constraint) bool {
+	if constraint.Type != ir.ConstraintTypeForeignKey || constraint.ReferencedTable != td.Table.Name {
+		return false
+	}
+	if constraint.ReferencedSchema != "" && constraint.ReferencedSchema != td.Table.Schema {
+		return false
+	}
+	referenced := make(map[string]bool, len(constraint.ReferencedColumns))
+	for _, column := range constraint.ReferencedColumns {
+		referenced[column.Name] = true
+	}
+	for _, key := range td.AddedConstraints {
+		if key.Type != ir.ConstraintTypePrimaryKey && key.Type != ir.ConstraintTypeUnique {
+			continue
+		}
+		if len(key.Columns) != len(referenced) {
+			continue
+		}
+		matched := true
+		for _, column := range key.Columns {
+			if !referenced[column.Name] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 // constraintDroppedWithColumns reports whether dropping any column in droppedColumnSet
 // will implicitly remove the constraint. PostgreSQL drops dependent constraints as part
 // of ALTER TABLE ... DROP COLUMN, so emitting an explicit DROP CONSTRAINT would be redundant.
@@ -1523,6 +1558,12 @@ func (td *tableDiff) generateAlterTableStatements(targetSchema string, collector
 			}
 			// INCLUDE needs table-level syntax after all new columns exist.
 			if len(constraint.IncludeColumns) > 0 {
+				continue
+			}
+			// A self-referencing FK can only be inlined once its key exists; a
+			// key added by this same migration is created at table level, or by
+			// a later ADD COLUMN, so emit the FK at table level after it.
+			if td.referencesKeyAddedHere(constraint) {
 				continue
 			}
 			// Only add inline for single-column constraints
