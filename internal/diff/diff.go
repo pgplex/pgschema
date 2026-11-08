@@ -2809,6 +2809,27 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 	// A procedure whose body may depend on a postponed key (issue #653) waits
 	// for the batch in which that hierarchy completes, like a function.
 	proceduresNow, proceduresAfterSecondBatch, proceduresAfterThirdBatch := holdBackKeyDependentProcedures(d.partitionIndexes, batches, d.addedTables, d.addedProcedures)
+	// A procedure whose parameter is a type created after all tables (a
+	// domain or composite over a table's row type, issue #626) waits for the
+	// last batch as well.
+	if len(tableDomainLookup) > 0 {
+		var now, second []*ir.Procedure
+		for _, proc := range proceduresNow {
+			if procedureSignatureReferencesRelation(proc, tableDomainLookup) {
+				proceduresAfterThirdBatch = append(proceduresAfterThirdBatch, proc)
+			} else {
+				now = append(now, proc)
+			}
+		}
+		for _, proc := range proceduresAfterSecondBatch {
+			if procedureSignatureReferencesRelation(proc, tableDomainLookup) {
+				proceduresAfterThirdBatch = append(proceduresAfterThirdBatch, proc)
+			} else {
+				second = append(second, proc)
+			}
+		}
+		proceduresNow, proceduresAfterSecondBatch = now, second
+	}
 	generateCreateProceduresSQL(proceduresNow, targetSchema, collector)
 
 	// Create tables WITH function/domain dependencies (now that functions and deferred domains exist)
@@ -4624,14 +4645,37 @@ func typeReferencesNewTable(typeObj *ir.Type, newTables map[string]struct{}) boo
 	if len(newTables) == 0 || typeObj == nil {
 		return false
 	}
+	// The inspector renders a pg_catalog type unqualified and any other type
+	// schema-qualified, so an unqualified name is a built-in, never a table's
+	// row type, even when a new table shares its name (e.g. a table "text").
+	isNewTableRowType := func(dataType string) bool {
+		name := extractBaseTypeName(dataType)
+		return strings.Contains(name, ".") && typeMatchesLookup(name, typeObj.Schema, newTables)
+	}
 	switch typeObj.Kind {
 	case ir.TypeKindDomain:
-		return typeMatchesLookup(extractBaseTypeName(typeObj.BaseType), typeObj.Schema, newTables)
+		return isNewTableRowType(typeObj.BaseType)
 	case ir.TypeKindComposite:
 		for _, attr := range typeObj.Columns {
-			if typeMatchesLookup(extractBaseTypeName(attr.DataType), typeObj.Schema, newTables) {
+			if isNewTableRowType(attr.DataType) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// procedureSignatureReferencesRelation reports whether a parameter of the
+// procedure is typed on one of the given relations (or types deferred with
+// them). A procedure's parameter types are resolved at creation, so one
+// taking a type created in a later batch must wait for that batch.
+func procedureSignatureReferencesRelation(proc *ir.Procedure, relations map[string]struct{}) bool {
+	if len(relations) == 0 || proc == nil {
+		return false
+	}
+	for _, param := range proc.Parameters {
+		if param.DataType != "" && typeMatchesLookup(extractBaseTypeName(param.DataType), proc.Schema, relations) {
+			return true
 		}
 	}
 	return false

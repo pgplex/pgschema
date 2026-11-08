@@ -9,10 +9,34 @@
     {
       "steps": [
         {
+          "sql": "CREATE TYPE payload AS (value text);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.payload"
+        },
+        {
           "sql": "CREATE TABLE IF NOT EXISTS example (\n    id integer,\n    CONSTRAINT example_pkey PRIMARY KEY (id)\n);",
           "type": "table",
           "operation": "create",
           "path": "public.example"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS text (\n    id integer\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.text"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION check_payload(\n    p payload\n)\nRETURNS boolean\nLANGUAGE sql\nIMMUTABLE\nAS $$ SELECT p.value IS NOT NULL\n$$;",
+          "type": "function",
+          "operation": "create",
+          "path": "public.check_payload"
+        },
+        {
+          "sql": "CREATE TABLE IF NOT EXISTS holder (\n    p payload,\n    CONSTRAINT holder_p_check CHECK (check_payload(p))\n);",
+          "type": "table",
+          "operation": "create",
+          "path": "public.holder"
         },
         {
           "sql": "CREATE TYPE example_result AS (rows example[]);",
@@ -25,6 +49,12 @@
           "type": "function",
           "operation": "create",
           "path": "public.collect_examples"
+        },
+        {
+          "sql": "CREATE OR REPLACE PROCEDURE consume_examples(\n    IN r example_result\n)\nLANGUAGE plpgsql\nAS $$ BEGIN NULL; END \n$$;",
+          "type": "procedure",
+          "operation": "create",
+          "path": "public.consume_examples"
         }
       ]
     }

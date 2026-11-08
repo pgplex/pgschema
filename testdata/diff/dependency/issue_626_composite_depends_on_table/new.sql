@@ -13,3 +13,27 @@ CREATE TYPE example_result AS (
 CREATE FUNCTION collect_examples() RETURNS example_result
     LANGUAGE sql STABLE
     AS $$ SELECT ARRAY(SELECT e FROM example e) $$;
+
+-- A procedure taking the composite as a parameter waits for it too.
+CREATE PROCEDURE consume_examples(IN r example_result)
+    LANGUAGE plpgsql
+    AS $$ BEGIN NULL; END $$;
+
+-- A new table named like a built-in type must not be mistaken for the type:
+-- payload's attribute is pg_catalog.text, so payload needs no deferral and
+-- the function and table built on it keep their usual order.
+CREATE TABLE text (
+    id integer
+);
+
+CREATE TYPE payload AS (
+    value text
+);
+
+CREATE FUNCTION check_payload(p payload) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT p.value IS NOT NULL $$;
+
+CREATE TABLE holder (
+    p payload CHECK (check_payload(p))
+);
