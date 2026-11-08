@@ -25,6 +25,18 @@
           "type": "table",
           "operation": "create",
           "path": "public.users"
+        },
+        {
+          "sql": "GRANT SELECT ON TABLE users TO PUBLIC;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TABLE.users.PUBLIC"
+        },
+        {
+          "sql": "GRANT INSERT, UPDATE ON TABLE users TO app_user;",
+          "type": "privilege",
+          "operation": "create",
+          "path": "privileges.TABLE.users.app_user"
         }
       ]
     }

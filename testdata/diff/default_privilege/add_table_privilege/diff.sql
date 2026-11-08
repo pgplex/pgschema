@@ -7,3 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     name text NOT NULL,
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );
+
+GRANT SELECT ON TABLE users TO PUBLIC;
+
+GRANT INSERT, UPDATE ON TABLE users TO app_user;

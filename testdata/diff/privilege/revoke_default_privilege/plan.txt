@@ -1,8 +1,8 @@
-Plan: 2 to add, 2 to drop.
+Plan: 5 to add, 2 to drop.
 
 Summary by type:
   tables: 2 to add
-  privileges: 2 to drop
+  privileges: 3 to add, 2 to drop
 
 Tables:
   + readonly_data
@@ -10,6 +10,9 @@ Tables:
 
 Privileges:
   - app_user
+  + app_user
+  + reader
+  + app_user
   - reader
 
 DDL to be executed:
@@ -30,3 +33,9 @@ CREATE TABLE IF NOT EXISTS secrets (
 REVOKE DELETE, INSERT, UPDATE ON TABLE readonly_data FROM app_user;
 
 REVOKE SELECT ON TABLE secrets FROM reader;
+
+GRANT SELECT ON TABLE readonly_data TO app_user;
+
+GRANT SELECT ON TABLE readonly_data TO reader;
+
+GRANT DELETE, INSERT, SELECT, UPDATE ON TABLE secrets TO app_user;
