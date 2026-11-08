@@ -254,7 +254,9 @@ func TestNormalizeSchemaNames_StripsQuotedSchemaQualifiers(t *testing.T) {
 						Schema: tempSchema,
 						Name:   "v",
 						Definition: " SELECT \"My Schema\".nlevel(path) AS depth,\n" +
+							"    \"My Schema\".\"Fn Name\"(path) AS named,\n" +
 							"    path::\"My Schema\".ltree AS p,\n" +
+							"    path::\"My Schema\".\"Type Name\" AS typed,\n" +
 							"    h OPERATOR(\"My Schema\".->) 'a'::text AS ha,\n" +
 							"    id OPERATOR(\"My Schema\".+) 1 AS shadowed,\n" +
 							"    1 AS \"x \"\"My Schema\"\".y(\"\n" +
@@ -268,7 +270,9 @@ func TestNormalizeSchemaNames_StripsQuotedSchemaQualifiers(t *testing.T) {
 	normalizeSchemaNames(irData, tempSchema, "My Schema")
 
 	expected := " SELECT nlevel(path) AS depth,\n" +
+		"    \"Fn Name\"(path) AS named,\n" +
 		"    path::ltree AS p,\n" +
+		"    path::\"Type Name\" AS typed,\n" +
 		"    h -> 'a'::text AS ha,\n" +
 		"    id OPERATOR(\"My Schema\".+) 1 AS shadowed,\n" +
 		"    1 AS \"x \"\"My Schema\"\".y(\"\n" +
@@ -390,6 +394,7 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 							"    'OPERATOR(public.->)'::text AS literal,\n" +
 							"    1 AS \"OPERATOR(public.->)\",\n" +
 							"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
+							"    public.\"Fn Name\"(id) AS named, id::public.\"Type Name\" AS typed,\n" +
 							"    j -> 'a'::text AS ja\n" +
 							"   FROM t",
 					},
@@ -408,6 +413,7 @@ func TestNormalizeSchemaNames_StripsSameSchemaOperatorQualifiers(t *testing.T) {
 		"    'OPERATOR(public.->)'::text AS literal,\n" +
 		"    1 AS \"OPERATOR(public.->)\",\n" +
 		"    \"public.nlevel(\" AS \"it''s \"\"public.x(\"\"\",\n" +
+		"    \"Fn Name\"(id) AS named, id::\"Type Name\" AS typed,\n" +
 		"    j -> 'a'::text AS ja\n" +
 		"   FROM t"
 	if got := irData.Schemas["public"].Views["v"].Definition; got != expected {

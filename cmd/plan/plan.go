@@ -871,7 +871,8 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 		quotedPrefixes[i] = regexp.QuoteMeta(p)
 	}
 	prefixAlternatives := `(?:` + strings.Join(quotedPrefixes, "|") + `)`
-	funcPattern := regexp.MustCompile(prefixAlternatives + `([a-zA-Z_][a-zA-Z0-9_$]*)\(`)
+	// The object name after the qualifier is bare or quote_ident form too.
+	funcPattern := regexp.MustCompile(prefixAlternatives + `([a-zA-Z_][a-zA-Z0-9_$]*|"(?:[^"]|"")+")\(`)
 	typePattern := regexp.MustCompile(`::` + prefixAlternatives)
 	// OPERATOR(schema.op): ruleutils qualifies an operator whenever its schema
 	// is not on the deparsing session's search_path. The plan database is
@@ -915,15 +916,43 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 		}
 		return 0
 	}
+	// endsWithPrefix reports whether s[:i] ends with a schema qualifier, so a
+	// quoted identifier starting at s[i] is the qualified object's own name.
+	endsWithPrefix := func(s string, i int) bool {
+		for _, p := range prefixes {
+			if strings.HasSuffix(s[:i], p) {
+				return true
+			}
+		}
+		return false
+	}
+	// closingQuote returns the index of the quote that closes the literal or
+	// identifier opened at s[i]; a doubled quote inside is an escape.
+	closingQuote := func(s string, i int) int {
+		quote := s[i]
+		for i++; i < len(s); i++ {
+			if s[i] != quote {
+				continue
+			}
+			if i+1 < len(s) && s[i+1] == quote {
+				i++
+				continue
+			}
+			break
+		}
+		return min(i, len(s)-1)
+	}
 	return func(s string) string {
 		if s == "" || !containsPrefix(s) {
 			return s
 		}
 
 		// Replace only outside single-quoted literals and double-quoted
-		// identifiers; a doubled quote inside either is an escape. The quoted
-		// schema token itself ("My Schema".) is not an opaque identifier: it
-		// stays in the replaceable segment so the patterns above can strip it.
+		// identifiers; a doubled quote inside either is an escape. Two quoted
+		// tokens are not opaque: the quoted schema itself ("My Schema".) and
+		// a quoted object name right after a qualifier (public."My Func"().
+		// Both stay in the replaceable segment so the patterns can see the
+		// whole qualified reference.
 		var result strings.Builder
 		result.Grow(len(s))
 		segmentStart := 0
@@ -937,22 +966,17 @@ func newSameSchemaQualifierStripper(schema string, shadowedOperators map[string]
 					i += n - 1
 					continue
 				}
+				if endsWithPrefix(s, i) {
+					i = closingQuote(s, i)
+					continue
+				}
 			}
 
 			result.WriteString(replaceQualifiers(s[segmentStart:i]))
 			literalStart := i
-			for i++; i < len(s); i++ {
-				if s[i] != quote {
-					continue
-				}
-				if i+1 < len(s) && s[i+1] == quote {
-					i++
-					continue
-				}
-				break
-			}
-			result.WriteString(s[literalStart:min(i+1, len(s))])
-			segmentStart = min(i+1, len(s))
+			i = closingQuote(s, i)
+			result.WriteString(s[literalStart : i+1])
+			segmentStart = i + 1
 		}
 		result.WriteString(replaceQualifiers(s[segmentStart:]))
 		return result.String()

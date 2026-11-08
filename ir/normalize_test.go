@@ -807,8 +807,13 @@ func TestNormalizeOperatorSyntax(t *testing.T) {
 		},
 		{
 			name:  "unterminated or non-operator OPERATOR( text is copied through",
-			input: "OPERATOR(public.foo) OPERATOR(public.->",
-			want:  "OPERATOR(public.foo) OPERATOR(public.->",
+			input: "OPERATOR(public.foo) OPERATOR(public.-> xoperator(public.->) operator",
+			want:  "OPERATOR(public.foo) OPERATOR(public.-> xoperator(public.->) operator",
+		},
+		{
+			name:  "keyword case and whitespace before the parenthesis",
+			input: "(h operator (public.->) 'a'::text) AND (h Operator\t(public.?) 'k'::text)",
+			want:  "(h -> 'a'::text) AND (h ? 'k'::text)",
 		},
 		{
 			name:  "quoted text is untouched",

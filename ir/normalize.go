@@ -525,8 +525,8 @@ const OperatorNameChars = "-+*/<>=~!@#%^&|`?"
 // ("My Schema".op); single-quoted literals and double-quoted identifiers are
 // copied through untouched.
 func normalizeOperatorSyntax(expr, schema string, shadowed map[string]bool) string {
-	const keyword = "OPERATOR("
-	if schema == "" || !strings.Contains(expr, keyword) {
+	const keyword = "operator"
+	if schema == "" || !strings.Contains(strings.ToLower(expr), keyword) {
 		return expr
 	}
 	bare := schema + "."
@@ -542,32 +542,41 @@ func normalizeOperatorSyntax(expr, schema string, shadowed map[string]bool) stri
 			i = end
 			continue
 		}
-		if c == 'O' && strings.HasPrefix(expr[i:], keyword) && (i == 0 || !isIdentChar(expr[i-1])) {
-			rest := expr[i+len(keyword):]
-			prefixLen := 0
-			if strings.HasPrefix(rest, bare) {
-				prefixLen = len(bare)
-			} else if strings.HasPrefix(rest, quoted) {
-				prefixLen = len(quoted)
+		// The keyword in any letter case, as a whole word, then optional
+		// whitespace and the opening parenthesis (same as followsOperatorKeyword).
+		if (c == 'O' || c == 'o') && i+len(keyword) <= len(expr) && strings.EqualFold(expr[i:i+len(keyword)], keyword) &&
+			(i == 0 || !isIdentChar(expr[i-1])) && (i+len(keyword) == len(expr) || !isIdentChar(expr[i+len(keyword)])) {
+			open := i + len(keyword)
+			for open < len(expr) && (expr[open] == ' ' || expr[open] == '\t' || expr[open] == '\n' || expr[open] == '\r') {
+				open++
 			}
-			if prefixLen > 0 {
-				nameEnd := prefixLen
-				for nameEnd < len(rest) && strings.IndexByte(OperatorNameChars, rest[nameEnd]) >= 0 {
-					nameEnd++
+			if open < len(expr) && expr[open] == '(' {
+				rest := expr[open+1:]
+				prefixLen := 0
+				if strings.HasPrefix(rest, bare) {
+					prefixLen = len(bare)
+				} else if strings.HasPrefix(rest, quoted) {
+					prefixLen = len(quoted)
 				}
-				if nameEnd > prefixLen && nameEnd < len(rest) && rest[nameEnd] == ')' {
-					name := rest[prefixLen:nameEnd]
-					if shadowed[name] {
-						out.WriteString(expr[i : i+len(keyword)+nameEnd+1])
-					} else {
-						out.WriteString(name)
+				if prefixLen > 0 {
+					nameEnd := prefixLen
+					for nameEnd < len(rest) && strings.IndexByte(OperatorNameChars, rest[nameEnd]) >= 0 {
+						nameEnd++
 					}
-					i += len(keyword) + nameEnd + 1
-					continue
+					if nameEnd > prefixLen && nameEnd < len(rest) && rest[nameEnd] == ')' {
+						end := open + 1 + nameEnd + 1
+						if name := rest[prefixLen:nameEnd]; shadowed[name] {
+							out.WriteString(expr[i:end])
+						} else {
+							out.WriteString(name)
+						}
+						i = end
+						continue
+					}
 				}
 			}
-			out.WriteString(keyword)
-			i += len(keyword)
+			out.WriteString(expr[i:open])
+			i = open
 			continue
 		}
 		out.WriteByte(c)
