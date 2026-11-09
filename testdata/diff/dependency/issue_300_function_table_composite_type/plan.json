@@ -27,7 +27,7 @@
           "path": "public.actor"
         },
         {
-          "sql": "CREATE OR REPLACE FUNCTION get_actor(\n    activity activity\n)\nRETURNS SETOF actor\nLANGUAGE sql\nSTABLE\nAS $$ SELECT actor.* FROM actor WHERE actor.id = activity.author_id\n$$;",
+          "sql": "CREATE OR REPLACE FUNCTION get_actor(\n    activity activity\n)\nRETURNS SETOF actor\nLANGUAGE sql\nSTABLE\nROWS 1\nAS $$ SELECT actor.* FROM actor WHERE actor.id = activity.author_id\n$$;",
           "type": "function",
           "operation": "create",
           "path": "public.get_actor"
