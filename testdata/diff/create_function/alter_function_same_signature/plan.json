@@ -3,11 +3,17 @@
   "pgschema_version": "1.14.1",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "fc335bb328a0b47f89b922eadc006adbeadd205c59890bb5523a57bb00e854b9"
+    "hash": "c236d56c9682584188b6b3590b3bec5e17b0274fabe253d1f09f9b5b673133b0"
   },
   "groups": [
     {
       "steps": [
+        {
+          "sql": "CREATE OR REPLACE FUNCTION expand_order(\n    order_id integer\n)\nRETURNS TABLE(line_id integer)\nLANGUAGE sql\nVOLATILE\nROWS 1\nAS $$\n    SELECT order_id;\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.expand_order"
+        },
         {
           "sql": "CREATE OR REPLACE FUNCTION process_order(\n    order_id integer,\n    discount_percent numeric DEFAULT 0,\n    status order_status DEFAULT 'pending'::order_status,\n    priority utils.priority_level DEFAULT 'medium'::utils.priority_level\n)\nRETURNS numeric\nLANGUAGE plpgsql\nSTABLE\nAS $$\nDECLARE\n    base_price numeric;\n    tax_rate numeric := 0.08;\nBEGIN\n    -- Different logic: calculate with tax instead of just discount\n    -- Status and priority parameters are available but not used in this simplified version\n    SELECT price INTO base_price FROM products WHERE id = order_id;\n    RETURN base_price * (1 - discount_percent / 100) * (1 + tax_rate);\nEND;\n$$;",
           "type": "function",

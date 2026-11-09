@@ -1,13 +1,25 @@
-Plan: 1 to modify.
+Plan: 2 to modify.
 
 Summary by type:
-  functions: 1 to modify
+  functions: 2 to modify
 
 Functions:
+  ~ expand_order
   ~ process_order
 
 DDL to be executed:
 --------------------------------------------------
+
+CREATE OR REPLACE FUNCTION expand_order(
+    order_id integer
+)
+RETURNS TABLE(line_id integer)
+LANGUAGE sql
+VOLATILE
+ROWS 1
+AS $$
+    SELECT order_id;
+$$;
 
 CREATE OR REPLACE FUNCTION process_order(
     order_id integer,

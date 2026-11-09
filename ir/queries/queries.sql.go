@@ -2161,6 +2161,9 @@ SELECT
     p.prosecdef AS is_security_definer,
     p.proleakproof AS is_leakproof,
     p.proparallel AS parallel_mode,
+    p.proretset AS returns_set,
+    -- Planner row estimate for set-returning functions (ROWS n); text so it round-trips as pg_dump prints it
+    p.prorows::text AS result_rows,
     COALESCE(p.proconfig, '{}') AS set_config
 FROM information_schema.routines r
 LEFT JOIN pg_proc p ON p.proname = r.routine_name
@@ -2205,6 +2208,8 @@ type GetFunctionsForSchemaRow struct {
 	IsSecurityDefiner         bool           `db:"is_security_definer" json:"is_security_definer"`
 	IsLeakproof               bool           `db:"is_leakproof" json:"is_leakproof"`
 	ParallelMode              interface{}    `db:"parallel_mode" json:"parallel_mode"`
+	ReturnsSet                bool           `db:"returns_set" json:"returns_set"`
+	ResultRows                sql.NullString `db:"result_rows" json:"result_rows"`
 	SetConfig                 []string       `db:"set_config" json:"set_config"`
 }
 
@@ -2234,6 +2239,8 @@ func (q *Queries) GetFunctionsForSchema(ctx context.Context, dollar_1 sql.NullSt
 			&i.IsSecurityDefiner,
 			&i.IsLeakproof,
 			&i.ParallelMode,
+			&i.ReturnsSet,
+			&i.ResultRows,
 			pq.Array(&i.SetConfig),
 		); err != nil {
 			return nil, err

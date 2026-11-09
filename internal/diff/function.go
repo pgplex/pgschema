@@ -263,6 +263,11 @@ func generateFunctionSQL(function *ir.Function, targetSchema string, qualifySche
 	}
 	// Note: Don't output PARALLEL UNSAFE (it's the default)
 
+	// Add ROWS estimate for set-returning functions when not the default (1000)
+	if function.Rows != "" {
+		stmt.WriteString(fmt.Sprintf("\nROWS %s", function.Rows))
+	}
+
 	// Add SET clauses from pg_proc.proconfig.
 	// Each entry is a raw "key=value" pair (e.g., "search_path=public", "TimeZone=UTC").
 	// Render them in sorted order for deterministic output.
@@ -428,6 +433,9 @@ func functionsEqualExceptAttributes(old, new *ir.Function) bool {
 	if old.IsSecurityDefiner != new.IsSecurityDefiner {
 		return false
 	}
+	if old.Rows != new.Rows {
+		return false
+	}
 	if !setConfigEqual(old.SetConfig, new.SetConfig) {
 		return false
 	}
@@ -464,6 +472,9 @@ func functionsEqual(old, new *ir.Function) bool {
 		return false
 	}
 	if old.IsSecurityDefiner != new.IsSecurityDefiner {
+		return false
+	}
+	if old.Rows != new.Rows {
 		return false
 	}
 	if old.IsLeakproof != new.IsLeakproof {
@@ -513,6 +524,9 @@ func functionsEqualExceptComment(old, new *ir.Function) bool {
 		return false
 	}
 	if old.IsSecurityDefiner != new.IsSecurityDefiner {
+		return false
+	}
+	if old.Rows != new.Rows {
 		return false
 	}
 	if old.IsLeakproof != new.IsLeakproof {

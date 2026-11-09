@@ -1,3 +1,14 @@
+CREATE OR REPLACE FUNCTION expand_order(
+    order_id integer
+)
+RETURNS TABLE(line_id integer)
+LANGUAGE sql
+VOLATILE
+ROWS 1
+AS $$
+    SELECT order_id;
+$$;
+
 CREATE OR REPLACE FUNCTION process_order(
     order_id integer,
     discount_percent numeric DEFAULT 0,

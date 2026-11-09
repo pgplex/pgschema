@@ -18,3 +18,11 @@ BEGIN
     RETURN total - (total * discount_percent / 100);
 END;
 $$;
+
+-- Set-returning function with the default ROWS estimate (1000); issue #702
+CREATE FUNCTION expand_order(order_id integer)
+RETURNS TABLE (line_id integer)
+LANGUAGE sql
+AS $$
+    SELECT order_id;
+$$;

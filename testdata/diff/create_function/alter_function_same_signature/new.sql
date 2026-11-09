@@ -21,3 +21,12 @@ BEGIN
     RETURN base_price * (1 - discount_percent / 100) * (1 + tax_rate);
 END;
 $$;
+
+-- Same body, but with a planner row estimate; issue #702
+CREATE FUNCTION expand_order(order_id integer)
+RETURNS TABLE (line_id integer)
+LANGUAGE sql
+ROWS 1
+AS $$
+    SELECT order_id;
+$$;
