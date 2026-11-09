@@ -1321,6 +1321,16 @@ func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema
 			parallelMode = "UNSAFE" // Defensive default
 		}
 
+		// ROWS estimate: pg_proc.prorows is 0 for non-set-returning functions and
+		// 1000 by default for set-returning ones; like pg_dump, keep it only when
+		// it differs from the default.
+		rows := ""
+		if fn.ReturnsSet {
+			if r := i.safeInterfaceToString(fn.ResultRows); r != "" && r != "0" && r != "1000" {
+				rows = r
+			}
+		}
+
 		// Parse parameters from the complete signature provided by pg_get_function_arguments()
 		// This signature includes all parameter information including modes, names, types, and defaults
 		parameters := i.parseParametersFromSignature(signature, schemaName)
@@ -1343,6 +1353,7 @@ func (i *Inspector) buildFunctions(ctx context.Context, schema *IR, targetSchema
 			IsSecurityDefiner: isSecurityDefiner,
 			IsLeakproof:       isLeakproof,
 			Parallel:          parallelMode,
+			Rows:              rows,
 			SetConfig:         setConfig,
 		}
 

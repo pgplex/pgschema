@@ -244,6 +244,7 @@ type Function struct {
 	IsSecurityDefiner bool         `json:"is_security_definer,omitempty"` // SECURITY DEFINER
 	IsLeakproof       bool         `json:"is_leakproof,omitempty"`        // LEAKPROOF
 	Parallel          string       `json:"parallel,omitempty"`            // SAFE, UNSAFE, RESTRICTED
+	Rows              string       `json:"rows,omitempty"`                // ROWS n planner estimate of a set-returning function; empty when default (1000) or not set-returning
 	SetConfig         []string     `json:"set_config,omitempty"`          // SET clauses from pg_proc.proconfig (e.g., "search_path=public", "TimeZone=UTC")
 	Dependencies      []string     `json:"dependencies,omitempty"`        // Function keys (name(args)) this function depends on
 	TypeDependencies  []string     `json:"-"`                             // schema.name of the types this function depends on per pg_depend (signature, SQL-standard body, defaults); ordering data, kept out of the fingerprint

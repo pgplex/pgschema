@@ -1757,6 +1757,9 @@ SELECT
     p.prosecdef AS is_security_definer,
     p.proleakproof AS is_leakproof,
     p.proparallel AS parallel_mode,
+    p.proretset AS returns_set,
+    -- Planner row estimate for set-returning functions (ROWS n); text so it round-trips as pg_dump prints it
+    p.prorows::text AS result_rows,
     COALESCE(p.proconfig, '{}') AS set_config
 FROM information_schema.routines r
 LEFT JOIN pg_proc p ON p.proname = r.routine_name

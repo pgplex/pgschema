@@ -52,7 +52,7 @@ func generateModifyFunctionsSQL(diffs []*functionDiff, targetSchema string, coll
 			continue
 		}
 
-		// Check if only LEAKPROOF or PARALLEL attributes changed (not the function body/definition)
+		// Check if only LEAKPROOF, PARALLEL or ROWS attributes changed (not the function body/definition)
 		onlyAttributesChanged := functionsEqualExceptAttributes(oldFunc, newFunc)
 
 		if onlyAttributesChanged {
@@ -86,6 +86,27 @@ func generateModifyFunctionsSQL(diffs []*functionDiff, targetSchema string, coll
 						qualifyEntityName(newFunc.Schema, newFunc.Name, targetSchema),
 						newFunc.GetArguments())
 				}
+
+				context := &diffContext{
+					Type:                DiffTypeFunction,
+					Operation:           DiffOperationAlter,
+					Path:                fmt.Sprintf("%s.%s", newFunc.Schema, newFunc.Name),
+					Source:              diff,
+					CanRunInTransaction: true,
+				}
+				collector.collect(context, stmt)
+			}
+
+			// Check ROWS changes; an empty Rows means the default estimate (1000)
+			if oldFunc.Rows != newFunc.Rows {
+				rows := newFunc.Rows
+				if rows == "" {
+					rows = "1000"
+				}
+				stmt := fmt.Sprintf("ALTER FUNCTION %s(%s) ROWS %s;",
+					qualifyEntityName(newFunc.Schema, newFunc.Name, targetSchema),
+					newFunc.GetArguments(),
+					rows)
 
 				context := &diffContext{
 					Type:                DiffTypeFunction,
@@ -263,6 +284,11 @@ func generateFunctionSQL(function *ir.Function, targetSchema string, qualifySche
 	}
 	// Note: Don't output PARALLEL UNSAFE (it's the default)
 
+	// Add ROWS estimate for set-returning functions when not the default (1000)
+	if function.Rows != "" {
+		stmt.WriteString(fmt.Sprintf("\nROWS %s", function.Rows))
+	}
+
 	// Add SET clauses from pg_proc.proconfig.
 	// Each entry is a raw "key=value" pair (e.g., "search_path=public", "TimeZone=UTC").
 	// Render them in sorted order for deterministic output.
@@ -401,7 +427,7 @@ func formatFunctionParameter(param *ir.Parameter, includeDefault bool, targetSch
 	return part
 }
 
-// functionsEqualExceptAttributes compares two functions ignoring LEAKPROOF and PARALLEL attributes
+// functionsEqualExceptAttributes compares two functions ignoring the LEAKPROOF, PARALLEL and ROWS attributes
 // Used to determine if ALTER FUNCTION can be used instead of CREATE OR REPLACE
 func functionsEqualExceptAttributes(old, new *ir.Function) bool {
 	if old.Schema != new.Schema {
@@ -431,7 +457,7 @@ func functionsEqualExceptAttributes(old, new *ir.Function) bool {
 	if !setConfigEqual(old.SetConfig, new.SetConfig) {
 		return false
 	}
-	// Note: We intentionally do NOT compare IsLeakproof or Parallel here
+	// Note: We intentionally do NOT compare IsLeakproof, Parallel or Rows here
 	// That's the whole point - we want to detect when only those attributes changed
 
 	// Compare using normalized Parameters array
@@ -464,6 +490,9 @@ func functionsEqual(old, new *ir.Function) bool {
 		return false
 	}
 	if old.IsSecurityDefiner != new.IsSecurityDefiner {
+		return false
+	}
+	if old.Rows != new.Rows {
 		return false
 	}
 	if old.IsLeakproof != new.IsLeakproof {
@@ -513,6 +542,9 @@ func functionsEqualExceptComment(old, new *ir.Function) bool {
 		return false
 	}
 	if old.IsSecurityDefiner != new.IsSecurityDefiner {
+		return false
+	}
+	if old.Rows != new.Rows {
 		return false
 	}
 	if old.IsLeakproof != new.IsLeakproof {

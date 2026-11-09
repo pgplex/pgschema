@@ -21,3 +21,29 @@ BEGIN
     RETURN base_price * (1 - discount_percent / 100) * (1 + tax_rate);
 END;
 $$;
+
+-- Same body, but with a planner row estimate; issue #702
+CREATE FUNCTION expand_order(order_id integer)
+RETURNS TABLE (line_id integer)
+LANGUAGE sql
+ROWS 1
+AS $$
+    SELECT order_id;
+$$;
+
+-- Estimate dropped, back to the default of 1000; issue #702
+CREATE FUNCTION order_lines(order_id integer)
+RETURNS SETOF integer
+LANGUAGE sql
+AS $$
+    SELECT order_id;
+$$;
+
+-- Body and estimate both change, so CREATE OR REPLACE carries ROWS; issue #702
+CREATE FUNCTION order_items(order_id integer)
+RETURNS SETOF integer
+LANGUAGE sql
+ROWS 10
+AS $$
+    SELECT order_id + 1;
+$$;

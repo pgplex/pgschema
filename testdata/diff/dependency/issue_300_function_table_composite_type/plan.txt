@@ -41,5 +41,6 @@ CREATE OR REPLACE FUNCTION get_actor(
 RETURNS SETOF actor
 LANGUAGE sql
 STABLE
+ROWS 1
 AS $$ SELECT actor.* FROM actor WHERE actor.id = activity.author_id
 $$;
