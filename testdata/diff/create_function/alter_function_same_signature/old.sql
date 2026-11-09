@@ -26,3 +26,20 @@ LANGUAGE sql
 AS $$
     SELECT order_id;
 $$;
+
+-- Set-returning function with a custom estimate that goes back to the default; issue #702
+CREATE FUNCTION order_lines(order_id integer)
+RETURNS SETOF integer
+LANGUAGE sql
+ROWS 5
+AS $$
+    SELECT order_id;
+$$;
+
+-- Set-returning function whose body and estimate both change; issue #702
+CREATE FUNCTION order_items(order_id integer)
+RETURNS SETOF integer
+LANGUAGE sql
+AS $$
+    SELECT order_id;
+$$;

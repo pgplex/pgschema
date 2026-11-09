@@ -30,3 +30,20 @@ ROWS 1
 AS $$
     SELECT order_id;
 $$;
+
+-- Estimate dropped, back to the default of 1000; issue #702
+CREATE FUNCTION order_lines(order_id integer)
+RETURNS SETOF integer
+LANGUAGE sql
+AS $$
+    SELECT order_id;
+$$;
+
+-- Body and estimate both change, so CREATE OR REPLACE carries ROWS; issue #702
+CREATE FUNCTION order_items(order_id integer)
+RETURNS SETOF integer
+LANGUAGE sql
+ROWS 10
+AS $$
+    SELECT order_id + 1;
+$$;

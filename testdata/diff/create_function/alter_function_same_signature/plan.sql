@@ -1,13 +1,17 @@
-CREATE OR REPLACE FUNCTION expand_order(
+ALTER FUNCTION expand_order(integer) ROWS 1;
+
+CREATE OR REPLACE FUNCTION order_items(
     order_id integer
 )
-RETURNS TABLE(line_id integer)
+RETURNS SETOF integer
 LANGUAGE sql
 VOLATILE
-ROWS 1
+ROWS 10
 AS $$
-    SELECT order_id;
+    SELECT order_id + 1;
 $$;
+
+ALTER FUNCTION order_lines(integer) ROWS 1000;
 
 CREATE OR REPLACE FUNCTION process_order(
     order_id integer,

@@ -3,16 +3,28 @@
   "pgschema_version": "1.14.1",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "c236d56c9682584188b6b3590b3bec5e17b0274fabe253d1f09f9b5b673133b0"
+    "hash": "1db813e004230e88ebf2743783a6c8b7bf85c967112961b8525f5b2c131f74b4"
   },
   "groups": [
     {
       "steps": [
         {
-          "sql": "CREATE OR REPLACE FUNCTION expand_order(\n    order_id integer\n)\nRETURNS TABLE(line_id integer)\nLANGUAGE sql\nVOLATILE\nROWS 1\nAS $$\n    SELECT order_id;\n$$;",
+          "sql": "ALTER FUNCTION expand_order(integer) ROWS 1;",
           "type": "function",
           "operation": "alter",
           "path": "public.expand_order"
+        },
+        {
+          "sql": "CREATE OR REPLACE FUNCTION order_items(\n    order_id integer\n)\nRETURNS SETOF integer\nLANGUAGE sql\nVOLATILE\nROWS 10\nAS $$\n    SELECT order_id + 1;\n$$;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.order_items"
+        },
+        {
+          "sql": "ALTER FUNCTION order_lines(integer) ROWS 1000;",
+          "type": "function",
+          "operation": "alter",
+          "path": "public.order_lines"
         },
         {
           "sql": "CREATE OR REPLACE FUNCTION process_order(\n    order_id integer,\n    discount_percent numeric DEFAULT 0,\n    status order_status DEFAULT 'pending'::order_status,\n    priority utils.priority_level DEFAULT 'medium'::utils.priority_level\n)\nRETURNS numeric\nLANGUAGE plpgsql\nSTABLE\nAS $$\nDECLARE\n    base_price numeric;\n    tax_rate numeric := 0.08;\nBEGIN\n    -- Different logic: calculate with tax instead of just discount\n    -- Status and priority parameters are available but not used in this simplified version\n    SELECT price INTO base_price FROM products WHERE id = order_id;\n    RETURN base_price * (1 - discount_percent / 100) * (1 + tax_rate);\nEND;\n$$;",
