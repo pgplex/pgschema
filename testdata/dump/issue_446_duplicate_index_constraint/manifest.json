@@ -1,0 +1,10 @@
+{
+  "name": "issue_446_duplicate_index_constraint",
+  "description": "Dump inlined a PRIMARY KEY or UNIQUE constraint whose key equals an earlier one in CREATE TABLE, and PostgreSQL silently dropped it",
+  "source": "https://github.com/pgplex/pgschema/issues/446",
+  "notes": [
+    "transformIndexConstraints (parse_utilcmd.c) removes an index constraint of CREATE TABLE whose index equals an earlier one; ALTER TABLE ADD CONSTRAINT keeps it.",
+    "The dump keeps the first such constraint inline and adds each duplicate with ALTER TABLE right after the CREATE TABLE, so a plan of the dump against the source database is empty.",
+    "The constraint comment follows the ALTER TABLE that creates the constraint."
+  ]
+}

@@ -1,0 +1,31 @@
+Plan: 2 to add.
+
+Summary by type:
+  tables: 2 to add
+
+Tables:
+  + order_lines
+  + products
+
+DDL to be executed:
+--------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS products (
+    sku text,
+    name text,
+    CONSTRAINT products_pkey PRIMARY KEY (sku),
+    CONSTRAINT products_name_key UNIQUE (name)
+);
+
+ALTER TABLE products
+ADD CONSTRAINT products_name_unique UNIQUE (name);
+
+ALTER TABLE products
+ADD CONSTRAINT products_sku_key UNIQUE (sku);
+
+CREATE TABLE IF NOT EXISTS order_lines (
+    id integer,
+    sku text NOT NULL,
+    CONSTRAINT order_lines_pkey PRIMARY KEY (id),
+    CONSTRAINT order_lines_sku_fkey FOREIGN KEY (sku) REFERENCES products (sku)
+);

@@ -180,6 +180,13 @@ func TestDumpCommand_Issue674ConstraintComment(t *testing.T) {
 	runExactMatchTest(t, "issue_674_constraint_comment")
 }
 
+func TestDumpCommand_Issue446DuplicateIndexConstraint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	runExactMatchTest(t, "issue_446_duplicate_index_constraint")
+}
+
 func TestDumpCommand_Issue653InheritedConstraintIndexName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

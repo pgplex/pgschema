@@ -555,7 +555,7 @@ func generateCreateTablesSQL(
 	// Process tables in the provided order (already topologically sorted)
 	for _, table := range tables {
 		// Create the table, deferring FK constraints that reference not-yet-created tables
-		sql, inlined, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables, partitionIndexes)
+		tableStatements, created, tableDeferred := generateTableSQL(table, targetSchema, collector.qualifySchema, createdTables, existingTables, suppressedInlineFKs, allNewTables, partitionIndexes)
 		deferredConstraints = append(deferredConstraints, tableDeferred...)
 
 		// Create context for this statement
@@ -570,7 +570,10 @@ func generateCreateTablesSQL(
 		// A child's local DEFAULT / NOT NULL on inherited columns belong to
 		// the same step, unless a parent still has to add the column
 		// (see inherit.go)
-		statements := []SQLStatement{{SQL: sql, CanRunInTransaction: true}}
+		var statements []SQLStatement
+		for _, sql := range tableStatements {
+			statements = append(statements, SQLStatement{SQL: sql, CanRunInTransaction: true})
+		}
 		for _, override := range inheritedColumnOverrideSQL(table, targetSchema, collector.qualifySchema, allNewTables, parentAddedColumns) {
 			statements = append(statements, SQLStatement{SQL: override, CanRunInTransaction: true})
 		}
@@ -612,9 +615,9 @@ func generateCreateTablesSQL(
 			}
 		}
 
-		// Add comments on the constraints created inline above. Deferred and
-		// postponed constraints get theirs where they are created (#674).
-		for _, constraint := range inlined {
+		// Add comments on the constraints created with the table above. Deferred
+		// and postponed constraints get theirs where they are created (#674).
+		for _, constraint := range created {
 			if constraint.Comment != "" {
 				generateConstraintComment(constraint, targetSchema, DiffOperationCreate, collector)
 			}
@@ -1045,9 +1048,10 @@ func generateDropTablesSQL(tables []*ir.Table, targetSchema string, collector *d
 }
 
 // generateTableSQL generates CREATE TABLE statement and returns any deferred FK constraints
-// It returns the statement, the constraints created inline with it, and the
-// foreign keys deferred until their referenced table exists.
-func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table, partitionIndexes *partitionIndexCreationPlan) (string, []*ir.Constraint, []*deferredConstraint) {
+// It returns the CREATE TABLE statement followed by the ALTER TABLE statements
+// that add the keys it cannot inline, the constraints that these statements
+// create, and the foreign keys deferred until their referenced table exists.
+func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, allTables map[string]*ir.Table, partitionIndexes *partitionIndexCreationPlan) ([]string, []*ir.Constraint, []*deferredConstraint) {
 	// Only include table name without schema if it's in the target schema (unless
 	// forced qualification is on).
 	tableName := ir.QualifyEntityNameWithQuotesMode(table.Schema, table.Name, targetSchema, qualifySchema)
@@ -1109,27 +1113,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 			}
 		}
 
-		var constraintParts []string
-		var inlined []*ir.Constraint
-		var deferred []*deferredConstraint
-		currentKey := fmt.Sprintf("%s.%s", table.Schema, table.Name)
-		for _, constraint := range getInlineConstraintsForTable(table) {
-			if suppressedInlineFKs[constraintPathKey(constraint)] || partitionIndexes.defersConstraint(table, constraint) {
-				continue
-			}
-			if shouldDeferConstraint(table, constraint, currentKey, createdTables, existingTables) ||
-				partitionIndexes.defersForeignKey(table, constraint) {
-				deferred = append(deferred, &deferredConstraint{
-					table:      table,
-					constraint: constraint,
-				})
-				continue
-			}
-			if def := generateConstraintSQL(constraint, targetSchema, qualifySchema); def != "" {
-				constraintParts = append(constraintParts, fmt.Sprintf("    %s", def))
-				inlined = append(inlined, constraint)
-			}
-		}
+		constraintParts, added, created, deferred := newTableConstraintsSQL(table, tableName, targetSchema, qualifySchema, createdTables, existingTables, suppressedInlineFKs, partitionIndexes)
 
 		createPrefix := "CREATE TABLE IF NOT EXISTS"
 		if table.Unlogged {
@@ -1144,7 +1128,7 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 		} else {
 			sql = fmt.Sprintf("%s %s PARTITION OF %s %s%s;", createPrefix, tableName, parentName, table.PartitionBound, partitionClause)
 		}
-		return sql, inlined, deferred
+		return append([]string{sql}, added...), created, deferred
 	}
 
 	var parts []string
@@ -1182,8 +1166,30 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 	}
 
 	// Add constraints inline in the correct order (PRIMARY KEY, UNIQUE, FOREIGN KEY)
-	var inlined []*ir.Constraint
+	constraintParts, added, created, deferred := newTableConstraintsSQL(table, tableName, targetSchema, qualifySchema, createdTables, existingTables, suppressedInlineFKs, partitionIndexes)
+	columnParts = append(columnParts, constraintParts...)
+
+	// CHECK constraints the child declares as well as inherits (see inherit.go)
+	for _, def := range mergedInheritedCheckSQL(table, targetSchema, qualifySchema, allTables) {
+		columnParts = append(columnParts, fmt.Sprintf("    %s", def))
+	}
+
+	parts = append(parts, strings.Join(columnParts, ",\n"))
+
+	parts = append(parts, ")"+inheritsClauseSQL(table, targetSchema, qualifySchema)+partitionClause+";")
+
+	return append([]string{strings.Join(parts, "\n")}, added...), created, deferred
+}
+
+// newTableConstraintsSQL renders the constraints of a new table: the
+// definitions inlined in its CREATE TABLE and the ALTER TABLE statements that
+// must follow it. It also returns the constraints that these create and the
+// foreign keys deferred until their referenced table exists.
+func newTableConstraintsSQL(table *ir.Table, tableName string, targetSchema string, qualifySchema bool, createdTables map[string]bool, existingTables map[string]bool, suppressedInlineFKs map[string]bool, partitionIndexes *partitionIndexCreationPlan) ([]string, []string, []*ir.Constraint, []*deferredConstraint) {
+	var inline, added []string
+	var created []*ir.Constraint
 	var deferred []*deferredConstraint
+	inlinedIndexes := make(map[string]bool)
 	currentKey := fmt.Sprintf("%s.%s", table.Schema, table.Name)
 	for _, constraint := range getInlineConstraintsForTable(table) {
 		// FKs bound to a unique/PK constraint being replaced by this migration
@@ -1200,22 +1206,23 @@ func generateTableSQL(table *ir.Table, targetSchema string, qualifySchema bool, 
 			continue
 		}
 		constraintDef := generateConstraintSQL(constraint, targetSchema, qualifySchema)
-		if constraintDef != "" {
-			columnParts = append(columnParts, fmt.Sprintf("    %s", constraintDef))
-			inlined = append(inlined, constraint)
+		if constraintDef == "" {
+			continue
 		}
+		created = append(created, constraint)
+		// CREATE TABLE silently drops an index constraint equal to an earlier
+		// one (transformIndexConstraints in parse_utilcmd.c); ALTER TABLE keeps
+		// it (issue #446).
+		if key := indexConstraintKey(constraint); key != "" {
+			if inlinedIndexes[key] {
+				added = append(added, fmt.Sprintf("ALTER TABLE %s\nADD %s;", tableName, constraintDef))
+				continue
+			}
+			inlinedIndexes[key] = true
+		}
+		inline = append(inline, fmt.Sprintf("    %s", constraintDef))
 	}
-
-	// CHECK constraints the child declares as well as inherits (see inherit.go)
-	for _, def := range mergedInheritedCheckSQL(table, targetSchema, qualifySchema, allTables) {
-		columnParts = append(columnParts, fmt.Sprintf("    %s", def))
-	}
-
-	parts = append(parts, strings.Join(columnParts, ",\n"))
-
-	parts = append(parts, ")"+inheritsClauseSQL(table, targetSchema, qualifySchema)+partitionClause+";")
-
-	return strings.Join(parts, "\n"), inlined, deferred
+	return inline, added, created, deferred
 }
 
 func shouldDeferConstraint(table *ir.Table, constraint *ir.Constraint, currentKey string, createdTables map[string]bool, existingTables map[string]bool) bool {
