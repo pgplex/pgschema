@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -160,6 +161,31 @@ func getInlineConstraintsForTable(table *ir.Table) []*ir.Constraint {
 	inlineConstraints = append(inlineConstraints, exclusionConstraints...)
 
 	return inlineConstraints
+}
+
+// exclusionStorageParameters matches the WITH (...) storage parameters in the
+// pg_get_constraintdef() text of an EXCLUDE constraint. An element of the
+// constraint is "<expr> WITH <operator>", without a parenthesis after WITH.
+var exclusionStorageParameters = regexp.MustCompile(` WITH \([^()]*\)`)
+
+// indexConstraintKey identifies the index of a PRIMARY KEY, UNIQUE or EXCLUDE
+// constraint by the fields that PostgreSQL compares to find duplicate index
+// constraints in CREATE TABLE. It returns "" for other constraint types.
+func indexConstraintKey(constraint *ir.Constraint) string {
+	switch constraint.Type {
+	case ir.ConstraintTypePrimaryKey, ir.ConstraintTypeUnique:
+		columns := make([]string, len(constraint.Columns))
+		for i, column := range constraint.Columns {
+			columns[i] = column.Name
+		}
+		return fmt.Sprintf("%q %t %q %t %t %t", columns, constraint.IsTemporal, constraint.IncludeColumns,
+			constraint.NullsNotDistinct, constraint.Deferrable, constraint.InitiallyDeferred)
+	case ir.ConstraintTypeExclusion:
+		// PostgreSQL does not compare the storage parameters of the indexes.
+		return exclusionStorageParameters.ReplaceAllString(constraint.ExclusionDefinition, "")
+	default:
+		return ""
+	}
 }
 
 // constraintsStructurallyEqual compares two constraints' definitions. A

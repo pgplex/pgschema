@@ -60,7 +60,8 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 	}
 	empty := map[string]bool{}
 
-	def, _, _ := generateTableSQL(table, "public", false, empty, empty, empty, nil, nil)
+	statements, _, _ := generateTableSQL(table, "public", false, empty, empty, empty, nil, nil)
+	def := statements[0]
 	if !strings.Contains(def, "CREATE TABLE IF NOT EXISTS account (") {
 		t.Errorf("default should use the bare table name: %q", def)
 	}
@@ -71,7 +72,8 @@ func TestQualifySchema_TableAndColumnType(t *testing.T) {
 		t.Errorf("default should strip the target-schema prefix from the type ref: %q", def)
 	}
 
-	qualified, _, _ := generateTableSQL(table, "public", true, empty, empty, empty, nil, nil)
+	statements, _, _ = generateTableSQL(table, "public", true, empty, empty, empty, nil, nil)
+	qualified := statements[0]
 	if !strings.Contains(qualified, "CREATE TABLE IF NOT EXISTS public.account (") {
 		t.Errorf("forced qualification should qualify the table name: %q", qualified)
 	}
