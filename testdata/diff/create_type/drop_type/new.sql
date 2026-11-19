@@ -3,3 +3,8 @@ CREATE TYPE public.status AS ENUM (
    'inactive',
    'pending'
 );
+
+CREATE TABLE public.tickets (
+    id integer PRIMARY KEY,
+    severity text
+);
