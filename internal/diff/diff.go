@@ -3354,6 +3354,12 @@ func typesUsedByAlteredColumns(droppedTypes []*ir.Type, modifiedTables []*tableD
 	byKey := make(map[string]*ir.Type, len(droppedTypes))
 	for _, t := range droppedTypes {
 		byKey[typeGraphKey(t.Schema, t.Name)] = t
+		// A column typed as a range's multirange depends on the range.
+		if t.Kind == ir.TypeKindRange && t.MultirangeTypeName != "" {
+			if key := extractTypeName(t.MultirangeTypeName, t.Schema); key != "" {
+				byKey[key] = t
+			}
+		}
 	}
 	used := make(map[*ir.Type]bool)
 	mark := func(table *ir.Table, column *ir.Column) {
