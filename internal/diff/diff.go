@@ -2011,13 +2011,13 @@ func (d *ddlDiff) collectMigrationSQL(targetSchema string, collector *diffCollec
 	}
 
 	// First: Drop operations (in reverse dependency order)
-	d.generateDropSQL(targetSchema, collector, preDroppedViews)
+	typeDropsAfterTables := d.generateDropSQL(targetSchema, collector, preDroppedViews)
 
 	// Then: Create operations (in dependency order)
 	d.generateCreateSQL(targetSchema, collector)
 
 	// Finally: Modify operations
-	d.generateModifySQL(targetSchema, collector, preDroppedViews)
+	d.generateModifySQL(targetSchema, collector, preDroppedViews, typeDropsAfterTables)
 }
 
 // generatePreDropMaterializedViewsSQL drops materialized views that depend on
@@ -3085,7 +3085,7 @@ func (d *ddlDiff) generateCreateSQL(targetSchema string, collector *diffCollecto
 
 // generateModifySQL generates ALTER statements
 // preDroppedViews contains views that were already dropped in the pre-drop phase
-func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) {
+func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollector, preDroppedViews map[string]bool, typeDropsAfterTables []droppedTypeOrFunction) {
 	// Modify schemas
 	// Note: Schema modification is out of scope for schema-level comparisons
 
@@ -3104,6 +3104,10 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 	// Columns inheritance descendants drop once every parent has (see inherit.go)
 	generateInheritanceChildDropsSQL(d.inheritanceChildEffects, targetSchema, collector)
+
+	// Drop the types held back by generateDropSQL, now that the columns using
+	// them have been dropped or changed to another type (issue #710)
+	generateDropTypesAndFunctionsSQL(typeDropsAfterTables, nil, targetSchema, collector)
 
 	// Attach OWNED BY for explicitly created sequences whose owning column was
 	// created by this migration, either with a new table (create phase) or by
@@ -3207,7 +3211,11 @@ func (d *ddlDiff) generateModifySQL(targetSchema string, collector *diffCollecto
 
 // generateDropSQL generates DROP statements in reverse dependency order
 // preDroppedViews contains views that were already dropped in the pre-drop phase
-func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) {
+// generateDropSQL emits the drop phase. It returns the type drops (with the
+// functions those types reference) that must wait for the modify phase,
+// because a column of a modified table still uses the type until that table's
+// ALTER TABLE has run (issue #710).
+func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector, preDroppedViews map[string]bool) []droppedTypeOrFunction {
 
 	// REVOKE privileges BEFORE dropping objects (objects must exist for REVOKE to succeed)
 	// Skip REVOKEs on relations already dropped in the pre-drop phase: REVOKE has
@@ -3297,7 +3305,32 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 	// Drop types, interleaved with the held-back functions in dependency
 	// order: a range before its subtype_diff function, that function before
 	// the subtype its signature takes, a domain before its CHECK function.
-	for _, node := range orderTypeAndFunctionDrops(droppedTypes, functionsAfterTypes) {
+	// A dropped type that a modified table's column still uses waits, along
+	// with whatever must be dropped after it, until that table has been
+	// altered (issue #710). The old definition of a replaced type cannot
+	// wait: its new definition is created in the create phase.
+	usedByColumns := typesUsedByAlteredColumns(d.droppedTypes, d.modifiedTables)
+	now, held := orderTypeAndFunctionDrops(droppedTypes, functionsAfterTypes, usedByColumns)
+	var afterTables []droppedTypeOrFunction
+	for _, node := range held {
+		if _, ok := replacedOld[node.typeObj]; ok && node.typeObj != nil {
+			now = append(now, node)
+		} else {
+			afterTables = append(afterTables, node)
+		}
+	}
+	generateDropTypesAndFunctionsSQL(now, replacedOld, targetSchema, collector)
+
+	// Drop schemas
+	// Note: Schema deletion is out of scope for schema-level comparisons
+
+	return afterTables
+}
+
+// generateDropTypesAndFunctionsSQL emits the drops in the given order. The
+// old definition of a replaced type is reported against its diff.
+func generateDropTypesAndFunctionsSQL(nodes []droppedTypeOrFunction, replacedOld map[*ir.Type]*typeDiff, targetSchema string, collector *diffCollector) {
+	for _, node := range nodes {
 		if node.function != nil {
 			generateDropFunctionsSQL([]*ir.Function{node.function}, targetSchema, collector)
 			continue
@@ -3308,9 +3341,35 @@ func (d *ddlDiff) generateDropSQL(targetSchema string, collector *diffCollector,
 		}
 		generateDropTypeSQL(node.typeObj, source, targetSchema, collector)
 	}
+}
 
-	// Drop schemas
-	// Note: Schema deletion is out of scope for schema-level comparisons
+// typesUsedByAlteredColumns returns the dropped types that a column of a
+// modified table uses in the current state: a column the migration drops, or
+// one it changes to another type. Such a type can only be dropped once the
+// table has been altered.
+func typesUsedByAlteredColumns(droppedTypes []*ir.Type, modifiedTables []*tableDiff) map[*ir.Type]bool {
+	if len(droppedTypes) == 0 || len(modifiedTables) == 0 {
+		return nil
+	}
+	byKey := make(map[string]*ir.Type, len(droppedTypes))
+	for _, t := range droppedTypes {
+		byKey[typeGraphKey(t.Schema, t.Name)] = t
+	}
+	used := make(map[*ir.Type]bool)
+	mark := func(table *ir.Table, column *ir.Column) {
+		if t, ok := byKey[extractTypeName(column.DataType, table.Schema)]; ok {
+			used[t] = true
+		}
+	}
+	for _, td := range modifiedTables {
+		for _, column := range td.DroppedColumns {
+			mark(td.Table, column)
+		}
+		for _, columnDiff := range td.ModifiedColumns {
+			mark(td.Table, columnDiff.Old)
+		}
+	}
+	return used
 }
 
 // filterPreDroppedViews returns views that haven't been pre-dropped
@@ -4756,7 +4815,10 @@ type droppedTypeOrFunction struct {
 // signature uses (that subtype_diff takes the subtype), and a caller before
 // its callee. Ties break with types first, then by name, so the output stays
 // deterministic.
-func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []droppedTypeOrFunction {
+//
+// The held types, and everything that has to be dropped after one of them,
+// are returned separately (in the same order) for the caller to emit later.
+func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function, held map[*ir.Type]bool) (now, later []droppedTypeOrFunction) {
 	typeMap, _, typeEdges := buildTypeGraph(types)
 	typeKey := func(t *ir.Type) string { return "t\x00" + typeGraphKey(t.Schema, t.Name) }
 	fnKey := func(f *ir.Function) string { return "f\x00" + f.Schema + "." + f.Name + "(" + f.GetArguments() + ")" }
@@ -4817,6 +4879,26 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 		}
 	}
 
+	// Holding a node holds everything that must be dropped after it.
+	heldKeys := make(map[string]bool)
+	var queue []string
+	for _, t := range types {
+		if held[t] {
+			heldKeys[typeKey(t)] = true
+			queue = append(queue, typeKey(t))
+		}
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, next := range after[current] {
+			if _, exists := nodes[next]; exists && !heldKeys[next] {
+				heldKeys[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+
 	var ready []string
 	for key := range nodes {
 		if inDegree[key] == 0 {
@@ -4824,9 +4906,8 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 		}
 	}
 	sort.Strings(ready) // "f\x00" sorts before "t\x00"; reversed below so types lead
-	var result []droppedTypeOrFunction
 	done := make(map[string]bool, len(nodes))
-	for len(result) < len(nodes) {
+	for len(done) < len(nodes) {
 		if len(ready) == 0 {
 			// A cycle cannot occur in PostgreSQL's catalog; keep going
 			// deterministically rather than drop nodes on the floor.
@@ -4845,7 +4926,11 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 			continue
 		}
 		done[current] = true
-		result = append(result, nodes[current])
+		if heldKeys[current] {
+			later = append(later, nodes[current])
+		} else {
+			now = append(now, nodes[current])
+		}
 		for _, next := range after[current] {
 			inDegree[next]--
 			if inDegree[next] <= 0 && !done[next] {
@@ -4854,7 +4939,7 @@ func orderTypeAndFunctionDrops(types []*ir.Type, functions []*ir.Function) []dro
 			}
 		}
 	}
-	return result
+	return now, later
 }
 
 // typeReferencesNewFunction determines if a domain references any newly added
