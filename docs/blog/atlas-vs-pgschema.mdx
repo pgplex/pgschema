@@ -95,17 +95,13 @@ env "prod" {
 }
 ```
 
-pgschema uses a [`.pgschemaignore`](/cli/ignore) file, with patterns grouped by object type and negation support:
+pgschema uses an [`[ignore]`](/cli/ignore) table in `pgschema.toml`, with patterns grouped by object type and negation support:
 
 ```toml
-[tables]
-patterns = ["temp_*", "test_*", "!test_core_*"]
-
-[views]
-patterns = ["debug_*", "analytics_*"]
-
-[functions]
-patterns = ["fn_test_*"]
+[ignore]
+tables = ["temp_*", "test_*", "!test_core_*"]
+views = ["debug_*", "analytics_*"]
+functions = ["fn_test_*"]
 ```
 
 The per-object-type grouping and `!`-negation make it straightforward to onboard a schema gradually: ignore everything except the tables you're actively managing, then shrink the ignore list over time as more of the schema comes under pgschema's control.

@@ -173,10 +173,11 @@ func ApplyMigration(config *ApplyConfig, provider postgres.DesiredStateProvider)
 	}
 
 	// Load ignore configuration for fingerprint validation
-	ignoreConfig, err := util.LoadIgnoreFileWithStructure()
+	projectConfig, err := util.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load .pgschemaignore: %w", err)
+		return err
 	}
+	ignoreConfig := projectConfig.Ignore
 
 	// Validate schema fingerprint if plan has one
 	if migrationPlan.SourceFingerprint != nil {

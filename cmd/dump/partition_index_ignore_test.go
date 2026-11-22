@@ -52,21 +52,21 @@ ALTER INDEX partial_lookup ATTACH PARTITION late_partial_lookup;
 	}{
 		{name: "complete_family"},
 		{name: "constraint_owned_leaf", constraintChild: true},
-		{name: "ignored_constraint", constraintChild: true, ignore: "[constraints]\npatterns = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique"},
-		{name: "ignored_constraint_table", constraintChild: true, ignore: "[tables]\npatterns = [\"events_late\"]\n", parent: "event_unique", child: "late_custom_unique"},
-		{name: "constraint_owned_index_pattern", constraintChild: true, ignore: "[indexes]\npatterns = [\"late_custom_unique\"]\n"},
-		{name: "ignored_leaf", ignore: "[indexes]\npatterns = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique"},
-		{name: "ignored_intermediate", ignore: "[indexes]\npatterns = [\"early_custom_unique\"]\n", parent: "event_unique", child: "early_custom_unique"},
-		{name: "ignored_nested_leaf", ignore: "[indexes]\npatterns = [\"first_custom_unique\"]\n", parent: "early_custom_unique", child: "first_custom_unique"},
-		{name: "ignored_partition_table", ignore: "[tables]\npatterns = [\"events_first\"]\n", parent: "early_custom_unique", child: "first_custom_unique"},
-		{name: "ignored_leaf_without_fk", ignore: "[indexes]\npatterns = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique", dropFK: true},
-		{name: "ignored_child_of_invalid_parent", ignore: "[indexes]\npatterns = [\"late_partial_lookup\"]\n", parent: "partial_lookup", child: "late_partial_lookup"},
-		{name: "ignored_unattached", ignore: "[indexes]\npatterns = [\"unattached_lookup\"]\n", absent: "unattached_lookup"},
-		{name: "ignored_family", ignore: "[indexes]\npatterns = [\"event_unique\", \"*custom_unique\"]\n[constraints]\npatterns = [\"event_links_bucket_id_fkey\"]\n", absent: "event_unique"},
+		{name: "ignored_constraint", constraintChild: true, ignore: "[ignore]\nconstraints = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique"},
+		{name: "ignored_constraint_table", constraintChild: true, ignore: "[ignore]\ntables = [\"events_late\"]\n", parent: "event_unique", child: "late_custom_unique"},
+		{name: "constraint_owned_index_pattern", constraintChild: true, ignore: "[ignore]\nindexes = [\"late_custom_unique\"]\n"},
+		{name: "ignored_leaf", ignore: "[ignore]\nindexes = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique"},
+		{name: "ignored_intermediate", ignore: "[ignore]\nindexes = [\"early_custom_unique\"]\n", parent: "event_unique", child: "early_custom_unique"},
+		{name: "ignored_nested_leaf", ignore: "[ignore]\nindexes = [\"first_custom_unique\"]\n", parent: "early_custom_unique", child: "first_custom_unique"},
+		{name: "ignored_partition_table", ignore: "[ignore]\ntables = [\"events_first\"]\n", parent: "early_custom_unique", child: "first_custom_unique"},
+		{name: "ignored_leaf_without_fk", ignore: "[ignore]\nindexes = [\"late_custom_unique\"]\n", parent: "event_unique", child: "late_custom_unique", dropFK: true},
+		{name: "ignored_child_of_invalid_parent", ignore: "[ignore]\nindexes = [\"late_partial_lookup\"]\n", parent: "partial_lookup", child: "late_partial_lookup"},
+		{name: "ignored_unattached", ignore: "[ignore]\nindexes = [\"unattached_lookup\"]\n", absent: "unattached_lookup"},
+		{name: "ignored_family", ignore: "[ignore]\nindexes = [\"event_unique\", \"*custom_unique\"]\nconstraints = [\"event_links_bucket_id_fkey\"]\n", absent: "event_unique"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Chdir(t.TempDir())
-			if err := os.WriteFile(".pgschemaignore", []byte(tc.ignore), 0600); err != nil {
+			if err := os.WriteFile("pgschema.toml", []byte(tc.ignore), 0600); err != nil {
 				t.Fatal(err)
 			}
 			for _, multiFile := range []bool{false, true} {
@@ -98,7 +98,7 @@ ALTER INDEX partial_lookup ATTACH PARTITION late_partial_lookup;
 						})
 						if tc.child != "" {
 							want := "cannot dump index public." + tc.parent + ": attached index public." + tc.child + " is excluded"
-							if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), ".pgschemaignore") {
+							if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "pgschema.toml") {
 								t.Fatalf("Expected actionable dependency error %q, got %v", want, err)
 							}
 							if output != "" {
@@ -150,7 +150,7 @@ func TestDumpCommand_IgnoredConstraintIndexDescendant(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 	t.Chdir(t.TempDir())
-	if err := os.WriteFile(".pgschemaignore", []byte("[tables]\npatterns = [\"events_leaf\"]\n"), 0600); err != nil {
+	if err := os.WriteFile("pgschema.toml", []byte("[ignore]\ntables = [\"events_leaf\"]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	source := testutil.SetupPostgres(t)
@@ -185,7 +185,7 @@ CREATE TABLE event_links (bucket int, id int, FOREIGN KEY (bucket, id) REFERENCE
 					Host: host, Port: port, DB: dbname, User: user, Password: password,
 					Schema: "public", SSLMode: "disable", MultiFile: multiFile, File: path,
 				})
-				if err == nil || !strings.Contains(err.Error(), "event_unique") || !strings.Contains(err.Error(), "mid_unique") || !strings.Contains(err.Error(), "events_leaf") || !strings.Contains(err.Error(), ".pgschemaignore") {
+				if err == nil || !strings.Contains(err.Error(), "event_unique") || !strings.Contains(err.Error(), "mid_unique") || !strings.Contains(err.Error(), "events_leaf") || !strings.Contains(err.Error(), "pgschema.toml") {
 					t.Fatalf("Expected actionable nested dependency error, got %v", err)
 				}
 				if output != "" {

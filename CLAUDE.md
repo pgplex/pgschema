@@ -16,7 +16,7 @@ The tool is written in Go 1.24.0 (toolchain go1.24.7) and uses:
 - Cobra for CLI commands
 - embedded-postgres v1.34.0 for plan command (temporary instances) and testing (no Docker required)
 - pgx/v5 v5.7.5 for database connections
-- BurntSushi/toml for TOML parsing (ignore config)
+- BurntSushi/toml for TOML parsing (`pgschema.toml` project config)
 - Supports PostgreSQL versions 14-18
 
 Key differentiators:
@@ -90,7 +90,7 @@ PGAPPNAME=pgschema
 - `dump/` - Schema extraction from live database
 - `plan/` - Migration planning by comparing schemas
 - `apply/` - Migration execution with safety checks
-- `util/` - Shared utilities (connection, env, ignore file loading, SQL logging)
+- `util/` - Shared utilities (connection, env, `pgschema.toml` config loading, SQL logging)
 - `root.go` - Main CLI setup with Cobra
 - `migrate_integration_test.go`, `schema_integration_test.go`, `include_integration_test.go`, `ignore_integration_test.go` - Integration test suites
 
@@ -220,6 +220,13 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 - ALTER TABLE ... ADD CONSTRAINT ... NOT VALID for online constraint addition
 - Proper transaction handling - some operations must run outside transactions
 
+**Project Config (`pgschema.toml`)**:
+
+- Loaded from the current directory by `util.LoadConfig()` in dump, plan, and apply; the file is optional
+- `[ignore]` holds one key per object type (`tables = ["temp_*"]`) and decodes straight into `ir.IgnoreConfig`
+- Unknown tables/keys are rejected; add a new config block as a field on `util.Config`
+- A leftover `.pgschemaignore` (the removed predecessor) is a hard error with a migration hint
+
 **pgschema Directives**:
 
 - Special SQL comments control behavior: `--pgschema-lock-timeout`, `--pgschema-no-transaction`
@@ -244,7 +251,8 @@ The tool supports comprehensive PostgreSQL schema objects (see `ir/ir.go` for co
 - `ir/inspector.go` - Database introspection using pgx (queries pg_catalog)
 - `ir/normalize.go` - Schema normalization (version-specific differences, type mappings)
 - `ir/quote.go` - Identifier quoting utilities
-- `ir/ignore.go` - IgnoreConfig for filtering database objects with glob patterns
+- `ir/ignore.go` - IgnoreConfig for filtering database objects with glob patterns (the `[ignore]` table of `pgschema.toml`)
+- `cmd/util/config.go` - `pgschema.toml` loader; each top-level TOML table is a field on `util.Config`
 - `ir/queries/` - sqlc-generated code for type-safe SQL queries (`queries.sql`, `queries.sql.go`, `models.sql.go`, `dml.sql.go`, `sqlc.yaml`)
 
 **Diff Package** (`internal/diff/`):

@@ -9,7 +9,7 @@
 --
 -- pgschema dump used to emit all of them, producing bogus extra constraints like
 -- event_..._fkey1 / event_..._fkey2 that reference individual partitions. This
--- also broke .pgschemaignore'd partitions, leaving dangling REFERENCES.
+-- also broke ignored partitions, leaving dangling REFERENCES.
 --
 
 CREATE TABLE session (

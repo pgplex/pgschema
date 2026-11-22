@@ -136,13 +136,12 @@ If your schema has foreign keys that reference tables in other schemas (for exam
 **Recommended: ignore the referenced schema or table** (default embedded plan database — no manual stub, no external plan DB):
 
 ```toml
-# .pgschemaignore
-[schemas]
-patterns = ["auth"]
+# pgschema.toml
+[ignore]
+schemas = ["auth"]
 
 # Or a single table:
-# [tables]
-# patterns = ["auth.users"]
+# tables = ["auth.users"]
 ```
 
 ```sql
@@ -158,7 +157,7 @@ When you run `pgschema plan`, pgschema clones a structural stub of each ignored 
 Requirements:
 
 - The referenced table must already exist on the **target** database (for example Supabase already has `auth.users`).
-- Ignore patterns for cross-schema tables must be schema-qualified (`auth.users`, `auth.*`, or `[schemas] auth`). A bare `users` pattern only matches tables in the schema you are managing.
+- Ignore patterns for cross-schema tables must be schema-qualified (`tables = ["auth.users"]`, `tables = ["auth.*"]`, or `schemas = ["auth"]`). A bare `users` pattern only matches tables in the schema you are managing.
 
 See [Ignore](/cli/ignore) for full details.
 

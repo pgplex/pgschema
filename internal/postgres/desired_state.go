@@ -616,7 +616,7 @@ func hintExtensionDependency(err error, hint string) error {
 // references objects in another schema (e.g. REFERENCES auth.users) that the
 // plan database does not have (issues #122, #548).
 //
-// .pgschemaignore can help when the referenced table is ignored and exists
+// The [ignore] table of pgschema.toml can help when the referenced table is ignored and exists
 // on the target DB: plan stubs ignored FK targets before apply (issue #548).
 // If the table is missing entirely, users must still provide a manual stub or
 // a plan database that already has the referenced objects.

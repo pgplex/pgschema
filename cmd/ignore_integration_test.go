@@ -1,7 +1,7 @@
 package cmd
 
 // Ignore Integration Tests
-// These comprehensive integration tests verify the .pgschemaignore functionality
+// These comprehensive integration tests verify the pgschema.toml [ignore] functionality
 // across dump, plan, and apply commands by testing the complete workflow with
 // various database object types and ignore patterns including wildcards and negation.
 
@@ -269,35 +269,30 @@ CREATE TABLE temp_external_users (
 	}
 }
 
-// createIgnoreFile creates a .pgschemaignore file in the current directory
+// createIgnoreFile creates a pgschema.toml file in the current directory
 func createIgnoreFile(t *testing.T) func() {
-	ignoreContent := `[tables]
-patterns = ["temp_*", "test_*", "!test_core_*"]
+	ignoreContent := `[ignore]
+tables = ["temp_*", "test_*", "!test_core_*"]
 
-[views]
-patterns = ["debug_*", "*_view_tmp"]
+views = ["debug_*", "*_view_tmp"]
 
-[functions]
-patterns = ["fn_test_*", "fn_debug_*"]
+functions = ["fn_test_*", "fn_debug_*"]
 
-[procedures]
-patterns = ["sp_temp_*"]
+procedures = ["sp_temp_*"]
 
-[types]
-patterns = ["type_test_*"]
+types = ["type_test_*"]
 
-[sequences]
-patterns = ["seq_temp_*"]
+sequences = ["seq_temp_*"]
 `
 
-	err := os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err := os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore file: %v", err)
+		t.Fatalf("Failed to create pgschema.toml file: %v", err)
 	}
 
 	// Return cleanup function
 	return func() {
-		os.Remove(".pgschemaignore")
+		os.Remove("pgschema.toml")
 	}
 }
 
@@ -310,7 +305,7 @@ func testIgnoreDump(t *testing.T, containerInfo *struct {
 	User     string
 	Password string
 }) {
-	// Create .pgschemaignore file
+	// Create pgschema.toml file
 	cleanup := createIgnoreFile(t)
 	defer cleanup()
 
@@ -388,7 +383,7 @@ JOIN supplier_contracts c ON s.id = c.supplier_id;
 		containerInfo.Conn.Exec("DROP TABLE IF EXISTS temp_external_suppliers CASCADE")
 	}()
 
-	// Create .pgschemaignore file
+	// Create pgschema.toml file
 	cleanup := createIgnoreFile(t)
 	defer cleanup()
 
@@ -572,7 +567,7 @@ func testIgnorePlan(t *testing.T, containerInfo *struct {
 	User     string
 	Password string
 }) {
-	// Create .pgschemaignore file
+	// Create pgschema.toml file
 	cleanup := createIgnoreFile(t)
 	defer cleanup()
 
@@ -631,7 +626,7 @@ func testIgnoreApply(t *testing.T, containerInfo *struct {
 	User     string
 	Password string
 }) {
-	// Create .pgschemaignore file
+	// Create pgschema.toml file
 	cleanup := createIgnoreFile(t)
 	defer cleanup()
 
@@ -1043,16 +1038,15 @@ ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO deploy_bot;
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
-	// Create .pgschemaignore with privileges section
-	ignoreContent := `[privileges]
-patterns = ["deploy_bot", "admin_*"]
+	// Create pgschema.toml with privileges section
+	ignoreContent := `[ignore]
+privileges = ["deploy_bot", "admin_*"]
 
-[default_privileges]
-patterns = ["deploy_bot"]
+default_privileges = ["deploy_bot"]
 `
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+		t.Fatalf("Failed to create pgschema.toml: %v", err)
 	}
 
 	t.Run("dump", func(t *testing.T) {
@@ -1253,16 +1247,15 @@ GRANT SELECT ON users TO app_user;
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
-	// Create .pgschemaignore that ignores dblink_* functions and temp_* tables
-	ignoreContent := `[functions]
-patterns = ["dblink_*"]
+	// Create pgschema.toml that ignores dblink_* functions and temp_* tables
+	ignoreContent := `[ignore]
+functions = ["dblink_*"]
 
-[tables]
-patterns = ["temp_*"]
+tables = ["temp_*"]
 `
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+		t.Fatalf("Failed to create pgschema.toml: %v", err)
 	}
 
 	t.Run("dump", func(t *testing.T) {
@@ -1336,7 +1329,7 @@ GRANT SELECT ON users TO app_user;
 	}
 }
 
-// TestIgnoreIndexes tests that indexes matching .pgschemaignore [indexes] patterns
+// TestIgnoreIndexes tests that indexes matching pgschema.toml [ignore] indexes patterns
 // are excluded from dump and plan output.
 // Reproduces https://github.com/pgplex/pgschema/issues/406
 func TestIgnoreIndexes(t *testing.T) {
@@ -1399,12 +1392,12 @@ CREATE INDEX manual_perf_idx ON products(category);
 	}
 
 	// Ignore any index whose name starts with "manual_"
-	ignoreContent := `[indexes]
-patterns = ["manual_*"]
+	ignoreContent := `[ignore]
+indexes = ["manual_*"]
 `
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+		t.Fatalf("Failed to create pgschema.toml: %v", err)
 	}
 
 	t.Run("dump", func(t *testing.T) {
@@ -1415,7 +1408,7 @@ patterns = ["manual_*"]
 		}
 
 		if strings.Contains(output, "manual_perf_idx") {
-			t.Error("Dump should not include manual_perf_idx (ignored by [indexes] patterns)")
+			t.Error("Dump should not include manual_perf_idx (ignored by [ignore] indexes patterns)")
 		}
 	})
 
@@ -1447,7 +1440,7 @@ CREATE INDEX products_name_idx ON products(name);
 	})
 }
 
-// TestIgnoreConstraints tests that constraints matching .pgschemaignore [constraints]
+// TestIgnoreConstraints tests that constraints matching pgschema.toml [ignore] constraints
 // patterns are excluded from dump and plan output.
 // Addresses https://github.com/pgplex/pgschema/issues/447 and https://github.com/pgplex/pgschema/issues/429
 func TestIgnoreConstraints(t *testing.T) {
@@ -1515,12 +1508,12 @@ ALTER TABLE products
 	}
 
 	// Ignore any constraint whose name starts with "fk_"
-	ignoreContent := `[constraints]
-patterns = ["fk_*"]
+	ignoreContent := `[ignore]
+constraints = ["fk_*"]
 `
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+		t.Fatalf("Failed to create pgschema.toml: %v", err)
 	}
 
 	t.Run("dump", func(t *testing.T) {
@@ -1531,7 +1524,7 @@ patterns = ["fk_*"]
 		}
 
 		if strings.Contains(output, "fk_products_category") {
-			t.Error("Dump should not include fk_products_category (ignored by [constraints] patterns)")
+			t.Error("Dump should not include fk_products_category (ignored by [ignore] constraints patterns)")
 		}
 	})
 
@@ -1566,7 +1559,7 @@ CREATE TABLE products (
 	})
 }
 
-// TestIgnoreTriggers tests that triggers matching .pgschemaignore [triggers]
+// TestIgnoreTriggers tests that triggers matching pgschema.toml [ignore] triggers
 // patterns are excluded from dump and plan output.
 // Addresses https://github.com/pgplex/pgschema/issues/407
 func TestIgnoreTriggers(t *testing.T) {
@@ -1643,12 +1636,12 @@ CREATE TRIGGER _vectorizer_src_trg_products
 	}
 
 	// Ignore any trigger whose name starts with "_vectorizer_src_trg_"
-	ignoreContent := `[triggers]
-patterns = ["_vectorizer_src_trg_*"]
+	ignoreContent := `[ignore]
+triggers = ["_vectorizer_src_trg_*"]
 `
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+		t.Fatalf("Failed to create pgschema.toml: %v", err)
 	}
 
 	t.Run("dump", func(t *testing.T) {
@@ -1659,7 +1652,7 @@ patterns = ["_vectorizer_src_trg_*"]
 		}
 
 		if strings.Contains(output, "_vectorizer_src_trg_products") {
-			t.Error("Dump should not include _vectorizer_src_trg_products (ignored by [triggers] patterns)")
+			t.Error("Dump should not include _vectorizer_src_trg_products (ignored by [ignore] triggers patterns)")
 		}
 	})
 
@@ -1792,11 +1785,11 @@ CREATE AGGREGATE agg_debug_concat(text) (
 	}
 
 	// Ignore any aggregate whose name starts with "agg_debug_"
-	ignoreContent := `[aggregates]
-patterns = ["agg_debug_*"]
+	ignoreContent := `[ignore]
+aggregates = ["agg_debug_*"]
 `
-	if err := os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644); err != nil {
-		t.Fatalf("Failed to create .pgschemaignore: %v", err)
+	if err := os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644); err != nil {
+		t.Fatalf("Failed to create pgschema.toml: %v", err)
 	}
 
 	t.Run("dump", func(t *testing.T) {
@@ -1806,7 +1799,7 @@ patterns = ["agg_debug_*"]
 			t.Error("Dump should include group_concat (not ignored)")
 		}
 		if strings.Contains(output, "agg_debug_concat") {
-			t.Error("Dump should not include agg_debug_concat (ignored by [aggregates] patterns)")
+			t.Error("Dump should not include agg_debug_concat (ignored by [ignore] aggregates patterns)")
 		}
 	})
 
@@ -1918,7 +1911,7 @@ CREATE TABLE profiles (
 	}
 
 	t.Run("without_ignore_fails", func(t *testing.T) {
-		os.Remove(".pgschemaignore")
+		os.Remove("pgschema.toml")
 		config := &planCmd.PlanConfig{
 			Host:            host,
 			Port:            port,
@@ -1939,7 +1932,7 @@ CREATE TABLE profiles (
 	})
 
 	t.Run("schemas_section", func(t *testing.T) {
-		if err := os.WriteFile(".pgschemaignore", []byte("[schemas]\npatterns = [\"auth\"]\n"), 0644); err != nil {
+		if err := os.WriteFile("pgschema.toml", []byte("[ignore]\nschemas = [\"auth\"]\n"), 0644); err != nil {
 			t.Fatalf("Failed to write ignore file: %v", err)
 		}
 		output := executeIgnorePlanCommand(t, containerInfo, "schema.sql")
@@ -1956,7 +1949,7 @@ CREATE TABLE profiles (
 	})
 
 	t.Run("qualified_table_pattern", func(t *testing.T) {
-		if err := os.WriteFile(".pgschemaignore", []byte("[tables]\npatterns = [\"auth.users\"]\n"), 0644); err != nil {
+		if err := os.WriteFile("pgschema.toml", []byte("[ignore]\ntables = [\"auth.users\"]\n"), 0644); err != nil {
 			t.Fatalf("Failed to write ignore file: %v", err)
 		}
 		output := executeIgnorePlanCommand(t, containerInfo, "schema.sql")

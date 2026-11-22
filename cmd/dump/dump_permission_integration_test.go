@@ -126,7 +126,7 @@ func getRoleNames(dbName string) (restrictedRole string, regularUser string) {
 	return fmt.Sprintf("restricted_owner_%s", dbName), fmt.Sprintf("regular_user_%s", dbName)
 }
 
-// testIgnoredObjects tests procedures ignored via .pgschemaignore
+// testIgnoredObjects tests procedures ignored via pgschema.toml
 func testIgnoredObjects(t *testing.T, ctx context.Context, container *struct {
 	Conn     *sql.DB
 	Host     string
@@ -136,7 +136,7 @@ func testIgnoredObjects(t *testing.T, ctx context.Context, container *struct {
 	Password string
 }, dbName string) {
 	// This test verifies that when procedures/functions are explicitly ignored
-	// via .pgschemaignore, permission issues should not cause the dump to fail
+	// via pgschema.toml, permission issues should not cause the dump to fail
 
 	// Setup isolated database
 	dbConn := setupTestDatabase(ctx, t, container, dbName)
@@ -186,22 +186,21 @@ func testIgnoredObjects(t *testing.T, ctx context.Context, container *struct {
 		t.Fatalf("Failed to setup ignore permission test: %v", err)
 	}
 
-	// Create .pgschemaignore file that ignores the specific procedures/functions
-	ignoreContent := `[procedures]
-patterns = ["skip_proc_restricted"]
+	// Create pgschema.toml file that ignores the specific procedures/functions
+	ignoreContent := `[ignore]
+procedures = ["skip_proc_restricted"]
 
-[functions]
-patterns = ["skip_func_restricted"]
+functions = ["skip_func_restricted"]
 `
 
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create .pgschemaignore file: %v", err)
+		t.Fatalf("Failed to create pgschema.toml file: %v", err)
 	}
 
-	// Cleanup function to remove .pgschemaignore file
+	// Cleanup function to remove pgschema.toml file
 	defer func() {
-		os.Remove(".pgschemaignore")
+		os.Remove("pgschema.toml")
 	}()
 
 	// Try to dump schema as regular_user
@@ -238,17 +237,16 @@ patterns = ["skip_func_restricted"]
 		}
 	}
 
-	// Additional test: Create .pgschemaignore that ignores ALL restricted objects
-	ignoreAllContent := `[procedures]
-patterns = ["*_restricted"]
+	// Additional test: Create pgschema.toml that ignores ALL restricted objects
+	ignoreAllContent := `[ignore]
+procedures = ["*_restricted"]
 
-[functions]
-patterns = ["*_restricted"]
+functions = ["*_restricted"]
 `
 
-	err = os.WriteFile(".pgschemaignore", []byte(ignoreAllContent), 0644)
+	err = os.WriteFile("pgschema.toml", []byte(ignoreAllContent), 0644)
 	if err != nil {
-		t.Fatalf("Failed to create comprehensive .pgschemaignore file: %v", err)
+		t.Fatalf("Failed to create comprehensive pgschema.toml file: %v", err)
 	}
 
 	// Now the dump should succeed and ALL restricted objects should be ignored
