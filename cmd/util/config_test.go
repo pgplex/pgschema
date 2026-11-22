@@ -305,3 +305,24 @@ func TestLoadConfig_LegacyIgnoreFileLookupError(t *testing.T) {
 		t.Error("LoadConfigFromPath() should return nil config when the .pgschemaignore lookup fails")
 	}
 }
+
+// A pgschema.toml symlink whose target is missing is a broken config, not an
+// absent one: loading it as empty would drop every ignore rule.
+func TestLoadConfig_DanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigFileName)
+	if err := os.Symlink(filepath.Join(dir, "missing"), path); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	config, err := LoadConfigFromPath(path)
+	if err == nil {
+		t.Fatal("LoadConfigFromPath() should return error for a dangling pgschema.toml symlink")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error %q should mention the file path %q", err.Error(), path)
+	}
+	if config != nil {
+		t.Error("LoadConfigFromPath() should return nil config for a dangling pgschema.toml symlink")
+	}
+}

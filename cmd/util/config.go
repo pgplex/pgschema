@@ -63,7 +63,10 @@ func LoadConfigFromPath(filePath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to check for a leftover %s: %w", legacyIgnoreFileName, err)
 	}
 
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	// Lstat again: only a missing entry means "no config". A dangling symlink
+	// falls through to the decode below and fails there, rather than loading
+	// as an empty config with nothing ignored.
+	if _, err := os.Lstat(filePath); os.IsNotExist(err) {
 		logger.Get().Debug("no config file found, no filtering applied", "file", absPath)
 		return &Config{}, nil
 	} else if err != nil {
