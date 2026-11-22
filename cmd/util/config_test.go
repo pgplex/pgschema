@@ -251,7 +251,7 @@ func TestLoadConfig_LegacyIgnoreFile(t *testing.T) {
 			if err == nil {
 				t.Fatal("LoadConfigFromPath() should return error when .pgschemaignore exists")
 			}
-			for _, want := range []string{legacyPath, "no longer supported", "[ignore]", ConfigFileName} {
+			for _, want := range []string{legacyPath, "no longer supported as of pgschema 2.0.0", "[ignore]", ConfigFileName} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q should mention %q", err.Error(), want)
 				}

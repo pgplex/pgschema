@@ -4,6 +4,10 @@ title: "Ignore"
 
 `pgschema` supports ignoring specific database objects using the `[ignore]` table of `pgschema.toml`, enabling gradual onboarding and selective schema management.
 
+<Warning>
+**Breaking change in 2.0.0.** pgschema 1.x read ignore rules from a separate `.pgschemaignore` file. Starting with 2.0.0, that file is no longer supported and ignore rules live in the `[ignore]` table of `pgschema.toml`. If a `.pgschemaignore` is present in the current directory, `dump`, `plan`, and `apply` stop with an error instead of running without your ignore rules. See [Migrating from .pgschemaignore](#migrating-from-pgschemaignore).
+</Warning>
+
 ## Overview
 
 The `[ignore]` table allows you to exclude database objects from pgschema operations. This is particularly useful when:
@@ -41,9 +45,9 @@ Every key is optional. Unknown tables or keys are rejected, so a typo such as `t
 
 ## Migrating from .pgschemaignore
 
-Earlier versions read ignore rules from a separate `.pgschemaignore` file. That file is no longer supported: if one is present in the current directory, `dump`, `plan`, and `apply` stop with an error instead of running without your ignore rules.
+pgschema 1.x read ignore rules from a separate `.pgschemaignore` file. pgschema 2.0.0 removes it: if one is present in the current directory, `dump`, `plan`, and `apply` stop with an error instead of running without your ignore rules.
 
-To migrate, move each section into a key under `[ignore]` in `pgschema.toml`, then delete `.pgschemaignore`:
+To migrate when upgrading to 2.0.0 or later, move each section into a key under `[ignore]` in `pgschema.toml`, then delete `.pgschemaignore`:
 
 <CodeGroup>
 ```toml .pgschemaignore (before)

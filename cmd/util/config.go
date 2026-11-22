@@ -56,7 +56,7 @@ func LoadConfigFromPath(filePath string) (*Config, error) {
 	// command rather than be read as "no legacy file".
 	legacyPath := filepath.Join(filepath.Dir(absPath), legacyIgnoreFileName)
 	if _, err := os.Lstat(legacyPath); err == nil {
-		return nil, fmt.Errorf("%s is no longer supported: move its rules into the [ignore] table of %s and delete it. "+
+		return nil, fmt.Errorf("%s is no longer supported as of pgschema 2.0.0: move its rules into the [ignore] table of %s and delete it. "+
 			"Each section such as `[tables]` with `patterns = [...]` becomes a `tables = [...]` key under `[ignore]`, "+
 			"see %s", legacyPath, ConfigFileName, configDocsURL)
 	} else if !os.IsNotExist(err) {
