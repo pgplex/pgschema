@@ -51,11 +51,16 @@ func LoadConfigFromPath(filePath string) (*Config, error) {
 
 	// A leftover .pgschemaignore must not be skipped silently: the objects it
 	// used to hide would show up in the next plan as objects to drop.
+	// Lstat, not Stat: a dangling or unreadable symlink is still a leftover
+	// entry, and any lookup failure other than "not found" must stop the
+	// command rather than be read as "no legacy file".
 	legacyPath := filepath.Join(filepath.Dir(absPath), legacyIgnoreFileName)
-	if _, err := os.Stat(legacyPath); err == nil {
+	if _, err := os.Lstat(legacyPath); err == nil {
 		return nil, fmt.Errorf("%s is no longer supported: move its rules into the [ignore] table of %s and delete it. "+
 			"Each section such as `[tables]` with `patterns = [...]` becomes a `tables = [...]` key under `[ignore]`, "+
 			"see %s", legacyPath, ConfigFileName, configDocsURL)
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to check for a leftover %s: %w", legacyIgnoreFileName, err)
 	}
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {

@@ -262,3 +262,46 @@ func TestLoadConfig_LegacyIgnoreFile(t *testing.T) {
 		})
 	}
 }
+
+// The guard looks at the .pgschemaignore entry itself, so a symlink whose
+// target is missing still counts as a leftover file.
+func TestLoadConfig_LegacyIgnoreFileDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	legacyPath := filepath.Join(dir, ".pgschemaignore")
+	if err := os.Symlink(filepath.Join(dir, "missing"), legacyPath); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	config, err := LoadConfigFromPath(filepath.Join(dir, ConfigFileName))
+	if err == nil {
+		t.Fatal("LoadConfigFromPath() should return error for a dangling .pgschemaignore symlink")
+	}
+	if !strings.Contains(err.Error(), "no longer supported") {
+		t.Errorf("error %q should be the migration error", err.Error())
+	}
+	if config != nil {
+		t.Error("LoadConfigFromPath() should return nil config for a dangling .pgschemaignore symlink")
+	}
+}
+
+// A failure to look up .pgschemaignore other than "not found" must not be read
+// as "no legacy file": the command would then run without the ignore rules.
+func TestLoadConfig_LegacyIgnoreFileLookupError(t *testing.T) {
+	// A regular file where the directory should be makes the lookup fail with
+	// ENOTDIR on every platform, without depending on permissions.
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, nil, 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	config, err := LoadConfigFromPath(filepath.Join(notDir, ConfigFileName))
+	if err == nil {
+		t.Fatal("LoadConfigFromPath() should return error when the .pgschemaignore lookup fails")
+	}
+	if !strings.Contains(err.Error(), ".pgschemaignore") {
+		t.Errorf("error %q should mention .pgschemaignore", err.Error())
+	}
+	if config != nil {
+		t.Error("LoadConfigFromPath() should return nil config when the .pgschemaignore lookup fails")
+	}
+}
