@@ -198,11 +198,11 @@ pgschema's `dump --multi-file` writes a `main.sql` entry point with `\i` include
 
 pg-delta uses **profiles** (`--profile raw | supabase | <path>`). A profile holds policy rules separating user objects from platform objects, extension handlers, assumed roles and schemas, and optionally a baseline snapshot subtracted from both sides. The `supabase` profile is how the `auth`, `storage`, and other platform schemas and roles stay out of your migrations. The rule DSL is evaluated first-match-wins and is readable in the source under `src/policy/`, but the README does not document it, so writing a custom profile today means reading code.
 
-pgschema uses a [`.pgschemaignore`](/cli/ignore) file with glob patterns per object type:
+pgschema uses an [`[ignore]`](/cli/ignore) table in `pgschema.toml` with glob patterns per object type:
 
 ```toml
-[tables]
-patterns = ["temp_*", "!temp_core_*"]
+[ignore]
+tables = ["temp_*", "!temp_core_*"]
 ```
 
 It is less expressive than a profile, but it is documented and takes a minute to write. Neither tool's mechanism is a superset of the other's.
@@ -220,7 +220,7 @@ It is less expressive than a profile, but it is documented and takes a minute to
 | Online DDL | Transaction segments, destructive-action gating, lock-table splitting; concurrent indexes and timeouts via library only; no NOT VALID rewrite | CONCURRENTLY, NOT VALID + VALIDATE, lock timeout, transaction handling, all default and on the CLI |
 | Verification | `prove` on a clone, `drift`, `schema lint` | Test suite and staging runs |
 | Shadow database | Docker/Podman (Supabase CLI) or user-supplied | Embedded Postgres or `--plan-host` |
-| Excluding objects | Profiles (rule DSL documented only in source) | `.pgschemaignore` globs |
+| Excluding objects | Profiles (rule DSL documented only in source) | `pgschema.toml` `[ignore]` globs |
 | Renames | Opt-in detection, off by default | Drop + create |
 
 ## Conclusion

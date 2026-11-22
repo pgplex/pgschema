@@ -274,10 +274,11 @@ func CreateEmbeddedPostgresForPlan(config *PlanConfig, pgVersion postgres.Postgr
 // The caller is responsible for managing the provider lifecycle (creation and cleanup).
 func GeneratePlan(config *PlanConfig, provider postgres.DesiredStateProvider) (*plan.Plan, error) {
 	// Load ignore configuration
-	ignoreConfig, err := util.LoadIgnoreFileWithStructure()
+	projectConfig, err := util.LoadConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load .pgschemaignore: %w", err)
+		return nil, err
 	}
+	ignoreConfig := projectConfig.Ignore
 
 	// Process desired state file with include directives
 	processor := include.NewProcessor(filepath.Dir(config.File))

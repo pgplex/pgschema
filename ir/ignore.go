@@ -14,7 +14,9 @@ func stripFunctionArgs(name string) string {
 	return name
 }
 
-// IgnoreConfig represents the configuration for ignoring database objects
+// IgnoreConfig represents the configuration for ignoring database objects.
+// It is the [ignore] table of pgschema.toml: one key per object type, each a
+// list of glob patterns.
 type IgnoreConfig struct {
 	Tables            []string `toml:"tables,omitempty"`
 	Views             []string `toml:"views,omitempty"`
@@ -40,7 +42,7 @@ func (c *IgnoreConfig) ShouldIgnoreTable(tableName string) bool {
 	return c.shouldIgnore(tableName, c.Tables)
 }
 
-// ShouldIgnoreSchema checks if a schema should be ignored based on the [schemas] patterns.
+// ShouldIgnoreSchema checks if a schema should be ignored based on the schemas patterns.
 func (c *IgnoreConfig) ShouldIgnoreSchema(schemaName string) bool {
 	if c == nil {
 		return false
@@ -51,7 +53,7 @@ func (c *IgnoreConfig) ShouldIgnoreSchema(schemaName string) bool {
 // ShouldIgnoreReferencedTable reports whether a table used as an FK target should
 // be treated as ignored for plan-time stubbing.
 //
-// Cross-schema references (schema != targetSchema) match [schemas] patterns or
+// Cross-schema references (schema != targetSchema) match schemas patterns or
 // schema-qualified table patterns such as "auth.users" / "auth.*". Bare table
 // names are not matched across schemas, so ignoring local "users" does not
 // stub auth.users. Same-schema references use ordinary table-name patterns.

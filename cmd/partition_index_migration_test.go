@@ -290,14 +290,14 @@ ALTER INDEX parent_lookup ATTACH PARTITION custom_lookup;
 		name, ignore    string
 		constraintChild bool
 	}{
-		{name: "ignored_attached_index", ignore: "[indexes]\npatterns = [\"custom_lookup\"]\n"},
-		{name: "ignored_attached_table", ignore: "[tables]\npatterns = [\"events_early\"]\n"},
-		{name: "ignored_table_without_index", ignore: "[tables]\npatterns = [\"events_late\"]\n"},
-		{name: "ignored_owning_constraint", ignore: "[constraints]\npatterns = [\"custom_lookup\"]\n", constraintChild: true},
+		{name: "ignored_attached_index", ignore: "[ignore]\nindexes = [\"custom_lookup\"]\n"},
+		{name: "ignored_attached_table", ignore: "[ignore]\ntables = [\"events_early\"]\n"},
+		{name: "ignored_table_without_index", ignore: "[ignore]\ntables = [\"events_late\"]\n"},
+		{name: "ignored_owning_constraint", ignore: "[ignore]\nconstraints = [\"custom_lookup\"]\n", constraintChild: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Chdir(t.TempDir())
-			if err := os.WriteFile(".pgschemaignore", []byte(tc.ignore), 0600); err != nil {
+			if err := os.WriteFile("pgschema.toml", []byte(tc.ignore), 0600); err != nil {
 				t.Fatal(err)
 			}
 			path := filepath.Join(t.TempDir(), "schema.sql")

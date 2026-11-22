@@ -58,7 +58,7 @@ func validatePartitionIndexDependencies(schema *ir.IR) error {
 	for _, key := range keys {
 		for _, child := range indexes[key].AttachedPartitions {
 			if !available[child] {
-				return fmt.Errorf("cannot dump index %s: attached index %s is excluded; adjust .pgschemaignore to include the child index, its table, and any owning constraint",
+				return fmt.Errorf("cannot dump index %s: attached index %s is excluded; adjust [ignore] in pgschema.toml to include the child index, its table, and any owning constraint",
 					ir.QuoteIdentifier(key.Schema)+"."+ir.QuoteIdentifier(key.Name),
 					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name))
 			}
@@ -89,7 +89,7 @@ func validateConstraintIndexPartitions(parent, child ir.IndexRef, table *ir.Tabl
 		for _, partition := range current.AllPartitionChildren {
 			next := tables[partition.Schema+"."+partition.Name]
 			if next == nil || next.IsExternal {
-				return fmt.Errorf("cannot dump index %s: attached constraint-backed index %s requires excluded partition table %s; adjust .pgschemaignore to include the partition table",
+				return fmt.Errorf("cannot dump index %s: attached constraint-backed index %s requires excluded partition table %s; adjust [ignore] in pgschema.toml to include the partition table",
 					ir.QuoteIdentifier(parent.Schema)+"."+ir.QuoteIdentifier(parent.Name),
 					ir.QuoteIdentifier(child.Schema)+"."+ir.QuoteIdentifier(child.Name),
 					ir.QuoteIdentifier(partition.Schema)+"."+ir.QuoteIdentifier(partition.Name))

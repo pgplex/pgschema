@@ -9,7 +9,7 @@
 --
 -- pgschema dump used to emit all of them, producing a bogus
 -- CREATE OR REPLACE TRIGGER trg_rollup ... ON ledger_2026_06 that also left a
--- dangling reference when the partition was excluded via .pgschemaignore.
+-- dangling reference when the partition was excluded via pgschema.toml [ignore].
 --
 
 CREATE TABLE ledger (
