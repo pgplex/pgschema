@@ -208,10 +208,16 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 		}
 		return parentDefinesColumn(tables, retained, column.Name)
 	}
+	// A partition that stays attached to its parent gets the parent's columns
+	// the same way (see partition.go)
+	followsParent := partitionFollowsParent(oldTable, newTable)
 
 	// Find added columns
 	for name, column := range newColumns {
 		if _, exists := oldColumns[name]; !exists {
+			if followsParent && partitionParentHasColumn(newTables, newTable, name) {
+				continue
+			}
 			if fromRetainedParent(newTables, newTable, column) {
 				// The parent adds it; only a comment is the child's own, and
 				// the parent's diff re-applies the DEFAULT and NOT NULL
@@ -229,6 +235,9 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 	// Find dropped columns
 	for name, column := range oldColumns {
 		if _, exists := newColumns[name]; !exists {
+			if followsParent && partitionParentHasColumn(oldTables, oldTable, name) {
+				continue
+			}
 			if fromRetainedParent(oldTables, oldTable, column) {
 				continue
 			}
@@ -251,6 +260,9 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 					})
 				}
 				continue
+			}
+			if followsParent && partitionParentHasColumn(newTables, newTable, name) {
+				oldColumn = withParentColumnType(oldColumn, newColumn)
 			}
 			if !columnsEqual(oldColumn, newColumn, targetSchema) {
 				if generatedColumnNeedsRecreate(oldColumn, newColumn, targetMajorVersion) {

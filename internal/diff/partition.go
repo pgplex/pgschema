@@ -413,3 +413,47 @@ func inheritedConstraintRecreated(tables map[string]*ir.Table, table *ir.Table, 
 	}
 	return false
 }
+
+// Columns a partition gets from its parent (issue #709).
+//
+// ADD COLUMN, DROP COLUMN and ALTER COLUMN TYPE on a partitioned table
+// recurse to its partitions, and PostgreSQL rejects the same statements on a
+// partition ("cannot add column to a partition", SQLSTATE 42809). The
+// partition itself only owns what a PARTITION OF declaration can override:
+// DEFAULT, NOT NULL and the like. So while a partition stays attached to the
+// same parent with the same bound, a column the parent defines is the
+// parent's to add, drop and retype, and the partition's diff skips it.
+
+// partitionFollowsParent reports whether the table is a partition in both
+// states and keeps its parent and bound.
+func partitionFollowsParent(oldTable, newTable *ir.Table) bool {
+	return oldTable.PartitionOf != "" && newTable.PartitionOf != "" && !partitionChanged(oldTable, newTable)
+}
+
+// partitionParentHasColumn reports whether the table's parent, looked up in
+// tables, defines the named column. It is false when the parent is unknown.
+func partitionParentHasColumn(tables map[string]*ir.Table, partition *ir.Table, name string) bool {
+	parent := tables[partitionParentKey(partition)]
+	if parent == nil {
+		return false
+	}
+	for _, column := range parent.Columns {
+		if column.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// withParentColumnType returns the old partition column with the type and
+// collation of the new one: the parent's ALTER COLUMN TYPE changes them on
+// every partition, so they are not a difference of the partition's own.
+func withParentColumnType(old, new *ir.Column) *ir.Column {
+	retyped := *old
+	retyped.DataType = new.DataType
+	retyped.MaxLength = new.MaxLength
+	retyped.Precision = new.Precision
+	retyped.Scale = new.Scale
+	retyped.Collation = new.Collation
+	return &retyped
+}
