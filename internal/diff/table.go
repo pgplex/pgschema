@@ -240,6 +240,7 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 	// ALTER in place is applied as DROP COLUMN + ADD COLUMN instead (issue #591);
 	// recreatedColumns drives the re-creation of their dependent objects below.
 	recreatedColumns := make(map[string]bool)
+	typeChangedColumns := make(map[string]bool)
 	for name, newColumn := range newColumns {
 		if oldColumn, exists := oldColumns[name]; exists {
 			if oldColumn.IsInherited && fromRetainedParent(newTables, newTable, newColumn) {
@@ -259,6 +260,9 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 					recreatedColumns[name] = true
 					continue
 				}
+				if columnTypeChanged(oldColumn, newColumn, targetSchema) {
+					typeChangedColumns[name] = true
+				}
 				diff.ModifiedColumns = append(diff.ModifiedColumns, &ColumnDiff{
 					Old: oldColumn,
 					New: newColumn,
@@ -269,6 +273,9 @@ func diffTablesWithTables(oldTable, newTable *ir.Table, targetSchema string, tar
 
 	if len(recreatedColumns) > 0 {
 		diff.RecreatedColumns = recreatedColumns
+	}
+	if len(typeChangedColumns) > 0 {
+		diff.TypeChangedColumns = typeChangedColumns
 	}
 
 	// Compare constraints
