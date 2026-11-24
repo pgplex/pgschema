@@ -29,7 +29,10 @@ Yes, pgschema works with any PostgreSQL-compatible database that you can connect
 - Azure Database for PostgreSQL
 - Supabase
 - Neon
+- Prisma Postgres
 - And other PostgreSQL-compatible services
+
+Connect to the database directly rather than through a transaction-mode connection pooler. `plan` and `apply` set `search_path` for their session, and a pooler that can send each statement to a different server connection loses that setting, so objects can be created in the wrong schema. On Prisma Postgres, for example, use the direct host (`db.prisma.io`) instead of the pooled host (`pooled.db.prisma.io`), and pass `--plan-host` because its user names are too long for the embedded plan instance (see [External Plan Database](/cli/plan-db)).
 
 ### How do I handle database-specific settings?
 

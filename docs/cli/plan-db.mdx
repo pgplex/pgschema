@@ -16,6 +16,7 @@ Use an external database for plan generation when:
 
 - Your schema uses **third-party PostgreSQL extensions** (like `postgis` or `pgvector`) - The embedded database automatically mirrors every extension installed on the target, but only extensions bundled with PostgreSQL (contrib: `hstore`, `pg_trgm`, `citext`, `uuid-ossp`, etc.) are available to it. Anything else causes plan generation to fail with "type does not exist" errors ([#121](https://github.com/pgplex/pgschema/issues/121), [#584](https://github.com/pgplex/pgschema/issues/584))
 - Your schema has **cross-schema foreign key references** to tables you do not manage (for example Supabase `auth.users`) - If the referenced table exists on the target database, [ignore that schema or table](/cli/ignore) and pgschema stubs it automatically during plan (embedded postgres is enough). Use the fallbacks below only when the table is missing on target ([#122](https://github.com/pgplex/pgschema/issues/122), [#548](https://github.com/pgplex/pgschema/issues/548))
+- Your database **user name is longer than 63 characters** (for example Prisma Postgres) - The embedded instance is initialized with the same user name as the target connection, and PostgreSQL limits identifiers to 63 bytes, so plan generation fails with "identifier too long". The plan database can be the target database itself.
 
 ### How It Works
 
