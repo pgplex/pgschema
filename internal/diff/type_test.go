@@ -213,7 +213,8 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 	spanSet := &ir.Type{Schema: "public", Name: "busy", Kind: ir.TypeKindDomain, BaseType: "public.positive_span_multirange"}
 
 	var names []string
-	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{positive, span, spanSet}, []*ir.Function{isPositive, positiveDiff}) {
+	nodes, _ := orderTypeAndFunctionDrops([]*ir.Type{positive, span, spanSet}, []*ir.Function{isPositive, positiveDiff}, nil)
+	for _, node := range nodes {
 		if node.function != nil {
 			names = append(names, node.function.Name)
 		} else {
@@ -232,7 +233,8 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 	bodyFn := &ir.Function{Schema: "public", Name: "span_diff", TypeDependencies: []string{"public.z_status"}, Parameters: []*ir.Parameter{{Mode: "IN", DataType: "integer"}, {Mode: "IN", DataType: "integer"}}}
 	intSpan := &ir.Type{Schema: "public", Name: "span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "span_diff", MultirangeTypeName: "span_multirange"}
 	names = nil
-	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{status, intSpan}, []*ir.Function{bodyFn}) {
+	nodes, _ = orderTypeAndFunctionDrops([]*ir.Type{status, intSpan}, []*ir.Function{bodyFn}, nil)
+	for _, node := range nodes {
 		if node.function != nil {
 			names = append(names, node.function.Name)
 		} else {
@@ -251,7 +253,8 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 	aSpan := &ir.Type{Schema: "public", Name: "a_span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "a_diff", MultirangeTypeName: "a_span_multirange"}
 	zSpan := &ir.Type{Schema: "public", Name: "z_span", Kind: ir.TypeKindRange, Subtype: "integer", SubtypeDiff: "z_diff", MultirangeTypeName: "z_span_multirange"}
 	names = nil
-	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{aSpan, zSpan}, []*ir.Function{aDiff, zDiff}) {
+	nodes, _ = orderTypeAndFunctionDrops([]*ir.Type{aSpan, zSpan}, []*ir.Function{aDiff, zDiff}, nil)
+	for _, node := range nodes {
 		if node.function != nil {
 			names = append(names, node.function.Name)
 		} else {
@@ -264,10 +267,30 @@ func TestOrderTypeAndFunctionDrops(t *testing.T) {
 
 	// No held functions: plain reverse dependency order of the types.
 	names = nil
-	for _, node := range orderTypeAndFunctionDrops([]*ir.Type{positive, span}, nil) {
+	nodes, _ = orderTypeAndFunctionDrops([]*ir.Type{positive, span}, nil, nil)
+	for _, node := range nodes {
 		names = append(names, node.typeObj.Name)
 	}
 	if strings.Join(names, ",") != "positive_span,positive" {
+		t.Fatalf("got %v", names)
+	}
+
+	// A type a modified table still uses is held back together with all
+	// that must be dropped after it; what depends on it still goes first.
+	names = nil
+	nodes, later := orderTypeAndFunctionDrops([]*ir.Type{positive, span, spanSet}, []*ir.Function{isPositive, positiveDiff}, map[*ir.Type]bool{span: true})
+	for _, node := range nodes {
+		names = append(names, node.typeObj.Name)
+	}
+	names = append(names, "|")
+	for _, node := range later {
+		if node.function != nil {
+			names = append(names, node.function.Name)
+		} else {
+			names = append(names, node.typeObj.Name)
+		}
+	}
+	if strings.Join(names, ",") != "busy,|,positive_span,positive_diff,positive,is_positive" {
 		t.Fatalf("got %v", names)
 	}
 }

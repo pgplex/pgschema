@@ -1,12 +1,31 @@
-Plan: 1 to drop.
+Plan: 1 to modify, 3 to drop.
 
 Summary by type:
-  types: 1 to drop
+  types: 3 to drop
+  tables: 1 to modify
 
 Types:
+  - period
   - priority
+  - severity
+
+Tables:
+  ~ tickets
+    - busy (column)
+    - priority (column)
+    ~ severity (column)
 
 DDL to be executed:
 --------------------------------------------------
 
+ALTER TABLE tickets DROP COLUMN priority;
+
+ALTER TABLE tickets DROP COLUMN busy;
+
+ALTER TABLE tickets ALTER COLUMN severity TYPE text USING severity::text;
+
+DROP TYPE IF EXISTS severity RESTRICT;
+
 DROP TYPE IF EXISTS priority RESTRICT;
+
+DROP TYPE IF EXISTS period RESTRICT;
