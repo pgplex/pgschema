@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "pgschema_version": "2.0.0",
+  "created_at": "1970-01-01T00:00:00Z",
+  "source_fingerprint": {
+    "hash": "49a0ec4bad9ba03fa118e3edfe68c5c21a93901bbe88ef40753785963eebb195"
+  },
+  "groups": [
+    {
+      "steps": [
+        {
+          "sql": "ALTER TABLE events DROP COLUMN legacy;",
+          "type": "table.column",
+          "operation": "drop",
+          "path": "public.events.legacy"
+        },
+        {
+          "sql": "ALTER TABLE events ADD COLUMN payload text;",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.events.payload"
+        },
+        {
+          "sql": "ALTER TABLE events ALTER COLUMN amount TYPE bigint USING amount::bigint;",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.events.amount"
+        }
+      ]
+    }
+  ]
+}
