@@ -5,9 +5,12 @@ Summary by type:
 
 Tables:
   ~ users
+    ~ scope_gate (policy)
     ~ user_tenant_isolation (policy)
 
 DDL to be executed:
 --------------------------------------------------
+
+ALTER POLICY scope_gate ON users USING (( SELECT (NOT has_scope('read'))));
 
 ALTER POLICY user_tenant_isolation ON users USING (tenant_id = 2);
