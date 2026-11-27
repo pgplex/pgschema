@@ -6,7 +6,8 @@ CREATE TYPE "MyStatus" AS ENUM ('active', 'inactive');
 
 CREATE TYPE "MyComposite" AS (
     a integer,
-    b text
+    b text,
+    "camelCase" text
 );
 
 CREATE DOMAIN "MyDomain" AS integer CONSTRAINT "MyDomain_check" CHECK (VALUE > 0);

@@ -1,7 +1,7 @@
-Plan: 9 to add, 8 to modify, 1 to drop.
+Plan: 10 to add, 8 to modify, 1 to drop.
 
 Summary by type:
-  types: 1 to add, 8 to modify, 1 to drop
+  types: 2 to add, 8 to modify, 1 to drop
   functions: 4 to add
   tables: 2 to add
 
@@ -9,6 +9,7 @@ Types:
   ~ address
   ~ address
   ~ address
+  + customer_response
   ~ example_input
   ~ example_input
   ~ example_input
@@ -35,6 +36,8 @@ ALTER TYPE address DROP ATTRIBUTE country;
 ALTER TYPE address DROP ATTRIBUTE flag;
 
 DROP TYPE IF EXISTS legacy_flag RESTRICT;
+
+CREATE TYPE customer_response AS (status text, "organizationId" integer, "firstName" text);
 
 CREATE TYPE priority AS ENUM (
     'low',
