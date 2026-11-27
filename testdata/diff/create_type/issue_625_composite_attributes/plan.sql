@@ -4,6 +4,8 @@ ALTER TYPE address DROP ATTRIBUTE flag;
 
 DROP TYPE IF EXISTS legacy_flag RESTRICT;
 
+CREATE TYPE customer_response AS (status text, "organizationId" integer, "firstName" text);
+
 CREATE TYPE priority AS ENUM (
     'low',
     'high'

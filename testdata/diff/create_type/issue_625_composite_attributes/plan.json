@@ -27,6 +27,12 @@
           "path": "public.legacy_flag"
         },
         {
+          "sql": "CREATE TYPE customer_response AS (status text, \"organizationId\" integer, \"firstName\" text);",
+          "type": "type",
+          "operation": "create",
+          "path": "public.customer_response"
+        },
+        {
           "sql": "CREATE TYPE priority AS ENUM (\n    'low',\n    'high'\n);",
           "type": "type",
           "operation": "create",

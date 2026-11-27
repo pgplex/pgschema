@@ -10,7 +10,7 @@
 -- Name: MyComposite; Type: TYPE; Schema: -; Owner: -
 --
 
-CREATE TYPE "MyComposite" AS (a integer, b text);
+CREATE TYPE "MyComposite" AS (a integer, b text, "camelCase" text);
 
 --
 -- Name: MyDomain; Type: DOMAIN; Schema: -; Owner: -

@@ -60,3 +60,10 @@ CREATE TABLE customer (
     id integer PRIMARY KEY,
     addr address
 );
+
+-- Issue #719: a new composite type keeps the case of quoted attribute names.
+CREATE TYPE customer_response AS (
+    status text,
+    "organizationId" integer,
+    "firstName" text
+);
