@@ -190,7 +190,9 @@ func ensureParentheses(expr string) string {
 		return expr
 	}
 	if expr[0] == '(' && matchingParen(expr, 0) == len(expr)-1 {
-		inner := strings.TrimSpace(expr[1 : len(expr)-1])
+		// A set-operation subquery may open with its own parentheses, e.g.
+		// "((SELECT a UNION SELECT b) INTERSECT SELECT c)".
+		inner := strings.TrimLeft(expr[1:len(expr)-1], "( \t\n\r")
 		if !keywordAt(inner, 0, "SELECT") && !keywordAt(inner, 0, "WITH") && !keywordAt(inner, 0, "VALUES") {
 			return expr
 		}

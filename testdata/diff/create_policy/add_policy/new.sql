@@ -76,3 +76,8 @@ CREATE POLICY admin_write_gate ON orders
     FOR INSERT
     TO PUBLIC
     WITH CHECK ((SELECT is_admin()));
+
+CREATE POLICY admin_setop_gate ON orders
+    FOR UPDATE
+    TO PUBLIC
+    USING (((SELECT is_admin() UNION SELECT false) INTERSECT SELECT true));
