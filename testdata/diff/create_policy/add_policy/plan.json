@@ -15,6 +15,24 @@
           "path": "public.orders"
         },
         {
+          "sql": "CREATE POLICY admin_read_gate ON orders FOR SELECT TO PUBLIC USING (( SELECT is_admin() AS is_admin));",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.orders.admin_read_gate"
+        },
+        {
+          "sql": "CREATE POLICY admin_setop_gate ON orders FOR UPDATE TO PUBLIC USING ((( SELECT is_admin() AS is_admin UNION SELECT false ) INTERSECT SELECT true));",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.orders.admin_setop_gate"
+        },
+        {
+          "sql": "CREATE POLICY admin_write_gate ON orders FOR INSERT TO PUBLIC WITH CHECK (( SELECT is_admin() AS is_admin));",
+          "type": "table.policy",
+          "operation": "create",
+          "path": "public.orders.admin_write_gate"
+        },
+        {
           "sql": "CREATE POLICY orders_user_access ON orders FOR SELECT TO PUBLIC USING (user_id IN ( SELECT users.id FROM users));",
           "type": "table.policy",
           "operation": "create",

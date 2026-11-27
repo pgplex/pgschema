@@ -20,3 +20,9 @@ CREATE POLICY scope_check ON users
     FOR SELECT
     TO PUBLIC
     USING (has_scope('public.manage'));
+
+-- Scalar subquery in USING (Issue #718)
+CREATE POLICY scope_gate ON users
+    FOR SELECT
+    TO PUBLIC
+    USING ((SELECT has_scope('read')));

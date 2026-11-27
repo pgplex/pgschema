@@ -1,5 +1,11 @@
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 
+CREATE POLICY admin_read_gate ON orders FOR SELECT TO PUBLIC USING (( SELECT is_admin() AS is_admin));
+
+CREATE POLICY admin_setop_gate ON orders FOR UPDATE TO PUBLIC USING ((( SELECT is_admin() AS is_admin UNION SELECT false ) INTERSECT SELECT true));
+
+CREATE POLICY admin_write_gate ON orders FOR INSERT TO PUBLIC WITH CHECK (( SELECT is_admin() AS is_admin));
+
 CREATE POLICY orders_user_access ON orders FOR SELECT TO PUBLIC USING (user_id IN ( SELECT users.id FROM users));
 
 CREATE POLICY "UserPolicy" ON users TO PUBLIC USING (tenant_id = (current_setting('app.current_tenant'))::integer);

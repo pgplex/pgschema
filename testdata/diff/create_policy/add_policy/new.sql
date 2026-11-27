@@ -64,3 +64,20 @@ CREATE POLICY admin_restricted ON users
     FOR ALL
     TO PUBLIC
     USING (is_admin());
+
+-- Scalar subquery in USING / WITH CHECK (Issue #718): the subquery's own
+-- parentheses must not be mistaken for the clause's required parentheses
+CREATE POLICY admin_read_gate ON orders
+    FOR SELECT
+    TO PUBLIC
+    USING ((SELECT is_admin()));
+
+CREATE POLICY admin_write_gate ON orders
+    FOR INSERT
+    TO PUBLIC
+    WITH CHECK ((SELECT is_admin()));
+
+CREATE POLICY admin_setop_gate ON orders
+    FOR UPDATE
+    TO PUBLIC
+    USING (((SELECT is_admin() UNION SELECT false) INTERSECT SELECT true));

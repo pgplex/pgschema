@@ -181,13 +181,21 @@ func generateAlterPolicySQL(old, new *ir.RLSPolicy, targetSchema string) string 
 // ensureParentheses wraps an expression in parentheses if not already wrapped.
 // PostgreSQL's CREATE POLICY and ALTER POLICY syntax requires USING (expr) and WITH CHECK (expr).
 // pg_get_expr may return expressions without outer parentheses (e.g., simple function calls).
+// The expression counts as wrapped only when its first '(' is closed by its last ')'
+// and the enclosed text is not a subquery: pg_get_expr renders a scalar subquery as
+// "( SELECT ... )", whose parentheses belong to the subquery, not the clause (issue #718).
 func ensureParentheses(expr string) string {
+	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return expr
 	}
-	expr = strings.TrimSpace(expr)
-	if strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
-		return expr
+	if expr[0] == '(' && matchingParen(expr, 0) == len(expr)-1 {
+		// A set-operation subquery may open with its own parentheses, e.g.
+		// "((SELECT a UNION SELECT b) INTERSECT SELECT c)".
+		inner := strings.TrimLeft(expr[1:len(expr)-1], "( \t\n\r")
+		if !keywordAt(inner, 0, "SELECT") && !keywordAt(inner, 0, "WITH") && !keywordAt(inner, 0, "VALUES") {
+			return expr
+		}
 	}
 	return "(" + expr + ")"
 }
