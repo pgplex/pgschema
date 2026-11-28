@@ -1,0 +1,13 @@
+Plan: 1 to modify.
+
+Summary by type:
+  views: 1 to modify
+
+Views:
+  ~ public
+    ~ name (column.comment)
+
+DDL to be executed:
+--------------------------------------------------
+
+COMMENT ON COLUMN public.public.name IS 'Display name';

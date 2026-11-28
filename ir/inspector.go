@@ -2052,19 +2052,31 @@ func (i *Inspector) buildViews(ctx context.Context, schema *IR, targetSchema str
 		columns := view.ColumnNames
 		columnTypes := view.ColumnTypes
 
+		var columnComments map[string]string
+		for idx, c := range view.ColumnComments {
+			if c == "" || idx >= len(columns) {
+				continue
+			}
+			if columnComments == nil {
+				columnComments = make(map[string]string)
+			}
+			columnComments[columns[idx]] = c
+		}
+
 		// Copy and sort reloptions for deterministic comparison and output
 		options := append([]string(nil), view.Reloptions...)
 		sort.Strings(options)
 
 		v := &View{
-			Schema:       schemaName,
-			Name:         viewName,
-			Definition:   definition,
-			Columns:      columns,
-			ColumnTypes:  columnTypes,
-			Options:      options,
-			Comment:      comment,
-			Materialized: view.IsMaterialized.Valid && view.IsMaterialized.Bool,
+			Schema:         schemaName,
+			Name:           viewName,
+			Definition:     definition,
+			Columns:        columns,
+			ColumnTypes:    columnTypes,
+			Options:        options,
+			Comment:        comment,
+			ColumnComments: columnComments,
+			Materialized:   view.IsMaterialized.Valid && view.IsMaterialized.Bool,
 		}
 
 		dbSchema.SetView(viewName, v)

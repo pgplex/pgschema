@@ -4938,7 +4938,8 @@ SELECT
     -- tell a column type change apart from a same-named column, which CREATE
     -- OR REPLACE VIEW rejects (issue #687).
     COALESCE(cols.column_names, '{}'::text[])::text[] AS column_names,
-    COALESCE(cols.column_types, '{}'::text[])::text[] AS column_types
+    COALESCE(cols.column_types, '{}'::text[])::text[] AS column_types,
+    COALESCE(cols.column_comments, '{}'::text[])::text[] AS column_comments
 FROM view_definitions vd
 CROSS JOIN LATERAL (
     SELECT
@@ -4948,7 +4949,8 @@ CROSS JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT
         array_agg(a.attname::text ORDER BY a.attnum) AS column_names,
-        array_agg(format_type(a.atttypid, a.atttypmod) ORDER BY a.attnum) AS column_types
+        array_agg(format_type(a.atttypid, a.atttypmod) ORDER BY a.attnum) AS column_types,
+        array_agg(COALESCE(col_description(vd.view_oid, a.attnum), '') ORDER BY a.attnum) AS column_comments
     FROM pg_attribute a
     WHERE a.attrelid = vd.view_oid
       AND a.attnum > 0
@@ -4966,6 +4968,7 @@ type GetViewsForSchemaRow struct {
 	Reloptions     []string       `db:"reloptions" json:"reloptions"`
 	ColumnNames    []string       `db:"column_names" json:"column_names"`
 	ColumnTypes    []string       `db:"column_types" json:"column_types"`
+	ColumnComments []string       `db:"column_comments" json:"column_comments"`
 }
 
 // GetViewsForSchema retrieves all views and materialized views for a specific schema
@@ -4990,6 +4993,7 @@ func (q *Queries) GetViewsForSchema(ctx context.Context, dollar_1 sql.NullString
 			pq.Array(&i.Reloptions),
 			pq.Array(&i.ColumnNames),
 			pq.Array(&i.ColumnTypes),
+			pq.Array(&i.ColumnComments),
 		); err != nil {
 			return nil, err
 		}

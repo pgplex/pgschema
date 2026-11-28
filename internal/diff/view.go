@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -66,6 +67,8 @@ func generateCreateViewsSQL(views []*ir.View, targetSchema string, collector *di
 				collector.collect(context, sql)
 			}
 		}
+
+		generateViewColumnCommentsSQL(nil, view, targetSchema, collector)
 
 		// For materialized views, create indexes
 		if view.Materialized && view.Indexes != nil {
@@ -248,6 +251,8 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 				collector.collect(commentContext, commentSQL)
 			}
 
+			generateViewColumnCommentsSQL(nil, diff.New, targetSchema, collector)
+
 			// Recreate indexes for materialized views
 			if diff.New.Materialized && diff.New.Indexes != nil {
 				indexList := make([]*ir.Index, 0, len(diff.New.Indexes))
@@ -291,7 +296,8 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 		// Both IRs come from pg_get_viewdef() at the same PostgreSQL version, so string comparison is sufficient
 		definitionsEqual := diff.Old.Definition == diff.New.Definition
 		optionsEqual := viewOptionsEqual(diff.Old.Options, diff.New.Options)
-		commentOnlyChange := diff.CommentChanged && definitionsEqual && optionsEqual && diff.Old.Materialized == diff.New.Materialized
+		columnCommentsChanged := !maps.Equal(diff.Old.ColumnComments, diff.New.ColumnComments)
+		commentOnlyChange := (diff.CommentChanged || columnCommentsChanged) && definitionsEqual && optionsEqual && diff.Old.Materialized == diff.New.Materialized
 
 		// Check if only indexes changed (for materialized views)
 		hasIndexChanges := len(diff.AddedIndexes) > 0 || len(diff.DroppedIndexes) > 0 || len(diff.ModifiedIndexes) > 0
@@ -416,6 +422,10 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			}
 		}
 
+		// Neither branch drops the view (CREATE OR REPLACE VIEW keeps existing
+		// column comments), so only the changed column comments are emitted.
+		generateViewColumnCommentsSQL(diff.Old, diff.New, targetSchema, collector)
+
 		// Handle trigger changes (e.g., INSTEAD OF triggers) - applies to both branches above
 		// Note: DroppedTriggers are skipped here because they are already processed in the DROP phase
 		// (see generateDropTriggersFromModifiedViews in trigger.go)
@@ -535,6 +545,8 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			collector.collect(commentContext, commentSQL)
 		}
 
+		generateViewColumnCommentsSQL(nil, depView, targetSchema, collector)
+
 		// Dropping a materialized view also drops its indexes, so recreate them
 		// for materialized dependents (issue #415).
 		if depView.Materialized && depView.Indexes != nil {
@@ -554,6 +566,48 @@ func generateModifyViewsSQL(diffs []*viewDiff, targetSchema string, collector *d
 			}
 			generateCreateViewTriggersSQL(triggerList, targetSchema, collector)
 		}
+	}
+}
+
+// generateViewColumnCommentsSQL emits COMMENT ON COLUMN statements for the
+// column comments of newView that differ from oldView, in column order.
+// A nil oldView emits every comment of a freshly created view.
+func generateViewColumnCommentsSQL(oldView, newView *ir.View, targetSchema string, collector *diffCollector) {
+	var oldComments map[string]string
+	if oldView != nil {
+		oldComments = oldView.ColumnComments
+	}
+	if maps.Equal(oldComments, newView.ColumnComments) {
+		return
+	}
+
+	diffType := DiffTypeViewColumnComment
+	if newView.Materialized {
+		diffType = DiffTypeMaterializedViewColumnComment
+	}
+	operation := DiffOperationCreate
+	if oldView != nil {
+		operation = DiffOperationAlter
+	}
+	viewName := qualifyColumnCommentTable(newView.Schema, newView.Name, targetSchema, collector.qualifySchema)
+
+	for _, column := range newView.Columns {
+		comment := newView.ColumnComments[column]
+		if comment == oldComments[column] {
+			continue
+		}
+		value := "NULL"
+		if comment != "" {
+			value = quoteString(comment)
+		}
+		context := &diffContext{
+			Type:                diffType,
+			Operation:           operation,
+			Path:                fmt.Sprintf("%s.%s.%s", newView.Schema, newView.Name, column),
+			Source:              newView,
+			CanRunInTransaction: true,
+		}
+		collector.collect(context, fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", viewName, ir.QuoteIdentifier(column), value))
 	}
 }
 

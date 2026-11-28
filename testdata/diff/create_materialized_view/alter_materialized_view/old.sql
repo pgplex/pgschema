@@ -12,3 +12,5 @@ SELECT
     salary
 FROM employees
 WHERE status = 'active';
+
+COMMENT ON COLUMN public.active_employees.name IS 'Employee name';

@@ -3,7 +3,7 @@
   "pgschema_version": "2.0.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "d7265cc266dac8551a3b9f37cf2293f45c601b13dafb6bb301915976389a3927"
+    "hash": "bb2f50ec3593111192ca3211199deb202e9ced9ffb8d84580305632a4cc679d4"
   },
   "groups": [
     {
@@ -19,6 +19,12 @@
           "type": "materialized_view",
           "operation": "alter",
           "path": "public.active_employees"
+        },
+        {
+          "sql": "COMMENT ON COLUMN active_employees.name IS 'Employee name';",
+          "type": "materialized_view.column.comment",
+          "operation": "create",
+          "path": "public.active_employees.name"
         }
       ]
     }
