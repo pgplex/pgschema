@@ -26,3 +26,5 @@ CREATE TABLE public.user_pending_permissions (
     mask varbit(4),
     kept_at timestamp(3)
 );
+
+INSERT INTO public.user_pending_permissions (id, user_id, permission, arfcn_dl, flags, mask) VALUES (1, 1, 'read', NULL, B'101', B'1101');

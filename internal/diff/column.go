@@ -205,7 +205,9 @@ func needsUsingClause(oldType, newType string) bool {
 	oldNorm := normalizeBaseTypeName(oldType)
 	newNorm := normalizeBaseTypeName(newType)
 	if oldNorm == newNorm {
-		return false
+		// Assignment coercion rejects a bit string of a different length, so
+		// changing the length of bit(n) needs an explicit cast (issue #699).
+		return oldNorm == "bit" && oldType != newType
 	}
 	return true
 }

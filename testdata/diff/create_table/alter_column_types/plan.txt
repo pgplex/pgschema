@@ -89,6 +89,6 @@ ALTER TABLE user_pending_permissions ALTER COLUMN dur TYPE interval(6);
 
 ALTER TABLE user_pending_permissions ALTER COLUMN slot TYPE interval day to second(2) USING slot::interval day to second(2);
 
-ALTER TABLE user_pending_permissions ALTER COLUMN flags TYPE bit(5);
+ALTER TABLE user_pending_permissions ALTER COLUMN flags TYPE bit(5) USING flags::bit(5);
 
 ALTER TABLE user_pending_permissions ALTER COLUMN mask TYPE varbit(8);

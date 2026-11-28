@@ -159,7 +159,7 @@
           "path": "public.user_pending_permissions.slot"
         },
         {
-          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN flags TYPE bit(5);",
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN flags TYPE bit(5) USING flags::bit(5);",
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.flags"
