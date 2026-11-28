@@ -17,5 +17,15 @@ CREATE TABLE public.user_pending_permissions (
     label varchar(50),
     code text COLLATE "POSIX",
     region text COLLATE public.my_coll,
-    zone text COLLATE public.my_coll
+    zone text COLLATE public.my_coll,
+    created_at timestamp(6),
+    event_at timestamptz(3),
+    starts time(4),
+    starts_tz timetz(2),
+    dur interval(6),
+    slot interval day to second(2),
+    flags bit(5),
+    mask varbit(8),
+    kept_at timestamp(3),
+    added_at timestamp(0)
 );

@@ -131,6 +131,14 @@ WITH column_base AS (
                 -- Non-array base types: qualify if not in pg_catalog or table's schema
                 -- Use format_type to preserve typmod for extension types (e.g., vector(384) for pgvector)
                 CASE
+                    -- Date/time and bit-string typmods are not exposed through
+                    -- character_maximum_length/numeric_precision, so take them from
+                    -- format_type (issue #699), e.g. timestamp(3), bit(3),
+                    -- interval hour to minute
+                    WHEN dn.nspname = 'pg_catalog' AND a.atttypmod >= 0 AND dt.typname = 'interval' THEN
+                        format_type(a.atttypid, a.atttypmod)
+                    WHEN dn.nspname = 'pg_catalog' AND a.atttypmod >= 0 AND dt.typname IN ('timestamp', 'timestamptz', 'time', 'timetz', 'bit', 'varbit') THEN
+                        c.udt_name::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                     WHEN dn.nspname = 'pg_catalog' THEN c.udt_name::text
                     WHEN dn.nspname = c.table_schema THEN
                         dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
@@ -283,6 +291,14 @@ WITH column_base AS (
                 -- Non-array base types: qualify if not in pg_catalog or table's schema
                 -- Use format_type to preserve typmod for extension types (e.g., vector(384) for pgvector)
                 CASE
+                    -- Date/time and bit-string typmods are not exposed through
+                    -- character_maximum_length/numeric_precision, so take them from
+                    -- format_type (issue #699), e.g. timestamp(3), bit(3),
+                    -- interval hour to minute
+                    WHEN dn.nspname = 'pg_catalog' AND a.atttypmod >= 0 AND dt.typname = 'interval' THEN
+                        format_type(a.atttypid, a.atttypmod)
+                    WHEN dn.nspname = 'pg_catalog' AND a.atttypmod >= 0 AND dt.typname IN ('timestamp', 'timestamptz', 'time', 'timetz', 'bit', 'varbit') THEN
+                        c.udt_name::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
                     WHEN dn.nspname = 'pg_catalog' THEN c.udt_name::text
                     WHEN dn.nspname = c.table_schema THEN
                         dt.typname::text || COALESCE(substring(format_type(a.atttypid, a.atttypmod) FROM '\([^)]*\)'), '')
