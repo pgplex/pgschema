@@ -589,7 +589,7 @@ func generateViewColumnCommentsSQL(oldView, newView *ir.View, targetSchema strin
 	if oldView != nil {
 		operation = DiffOperationAlter
 	}
-	viewName := qualifyEntityNameMode(newView.Schema, newView.Name, targetSchema, collector.qualifySchema)
+	viewName := qualifyColumnCommentTable(newView.Schema, newView.Name, targetSchema, collector.qualifySchema)
 
 	for _, column := range newView.Columns {
 		comment := newView.ColumnComments[column]
