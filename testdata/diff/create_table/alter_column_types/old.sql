@@ -15,5 +15,16 @@ CREATE TABLE public.user_pending_permissions (
     label varchar(50) COLLATE "C",
     code text COLLATE "C",
     region text COLLATE public.my_coll,
-    zone text
+    zone text,
+    created_at timestamp(3),
+    event_at timestamptz(0),
+    starts time(2),
+    starts_tz timetz(1),
+    dur interval(3),
+    slot interval hour to minute,
+    flags bit(3),
+    mask varbit(4),
+    kept_at timestamp(3)
 );
+
+INSERT INTO public.user_pending_permissions (id, user_id, permission, arfcn_dl, flags, mask) VALUES (1, 1, 'read', NULL, B'101', B'1101');

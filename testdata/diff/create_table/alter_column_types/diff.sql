@@ -4,6 +4,8 @@ CREATE TYPE action_type AS ENUM (
     'rejected'
 );
 
+ALTER TABLE user_pending_permissions ADD COLUMN added_at timestamp(0);
+
 ALTER TABLE user_pending_permissions ALTER COLUMN id TYPE bigint USING id::bigint;
 
 ALTER TABLE user_pending_permissions ALTER COLUMN user_id TYPE bigint USING user_id::bigint;
@@ -37,3 +39,19 @@ ALTER TABLE user_pending_permissions ALTER COLUMN label TYPE varchar(50);
 ALTER TABLE user_pending_permissions ALTER COLUMN code TYPE text COLLATE "POSIX";
 
 ALTER TABLE user_pending_permissions ALTER COLUMN zone TYPE text COLLATE my_coll;
+
+ALTER TABLE user_pending_permissions ALTER COLUMN created_at TYPE timestamp(6);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN event_at TYPE timestamptz(3);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN starts TYPE time(4);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN starts_tz TYPE timetz(2);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN dur TYPE interval(6);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN slot TYPE interval day to second(2) USING slot::interval day to second(2);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN flags TYPE bit(5) USING flags::bit(5);
+
+ALTER TABLE user_pending_permissions ALTER COLUMN mask TYPE varbit(8);

@@ -3,7 +3,7 @@
   "pgschema_version": "2.0.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "d76f3ada9f39207b9f2e8a5ee8d23d63d1014af24fc0b1a48664b726fb52836e"
+    "hash": "861e1703fd815e19c5b2d3e3b914740fe3acdd09b4d6244141f957c4f4c09d82"
   },
   "groups": [
     {
@@ -13,6 +13,12 @@
           "type": "type",
           "operation": "create",
           "path": "public.action_type"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ADD COLUMN added_at timestamp(0);",
+          "type": "table.column",
+          "operation": "create",
+          "path": "public.user_pending_permissions.added_at"
         },
         {
           "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN id TYPE bigint USING id::bigint;",
@@ -115,6 +121,54 @@
           "type": "table.column",
           "operation": "alter",
           "path": "public.user_pending_permissions.zone"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN created_at TYPE timestamp(6);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.created_at"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN event_at TYPE timestamptz(3);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.event_at"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN starts TYPE time(4);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.starts"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN starts_tz TYPE timetz(2);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.starts_tz"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN dur TYPE interval(6);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.dur"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN slot TYPE interval day to second(2) USING slot::interval day to second(2);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.slot"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN flags TYPE bit(5) USING flags::bit(5);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.flags"
+        },
+        {
+          "sql": "ALTER TABLE user_pending_permissions ALTER COLUMN mask TYPE varbit(8);",
+          "type": "table.column",
+          "operation": "alter",
+          "path": "public.user_pending_permissions.mask"
         }
       ]
     }
