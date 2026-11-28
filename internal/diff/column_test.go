@@ -47,6 +47,9 @@ func TestNeedsUsingClause(t *testing.T) {
 		{"timestamp(3) with time zone", "timestamp(6) with time zone", false},
 		{"timestamp without time zone", "timestamp with time zone", true},
 		{`"MyStatus"`, `"mystatus"`, true},
+		{"bit(3)", "bit(5)", true},
+		{"bit(5)", "bit(3)", false},
+		{"varbit(4)", "varbit(8)", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.old+"→"+tt.new, func(t *testing.T) {

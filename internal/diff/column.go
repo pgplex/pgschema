@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/pgplex/pgschema/ir"
@@ -206,10 +207,21 @@ func needsUsingClause(oldType, newType string) bool {
 	newNorm := normalizeBaseTypeName(newType)
 	if oldNorm == newNorm {
 		// Assignment coercion rejects a bit string of a different length, so
-		// changing the length of bit(n) needs an explicit cast (issue #699).
-		return oldNorm == "bit" && oldType != newType
+		// widening bit(n) needs an explicit cast, which zero-pads (issue #699).
+		// Narrowing is left without one: the cast would silently drop bits.
+		return oldNorm == "bit" && typeModifierLength(newType) > typeModifierLength(oldType)
 	}
 	return true
+}
+
+// typeModifierLength returns n from a type like "bit(n)", or 0 if absent.
+func typeModifierLength(typeName string) int {
+	open := strings.Index(typeName, "(")
+	if open == -1 {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSuffix(typeName[open+1:], ")"))
+	return n
 }
 
 func normalizeBaseTypeName(typeName string) string {
