@@ -527,7 +527,11 @@ type tableDiff struct {
 	// They appear in both DroppedColumns and AddedColumns; dependent objects
 	// outside the table (views, column grants, FKs bound to a unique index)
 	// are re-created from this set.
-	RecreatedColumns   map[string]bool
+	RecreatedColumns map[string]bool
+	// TypeChangedColumns names columns altered with ALTER COLUMN ... TYPE.
+	// PostgreSQL refuses that while a view reads the column (SQLSTATE 0A000),
+	// so those views are dropped first and created again (issue #707).
+	TypeChangedColumns map[string]bool
 	AddedPolicies      []*ir.RLSPolicy
 	DroppedPolicies    []*ir.RLSPolicy
 	ModifiedPolicies   []*policyDiff
@@ -2128,7 +2132,7 @@ func (d *ddlDiff) generatePreDropRecreatedRegularViewsSQL(targetSchema string, c
 	destructiveTables := []*ir.Table{}
 	destructiveTables = append(destructiveTables, d.droppedTables...)
 	for _, tableDiff := range d.modifiedTables {
-		if len(tableDiff.DroppedColumns) > 0 {
+		if len(tableDiff.DroppedColumns) > 0 || len(tableDiff.TypeChangedColumns) > 0 {
 			destructiveTables = append(destructiveTables, tableDiff.Table)
 		}
 	}
@@ -3342,16 +3346,19 @@ func collectRecreatedColumns(modifiedTables []*tableDiff) map[string]map[string]
 }
 
 // viewDependsOnRecreatedColumn reports whether a view reads a column that this
-// migration re-creates, in which case the view must be dropped before the
+// migration re-creates or alters the type of (#707), in which case the view must be dropped before the
 // column and created again afterwards. The column check is a textual match on
 // the view definition, so a same-named column of another table the view also
 // reads can cause a redundant recreation. (#591)
 func viewDependsOnRecreatedColumn(view *ir.View, modifiedTables []*tableDiff) bool {
 	for _, td := range modifiedTables {
-		if len(td.RecreatedColumns) == 0 {
+		if len(td.RecreatedColumns) == 0 && len(td.TypeChangedColumns) == 0 {
 			continue
 		}
-		if viewDependsOnTable(view, td.Table.Schema, td.Table.Name) && exprReferencesAnyColumn(view.Definition, td.RecreatedColumns) {
+		if !viewDependsOnTable(view, td.Table.Schema, td.Table.Name) {
+			continue
+		}
+		if exprReferencesAnyColumn(view.Definition, td.RecreatedColumns) || exprReferencesAnyColumn(view.Definition, td.TypeChangedColumns) {
 			return true
 		}
 	}

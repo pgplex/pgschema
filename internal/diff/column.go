@@ -22,7 +22,6 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	// numeric(18,6) -> numeric(20,6) change would be invisible here.
 	oldBaseType := stripSchemaPrefix(cd.Old.DataType, targetSchema)
 	newBaseType := stripSchemaPrefix(cd.New.DataType, targetSchema)
-	oldType := stripSchemaPrefix(comparableColumnType(cd.Old), targetSchema)
 	newType := stripSchemaPrefix(comparableColumnType(cd.New), targetSchema)
 
 	// Check if there's a type change AND the column has a default value
@@ -31,7 +30,7 @@ func (cd *ColumnDiff) generateColumnSQL(tableSchema, tableName string, targetSch
 	// A collation change has no ALTER form of its own; it rides on ALTER COLUMN
 	// TYPE, where an omitted COLLATE resets to the type's default (issue #593).
 	newCollation := stripSchemaPrefix(cd.New.Collation, targetSchema)
-	hasTypeChange := oldType != newType || stripSchemaPrefix(cd.Old.Collation, targetSchema) != newCollation
+	hasTypeChange := columnTypeChanged(cd.Old, cd.New, targetSchema)
 	newTypeClause := newType
 	if newCollation != "" {
 		newTypeClause += " COLLATE " + newCollation
@@ -224,6 +223,14 @@ func normalizeBaseTypeName(typeName string) string {
 		t = strings.ToLower(t)
 	}
 	return t
+}
+
+// columnTypeChanged reports whether moving from old to new emits ALTER COLUMN
+// ... TYPE: a different type (including precision/scale/length modifiers) or
+// collation. Any such ALTER fails while a view reads the column (issue #707).
+func columnTypeChanged(old, new *ir.Column, targetSchema string) bool {
+	return stripSchemaPrefix(comparableColumnType(old), targetSchema) != stripSchemaPrefix(comparableColumnType(new), targetSchema) ||
+		stripSchemaPrefix(old.Collation, targetSchema) != stripSchemaPrefix(new.Collation, targetSchema)
 }
 
 // comparableColumnType returns the column's data type including any
