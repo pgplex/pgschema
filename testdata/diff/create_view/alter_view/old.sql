@@ -15,3 +15,5 @@ WHERE status = 'active'
 GROUP BY status
 HAVING COUNT(*) > 0
 ORDER BY avg_salary DESC;
+
+COMMENT ON COLUMN public.active_employees.avg_salary IS 'Average salary';

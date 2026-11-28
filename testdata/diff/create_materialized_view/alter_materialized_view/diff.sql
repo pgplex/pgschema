@@ -7,3 +7,5 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS active_employees AS
     status
    FROM employees
   WHERE status::text = 'active'::text;
+
+COMMENT ON COLUMN active_employees.name IS 'Employee name';

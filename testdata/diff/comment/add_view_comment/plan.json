@@ -3,16 +3,46 @@
   "pgschema_version": "2.0.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "5f72cd96b40f589c3c326b1677cfe598fd18d335c67824a10a730f7179a7e79d"
+    "hash": "bafe2eb726c840d921efab80961c118ae6f25ab40968e3c7fb3922b1a567dec4"
   },
   "groups": [
     {
       "steps": [
         {
+          "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS salary_stats AS\n SELECT department,\n    avg(salary) AS avg_salary\n   FROM employees\n  GROUP BY department;",
+          "type": "materialized_view",
+          "operation": "create",
+          "path": "public.salary_stats"
+        },
+        {
+          "sql": "COMMENT ON COLUMN salary_stats.avg_salary IS 'Average salary per department';",
+          "type": "materialized_view.column.comment",
+          "operation": "create",
+          "path": "public.salary_stats.avg_salary"
+        },
+        {
+          "sql": "COMMENT ON COLUMN department_summary.headcount IS 'Number of employees';",
+          "type": "materialized_view.column.comment",
+          "operation": "alter",
+          "path": "public.department_summary.headcount"
+        },
+        {
           "sql": "COMMENT ON VIEW employee_view IS 'Shows all active employees';",
           "type": "view",
           "operation": "alter",
           "path": "public.employee_view"
+        },
+        {
+          "sql": "COMMENT ON COLUMN employee_view.name IS 'Employee full name';",
+          "type": "view.column.comment",
+          "operation": "alter",
+          "path": "public.employee_view.name"
+        },
+        {
+          "sql": "COMMENT ON COLUMN employee_view.department IS NULL;",
+          "type": "view.column.comment",
+          "operation": "alter",
+          "path": "public.employee_view.department"
         }
       ]
     }

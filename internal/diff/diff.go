@@ -3,6 +3,7 @@ package diff
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -47,6 +48,8 @@ const (
 	DiffTypePrivilege
 	DiffTypeRevokedDefaultPrivilege
 	DiffTypeColumnPrivilege
+	DiffTypeViewColumnComment
+	DiffTypeMaterializedViewColumnComment
 )
 
 // String returns the string representation of DiffType
@@ -90,6 +93,10 @@ func (d DiffType) String() string {
 		return "materialized_view"
 	case DiffTypeMaterializedViewComment:
 		return "materialized_view.comment"
+	case DiffTypeViewColumnComment:
+		return "view.column.comment"
+	case DiffTypeMaterializedViewColumnComment:
+		return "materialized_view.column.comment"
 	case DiffTypeMaterializedViewIndex:
 		return "materialized_view.index"
 	case DiffTypeMaterializedViewIndexComment:
@@ -172,6 +179,10 @@ func (d *DiffType) UnmarshalJSON(data []byte) error {
 		*d = DiffTypeMaterializedView
 	case "materialized_view.comment":
 		*d = DiffTypeMaterializedViewComment
+	case "view.column.comment":
+		*d = DiffTypeViewColumnComment
+	case "materialized_view.column.comment":
+		*d = DiffTypeMaterializedViewColumnComment
 	case "materialized_view.index":
 		*d = DiffTypeMaterializedViewIndex
 	case "materialized_view.index.comment":
@@ -1151,7 +1162,9 @@ func generateMigration(oldIR, newIR *ir.IR, targetSchema string, qualifySchema b
 			addedTriggers, droppedTriggers, modifiedTriggers := diffViewTriggers(oldView, newView)
 			triggersChanged := len(addedTriggers) > 0 || len(droppedTriggers) > 0 || len(modifiedTriggers) > 0
 
-			if structurallyDifferent || commentChanged || indexesChanged || triggersChanged || dependsOnRecreated {
+			columnCommentsChanged := !maps.Equal(oldView.ColumnComments, newView.ColumnComments)
+
+			if structurallyDifferent || commentChanged || columnCommentsChanged || indexesChanged || triggersChanged || dependsOnRecreated {
 				// For materialized views with definition changes, mark for recreation.
 				// For regular views with column changes incompatible with CREATE OR REPLACE VIEW,
 				// also mark for recreation (issue #308).

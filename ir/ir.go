@@ -217,16 +217,17 @@ type TableDependency struct {
 
 // View represents a database view
 type View struct {
-	Schema       string              `json:"schema"`
-	Name         string              `json:"name"`
-	Definition   string              `json:"definition"`
-	Columns      []string            `json:"columns,omitempty"` // Ordered list of output column names
-	ColumnTypes  []string            `json:"-"`                 // Formatted type per column, parallel to Columns; derived from Definition, so kept out of JSON and the fingerprint
-	Options      []string            `json:"options,omitempty"` // View options (e.g., "security_invoker=true", "security_barrier=true")
-	Comment      string              `json:"comment,omitempty"`
-	Materialized bool                `json:"materialized,omitempty"`
-	Indexes      map[string]*Index   `json:"indexes,omitempty"`  // For materialized views only
-	Triggers     map[string]*Trigger `json:"triggers,omitempty"` // For INSTEAD OF triggers on views
+	Schema         string              `json:"schema"`
+	Name           string              `json:"name"`
+	Definition     string              `json:"definition"`
+	Columns        []string            `json:"columns,omitempty"` // Ordered list of output column names
+	ColumnTypes    []string            `json:"-"`                 // Formatted type per column, parallel to Columns; derived from Definition, so kept out of JSON and the fingerprint
+	Options        []string            `json:"options,omitempty"` // View options (e.g., "security_invoker=true", "security_barrier=true")
+	Comment        string              `json:"comment,omitempty"`
+	ColumnComments map[string]string   `json:"column_comments,omitempty"` // Column name -> comment, for commented columns only
+	Materialized   bool                `json:"materialized,omitempty"`
+	Indexes        map[string]*Index   `json:"indexes,omitempty"`  // For materialized views only
+	Triggers       map[string]*Trigger `json:"triggers,omitempty"` // For INSTEAD OF triggers on views
 }
 
 // Function represents a database function

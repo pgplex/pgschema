@@ -398,10 +398,10 @@ func (f *DumpFormatter) getObjectDirectory(objectType string) string {
 	case "view.trigger":
 		// View triggers are included with their views
 		return "views"
-	case "view.comment":
+	case "view.comment", "view.column.comment":
 		// View comments are included with their views
 		return "views"
-	case "materialized_view.comment", "materialized_view.index", "materialized_view.index.comment":
+	case "materialized_view.comment", "materialized_view.column.comment", "materialized_view.index", "materialized_view.index.comment":
 		// Materialized view comments/indexes are included with their materialized views
 		return "materialized_views"
 	case "comment":
@@ -437,7 +437,7 @@ func (f *DumpFormatter) getGroupingName(step diff.Diff) string {
 		if parts := strings.Split(step.Path, "."); len(parts) >= 2 {
 			return parts[1] // Return view name
 		}
-	case diff.DiffTypeViewComment:
+	case diff.DiffTypeViewComment, diff.DiffTypeViewColumnComment, diff.DiffTypeMaterializedViewColumnComment:
 		// For view comments, group with view
 		if step.Source != nil {
 			switch obj := step.Source.(type) {

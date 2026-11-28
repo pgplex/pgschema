@@ -14,3 +14,10 @@ SELECT
     e.salary
 FROM public.employees e
 WHERE e.active = true;
+
+COMMENT ON COLUMN public.employee_view.department IS 'Department name';
+
+CREATE MATERIALIZED VIEW public.department_summary AS
+SELECT department, count(*) AS headcount
+FROM public.employees
+GROUP BY department;

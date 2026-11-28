@@ -3,7 +3,7 @@
   "pgschema_version": "2.0.0",
   "created_at": "1970-01-01T00:00:00Z",
   "source_fingerprint": {
-    "hash": "e416c57a7e97843652d92d544f409ff025128ce45358273b5bffd768c6f29cc7"
+    "hash": "1856076c563f0902cd86c82dd549e979e154a594934c37f169622a0bec4a935e"
   },
   "groups": [
     {
@@ -13,6 +13,12 @@
           "type": "view",
           "operation": "alter",
           "path": "public.active_employees"
+        },
+        {
+          "sql": "COMMENT ON COLUMN active_employees.avg_salary IS 'Average salary of active employees';",
+          "type": "view.column.comment",
+          "operation": "alter",
+          "path": "public.active_employees.avg_salary"
         }
       ]
     }
